@@ -3,6 +3,76 @@ use super::*;
 #[napi_derive::napi]
 impl NativeBridgeBinding {
     #[napi]
+    pub fn apply_curator_governance_write_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let write = parse_json::<CuratorGovernanceWrite>(&input_json, "curator governance write")?;
+        serialize_json(
+            &bridge
+                .apply_curator_governance_write(&write)
+                .map_err(to_napi_error)?,
+            "curator governance write result",
+        )
+    }
+
+    #[napi]
+    pub fn get_curator_candidate_json(&self, candidate_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        serialize_json(
+            &bridge
+                .get_curator_candidate(&candidate_id)
+                .map_err(to_napi_error)?,
+            "curator candidate",
+        )
+    }
+
+    #[napi]
+    pub fn list_curator_candidates_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<CuratorCandidateQuery>(&input_json, "curator candidate query")?;
+        serialize_json(
+            &bridge
+                .list_curator_candidates(&query)
+                .map_err(to_napi_error)?,
+            "curator candidate page",
+        )
+    }
+
+    #[napi]
+    pub fn get_curator_mutation_json(&self, mutation_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        serialize_json(
+            &bridge
+                .get_curator_mutation(&mutation_id)
+                .map_err(to_napi_error)?,
+            "curator mutation",
+        )
+    }
+
+    #[napi]
+    pub fn list_curator_mutations_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<CuratorMutationQuery>(&input_json, "curator mutation query")?;
+        serialize_json(
+            &bridge
+                .list_curator_mutations(&query)
+                .map_err(to_napi_error)?,
+            "curator mutation page",
+        )
+    }
+
+    #[napi]
+    pub fn list_curator_audit_receipts_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<CuratorAuditQuery>(&input_json, "curator audit query")?;
+        serialize_json(
+            &bridge
+                .list_curator_audit_receipts(&query)
+                .map_err(to_napi_error)?,
+            "curator audit page",
+        )
+    }
+
+    #[napi]
     pub fn list_profile_memory(
         &self,
         query: JsProfileMemoryQuery,

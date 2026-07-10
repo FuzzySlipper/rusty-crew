@@ -2668,10 +2668,13 @@ async function createServiceCuratorRuntime(input: {
   bridge: NativeBridgeModule;
   now: () => string;
 }): Promise<ServiceCuratorRuntime> {
+  const skillsDir = curatorSkillsDir(input.runtimeConfig);
+  const snapshotRoot = join(input.config.paths.backupDir, "curator-snapshots");
   const store = await NativeCuratorGovernanceStore.load({
     bridge: input.bridge,
     now: input.now(),
-    scopeId: "service",
+    skillsDir,
+    snapshotRoot,
   });
   const runtime: ServiceCuratorRuntime = {
     store,
@@ -2681,9 +2684,9 @@ async function createServiceCuratorRuntime(input: {
     },
   };
   runtime.executor = createCuratorGovernanceExecutor({
-    skillsDir: curatorSkillsDir(input.runtimeConfig),
+    skillsDir,
     store,
-    snapshotDir: join(input.config.paths.backupDir, "curator-snapshots"),
+    snapshotDir: snapshotRoot,
     now: () => new Date(input.now()),
     planner: (request) =>
       input.bridge.planCuratorGovernanceTransition(

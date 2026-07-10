@@ -118,6 +118,8 @@ pub struct CuratorCandidateRecord {
     pub kind: String,
     pub summary: String,
     pub fingerprint: String,
+    #[serde(default)]
+    pub candidate_payload: JsonValue,
     pub mutation: JsonValue,
     #[serde(default)]
     pub source_refs: Vec<JsonValue>,
@@ -205,6 +207,8 @@ pub struct CuratorMutationRecord {
     pub actor_id: Option<String>,
     pub reason: String,
     pub snapshot_id: String,
+    #[serde(default)]
+    pub mutation_payload: JsonValue,
     #[serde(default)]
     pub changed_paths: Vec<String>,
     #[serde(default)]

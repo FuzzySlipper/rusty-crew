@@ -51,6 +51,7 @@ import { withGeneratedBridgeOutputValidation } from "./generated-binding-validat
 import { withDirectBridgeOutputValidation } from "./direct-binding-validation.js";
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
+import { createNativeBridgeCuratorMethods } from "./curator-wrappers.js";
 import { createNativeBridgeSchedulerMethods } from "./scheduler-wrappers.js";
 import { createNativeBridgeRoleplayMethods } from "./roleplay-wrappers.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
@@ -736,6 +737,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     saveMemoryProposal: unavailable("initialize_engine"),
     planCaptureMemoryProposals: unavailable("initialize_engine"),
     planCuratorGovernanceTransition: unavailable("initialize_engine"),
+    applyCuratorGovernanceWrite: unavailable("initialize_engine"),
+    getCuratorCandidate: unavailable("initialize_engine"),
+    listCuratorCandidates: unavailable("initialize_engine"),
+    getCuratorMutation: unavailable("initialize_engine"),
+    listCuratorMutations: unavailable("initialize_engine"),
+    listCuratorAuditReceipts: unavailable("initialize_engine"),
     planCuratorLifecycleTransition: unavailable("initialize_engine"),
     planBackgroundMemoryAutoMutations: unavailable("initialize_engine"),
     listMemoryProposals: unavailable("initialize_engine"),
@@ -1582,6 +1589,7 @@ function createNativeBridgeModule(
     ...createNativeBridgeProfileProviderMethods(binding),
     ...createNativeBridgeRoleplayMethods(binding),
     ...createNativeBridgeMemoryMethods(binding),
+    ...createNativeBridgeCuratorMethods(binding),
     ...createNativeBridgeChatMethods(binding),
     providerStateDiagnostics: async (limit = 100) => {
       const stored = binding

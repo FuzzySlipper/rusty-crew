@@ -94,6 +94,12 @@ export declare class NativeBridgeBinding {
   get manifestVersion(): number
   get operationNames(): Array<string>
   get wireShapeFingerprint(): string
+  applyCuratorGovernanceWriteJson(inputJson: string): string
+  getCuratorCandidateJson(candidateId: string): string
+  listCuratorCandidatesJson(inputJson: string): string
+  getCuratorMutationJson(mutationId: string): string
+  listCuratorMutationsJson(inputJson: string): string
+  listCuratorAuditReceiptsJson(inputJson: string): string
   listProfileMemory(query: JsProfileMemoryQuery): Array<JsProfileMemoryRecord>
   listMemorySpaceDescriptorsJson(): string
   querySessionMemoryRecordsJson(inputJson: string): string

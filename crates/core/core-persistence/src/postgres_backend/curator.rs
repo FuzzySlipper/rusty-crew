@@ -227,6 +227,10 @@ fn put_candidate(
         if current.fingerprint != write.record.fingerprint {
             return conflict("curator_candidate_fingerprint_conflict");
         }
+        crate::repos::curator::validate_candidate_transition(
+            &current.status,
+            &write.record.status,
+        )?;
     }
     let mut record = write.record.clone();
     record.revision = next_revision(
@@ -245,6 +249,12 @@ fn put_mutation(
     write: &CuratorMutationWrite,
 ) -> CoreResult<CuratorMutationRecord> {
     let current: Option<CuratorMutationRecord> = tx.query_opt(&format!("SELECT record_json::text FROM {schema}.module_curator_mutations WHERE mutation_id=$1 FOR UPDATE"), &[&write.record.mutation_id]).map_err(|error| postgres_error("lock PostgreSQL curator mutation", error))?.map(parse_row).transpose()?;
+    if let Some(current) = &current {
+        crate::repos::curator::validate_mutation_transition(
+            &current.status,
+            &write.record.status,
+        )?;
+    }
     let mut record = write.record.clone();
     record.revision = next_revision(
         current
@@ -490,6 +500,7 @@ mod tests {
                     kind: "skill_patch".into(),
                     summary: "Patch".into(),
                     fingerprint: "fingerprint-pg".into(),
+                    candidate_payload: serde_json::json!({}),
                     mutation: serde_json::json!({"type":"skill_patch"}),
                     source_refs: Vec::new(),
                     expires_at: None,

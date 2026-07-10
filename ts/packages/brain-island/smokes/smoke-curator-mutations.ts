@@ -33,6 +33,7 @@ const planner: CuratorGovernancePlanner = (input) =>
     input,
   ) as ReturnType<CuratorGovernancePlanner>;
 const skillsDir = join(root, "skills");
+const nativeSnapshotRoot = join(root, "native-snapshots");
 mkdirSync(skillsDir, { recursive: true });
 writeFileSync(
   join(skillsDir, "managed.md"),
@@ -235,13 +236,15 @@ const nativeCandidate: CuratorMutationCandidate = {
 const nativeStore = await NativeCuratorGovernanceStore.load({
   bridge,
   now: "2026-06-21T14:00:00.000Z",
-  scopeId: "smoke-curator",
+  skillsDir,
+  snapshotRoot: nativeSnapshotRoot,
 });
 nativeStore.upsertCandidate(nativeCandidate);
 await nativeStore.persist();
 const nativeExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store: nativeStore,
+  snapshotDir: nativeSnapshotRoot,
   now: () => new Date("2026-06-21T14:00:00.000Z"),
   planner,
 });
@@ -256,7 +259,8 @@ assert.equal(nativeApproval.status, "approved");
 const reloadedNativeStore = await NativeCuratorGovernanceStore.load({
   bridge,
   now: "2026-06-21T14:01:00.000Z",
-  scopeId: "smoke-curator",
+  skillsDir,
+  snapshotRoot: nativeSnapshotRoot,
 });
 assert.equal(
   reloadedNativeStore.getCandidate(nativeCandidate.candidateId)?.status,
@@ -265,6 +269,7 @@ assert.equal(
 const reloadedNativeExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store: reloadedNativeStore,
+  snapshotDir: nativeSnapshotRoot,
   now: () => new Date("2026-06-21T14:01:00.000Z"),
   planner,
 });
@@ -280,6 +285,28 @@ assert.match(
   /Native persisted body/,
 );
 assert.equal(reloadedNativeStore.mutations.size, 1);
+
+const appliedReload = await NativeCuratorGovernanceStore.load({
+  bridge,
+  now: "2026-06-21T14:02:00.000Z",
+  skillsDir,
+  snapshotRoot: nativeSnapshotRoot,
+});
+assert.equal(appliedReload.mutations.values().next().value?.status, "applied");
+await rollbackCuratorMutation(
+  appliedReload,
+  appliedReload.mutations.keys().next().value!,
+);
+const rollbackReload = await NativeCuratorGovernanceStore.load({
+  bridge,
+  now: "2026-06-21T14:03:00.000Z",
+  skillsDir,
+  snapshotRoot: nativeSnapshotRoot,
+});
+assert.equal(
+  rollbackReload.mutations.values().next().value?.status,
+  "rolled_back",
+);
 
 await bridge.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
 console.log("curator mutation smoke passed");

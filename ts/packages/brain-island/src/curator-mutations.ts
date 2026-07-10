@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type {
   CuratorExecuteReceipt,
   CuratorExecuteRequest,
@@ -387,66 +387,521 @@ export class NativeCuratorGovernanceStore
   extends MemoryCuratorGovernanceStore
   implements PersistableCuratorGovernanceStore
 {
-  static readonly scopeType = "curator_governance";
-  static readonly defaultScopeId = "default";
-  static readonly snapshotKey = "snapshot";
-
   static async load(input: {
-    bridge: Pick<NativeBridgeModule, "listSimpleKv" | "putSimpleKv">;
+    bridge: CuratorPersistenceBridge;
     now: string;
-    scopeId?: string;
+    skillsDir: string;
+    snapshotRoot: string;
   }): Promise<NativeCuratorGovernanceStore> {
-    const scopeId =
-      input.scopeId ?? NativeCuratorGovernanceStore.defaultScopeId;
-    const [record] = await input.bridge.listSimpleKv({
-      scopeType: NativeCuratorGovernanceStore.scopeType,
-      scopeId,
-      keyPrefix: NativeCuratorGovernanceStore.snapshotKey,
-      limit: 1,
-      now: input.now,
-    });
-    return new NativeCuratorGovernanceStore({
+    const store = new NativeCuratorGovernanceStore({
       bridge: input.bridge,
-      scopeId,
       now: () => input.now,
-      ...(record
-        ? {
-            snapshot: JSON.parse(
-              record.valueJson,
-            ) as CuratorGovernanceStoreSnapshot,
-          }
-        : {}),
+      skillsDir: input.skillsDir,
+      snapshotRoot: input.snapshotRoot,
     });
+    for (const record of await listAllCuratorCandidates(input.bridge)) {
+      const payload = record.candidatePayload as NativeCandidatePayload;
+      store.candidates.set(record.candidateId, payload.stored);
+      store.candidateRevisions.set(record.candidateId, record.revision);
+      store.candidateHashes.set(record.candidateId, stableHash(payload.stored));
+      if (payload.stored.approval) {
+        store.persistedApprovalIds.add(approvalId(payload.stored.approval));
+      }
+    }
+    for (const record of await listAllCuratorMutations(input.bridge)) {
+      const mutation = mutationFromNativeRecord(
+        record,
+        input.skillsDir,
+        input.snapshotRoot,
+      );
+      store.mutations.set(record.mutationId, mutation);
+      store.mutationRevisions.set(record.mutationId, record.revision);
+      store.mutationHashes.set(record.mutationId, stableHash(mutation));
+    }
+    return store;
   }
 
-  private readonly bridge: Pick<
-    NativeBridgeModule,
-    "listSimpleKv" | "putSimpleKv"
-  >;
-  private readonly scopeId: string;
+  private readonly bridge: CuratorPersistenceBridge;
   private readonly now: () => string;
+  private readonly skillsDir: string;
+  private readonly snapshotRoot: string;
+  private readonly candidateRevisions = new Map<string, number>();
+  private readonly candidateHashes = new Map<string, string>();
+  private readonly mutationRevisions = new Map<string, number>();
+  private readonly mutationHashes = new Map<string, string>();
+  private readonly persistedApprovalIds = new Set<string>();
 
   private constructor(input: {
-    bridge: Pick<NativeBridgeModule, "listSimpleKv" | "putSimpleKv">;
-    scopeId: string;
+    bridge: CuratorPersistenceBridge;
     now: () => string;
-    snapshot?: CuratorGovernanceStoreSnapshot;
+    skillsDir: string;
+    snapshotRoot: string;
   }) {
-    super(input.snapshot);
+    super();
     this.bridge = input.bridge;
-    this.scopeId = input.scopeId;
     this.now = input.now;
+    this.skillsDir = resolve(input.skillsDir);
+    this.snapshotRoot = resolve(input.snapshotRoot);
   }
 
   async persist(): Promise<void> {
-    await this.bridge.putSimpleKv({
-      scopeType: NativeCuratorGovernanceStore.scopeType,
-      scopeId: this.scopeId,
-      key: NativeCuratorGovernanceStore.snapshotKey,
-      valueJson: JSON.stringify(this.snapshot()),
-      now: this.now(),
-    });
+    const persistedCandidates = new Set<string>();
+    for (const mutation of this.mutations.values()) {
+      if (
+        this.mutationHashes.get(mutation.mutationId) === stableHash(mutation)
+      ) {
+        continue;
+      }
+      const stored = requiredCandidate(this, mutation.candidateId);
+      const candidateChanged =
+        this.candidateHashes.get(mutation.candidateId) !== stableHash(stored);
+      const result = (await this.bridge.applyCuratorGovernanceWrite({
+        candidate: candidateChanged ? this.candidateWrite(stored) : undefined,
+        approval: this.newApproval(stored),
+        snapshot:
+          this.mutationRevisions.get(mutation.mutationId) === undefined
+            ? snapshotRecord(mutation, this.skillsDir, this.snapshotRoot)
+            : undefined,
+        mutation: this.mutationWrite(mutation),
+        receipt: auditReceipt(
+          mutationActivityKind(mutation.status),
+          mutation.mutationId,
+          stored,
+          this.now(),
+          mutation.actorId,
+          mutation.error,
+        ),
+      })) as NativeGovernanceWriteResult;
+      if (result.candidate) {
+        this.rememberCandidate(stored, result.candidate.revision);
+        persistedCandidates.add(stored.candidate.candidateId);
+      }
+      if (result.mutation) {
+        this.mutationRevisions.set(
+          mutation.mutationId,
+          result.mutation.revision,
+        );
+        this.mutationHashes.set(mutation.mutationId, stableHash(mutation));
+      }
+    }
+
+    for (const stored of this.candidates.values()) {
+      const candidateId = stored.candidate.candidateId;
+      if (
+        persistedCandidates.has(candidateId) ||
+        this.candidateHashes.get(candidateId) === stableHash(stored)
+      ) {
+        continue;
+      }
+      const result = (await this.bridge.applyCuratorGovernanceWrite({
+        candidate: this.candidateWrite(stored),
+        approval: this.newApproval(stored),
+        receipt: auditReceipt(
+          candidateActivityKind(stored),
+          candidateId,
+          stored,
+          this.now(),
+          stored.approval?.actorId,
+          stored.lifecycle?.reasonCode,
+        ),
+      })) as NativeGovernanceWriteResult;
+      if (!result.candidate) {
+        throw new CuratorExecuteError("curator_candidate_persist_failed");
+      }
+      this.rememberCandidate(stored, result.candidate.revision);
+    }
   }
+
+  private candidateWrite(stored: CuratorStoredCandidate): unknown {
+    const candidateId = stored.candidate.candidateId;
+    const profileId = this.profileIdForCandidate(stored.candidate);
+    return {
+      record: {
+        candidateId,
+        batchId: stored.candidate.batchId,
+        profileId,
+        sessionId: undefined,
+        kind: stored.candidate.kind,
+        summary: stored.candidate.summary,
+        fingerprint: stored.candidate.fingerprint,
+        candidatePayload: {
+          stored,
+          profileId,
+        } satisfies NativeCandidatePayload,
+        mutation: stored.candidate.mutation,
+        sourceRefs: stored.candidate.sourceRefs,
+        expiresAt: stored.candidate.expiresAt,
+        status: stored.status,
+        lifecycleState: stored.lifecycle?.state ?? "active",
+        lifecycleReasonCode: stored.lifecycle?.reasonCode,
+        revision: this.candidateRevisions.get(candidateId) ?? 0,
+        createdAt: candidateCreatedAt(stored, this.now()),
+        updatedAt: this.now(),
+      },
+      expected_revision: this.candidateRevisions.get(candidateId),
+    };
+  }
+
+  private mutationWrite(record: CuratorMutationRecord): unknown {
+    return {
+      record: {
+        mutationId: record.mutationId,
+        receiptId: `curator-mutation:${record.mutationId}`,
+        candidateId: record.candidateId,
+        candidateRevision: this.candidateRevisions.get(record.candidateId) ?? 0,
+        action: record.action,
+        actorId: record.actorId,
+        reason: record.reason,
+        snapshotId: record.snapshot.snapshotId,
+        mutationPayload: {
+          management: record.management,
+          error: record.error,
+          snapshotManifest: snapshotManifest(
+            record.snapshot,
+            this.skillsDir,
+            this.snapshotRoot,
+          ),
+        },
+        changedPaths: record.changedPaths,
+        management: record.management,
+        status: record.status,
+        errorReasonCode: record.error,
+        revision: this.mutationRevisions.get(record.mutationId) ?? 0,
+        createdAt: record.appliedAt,
+        appliedAt: record.status === "applied" ? record.appliedAt : undefined,
+        rolledBackAt: record.status === "rolled_back" ? this.now() : undefined,
+      },
+      expected_revision: this.mutationRevisions.get(record.mutationId),
+    };
+  }
+
+  private newApproval(
+    stored: CuratorStoredCandidate,
+  ): NativeApprovalRecord | undefined {
+    if (!stored.approval) return undefined;
+    const id = approvalId(stored.approval);
+    if (this.persistedApprovalIds.has(id)) return undefined;
+    return {
+      approvalId: id,
+      receiptId: `curator-approval:${id}`,
+      candidateId: stored.approval.candidateId,
+      candidateRevision:
+        this.candidateRevisions.get(stored.approval.candidateId) ?? 0,
+      fingerprint: stored.approval.fingerprint,
+      actorId: stored.approval.actorId,
+      reason: stored.approval.reason,
+      approvedAt: stored.approval.approvedAt,
+      supersededAt: undefined,
+    };
+  }
+
+  private rememberCandidate(
+    stored: CuratorStoredCandidate,
+    revision: number,
+  ): void {
+    this.candidateRevisions.set(stored.candidate.candidateId, revision);
+    this.candidateHashes.set(stored.candidate.candidateId, stableHash(stored));
+    if (stored.approval) {
+      this.persistedApprovalIds.add(approvalId(stored.approval));
+    }
+  }
+
+  private profileIdForCandidate(candidate: CuratorMutationCandidate): string {
+    return String(this.batches.get(candidate.batchId)?.profileId ?? "service");
+  }
+}
+
+type CuratorPersistenceBridge = Pick<
+  NativeBridgeModule,
+  | "applyCuratorGovernanceWrite"
+  | "listCuratorCandidates"
+  | "listCuratorMutations"
+>;
+
+interface NativeCandidatePayload {
+  stored: CuratorStoredCandidate;
+  profileId: string;
+}
+
+interface NativeCandidateRecord {
+  candidateId: string;
+  candidatePayload: unknown;
+  revision: number;
+}
+
+interface NativeMutationRecord {
+  mutationId: string;
+  candidateId: string;
+  action: CuratorMutationRecord["action"];
+  actorId?: string;
+  reason: string;
+  snapshotId: string;
+  mutationPayload?: {
+    management?: SkillManagementResult;
+    error?: string;
+    snapshotManifest?: Record<string, unknown>;
+  };
+  changedPaths: string[];
+  status: CuratorMutationStatus;
+  revision: number;
+  createdAt: string;
+  appliedAt?: string;
+}
+
+interface NativePage<T> {
+  items: T[];
+  next_offset?: number | null;
+}
+
+interface NativeGovernanceWriteResult {
+  candidate?: NativeCandidateRecord;
+  mutation?: NativeMutationRecord;
+}
+
+interface NativeApprovalRecord {
+  approvalId: string;
+  receiptId: string;
+  candidateId: string;
+  candidateRevision: number;
+  fingerprint: string;
+  actorId?: string;
+  reason: string;
+  approvedAt: string;
+  supersededAt?: string;
+}
+
+async function listAllCuratorCandidates(
+  bridge: CuratorPersistenceBridge,
+): Promise<NativeCandidateRecord[]> {
+  return listAllNativePages(
+    (offset) =>
+      bridge.listCuratorCandidates({
+        page: { limit: 200, offset },
+      }) as Promise<NativePage<NativeCandidateRecord>>,
+  );
+}
+
+async function listAllCuratorMutations(
+  bridge: CuratorPersistenceBridge,
+): Promise<NativeMutationRecord[]> {
+  return listAllNativePages(
+    (offset) =>
+      bridge.listCuratorMutations({
+        page: { limit: 200, offset },
+      }) as Promise<NativePage<NativeMutationRecord>>,
+  );
+}
+
+async function listAllNativePages<T>(
+  read: (offset: number) => Promise<NativePage<T>>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await read(offset);
+    items.push(...page.items);
+    if (page.next_offset == null) return items;
+    offset = page.next_offset;
+  }
+}
+
+function stableHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function approvalId(approval: CuratorApprovalRecord): string {
+  return `${approval.candidateId}:${approval.fingerprint}`;
+}
+
+function candidateCreatedAt(
+  stored: CuratorStoredCandidate,
+  fallback: string,
+): string {
+  return (
+    stored.previewedAt ??
+    stored.approval?.approvedAt ??
+    stored.lifecycle?.lastTransitionAt ??
+    fallback
+  );
+}
+
+function candidateActivityKind(stored: CuratorStoredCandidate): string {
+  if (stored.lifecycle?.state === "stale") return "candidate_staled";
+  if (stored.lifecycle?.state === "archived") return "candidate_archived";
+  switch (stored.status) {
+    case "previewed":
+      return "candidate_previewed";
+    case "approved":
+      return "candidate_approved";
+    case "applied":
+      return "mutation_applied";
+    case "proposed":
+      return "candidate_discovered";
+  }
+}
+
+function mutationActivityKind(status: CuratorMutationStatus): string {
+  switch (status) {
+    case "applied":
+      return "mutation_applied";
+    case "failed":
+      return "mutation_failed";
+    case "rolled_back":
+      return "rollback_completed";
+    case "rollback_failed":
+      return "rollback_failed";
+  }
+}
+
+function auditReceipt(
+  activityKind: string,
+  subjectId: string,
+  stored: CuratorStoredCandidate,
+  now: string,
+  actorId?: string,
+  reasonCode?: string,
+): unknown {
+  const idempotencyKey = stableHash({
+    activityKind,
+    subjectId,
+    stored,
+  });
+  return {
+    sequence: 0,
+    receiptId: `curator-receipt:${activityKind}:${idempotencyKey.slice(0, 20)}`,
+    correlationId: `curator:${stored.candidate.batchId}`,
+    idempotencyKey,
+    profileId: undefined,
+    sessionId: undefined,
+    candidateId: stored.candidate.candidateId,
+    mutationId:
+      activityKind.startsWith("mutation_") ||
+      activityKind.startsWith("rollback_")
+        ? subjectId
+        : undefined,
+    activityKind,
+    outcome: activityKind.endsWith("failed") ? "failed" : "accepted",
+    reasonCode,
+    summary: `${activityKind} for ${subjectId}`,
+    actorId,
+    details: undefined,
+    occurredAt: now,
+  };
+}
+
+function snapshotRecord(
+  mutation: CuratorMutationRecord,
+  skillsDir: string,
+  snapshotRoot: string,
+): unknown {
+  return {
+    snapshotId: mutation.snapshot.snapshotId,
+    candidateId: mutation.candidateId,
+    snapshotRootRef: safeRelative(snapshotRoot, mutation.snapshot.snapshotDir),
+    manifest: snapshotManifest(mutation.snapshot, skillsDir, snapshotRoot),
+    status: "consumed",
+    createdAt: mutation.snapshot.createdAt,
+    verifiedAt: mutation.appliedAt,
+  };
+}
+
+function snapshotManifest(
+  snapshot: CuratorSnapshotRef,
+  skillsDir: string,
+  snapshotRoot: string,
+): Record<string, unknown> {
+  return {
+    snapshotDirRef: safeRelative(snapshotRoot, snapshot.snapshotDir),
+    skillPathRef: safeRelative(skillsDir, snapshot.skillPath),
+    skillExisted: snapshot.skillExisted,
+    skillSnapshotPathRef: snapshot.skillSnapshotPath
+      ? safeRelative(snapshotRoot, snapshot.skillSnapshotPath)
+      : undefined,
+    sidecarPathRef: snapshot.sidecarPath
+      ? safeRelative(skillsDir, snapshot.sidecarPath)
+      : undefined,
+    sidecarExisted: snapshot.sidecarExisted,
+    sidecarSnapshotPathRef: snapshot.sidecarSnapshotPath
+      ? safeRelative(snapshotRoot, snapshot.sidecarSnapshotPath)
+      : undefined,
+    filePathRef: snapshot.filePath
+      ? safeRelative(skillsDir, snapshot.filePath)
+      : undefined,
+    fileExisted: snapshot.fileExisted,
+    fileSnapshotPathRef: snapshot.fileSnapshotPath
+      ? safeRelative(snapshotRoot, snapshot.fileSnapshotPath)
+      : undefined,
+  };
+}
+
+function mutationFromNativeRecord(
+  record: NativeMutationRecord,
+  skillsDir: string,
+  snapshotRoot: string,
+): CuratorMutationRecord {
+  const payload = record.mutationPayload ?? {};
+  const manifest = payload.snapshotManifest;
+  if (!manifest) {
+    throw new CuratorExecuteError("curator_snapshot_unavailable");
+  }
+  return {
+    mutationId: record.mutationId,
+    candidateId: record.candidateId,
+    action: record.action,
+    actorId: record.actorId,
+    reason: record.reason,
+    appliedAt: record.appliedAt ?? record.createdAt,
+    status: record.status,
+    snapshot: snapshotFromManifest(
+      record.snapshotId,
+      manifest,
+      skillsDir,
+      snapshotRoot,
+      record.createdAt,
+    ),
+    rollbackRef: `curator-rollback:${record.mutationId}`,
+    changedPaths: record.changedPaths,
+    management: payload.management,
+    error: payload.error,
+  };
+}
+
+function snapshotFromManifest(
+  snapshotId: string,
+  manifest: Record<string, unknown>,
+  skillsDir: string,
+  snapshotRoot: string,
+  createdAt: string,
+): CuratorSnapshotRef {
+  const ref = (name: string): string | undefined =>
+    typeof manifest[name] === "string" ? String(manifest[name]) : undefined;
+  const rooted = (root: string, name: string): string | undefined => {
+    const value = ref(name);
+    return value ? resolve(root, value) : undefined;
+  };
+  return {
+    snapshotId,
+    snapshotDir: rooted(snapshotRoot, "snapshotDirRef") ?? snapshotRoot,
+    createdAt,
+    skillPath: rooted(skillsDir, "skillPathRef") ?? skillsDir,
+    skillExisted: Boolean(manifest.skillExisted),
+    skillSnapshotPath: rooted(snapshotRoot, "skillSnapshotPathRef"),
+    sidecarPath: rooted(skillsDir, "sidecarPathRef"),
+    sidecarExisted: Boolean(manifest.sidecarExisted),
+    sidecarSnapshotPath: rooted(snapshotRoot, "sidecarSnapshotPathRef"),
+    filePath: rooted(skillsDir, "filePathRef"),
+    fileExisted: Boolean(manifest.fileExisted),
+    fileSnapshotPath: rooted(snapshotRoot, "fileSnapshotPathRef"),
+  };
+}
+
+function safeRelative(root: string, target: string): string {
+  const ref = relative(resolve(root), resolve(target));
+  if (!ref || ref === "." || ref.startsWith(`..${sep}`) || ref === "..") {
+    if (ref === ".") return "snapshot";
+    throw new CuratorExecuteError("curator_snapshot_ref_invalid");
+  }
+  return ref;
 }
 
 export function createCuratorGovernanceExecutor(

@@ -15,22 +15,28 @@ export interface RustBridgeValidationFixtureSummary {
   }>;
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 200;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 206;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 122;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 200;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 206;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 0;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
+  "apply_curator_governance_write",
   "chat_read_model_page",
   "create_profile_registry_record",
   "drain_brain_run",
   "get_model_provider",
+  "get_curator_candidate",
+  "get_curator_mutation",
   "get_profile_registry_record",
   "list_context_compaction_artifacts",
+  "list_curator_audit_receipts",
+  "list_curator_candidates",
+  "list_curator_mutations",
   "list_model_providers",
   "list_profile_registry_records",
   "list_session_activity_digests",

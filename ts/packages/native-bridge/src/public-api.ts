@@ -2305,6 +2305,12 @@ export interface NativeBridgeModule {
   ): Promise<MemoryProposalRecord>;
   planCaptureMemoryProposals(input: unknown): Promise<unknown>;
   planCuratorGovernanceTransition(input: unknown): Promise<unknown>;
+  applyCuratorGovernanceWrite(input: unknown): Promise<unknown>;
+  getCuratorCandidate(candidateId: string): Promise<unknown | undefined>;
+  listCuratorCandidates(query: unknown): Promise<unknown>;
+  getCuratorMutation(mutationId: string): Promise<unknown | undefined>;
+  listCuratorMutations(query: unknown): Promise<unknown>;
+  listCuratorAuditReceipts(query: unknown): Promise<unknown>;
   planCuratorLifecycleTransition(input: unknown): Promise<unknown>;
   planBackgroundMemoryAutoMutations(input: unknown): Promise<unknown>;
   listMemoryProposals(

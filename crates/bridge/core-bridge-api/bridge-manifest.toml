@@ -1731,6 +1731,60 @@ errors = "core_protocol::CoreError"
 summary = "Validate curator candidate preview, approval, and apply transitions before TS performs file mutations."
 
 [[operation]]
+name = "apply_curator_governance_write"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CuratorGovernanceWrite"
+output = "core_persistence::CuratorGovernanceWriteResult"
+errors = "core_protocol::CoreError"
+summary = "Commit a typed curator lifecycle or mutation transition and its audit receipt atomically."
+
+[[operation]]
+name = "get_curator_candidate"
+surface = "stable"
+direction = "ts_to_rust"
+input = "String"
+output = "Option<core_persistence::CuratorCandidateRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one typed curator candidate."
+
+[[operation]]
+name = "list_curator_candidates"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CuratorCandidateQuery"
+output = "core_persistence::ExactPage<core_persistence::CuratorCandidateRecord>"
+errors = "core_protocol::CoreError"
+summary = "Page typed curator candidates by scope and lifecycle state."
+
+[[operation]]
+name = "get_curator_mutation"
+surface = "stable"
+direction = "ts_to_rust"
+input = "String"
+output = "Option<core_persistence::CuratorMutationRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one typed curator mutation or rollback record."
+
+[[operation]]
+name = "list_curator_mutations"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CuratorMutationQuery"
+output = "core_persistence::ExactPage<core_persistence::CuratorMutationRecord>"
+errors = "core_protocol::CoreError"
+summary = "Page typed curator mutation and rollback records."
+
+[[operation]]
+name = "list_curator_audit_receipts"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CuratorAuditQuery"
+output = "core_persistence::ExactPage<core_persistence::CuratorAuditReceiptRecord>"
+errors = "core_protocol::CoreError"
+summary = "Page append-only curator audit receipts in durable sequence order."
+
+[[operation]]
 name = "plan_curator_lifecycle_transition"
 surface = "stable"
 direction = "ts_to_rust"

@@ -327,6 +327,7 @@ fn put_candidate_in_tx(
         if current.fingerprint != write.record.fingerprint {
             return conflict("curator_candidate_fingerprint_conflict");
         }
+        validate_candidate_transition(&current.status, &write.record.status)?;
     }
     let revision = next_revision(
         current.as_ref().map(|record| record.revision),
@@ -377,6 +378,9 @@ fn put_mutation_in_tx(
         "mutation_id",
         &write.record.mutation_id,
     )?;
+    if let Some(current) = &current {
+        validate_mutation_transition(&current.status, &write.record.status)?;
+    }
     let revision = next_revision(
         current.as_ref().map(|record| record.revision),
         write.expected_revision,
@@ -561,6 +565,53 @@ fn conflict<T>(message: &str) -> CoreResult<T> {
     Err(CoreError::new(CoreErrorKind::ActionRejected, message))
 }
 
+pub(crate) fn validate_candidate_transition(
+    current: &CuratorCandidateStatus,
+    next: &CuratorCandidateStatus,
+) -> CoreResult<()> {
+    let valid = current == next
+        || matches!(
+            (current, next),
+            (CuratorCandidateStatus::Proposed, CuratorCandidateStatus::Previewed)
+                | (CuratorCandidateStatus::Proposed, CuratorCandidateStatus::Approved)
+                | (CuratorCandidateStatus::Previewed, CuratorCandidateStatus::Approved)
+                | (CuratorCandidateStatus::Approved, CuratorCandidateStatus::Applied)
+        );
+    if valid {
+        Ok(())
+    } else {
+        conflict("curator_candidate_transition_rejected")
+    }
+}
+
+pub(crate) fn validate_mutation_transition(
+    current: &CuratorMutationStatus,
+    next: &CuratorMutationStatus,
+) -> CoreResult<()> {
+    let valid = current == next
+        || matches!(
+            (current, next),
+            (CuratorMutationStatus::Prepared, CuratorMutationStatus::Applied)
+                | (CuratorMutationStatus::Prepared, CuratorMutationStatus::Failed)
+                | (CuratorMutationStatus::Applied, CuratorMutationStatus::RollbackPrepared)
+                | (CuratorMutationStatus::Applied, CuratorMutationStatus::RolledBack)
+                | (CuratorMutationStatus::Applied, CuratorMutationStatus::RollbackFailed)
+                | (
+                    CuratorMutationStatus::RollbackPrepared,
+                    CuratorMutationStatus::RolledBack
+                )
+                | (
+                    CuratorMutationStatus::RollbackPrepared,
+                    CuratorMutationStatus::RollbackFailed
+                )
+        );
+    if valid {
+        Ok(())
+    } else {
+        conflict("curator_mutation_already_terminal")
+    }
+}
+
 fn bounded_page(page: Option<QueryPage>) -> (i64, i64) {
     page.unwrap_or(QueryPage {
         limit: None,
@@ -706,6 +757,7 @@ mod tests {
             actor_id: Some("operator".into()),
             reason: "apply".into(),
             snapshot_id: "snapshot-one".into(),
+            mutation_payload: serde_json::json!({}),
             changed_paths: vec!["skill.md".into()],
             management: None,
             status: CuratorMutationStatus::Applied,
@@ -828,6 +880,7 @@ mod tests {
             kind: "skill_patch".into(),
             summary: "Patch a skill".into(),
             fingerprint: "fingerprint-one".into(),
+            candidate_payload: serde_json::json!({}),
             mutation: serde_json::json!({"type":"skill_patch"}),
             source_refs: vec![],
             expires_at: None,

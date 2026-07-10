@@ -94,6 +94,12 @@ export interface NativeBridgeBinding {
   readonly manifestVersion: number
   readonly operationNames: Array<string>
   readonly wireShapeFingerprint: string
+  applyCuratorGovernanceWriteJson(inputJson: string): string
+  getCuratorCandidateJson(candidateId: string): string
+  listCuratorCandidatesJson(inputJson: string): string
+  getCuratorMutationJson(mutationId: string): string
+  listCuratorMutationsJson(inputJson: string): string
+  listCuratorAuditReceiptsJson(inputJson: string): string
   listProfileMemory(query: JsProfileMemoryQuery): Array<JsProfileMemoryRecord>
   listMemorySpaceDescriptorsJson(): string
   querySessionMemoryRecordsJson(inputJson: string): string
@@ -744,7 +750,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 200,
+  "manifestOperationCount": 206,
   "methods": [
     {
       "name": "startBrainRunJson",
@@ -1465,6 +1471,54 @@ export const nativeBridgeBindingSurface = {
       "returnType": "JsEventReceipt",
       "returnKind": "object",
       "operationName": "submit_brain_event"
+    },
+    {
+      "name": "applyCuratorGovernanceWriteJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "apply_curator_governance_write"
+    },
+    {
+      "name": "getCuratorCandidateJson",
+      "parameterSource": "candidateId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_curator_candidate"
+    },
+    {
+      "name": "listCuratorCandidatesJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_curator_candidates"
+    },
+    {
+      "name": "getCuratorMutationJson",
+      "parameterSource": "mutationId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_curator_mutation"
+    },
+    {
+      "name": "listCuratorMutationsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_curator_mutations"
+    },
+    {
+      "name": "listCuratorAuditReceiptsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_curator_audit_receipts"
     },
     {
       "name": "listProfileMemory",
