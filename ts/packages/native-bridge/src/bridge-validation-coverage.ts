@@ -24,8 +24,9 @@ const EXPECTED_MANIFEST_OPERATION_COUNT = 200;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 122;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 160;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 40;
+const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 173;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 27;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -97,6 +98,22 @@ const RUST_FIXTURE_FAMILY_NAMES = [
   "session_activity_digest_v1",
 ] as const;
 
+const UNIT_RETURN_MANIFEST_OPERATIONS = [
+  "add_entry_to_layer",
+  "apply_brain_provider_state_output",
+  "complete_scheduled_host_run",
+  "pause_scheduled_job",
+  "release_buffer",
+  "remove_entry_from_layer",
+  "reorder_chat_layers",
+  "resume_scheduled_job",
+  "save_message_slot",
+  "set_chat_layers",
+  "set_entry_constant",
+  "toggle_chat_layer",
+  "unsubscribe_events",
+] as const satisfies readonly ManifestOperationName[];
+
 const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
     group: "engine_lifecycle",
@@ -108,7 +125,6 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "register_brain_implementation",
       "replace_brain_implementation",
       "unregister_brain_implementation_for_profile",
-      "apply_brain_provider_state_output",
     ],
   },
   {
@@ -144,9 +160,6 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     operations: [
       "archive_session",
       "ensure_configured_session",
-      "complete_scheduled_host_run",
-      "pause_scheduled_job",
-      "resume_scheduled_job",
       "cancel_delegated_session",
       "request_delegated_checkpoint",
       "drain_delegated_sessions",
@@ -155,29 +168,10 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     ],
   },
   {
-    group: "conversation_tree",
-    reason:
-      "save_message_slot returns unit; its Rust-owned input contract is covered by transaction tests while every value-returning chat operation uses generated output validation.",
-    operations: ["save_message_slot"],
-  },
-  {
     group: "model_secrets",
     reason:
       "Secret readback is intentionally narrow and redacted by callers; do not add fixture payloads that could normalize secret exposure.",
     operations: ["get_model_provider_secret"],
-  },
-  {
-    group: "roleplay_lore",
-    reason:
-      "These roleplay lore operations return unit. Their Rust input contracts are covered by repository tests; every value-returning lore operation uses generated output validation.",
-    operations: [
-      "set_chat_layers",
-      "toggle_chat_layer",
-      "reorder_chat_layers",
-      "add_entry_to_layer",
-      "remove_entry_from_layer",
-      "set_entry_constant",
-    ],
   },
   {
     group: "github_gate_wait",
@@ -195,12 +189,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     group: "subscriptions_and_buffers",
     reason:
       "Event subscription and runtime-buffer lease semantics are protocol/lifecycle concerns; bump MANIFEST_VERSION for breaking changes until buffer fixtures exist.",
-    operations: [
-      "subscribe_events",
-      "unsubscribe_events",
-      "get_buffer",
-      "release_buffer",
-    ],
+    operations: ["subscribe_events", "get_buffer"],
   },
 ] as const satisfies readonly OperationExemptionGroup[];
 
@@ -252,10 +241,16 @@ export function assertBridgeValidationCoverageRatchet(
   const coverage = sortedUnique([
     ...RUNTIME_VALIDATED_MANIFEST_OPERATIONS,
     ...RUST_FIXTURE_BACKED_OPERATIONS,
+    ...UNIT_RETURN_MANIFEST_OPERATIONS,
     ...(Object.keys(
       bridgeWireSchemaArtifact.operationSchemaKeys,
     ) as ManifestOperationName[]),
   ]);
+  assertEqual(
+    "unit-return manifest operation count",
+    UNIT_RETURN_MANIFEST_OPERATIONS.length,
+    EXPECTED_UNIT_RETURN_OPERATION_COUNT,
+  );
   assertEqual(
     "generated Rust bridge output schema count",
     Object.keys(bridgeWireSchemaArtifact.operationSchemaKeys).length,

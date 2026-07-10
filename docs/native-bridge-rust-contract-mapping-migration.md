@@ -425,6 +425,39 @@ boundary smoke ratchets per-file line ceilings, rejects back-imports into the
 entrypoint, and rejects runtime import cycles across the 15 bridge family and
 composition modules.
 
+### Task 5411 Final Ratchets And Certification
+
+The final 2026-07-10 bridge baseline is:
+
+- manifest operations: 200;
+- generated raw native binding methods: 215;
+- generated Rust output schemas: 122 operations;
+- covered manifest operations: 173;
+- first-class unit-return operations: 13;
+- explicit value/helper exemptions: 27;
+- handwritten `to*`/`from*` converters: 91 maximum;
+- `native-bridge/src/index.ts`: 1,747 lines maximum;
+- focused family/composition modules under the boundary ratchet: 15.
+
+Unit-return operations are now coverage evidence in their own exact list; they
+are no longer mislabeled as deferred output schemas. The 27 remaining
+value/helper exemptions have explicit implementation tasks:
+
+- #5564: direct engine, ingress, session, and delegation DTOs (16 operations);
+- #5565: OAuth, buffered diagnostics, model-secret, and GitHub gate helpers (9);
+- #5566: event subscription and runtime-buffer value contracts (2).
+
+The removed deterministic `local` brain still leaves the ST import smoke stale;
+#5563 owns that separate smoke repair rather than weakening production brain
+selection.
+
+Representative live certification ran against the restarted SQLite debug
+service at `http://127.0.0.1:9348` using
+`brain-island:chat-rust-authority-live-debug-service`. A real Responses provider
+completed `git_status` and `read_file`, emitted 47 streamed events, replayed the
+durable suffix, and completed chat variant/branch/snapshot/attachment/data-bank
+API mutations before cleaning up the temporary profile.
+
 ### 5. Ratchet Bridge Additions
 
 Make bridge operation additions follow an explicit greenpath:

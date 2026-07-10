@@ -44,6 +44,7 @@ const lineCeilings: Record<string, number> = {
   "scheduler-wrappers.ts": 250,
   "session-wire.ts": 100,
 };
+const HANDWRITTEN_CONVERTER_CEILING = 91;
 
 for (const [name, source] of sources) {
   const lines = source.split("\n").length;
@@ -85,11 +86,24 @@ function visit(name: string, path: string[]): void {
 }
 for (const name of graph.keys()) visit(name, []);
 
+const handwrittenConverterCount = [...sources.values()].reduce(
+  (count, source) =>
+    count +
+    [...source.matchAll(/^(?:export )?function (?:to|from)[A-Z]/gm)].length,
+  0,
+);
+assert(
+  handwrittenConverterCount <= HANDWRITTEN_CONVERTER_CEILING,
+  `handwritten native bridge converter count grew to ${handwrittenConverterCount}; generate or consolidate mappings before raising the ${HANDWRITTEN_CONVERTER_CEILING} ceiling`,
+);
+
 console.log(
   JSON.stringify({
     modules: moduleNames.length,
     indexLines: sources.get("index.ts")?.split("\n").length,
     runtimeImportCycles: 0,
     entrypointBackImports: 0,
+    handwrittenConverterCount,
+    handwrittenConverterCeiling: HANDWRITTEN_CONVERTER_CEILING,
   }),
 );
