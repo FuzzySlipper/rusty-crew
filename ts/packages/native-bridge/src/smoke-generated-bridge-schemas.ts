@@ -79,6 +79,30 @@ assert.throws(
   "raw binding chokepoint must reject invalid generated-schema output",
 );
 
+for (const operation of [
+  "plan_brain_selection",
+  "plan_runtime_graph",
+  "plan_curator_lifecycle_transition",
+  "run_scheduler_tick",
+] as const) {
+  assert(
+    !Value.Check(generatedBridgeOutputSchemas[operation], {}),
+    `generated ${operation} schema must reject an empty output`,
+  );
+}
+
+const invalidBrainBinding = withGeneratedBridgeOutputValidation(
+  {
+    planBrainSelectionJson: () => JSON.stringify({ catalog_revision: "bad" }),
+  },
+  { RUSTY_CREW_BRIDGE_VALIDATE: "1" },
+);
+assert.throws(
+  () => invalidBrainBinding.planBrainSelectionJson(),
+  BridgeValidationError,
+  "raw binding chokepoint must enforce generated brain schemas",
+);
+
 const disabledRawBinding = {
   createChatMessageSlotJson: () => JSON.stringify({ status: "created" }),
 };
@@ -97,5 +121,6 @@ console.log(
       .length,
     nestedEnumTagAndNullCoverage: true,
     rawBindingChokepoint: true,
+    brainConfigAndMemoryRejectionCoverage: true,
   }),
 );

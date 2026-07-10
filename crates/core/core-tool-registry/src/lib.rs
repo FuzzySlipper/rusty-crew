@@ -5,10 +5,11 @@
 //! intentionally does not model JavaScript executor modules, factory names, MCP
 //! clients, or other runtime binding details.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolMetadata {
     pub name: String,
     pub description: String,
@@ -29,7 +30,7 @@ pub struct ToolMetadata {
     pub collision_notes: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCategory {
     Local,
@@ -48,7 +49,7 @@ pub enum ToolCategory {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSurface {
     Brain,
@@ -58,7 +59,7 @@ pub enum ToolSurface {
     Diagnostic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSafetyFlag {
     ReadOnly,
@@ -70,7 +71,7 @@ pub enum ToolSafetyFlag {
     CoordinationAction,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolDeprecation {
     pub reason: String,
     pub since: String,
@@ -78,7 +79,7 @@ pub struct ToolDeprecation {
     pub sunset: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolInventoryStatus {
     Selected,
@@ -92,7 +93,7 @@ pub enum ToolInventoryStatus {
     Collision,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolDenialReasonCode {
     UnknownTool,
@@ -107,7 +108,7 @@ pub enum ToolDenialReasonCode {
     InvalidMetadata,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolMetadataDiagnosticSeverity {
     Error,
@@ -115,7 +116,7 @@ pub enum ToolMetadataDiagnosticSeverity {
     Info,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolMetadataDiagnostic {
     pub severity: ToolMetadataDiagnosticSeverity,
     pub code: String,
@@ -144,7 +145,7 @@ impl ToolMetadataDiagnostic {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolMetadataValidationResult {
     pub diagnostics: Vec<ToolMetadataDiagnostic>,
 }
@@ -166,14 +167,14 @@ pub fn validate_tool_metadata_list(entries: &[ToolMetadata]) -> ToolMetadataVali
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolMetadataPolicyValidationInput {
     #[serde(default)]
     pub tools: Vec<ToolMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolMetadataPolicyValidationResult {
     pub ok: bool,
@@ -190,14 +191,14 @@ pub fn validate_tool_metadata_policy(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalToolProfileValidationInput {
     pub profile: LocalToolProfilePolicy,
     pub catalog: LocalToolProfileCatalogPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalToolProfileCatalogPolicy {
     #[serde(default)]
@@ -206,7 +207,7 @@ pub struct LocalToolProfileCatalogPolicy {
     pub tools: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalToolProfilePolicy {
     pub id: String,
@@ -219,7 +220,7 @@ pub struct LocalToolProfilePolicy {
     pub tools: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalToolProfileValidationIssue {
     pub reason_code: String,
@@ -227,7 +228,7 @@ pub struct LocalToolProfileValidationIssue {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalToolProfileValidationResult {
     pub ok: bool,
@@ -287,7 +288,7 @@ pub fn validate_local_tool_profile_policy(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalMemoryToolMode {
     Off,
@@ -297,7 +298,7 @@ pub enum ExternalMemoryToolMode {
     Permissive,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalMemoryDependencyPolicy {
     pub configured: bool,
@@ -306,7 +307,7 @@ pub struct ExternalMemoryDependencyPolicy {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolAvailabilityPlanInput {
     #[serde(default)]
@@ -314,7 +315,7 @@ pub struct ToolAvailabilityPlanInput {
     pub den_memory: ExternalMemoryDependencyPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolAvailabilityOmission {
     pub tool_name: String,
@@ -322,7 +323,7 @@ pub struct ToolAvailabilityOmission {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolAvailabilityPlan {
     pub selected_tools: Vec<String>,
@@ -330,7 +331,7 @@ pub struct ToolAvailabilityPlan {
     pub diagnostics: Vec<ToolAvailabilityOmission>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebBrowserResourcePolicyInput {
     #[serde(default)]
@@ -339,35 +340,35 @@ pub struct WebBrowserResourcePolicyInput {
     pub browser: BrowserResourcePolicyOverrides,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCodeResourcePolicyInput {
     #[serde(default)]
     pub resource_limits: LocalCodeResourceLimitsInput,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCodeResourceLimitsInput {
     pub workdir: Option<String>,
     pub max_duration_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalCodeFilesystemScope {
     Unrestricted,
     Workdir,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalCodeExecutionMode {
     Parallel,
     Sequential,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCodeToolResourcePolicy {
     pub tool_name: String,
@@ -378,7 +379,7 @@ pub struct LocalCodeToolResourcePolicy {
     pub output_shape: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCodeResourcePolicyPlan {
     pub workdir: String,
@@ -391,7 +392,7 @@ pub struct LocalCodeResourcePolicyPlan {
     pub denial_reason_codes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebResourcePolicyOverrides {
     pub search_default_limit: Option<u32>,
@@ -405,7 +406,7 @@ pub struct WebResourcePolicyOverrides {
     pub allowed_nonstandard_ports: Vec<u16>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserResourcePolicyOverrides {
     pub max_service_sessions: Option<u32>,
@@ -422,7 +423,7 @@ pub struct BrowserResourcePolicyOverrides {
     pub allow_private_net: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebBrowserResourcePolicyPlan {
     pub web: WebResourcePolicyPlan,
@@ -430,7 +431,7 @@ pub struct WebBrowserResourcePolicyPlan {
     pub denial_reason_codes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebResourcePolicyPlan {
     pub search_default_limit: u32,
@@ -443,7 +444,7 @@ pub struct WebResourcePolicyPlan {
     pub allowed_nonstandard_ports: Vec<u16>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserResourcePolicyPlan {
     pub max_service_sessions: u32,
@@ -1784,7 +1785,7 @@ fn valid_semver(value: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, JsonSchema)]
     #[serde(rename_all = "camelCase")]
     struct ToolRegistryMetadataArtifact {
         schema_version: u32,

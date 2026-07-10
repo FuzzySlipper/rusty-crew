@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt;
@@ -18,14 +19,14 @@ const PREVIOUS_RESPONSE_FALLBACK_REASONS: &[&str] = &[
     "normal_invalidation",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainProviderProtocol {
     ChatCompletions,
     Responses,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainProviderStateMode {
     Unused,
@@ -33,7 +34,7 @@ pub enum BrainProviderStateMode {
     Required,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainProviderStateRebuildAction {
     Discard,
@@ -41,7 +42,7 @@ pub enum BrainProviderStateRebuildAction {
     Unsupported,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainProviderStateRebuildPolicy {
     pub action: BrainProviderStateRebuildAction,
     pub reason: String,
@@ -49,13 +50,13 @@ pub struct BrainProviderStateRebuildPolicy {
     pub migration_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainProviderStatePolicy {
     pub mode: BrainProviderStateMode,
     pub rebuild: BrainProviderStateRebuildPolicy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainHostCapability {
     ExecuteTool,
@@ -63,7 +64,7 @@ pub enum BrainHostCapability {
     ProjectEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainStrategyDiagnostics {
     pub selected_strategy_id: String,
     pub effective_strategy_id: String,
@@ -74,7 +75,7 @@ pub struct BrainStrategyDiagnostics {
     pub fallback_reason_catalog: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainCatalogStrategy {
     pub strategy_id: String,
     pub provider_state: BrainProviderStatePolicy,
@@ -85,7 +86,7 @@ pub struct BrainCatalogStrategy {
     pub diagnostics: BrainStrategyDiagnostics,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainCatalogModule {
     pub module_id: String,
     pub display_name: String,
@@ -95,13 +96,13 @@ pub struct BrainCatalogModule {
     pub required_host_capabilities: Vec<BrainHostCapability>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainCatalog {
     pub revision: u32,
     pub modules: Vec<BrainCatalogModule>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainSelectionRequest {
     #[serde(default)]
     pub configured_module_id: Option<String>,
@@ -113,7 +114,7 @@ pub struct BrainSelectionRequest {
     pub roleplay_narrator_enabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainSelectionPlan {
     pub catalog_revision: u32,
     pub module_id: String,

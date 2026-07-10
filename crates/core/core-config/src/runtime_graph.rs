@@ -10,12 +10,13 @@ use rusty_crew_core_protocol::{
     AdapterId, AgentId, BrainImplementationId, ProfileId, ResourceLimits, SessionHistoryWindow,
     SessionId, SessionKind,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphPlanInput {
     pub host_facts: RuntimeGraphHostFacts,
     #[serde(default)]
@@ -25,7 +26,7 @@ pub struct RuntimeGraphPlanInput {
     pub profiles: Vec<RuntimeGraphProfileSource>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphHostFacts {
     pub config_dir: String,
     pub engine_data_dir: String,
@@ -34,26 +35,26 @@ pub struct RuntimeGraphHostFacts {
     pub postgres_database_url_env_present: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphServiceDefaults {
     pub wake_timeout: Option<RuntimeGraphWakeTimeoutSource>,
     pub storage: Option<RuntimeGraphStorageSource>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphWakeTimeoutMode {
     Disabled,
     Default,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphWakeTimeoutSource {
     pub mode: RuntimeGraphWakeTimeoutMode,
     pub default_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphSourceDraft {
     pub profiles_dir: String,
     pub skills_dir: Option<String>,
@@ -70,13 +71,13 @@ pub struct RuntimeGraphSourceDraft {
     pub mcp_bindings: Vec<McpBindingConfigDraft>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphBrainSource {
     pub implementation_id: Option<String>,
     pub profile_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphSessionSource {
     pub session_id: String,
     pub agent_id: String,
@@ -90,7 +91,7 @@ pub struct RuntimeGraphSessionSource {
     pub local_tool_profile_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphScheduledJobSource {
     pub id: String,
     pub schedule: String,
@@ -103,14 +104,14 @@ pub struct RuntimeGraphScheduledJobSource {
     pub delivery_channel_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphStorageBackend {
     Sqlite,
     Postgres,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphPostgresBootMode {
     Blocked,
@@ -118,21 +119,21 @@ pub enum RuntimeGraphPostgresBootMode {
     Active,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphStorageSource {
     pub backend: String,
     pub sqlite: Option<RuntimeGraphSqliteStorageSource>,
     pub postgres: Option<RuntimeGraphPostgresStorageSource>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphSqliteStorageSource {
     pub path: Option<String>,
     pub wal: Option<bool>,
     pub busy_timeout_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphPostgresStorageSource {
     pub database_url_env: Option<String>,
     pub schema: Option<String>,
@@ -141,7 +142,7 @@ pub struct RuntimeGraphPostgresStorageSource {
     pub statement_timeout_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphProfileSource {
     pub profile_id: String,
     pub brain: Option<ProfileBrainMetadata>,
@@ -154,7 +155,7 @@ pub struct RuntimeGraphProfileSource {
     pub context_policy: Option<ProfileContextPolicy>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphSessionMemoryPromptSource {
     pub enabled: Option<bool>,
     pub max_records: Option<u32>,
@@ -162,7 +163,7 @@ pub struct RuntimeGraphSessionMemoryPromptSource {
     pub include_siblings: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphPlan {
     pub accepted: bool,
     pub source_revision: String,
@@ -172,7 +173,7 @@ pub struct RuntimeGraphPlan {
     pub diagnostics: Vec<RuntimeConfigDiagnostic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphEffectiveConfig {
     pub profiles_dir: String,
     pub skills_dir: Option<String>,
@@ -185,7 +186,7 @@ pub struct RuntimeGraphEffectiveConfig {
     pub mcp_bindings: Vec<McpBindingConfigDraft>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphSessionPlan {
     pub session_id: SessionId,
     pub agent_id: AgentId,
@@ -203,7 +204,7 @@ pub struct RuntimeGraphSessionPlan {
     pub session_memory_prompt_profile_id: Option<ProfileId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphWakeTimeoutSourceKind {
     Disabled,
@@ -213,7 +214,7 @@ pub enum RuntimeGraphWakeTimeoutSourceKind {
     ServiceDefault,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphScheduledJobPlan {
     pub id: String,
     pub schedule: String,
@@ -226,7 +227,7 @@ pub struct RuntimeGraphScheduledJobPlan {
     pub delivery_channel_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphStoragePlan {
     pub backend: RuntimeGraphStorageBackend,
     pub implementation_status: RuntimeGraphStorageImplementationStatus,
@@ -234,7 +235,7 @@ pub struct RuntimeGraphStoragePlan {
     pub postgres: RuntimeGraphPostgresStoragePlan,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphStorageImplementationStatus {
     Active,
@@ -242,7 +243,7 @@ pub enum RuntimeGraphStorageImplementationStatus {
     BlockedUnimplemented,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphSqliteStoragePlan {
     pub path: String,
     pub effective_path: String,
@@ -250,7 +251,7 @@ pub struct RuntimeGraphSqliteStoragePlan {
     pub busy_timeout_ms: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphPostgresStoragePlan {
     pub database_url_env: String,
     pub schema: String,
@@ -259,33 +260,33 @@ pub struct RuntimeGraphPostgresStoragePlan {
     pub statement_timeout_ms: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphWakeTimeoutPlan {
     pub mode: RuntimeGraphWakeTimeoutMode,
     pub default_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphDerivedRecord {
     pub kind: RuntimeGraphDerivedKind,
     pub id: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphDerivedKind {
     ScheduledJob,
     McpBinding,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphDefaultRecord {
     pub path: String,
     pub source: RuntimeGraphDefaultSource,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGraphDefaultSource {
     CanonicalProfileDefault,

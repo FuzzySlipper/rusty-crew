@@ -13,6 +13,7 @@
     "measure:napi": "tsx src/measure-napi-throughput.ts",
     "smoke:bridge-validation": "tsx src/smoke-bridge-validation.ts",
     "smoke:generated-bridge-schemas": "tsx src/smoke-generated-bridge-schemas.ts",
+    "smoke:native-admin-validation": "tsx src/smoke-native-admin-validation.ts",
     "smoke:native-mapping-inventory": "tsx src/smoke-native-mapping-inventory.ts"
   },
   "dependencies": {

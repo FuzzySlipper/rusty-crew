@@ -364,6 +364,28 @@ The focused gate is `npm run check:bridge-wire-schemas`. It checks generated
 artifact drift, validates all Rust samples, rejects invalid nested/enum/tag
 fixtures, and proves rejection occurs at the raw binding chokepoint.
 
+Task 5404 extended that generator across brain catalog/selection, tool policy,
+runtime/profile planning, session-memory/curator planning, and scheduler
+outputs. The scheduler no longer constructs anonymous `serde_json::Value`
+records: `core-bridge-api` owns named scheduler wire DTOs consumed by both the
+native binding and codegen. Direct napi admin DTOs have a different camel-case
+wire shape from persistence serialization, so storage diagnostics,
+maintenance, and simple-KV returns use strict TypeBox schemas at the TS edge
+instead of claiming that a persistence schema validates the converted object.
+
+The post-5404 ratchet is:
+
+- generated Rust output schemas: 122 operations;
+- runtime-validated, fixture-backed, or generated-schema operations: 160;
+- explicit exemptions: 40, down from 75 at the start of this task;
+- focused schema gate: generated artifact drift plus brain/config/memory/
+  scheduler rejection checks and strict nested admin DTO checks.
+
+The remaining exemptions are direct lifecycle/delegation DTOs, unit-return
+mutations, OAuth secret exchange, buffered-host helper diagnostics, GitHub gate
+wait helpers, model-secret readback, and subscription/buffer lifecycle calls.
+They remain explicit operation lists rather than a generic escape hatch.
+
 ### 3. Generate Or Check TypeScript Validation Schemas
 
 For fixture-backed families, reduce hand-written TypeBox drift by generating

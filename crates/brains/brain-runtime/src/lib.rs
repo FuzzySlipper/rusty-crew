@@ -8,6 +8,7 @@ pub use coordinator::*;
 pub use host_protocol::*;
 pub use tool_policy::*;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -66,7 +67,7 @@ impl fmt::Display for BrainRuntimeError {
 
 impl std::error::Error for BrainRuntimeError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedNeutralPendingToolRequest {
     pub call_id: String,
     pub provider_item_id: Option<String>,
@@ -74,20 +75,20 @@ pub struct BufferedNeutralPendingToolRequest {
     pub arguments_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedNeutralToolOutput {
     pub output: String,
     pub is_error: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedNeutralCancellation {
     pub reason_code: String,
     pub summary: String,
     pub cancelled_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedBrainTurnDiagnostic {
     pub module_label: String,
     pub wake_id: String,
@@ -103,7 +104,7 @@ pub struct BufferedBrainTurnDiagnostic {
     pub last_transition_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedBrainTurnCleanupReport {
     pub module_label: String,
     pub active_runs: usize,

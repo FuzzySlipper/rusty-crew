@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+schemars.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

@@ -11,6 +11,7 @@ rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
 rusty-crew-core-config = { path = "../../core/core-config" }
 rusty-crew-core-persistence = { path = "../../core/core-persistence" }
 rusty-crew-core-protocol = { path = "../../core/core-protocol" }
+rusty-crew-core-tool-registry = { path = "../../core/core-tool-registry" }
 rusty-crew-roleplay-core = { path = "../../roleplay/roleplay-core" }
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }

@@ -4,7 +4,7 @@ import type { TSchema } from "typebox";
 
 export const bridgeWireSchemaArtifact = {
   "formatVersion": 1,
-  "source": "schemars schemas derived from Rust persistence and roleplay DTOs",
+  "source": "schemars schemas derived from Rust bridge, brain, config, tool, protocol, persistence, and roleplay DTOs",
   "schemas": {
     "(rusty_crew_core_persistence::contracts::RoleplayLoreRecord, rusty_crew_core_persistence::contracts::RoleplayLoreRecord)": {
       "items": [
@@ -406,6 +406,136 @@ export const bridgeWireSchemaArtifact = {
       "maxItems": 2,
       "minItems": 2,
       "title": "Tuple_of_RoleplayLoreRecord_and_RoleplayLoreRecord",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput>": {
+      "items": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "interval_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "job_kind": {
+            "type": "string"
+          },
+          "next_due_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "job_kind",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ScheduledJobWireOutput",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>": {
+      "items": {
+        "properties": {
+          "claim_deadline_at": {
+            "type": "string"
+          },
+          "claimed_at": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "job_kind": {
+            "type": "string"
+          },
+          "output": true,
+          "run_id": {
+            "type": "string"
+          },
+          "scheduled_for": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "job_id",
+          "job_kind",
+          "status",
+          "trigger",
+          "claimed_at",
+          "claim_deadline_at",
+          "output",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ScheduledRunWireOutput",
       "type": "array"
     },
     "alloc::vec::Vec<rusty_crew_core_persistence::contracts::AttachmentRecord>": {
@@ -2308,6 +2438,265 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_RoleplaySessionMetadataRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_persistence::contracts::SessionMemoryRecord>": {
+      "items": {
+        "properties": {
+          "archive_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "branch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "format": "float",
+            "type": "number"
+          },
+          "content": true,
+          "created_at": {
+            "type": "string"
+          },
+          "durability_rationale": {
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "properties": {
+                "evidence_type": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "wake",
+                        "event",
+                        "tool_call",
+                        "transcript",
+                        "user_correction",
+                        "source_document",
+                        "import",
+                        "migration",
+                        "ui",
+                        "other"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "const": "den_memory",
+                      "description": "Explicit bridge/import evidence from external Den-owned memory.",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ref_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "evidence_type",
+                "ref_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "properties": {
+              "scope_id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "enum": [
+                  "profile",
+                  "user",
+                  "session",
+                  "conversation_branch",
+                  "world",
+                  "entity",
+                  "project"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope_type",
+              "scope_id"
+            ],
+            "type": "object"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "shape": {
+            "properties": {
+              "shape_id": {
+                "description": "Record shape id inside a memory space, such as `profile_dense_item`.",
+                "type": "string"
+              },
+              "version": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "shape_id",
+              "version"
+            ],
+            "type": "object"
+          },
+          "source": {
+            "enum": [
+              "in_wake_tool",
+              "capture_producer",
+              "ui",
+              "import",
+              "migration",
+              "human",
+              "den_memory_import"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "superseded",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "superseded_by_record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supersedes_record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "session_id",
+          "scope",
+          "shape",
+          "status",
+          "revision",
+          "content",
+          "evidence_refs",
+          "source",
+          "confidence",
+          "durability_rationale",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_SessionMemoryRecord",
+      "type": "array"
+    },
+    "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>": {
+      "properties": {
+        "claim_deadline_at": {
+          "type": "string"
+        },
+        "claimed_at": {
+          "type": "string"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "job_kind": {
+          "type": "string"
+        },
+        "output": true,
+        "run_id": {
+          "type": "string"
+        },
+        "scheduled_for": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "target_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trigger": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "job_id",
+        "job_kind",
+        "status",
+        "trigger",
+        "claimed_at",
+        "claim_deadline_at",
+        "output",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "Nullable_ScheduledRunWireOutput",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "core::option::Option<rusty_crew_core_persistence::contracts::LoreRecallTraceRecord>": {
       "properties": {
         "active_subjects": {
@@ -3066,6 +3455,3214 @@ export const bridgeWireSchemaArtifact = {
         "object",
         "null"
       ]
+    },
+    "rusty_crew_brain_runtime::catalog::BrainCatalog": {
+      "properties": {
+        "modules": {
+          "items": {
+            "properties": {
+              "default_strategy_id": {
+                "type": "string"
+              },
+              "display_name": {
+                "type": "string"
+              },
+              "module_id": {
+                "type": "string"
+              },
+              "provider_protocols": {
+                "items": {
+                  "enum": [
+                    "chat_completions",
+                    "responses"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "required_host_capabilities": {
+                "items": {
+                  "enum": [
+                    "execute_tool",
+                    "project_debug_reference",
+                    "project_event"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "strategies": {
+                "items": {
+                  "properties": {
+                    "diagnostics": {
+                      "properties": {
+                        "effective_strategy_id": {
+                          "type": "string"
+                        },
+                        "fallback_reason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "fallback_reason_catalog": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "replay_fallback_used": {
+                          "type": "boolean"
+                        },
+                        "selected_strategy_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "selected_strategy_id",
+                        "effective_strategy_id",
+                        "replay_fallback_used"
+                      ],
+                      "type": "object"
+                    },
+                    "profile_fingerprint_options": true,
+                    "provider_fingerprint_options": true,
+                    "provider_state": {
+                      "properties": {
+                        "mode": {
+                          "enum": [
+                            "unused",
+                            "optional",
+                            "required"
+                          ],
+                          "type": "string"
+                        },
+                        "rebuild": {
+                          "properties": {
+                            "action": {
+                              "enum": [
+                                "discard",
+                                "migrate",
+                                "unsupported"
+                              ],
+                              "type": "string"
+                            },
+                            "migration_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "action",
+                            "reason"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "mode",
+                        "rebuild"
+                      ],
+                      "type": "object"
+                    },
+                    "strategy_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "strategy_id",
+                    "provider_state",
+                    "diagnostics"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "module_id",
+              "display_name",
+              "provider_protocols",
+              "default_strategy_id",
+              "strategies",
+              "required_host_capabilities"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "modules"
+      ],
+      "title": "BrainCatalog",
+      "type": "object"
+    },
+    "rusty_crew_brain_runtime::catalog::BrainSelectionPlan": {
+      "properties": {
+        "catalog_revision": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "effective_strategy_id": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "profile_fingerprint_options": true,
+        "provider_fingerprint_options": true,
+        "provider_state_policy": {
+          "properties": {
+            "mode": {
+              "enum": [
+                "unused",
+                "optional",
+                "required"
+              ],
+              "type": "string"
+            },
+            "rebuild": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "discard",
+                    "migrate",
+                    "unsupported"
+                  ],
+                  "type": "string"
+                },
+                "migration_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action",
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "mode",
+            "rebuild"
+          ],
+          "type": "object"
+        },
+        "required_host_capabilities": {
+          "items": {
+            "enum": [
+              "execute_tool",
+              "project_debug_reference",
+              "project_event"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "selected_strategy_id": {
+          "type": "string"
+        },
+        "strategy_diagnostics": {
+          "properties": {
+            "effective_strategy_id": {
+              "type": "string"
+            },
+            "fallback_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fallback_reason_catalog": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "replay_fallback_used": {
+              "type": "boolean"
+            },
+            "selected_strategy_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "selected_strategy_id",
+            "effective_strategy_id",
+            "replay_fallback_used"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "catalog_revision",
+        "module_id",
+        "selected_strategy_id",
+        "effective_strategy_id",
+        "provider_state_policy",
+        "strategy_diagnostics",
+        "required_host_capabilities"
+      ],
+      "title": "BrainSelectionPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "interval_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "job_kind": {
+          "type": "string"
+        },
+        "next_due_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paused_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "target_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "job_kind",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ScheduledJobWireOutput",
+      "type": "object"
+    },
+    "rusty_crew_core_bridge_api::scheduler_wire::SchedulerTickWireOutput": {
+      "properties": {
+        "due_runs_claimed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runs_completed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runs_failed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runs_skipped": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stale_runs_expired": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wakes_requested": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stale_runs_expired",
+        "due_runs_claimed",
+        "wakes_requested",
+        "runs_completed",
+        "runs_skipped",
+        "runs_failed"
+      ],
+      "title": "SchedulerTickWireOutput",
+      "type": "object"
+    },
+    "rusty_crew_core_config::CreateProfilePlan": {
+      "properties": {
+        "derived_runtime_actions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "apply_phase": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "add_brain",
+                  "add_session",
+                  "add_profile_mcp_config",
+                  "add_mcp_binding"
+                ],
+                "type": "string"
+              },
+              "metadata_json": true,
+              "ref_id": {
+                "type": "string"
+              },
+              "ref_kind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "ref_kind",
+              "ref_id",
+              "apply_phase",
+              "metadata_json"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "file_asset_actions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "write_profile_json"
+                ],
+                "type": "string"
+              },
+              "metadata_json": true,
+              "overwrite": {
+                "type": "boolean"
+              },
+              "profile_id": {
+                "type": "string"
+              },
+              "relative_path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "profile_id",
+              "relative_path",
+              "overwrite",
+              "metadata_json"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "profile_mcp_config": {
+          "properties": {
+            "binding_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endpoint_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "server_names": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tool_profile": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transport": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "server_names"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "profile_seed": {
+          "properties": {
+            "brain": {
+              "properties": {
+                "module": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "strategy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "display_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_config": {
+              "properties": {
+                "api": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "api_key_env": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "base_url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "max_output_tokens": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "model_name": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "temperature_milli": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "provider",
+                "model_name"
+              ],
+              "type": "object"
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "provider_alias": {
+              "type": "string"
+            },
+            "skills_mode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "profile_id",
+            "provider_alias",
+            "model_config",
+            "brain",
+            "skills_mode"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "registry_write": {
+          "properties": {
+            "active_runtime_settings_json": true,
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default_session_kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "derived_runtime_refs": {
+              "items": {
+                "properties": {
+                  "metadata_json": true,
+                  "ref_id": {
+                    "type": "string"
+                  },
+                  "ref_kind": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "ref_kind",
+                  "ref_id",
+                  "status",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "display_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "import_export": {
+              "properties": {
+                "exported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "exported_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "metadata_json": true
+              },
+              "required": [
+                "metadata_json"
+              ],
+              "type": "object"
+            },
+            "lifecycle_status": {
+              "enum": [
+                "active",
+                "paused",
+                "decommissioned",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "now": {
+              "type": "string"
+            },
+            "owner_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "prompt_memory_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_soul_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_asset_refs": {
+              "items": {
+                "properties": {
+                  "asset_kind": {
+                    "type": "string"
+                  },
+                  "content_hash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_seen_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "metadata_json": true,
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "asset_kind",
+                  "path",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "profile_id",
+            "lifecycle_status",
+            "active_runtime_settings_json",
+            "source_asset_refs",
+            "derived_runtime_refs",
+            "import_export",
+            "now"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "runtime_brain": {
+          "properties": {
+            "implementation_id": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "implementation_id",
+            "profile_id"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "runtime_mcp_bindings": {
+          "default": [],
+          "items": {
+            "properties": {
+              "adapter_id": {
+                "type": "string"
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "binding_id": {
+                "type": "string"
+              },
+              "endpoint_ref": {
+                "type": "string"
+              },
+              "instance_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "profile_id": {
+                "type": "string"
+              },
+              "server_names": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "degraded",
+                  "disconnected",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              "tool_profile_key": {
+                "type": "string"
+              },
+              "transport": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "binding_id",
+              "adapter_id",
+              "agent_id",
+              "profile_id",
+              "server_names",
+              "endpoint_ref",
+              "transport",
+              "tool_profile_key",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "runtime_session": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "history_window": {
+              "properties": {
+                "max_messages": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated"
+              ],
+              "type": "string"
+            },
+            "max_history_messages": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "owner_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "resource_limits": {
+              "properties": {
+                "max_delegation_depth": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max_duration_ms": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "workdir": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "turn_timeout_ms": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "session_id",
+            "agent_id",
+            "profile_id",
+            "kind"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "diagnostics"
+      ],
+      "title": "CreateProfilePlan",
+      "type": "object"
+    },
+    "rusty_crew_core_config::DelegatedRoleLifecyclePlan": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "agent_id": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "full",
+            "worker",
+            "delegated"
+          ],
+          "type": "string"
+        },
+        "parent_agent_id": {
+          "type": "string"
+        },
+        "parent_session_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "resource_limits": {
+          "properties": {
+            "max_delegation_depth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_duration_ms": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "workdir": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source_action_index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_wake_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_profile_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accepted",
+        "reason_code",
+        "diagnostics",
+        "session_id",
+        "agent_id",
+        "parent_session_id",
+        "parent_agent_id",
+        "profile_id",
+        "kind",
+        "resource_limits",
+        "source_wake_id",
+        "source_action_index",
+        "correlation_id"
+      ],
+      "title": "DelegatedRoleLifecyclePlan",
+      "type": "object"
+    },
+    "rusty_crew_core_config::NewSessionControlPlan": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "actions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "archive_session",
+                  "create_session",
+                  "rebind_channel"
+                ],
+                "type": "string"
+              },
+              "new_session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "old_session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason_code": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "reason_code"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "command_kind": {
+          "type": "string"
+        },
+        "denial": {
+          "properties": {
+            "reason_code": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason_code",
+            "summary"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "idempotency_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operator_reason": {
+          "type": "string"
+        },
+        "preconditions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "satisfied",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "status",
+              "summary"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "target": {
+          "properties": {
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "channel_binding_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "channel_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "new_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "old_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_profile_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "accepted",
+        "command_kind",
+        "target",
+        "operator_reason",
+        "reason_code"
+      ],
+      "title": "NewSessionControlPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_config::ProfileRegistryMutationPlan": {
+      "properties": {
+        "current": {
+          "properties": {
+            "active_runtime_settings_json": true,
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "default_session_kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "derived_runtime_refs": {
+              "items": {
+                "properties": {
+                  "metadata_json": true,
+                  "ref_id": {
+                    "type": "string"
+                  },
+                  "ref_kind": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "ref_kind",
+                  "ref_id",
+                  "status",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "display_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "import_export": {
+              "properties": {
+                "exported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "exported_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "metadata_json": true
+              },
+              "required": [
+                "metadata_json"
+              ],
+              "type": "object"
+            },
+            "lifecycle_status": {
+              "enum": [
+                "active",
+                "paused",
+                "decommissioned",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "owner_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "prompt_memory_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_soul_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source_asset_refs": {
+              "items": {
+                "properties": {
+                  "asset_kind": {
+                    "type": "string"
+                  },
+                  "content_hash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_seen_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "metadata_json": true,
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "asset_kind",
+                  "path",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "profile_id",
+            "lifecycle_status",
+            "active_runtime_settings_json",
+            "source_asset_refs",
+            "derived_runtime_refs",
+            "import_export",
+            "revision",
+            "created_at",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "expected_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "implications": {
+          "properties": {
+            "lifecycle_effects": {
+              "type": "string"
+            },
+            "profile_files_unchanged": {
+              "type": "boolean"
+            },
+            "registry_revision_will_increment": {
+              "type": "boolean"
+            },
+            "runtime_rebuild_recommended": {
+              "type": "boolean"
+            },
+            "service_config_unchanged": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "registry_revision_will_increment",
+            "profile_files_unchanged",
+            "service_config_unchanged",
+            "runtime_rebuild_recommended",
+            "lifecycle_effects"
+          ],
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "update",
+            "lifecycle",
+            "prompt"
+          ],
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "plan",
+            "apply"
+          ],
+          "type": "string"
+        },
+        "next": {
+          "properties": {
+            "active_runtime_settings_json": true,
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "default_session_kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "derived_runtime_refs": {
+              "items": {
+                "properties": {
+                  "metadata_json": true,
+                  "ref_id": {
+                    "type": "string"
+                  },
+                  "ref_kind": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "ref_kind",
+                  "ref_id",
+                  "status",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "display_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "import_export": {
+              "properties": {
+                "exported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "exported_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "metadata_json": true
+              },
+              "required": [
+                "metadata_json"
+              ],
+              "type": "object"
+            },
+            "lifecycle_status": {
+              "enum": [
+                "active",
+                "paused",
+                "decommissioned",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "owner_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "prompt_memory_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_soul_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source_asset_refs": {
+              "items": {
+                "properties": {
+                  "asset_kind": {
+                    "type": "string"
+                  },
+                  "content_hash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_seen_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "metadata_json": true,
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "asset_kind",
+                  "path",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "profile_id",
+            "lifecycle_status",
+            "active_runtime_settings_json",
+            "source_asset_refs",
+            "derived_runtime_refs",
+            "import_export",
+            "revision",
+            "created_at",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "next_write": {
+          "properties": {
+            "active_runtime_settings_json": true,
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default_session_kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "derived_runtime_refs": {
+              "items": {
+                "properties": {
+                  "metadata_json": true,
+                  "ref_id": {
+                    "type": "string"
+                  },
+                  "ref_kind": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "ref_kind",
+                  "ref_id",
+                  "status",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "display_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "import_export": {
+              "properties": {
+                "exported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "exported_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "imported_from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "metadata_json": true
+              },
+              "required": [
+                "metadata_json"
+              ],
+              "type": "object"
+            },
+            "lifecycle_status": {
+              "enum": [
+                "active",
+                "paused",
+                "decommissioned",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "now": {
+              "type": "string"
+            },
+            "owner_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "prompt_memory_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_soul_markdown": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_asset_refs": {
+              "items": {
+                "properties": {
+                  "asset_kind": {
+                    "type": "string"
+                  },
+                  "content_hash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_seen_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "metadata_json": true,
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "asset_kind",
+                  "path",
+                  "metadata_json"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "profile_id",
+            "lifecycle_status",
+            "active_runtime_settings_json",
+            "source_asset_refs",
+            "derived_runtime_refs",
+            "import_export",
+            "now"
+          ],
+          "type": "object"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "profile_id",
+        "kind",
+        "mode",
+        "expected_revision",
+        "current",
+        "next",
+        "next_write",
+        "diagnostics",
+        "implications"
+      ],
+      "title": "ProfileRegistryMutationPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_config::ReloadMcpControlPlan": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "actions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "reload_mcp_surface"
+                ],
+                "type": "string"
+              },
+              "binding_id": {
+                "type": "string"
+              },
+              "reason_code": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "session_id",
+              "binding_id",
+              "reason_code"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "command_kind": {
+          "type": "string"
+        },
+        "denial": {
+          "properties": {
+            "reason_code": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason_code",
+            "summary"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "idempotency_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operator_reason": {
+          "type": "string"
+        },
+        "preconditions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "satisfied",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "status",
+              "summary"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "target": {
+          "properties": {
+            "binding_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endpoint_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_profile_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "accepted",
+        "command_kind",
+        "target",
+        "operator_reason",
+        "reason_code"
+      ],
+      "title": "ReloadMcpControlPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_config::RuntimeConfigPlan": {
+      "properties": {
+        "derived_mcp_bindings": {
+          "items": {
+            "properties": {
+              "adapter_id": {
+                "type": "string"
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "binding_id": {
+                "type": "string"
+              },
+              "endpoint_ref": {
+                "type": "string"
+              },
+              "instance_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "profile_id": {
+                "type": "string"
+              },
+              "server_names": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "degraded",
+                  "disconnected",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              "tool_profile_key": {
+                "type": "string"
+              },
+              "transport": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "binding_id",
+              "adapter_id",
+              "agent_id",
+              "profile_id",
+              "server_names",
+              "endpoint_ref",
+              "transport",
+              "tool_profile_key",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "derived_scheduled_jobs": {
+          "items": {
+            "properties": {
+              "delivery_channel_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "job_kind": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "schedule": {
+                "type": "string"
+              },
+              "script": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "shape": {
+                "enum": [
+                  "host_job",
+                  "session_wake",
+                  "script_only",
+                  "data_collection"
+                ],
+                "type": "string"
+              },
+              "target_session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "schedule",
+              "shape"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "runtime_config": {
+          "properties": {
+            "brains": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "implementation_id": {
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "implementation_id",
+                  "profile_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "channel_bindings": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "adapter_id": {
+                    "type": "string"
+                  },
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "binding_id": {
+                    "type": "string"
+                  },
+                  "conversation_channel_id": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "conversation_project_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "external_channel_id": {
+                    "type": "string"
+                  },
+                  "external_thread_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "external_user_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "instance_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "provider_subscription_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "degraded",
+                      "disconnected",
+                      "archived"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "binding_id",
+                  "adapter_id",
+                  "provider",
+                  "agent_id",
+                  "profile_id",
+                  "external_channel_id",
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "mcp_bindings": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "adapter_id": {
+                    "type": "string"
+                  },
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "binding_id": {
+                    "type": "string"
+                  },
+                  "endpoint_ref": {
+                    "type": "string"
+                  },
+                  "instance_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "server_names": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "degraded",
+                      "disconnected",
+                      "archived"
+                    ],
+                    "type": "string"
+                  },
+                  "tool_profile_key": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "binding_id",
+                  "adapter_id",
+                  "agent_id",
+                  "profile_id",
+                  "server_names",
+                  "endpoint_ref",
+                  "transport",
+                  "tool_profile_key",
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "profiles_dir": {
+              "type": "string"
+            },
+            "scheduled_jobs": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "delivery_channel_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "job_kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "schedule": {
+                    "type": "string"
+                  },
+                  "script": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "shape": {
+                    "enum": [
+                      "host_job",
+                      "session_wake",
+                      "script_only",
+                      "data_collection"
+                    ],
+                    "type": "string"
+                  },
+                  "target_session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "schedule",
+                  "shape"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "sessions": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "history_window": {
+                    "properties": {
+                      "max_messages": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "full",
+                      "worker",
+                      "delegated"
+                    ],
+                    "type": "string"
+                  },
+                  "max_history_messages": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "owner_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "resource_limits": {
+                    "properties": {
+                      "max_delegation_depth": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "max_duration_ms": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "workdir": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "turn_timeout_ms": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "agent_id",
+                  "profile_id",
+                  "kind"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "skills_dir": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "profiles_dir"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "runtime_config",
+        "diagnostics",
+        "derived_scheduled_jobs",
+        "derived_mcp_bindings"
+      ],
+      "title": "RuntimeConfigPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_config::RuntimeConfigValidationResult": {
+      "properties": {
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "diagnostics"
+      ],
+      "title": "RuntimeConfigValidationResult",
+      "type": "object"
+    },
+    "rusty_crew_core_config::runtime_graph::RuntimeGraphPlan": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "defaults_applied": {
+          "items": {
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "canonical_profile_default",
+                  "service_default",
+                  "host_default_workdir",
+                  "profile_runtime_default",
+                  "profile_session_default"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "derived": {
+          "items": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "scheduled_job",
+                  "mcp_binding"
+                ],
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "severity",
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "runtime_config": {
+          "properties": {
+            "brains": {
+              "items": {
+                "properties": {
+                  "implementation_id": {
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "implementation_id",
+                  "profile_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "channel_bindings": {
+              "items": {
+                "properties": {
+                  "adapter_id": {
+                    "type": "string"
+                  },
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "binding_id": {
+                    "type": "string"
+                  },
+                  "conversation_channel_id": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "conversation_project_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "external_channel_id": {
+                    "type": "string"
+                  },
+                  "external_thread_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "external_user_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "instance_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "provider_subscription_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "degraded",
+                      "disconnected",
+                      "archived"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "binding_id",
+                  "adapter_id",
+                  "provider",
+                  "agent_id",
+                  "profile_id",
+                  "external_channel_id",
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "mcp_bindings": {
+              "items": {
+                "properties": {
+                  "adapter_id": {
+                    "type": "string"
+                  },
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "binding_id": {
+                    "type": "string"
+                  },
+                  "endpoint_ref": {
+                    "type": "string"
+                  },
+                  "instance_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "server_names": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "degraded",
+                      "disconnected",
+                      "archived"
+                    ],
+                    "type": "string"
+                  },
+                  "tool_profile_key": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "binding_id",
+                  "adapter_id",
+                  "agent_id",
+                  "profile_id",
+                  "server_names",
+                  "endpoint_ref",
+                  "transport",
+                  "tool_profile_key",
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "profiles_dir": {
+              "type": "string"
+            },
+            "scheduled_jobs": {
+              "items": {
+                "properties": {
+                  "delivery_channel_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "job_kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "payload": {
+                    "default": null
+                  },
+                  "schedule": {
+                    "type": "string"
+                  },
+                  "script": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "shape": {
+                    "enum": [
+                      "host_job",
+                      "session_wake",
+                      "script_only",
+                      "data_collection"
+                    ],
+                    "type": "string"
+                  },
+                  "target_session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "schedule",
+                  "shape"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "sessions": {
+              "items": {
+                "properties": {
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "context_policy_profile_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "effective_wake_timeout_ms": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "history_window": {
+                    "properties": {
+                      "max_messages": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "full",
+                      "worker",
+                      "delegated"
+                    ],
+                    "type": "string"
+                  },
+                  "local_tool_profile_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "max_history_messages": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "owner_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "resource_limits": {
+                    "properties": {
+                      "max_delegation_depth": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "max_duration_ms": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "workdir": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "session_memory_prompt_profile_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "turn_timeout_ms": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "wake_timeout_source": {
+                    "enum": [
+                      "disabled",
+                      "session",
+                      "profile_runtime",
+                      "profile_session_default",
+                      "service_default"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "agent_id",
+                  "profile_id",
+                  "kind",
+                  "resource_limits",
+                  "wake_timeout_source"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "skills_dir": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "storage": {
+              "properties": {
+                "backend": {
+                  "enum": [
+                    "sqlite",
+                    "postgres"
+                  ],
+                  "type": "string"
+                },
+                "implementation_status": {
+                  "enum": [
+                    "active",
+                    "proof_admin_only",
+                    "blocked_unimplemented"
+                  ],
+                  "type": "string"
+                },
+                "postgres": {
+                  "properties": {
+                    "boot_mode": {
+                      "enum": [
+                        "blocked",
+                        "proof_admin",
+                        "active"
+                      ],
+                      "type": "string"
+                    },
+                    "database_url_env": {
+                      "type": "string"
+                    },
+                    "max_connections": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "schema": {
+                      "type": "string"
+                    },
+                    "statement_timeout_ms": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "database_url_env",
+                    "schema",
+                    "boot_mode",
+                    "max_connections",
+                    "statement_timeout_ms"
+                  ],
+                  "type": "object"
+                },
+                "sqlite": {
+                  "properties": {
+                    "busy_timeout_ms": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "effective_path": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "wal": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "effective_path",
+                    "wal",
+                    "busy_timeout_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "backend",
+                "implementation_status",
+                "sqlite",
+                "postgres"
+              ],
+              "type": "object"
+            },
+            "wake_timeout": {
+              "properties": {
+                "default_ms": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "disabled",
+                    "default"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "profiles_dir",
+            "storage",
+            "wake_timeout",
+            "brains",
+            "sessions",
+            "scheduled_jobs",
+            "channel_bindings",
+            "mcp_bindings"
+          ],
+          "type": "object"
+        },
+        "source_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "source_revision",
+        "runtime_config",
+        "derived",
+        "defaults_applied",
+        "diagnostics"
+      ],
+      "title": "RuntimeGraphPlan",
+      "type": "object"
     },
     "rusty_crew_core_persistence::contracts::ApplyRoleplayAlternativeResult": {
       "properties": {
@@ -10047,6 +13644,317 @@ export const bridgeWireSchemaArtifact = {
       "title": "SelectActiveVariantResult",
       "type": "object"
     },
+    "rusty_crew_core_persistence::contracts::SessionMemoryPromptContext": {
+      "properties": {
+        "diagnostics": {
+          "properties": {
+            "active_branch_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "character_estimate": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "context_policy": {
+              "enum": [
+                "summary_context",
+                "tool_only"
+              ],
+              "type": "string"
+            },
+            "descriptor_id": {
+              "type": "string"
+            },
+            "descriptor_schema_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "excluded_counts": {
+              "properties": {
+                "archived": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "limit_exceeded": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "policy_disabled": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "sibling_branch": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "superseded": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "tool_only": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "wrong_branch": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "wrong_branch",
+                "sibling_branch",
+                "tool_only",
+                "archived",
+                "superseded",
+                "limit_exceeded",
+                "policy_disabled"
+              ],
+              "type": "object"
+            },
+            "selected_records": {
+              "items": {
+                "properties": {
+                  "record_id": {
+                    "type": "string"
+                  },
+                  "shape_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "record_id",
+                  "shape_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "token_estimate": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "descriptor_id",
+            "descriptor_schema_version",
+            "session_id",
+            "selected_records",
+            "excluded_counts",
+            "character_estimate",
+            "token_estimate",
+            "context_policy"
+          ],
+          "type": "object"
+        },
+        "records": {
+          "items": {
+            "properties": {
+              "archive_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "archived_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "branch_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "format": "float",
+                "type": "number"
+              },
+              "content": true,
+              "created_at": {
+                "type": "string"
+              },
+              "durability_rationale": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "items": {
+                  "properties": {
+                    "evidence_type": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "wake",
+                            "event",
+                            "tool_call",
+                            "transcript",
+                            "user_correction",
+                            "source_document",
+                            "import",
+                            "migration",
+                            "ui",
+                            "other"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "const": "den_memory",
+                          "description": "Explicit bridge/import evidence from external Den-owned memory.",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "ref_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "evidence_type",
+                    "ref_id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "record_id": {
+                "type": "string"
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "scope": {
+                "properties": {
+                  "scope_id": {
+                    "type": "string"
+                  },
+                  "scope_type": {
+                    "enum": [
+                      "profile",
+                      "user",
+                      "session",
+                      "conversation_branch",
+                      "world",
+                      "entity",
+                      "project"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scope_type",
+                  "scope_id"
+                ],
+                "type": "object"
+              },
+              "session_id": {
+                "type": "string"
+              },
+              "shape": {
+                "properties": {
+                  "shape_id": {
+                    "description": "Record shape id inside a memory space, such as `profile_dense_item`.",
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "shape_id",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "source": {
+                "enum": [
+                  "in_wake_tool",
+                  "capture_producer",
+                  "ui",
+                  "import",
+                  "migration",
+                  "human",
+                  "den_memory_import"
+                ],
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "superseded",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              "superseded_by_record_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "supersedes_record_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id",
+              "session_id",
+              "scope",
+              "shape",
+              "status",
+              "revision",
+              "content",
+              "evidence_refs",
+              "source",
+              "confidence",
+              "durability_rationale",
+              "created_at",
+              "updated_at"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "records",
+        "diagnostics"
+      ],
+      "title": "SessionMemoryPromptContext",
+      "type": "object"
+    },
     "rusty_crew_core_persistence::contracts::UpdateBranchHeadResult": {
       "properties": {
         "branch": {
@@ -10135,6 +14043,1002 @@ export const bridgeWireSchemaArtifact = {
         "branch"
       ],
       "title": "UpdateBranchHeadResult",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::memory_space::BackgroundMemoryAutoMutationPlan": {
+      "properties": {
+        "accepted_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "decisions": {
+          "items": {
+            "properties": {
+              "accepted": {
+                "type": "boolean"
+              },
+              "action": {
+                "enum": [
+                  "approve_proposal",
+                  "apply_proposal",
+                  "prune_memory",
+                  "update_skill"
+                ],
+                "type": "string"
+              },
+              "audit_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "diagnostics": {
+                "items": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "reason_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "reason_code",
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "target_ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "accepted",
+              "action",
+              "target_ref",
+              "diagnostics"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "receipt_id": {
+          "type": "string"
+        },
+        "rejected_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accepted_count",
+        "rejected_count",
+        "receipt_id",
+        "decisions"
+      ],
+      "title": "BackgroundMemoryAutoMutationPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::memory_space::CaptureMemoryProposalPlan": {
+      "properties": {
+        "proposals": {
+          "items": {
+            "description": "Proposed Crew memory mutation.\n\nThis envelope may be produced by a brain/tool/UI/importer. It is not a write\nby itself: Rust validates it against the Rust-owned descriptor and routes it\nthrough the descriptor's governance policy before any Crew storage changes.",
+            "properties": {
+              "confidence": {
+                "format": "float",
+                "type": "number"
+              },
+              "content": true,
+              "created_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dedupe_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "durability_rationale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "evidence_refs": {
+                "items": {
+                  "properties": {
+                    "evidence_type": {
+                      "oneOf": [
+                        {
+                          "enum": [
+                            "wake",
+                            "event",
+                            "tool_call",
+                            "transcript",
+                            "user_correction",
+                            "source_document",
+                            "import",
+                            "migration",
+                            "ui",
+                            "other"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "const": "den_memory",
+                          "description": "Explicit bridge/import evidence from external Den-owned memory.",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "ref_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "evidence_type",
+                    "ref_id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "governance_mode": {
+                "enum": [
+                  "read_only",
+                  "direct_write",
+                  "candidate",
+                  "manual_review",
+                  "curator_route",
+                  "auto_apply_threshold"
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "read",
+                  "list",
+                  "add",
+                  "replace",
+                  "merge",
+                  "supersede",
+                  "remove",
+                  "archive",
+                  "candidate_only"
+                ],
+                "type": "string"
+              },
+              "proposal_id": {
+                "type": "string"
+              },
+              "scope": {
+                "properties": {
+                  "scope_id": {
+                    "type": "string"
+                  },
+                  "scope_type": {
+                    "enum": [
+                      "profile",
+                      "user",
+                      "session",
+                      "conversation_branch",
+                      "world",
+                      "entity",
+                      "project"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scope_type",
+                  "scope_id"
+                ],
+                "type": "object"
+              },
+              "shape": {
+                "properties": {
+                  "shape_id": {
+                    "description": "Record shape id inside a memory space, such as `profile_dense_item`.",
+                    "type": "string"
+                  },
+                  "version": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "shape_id",
+                  "version"
+                ],
+                "type": "object"
+              },
+              "source": {
+                "enum": [
+                  "in_wake_tool",
+                  "capture_producer",
+                  "ui",
+                  "import",
+                  "migration",
+                  "human",
+                  "den_memory_import"
+                ],
+                "type": "string"
+              },
+              "space_id": {
+                "description": "Runtime-owned durable memory space id.\n\nCrew memory spaces live in Rusty Crew service storage and may be projected\ninto prompts according to their descriptor policy. They are distinct from\nDen memory, which is external Den-owned product memory and should only enter\nCrew memory through explicit import/proposal flows with provenance.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "proposal_id",
+              "space_id",
+              "operation",
+              "scope",
+              "shape",
+              "content",
+              "evidence_refs",
+              "confidence",
+              "governance_mode",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "rejected": {
+          "items": {
+            "properties": {
+              "index": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "reason_code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "index",
+              "reason_code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "skipped_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "proposals",
+        "rejected",
+        "skipped_reasons",
+        "truncated"
+      ],
+      "title": "CaptureMemoryProposalPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::memory_space::CuratorGovernancePlan": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "action": {
+          "enum": [
+            "preview_candidate",
+            "approve_candidate",
+            "apply_candidate"
+          ],
+          "type": "string"
+        },
+        "audit_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidate_id": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "reason_code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason_code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "receipt_id": {
+          "type": "string"
+        },
+        "resulting_status": {
+          "enum": [
+            "proposed",
+            "previewed",
+            "approved",
+            "applied",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "accepted",
+        "action",
+        "candidate_id",
+        "receipt_id",
+        "diagnostics"
+      ],
+      "title": "CuratorGovernancePlan",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::memory_space::CuratorLifecyclePlan": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "audit_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidate_id": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "reason_code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason_code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "from": {
+          "enum": [
+            "active",
+            "stale",
+            "archived",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receipt_id": {
+          "type": "string"
+        },
+        "resulting_lifecycle_state": {
+          "enum": [
+            "active",
+            "stale",
+            "archived",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "enum": [
+            "active",
+            "stale",
+            "archived",
+            "skipped",
+            "unchanged"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "candidate_id",
+        "to",
+        "receipt_id",
+        "diagnostics"
+      ],
+      "title": "CuratorLifecyclePlan",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::memory_space::MemoryProposalRecord": {
+      "properties": {
+        "applied_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "decided_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duplicate_of": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proposal": {
+          "description": "Proposed Crew memory mutation.\n\nThis envelope may be produced by a brain/tool/UI/importer. It is not a write\nby itself: Rust validates it against the Rust-owned descriptor and routes it\nthrough the descriptor's governance policy before any Crew storage changes.",
+          "properties": {
+            "confidence": {
+              "format": "float",
+              "type": "number"
+            },
+            "content": true,
+            "created_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dedupe_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "durability_rationale": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "evidence_refs": {
+              "items": {
+                "properties": {
+                  "evidence_type": {
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "wake",
+                          "event",
+                          "tool_call",
+                          "transcript",
+                          "user_correction",
+                          "source_document",
+                          "import",
+                          "migration",
+                          "ui",
+                          "other"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "const": "den_memory",
+                        "description": "Explicit bridge/import evidence from external Den-owned memory.",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ref_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "evidence_type",
+                  "ref_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "governance_mode": {
+              "enum": [
+                "read_only",
+                "direct_write",
+                "candidate",
+                "manual_review",
+                "curator_route",
+                "auto_apply_threshold"
+              ],
+              "type": "string"
+            },
+            "operation": {
+              "enum": [
+                "read",
+                "list",
+                "add",
+                "replace",
+                "merge",
+                "supersede",
+                "remove",
+                "archive",
+                "candidate_only"
+              ],
+              "type": "string"
+            },
+            "proposal_id": {
+              "type": "string"
+            },
+            "scope": {
+              "properties": {
+                "scope_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "enum": [
+                    "profile",
+                    "user",
+                    "session",
+                    "conversation_branch",
+                    "world",
+                    "entity",
+                    "project"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scope_type",
+                "scope_id"
+              ],
+              "type": "object"
+            },
+            "shape": {
+              "properties": {
+                "shape_id": {
+                  "description": "Record shape id inside a memory space, such as `profile_dense_item`.",
+                  "type": "string"
+                },
+                "version": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "shape_id",
+                "version"
+              ],
+              "type": "object"
+            },
+            "source": {
+              "enum": [
+                "in_wake_tool",
+                "capture_producer",
+                "ui",
+                "import",
+                "migration",
+                "human",
+                "den_memory_import"
+              ],
+              "type": "string"
+            },
+            "space_id": {
+              "description": "Runtime-owned durable memory space id.\n\nCrew memory spaces live in Rusty Crew service storage and may be projected\ninto prompts according to their descriptor policy. They are distinct from\nDen memory, which is external Den-owned product memory and should only enter\nCrew memory through explicit import/proposal flows with provenance.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposal_id",
+            "space_id",
+            "operation",
+            "scope",
+            "shape",
+            "content",
+            "evidence_refs",
+            "confidence",
+            "governance_mode",
+            "source"
+          ],
+          "type": "object"
+        },
+        "resulting_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "selected_governance_mode": {
+          "enum": [
+            "read_only",
+            "direct_write",
+            "candidate",
+            "manual_review",
+            "curator_route",
+            "auto_apply_threshold"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending_review",
+            "approved",
+            "rejected",
+            "applied"
+          ],
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal",
+        "status",
+        "selected_governance_mode",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "MemoryProposalRecord",
+      "type": "object"
+    },
+    "rusty_crew_core_tool_registry::LocalCodeResourcePolicyPlan": {
+      "properties": {
+        "commandTimeoutMs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "denialReasonCodes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "maxCommandOutputBytes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxDurationMs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxReadBytes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxSearchFileBytes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tools": {
+          "items": {
+            "properties": {
+              "executesProcess": {
+                "type": "boolean"
+              },
+              "executionMode": {
+                "enum": [
+                  "parallel",
+                  "sequential"
+                ],
+                "type": "string"
+              },
+              "filesystemScope": {
+                "enum": [
+                  "unrestricted",
+                  "workdir"
+                ],
+                "type": "string"
+              },
+              "outputShape": {
+                "type": "string"
+              },
+              "toolName": {
+                "type": "string"
+              },
+              "writesFiles": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "toolName",
+              "filesystemScope",
+              "writesFiles",
+              "executesProcess",
+              "executionMode",
+              "outputShape"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workdir",
+        "commandTimeoutMs",
+        "maxReadBytes",
+        "maxSearchFileBytes",
+        "maxCommandOutputBytes",
+        "tools",
+        "denialReasonCodes"
+      ],
+      "title": "LocalCodeResourcePolicyPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_tool_registry::ToolAvailabilityPlan": {
+      "properties": {
+        "diagnostics": {
+          "items": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": "string"
+              },
+              "toolName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "toolName",
+              "reasonCode",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "omittedTools": {
+          "items": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": "string"
+              },
+              "toolName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "toolName",
+              "reasonCode",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "selectedTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "selectedTools",
+        "omittedTools",
+        "diagnostics"
+      ],
+      "title": "ToolAvailabilityPlan",
+      "type": "object"
+    },
+    "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan": {
+      "properties": {
+        "browser": {
+          "properties": {
+            "allowPrivateNet": {
+              "type": "boolean"
+            },
+            "cdpCallTimeoutMs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "consoleRingSize": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "hardLifetimeMs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "idleTimeoutMs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxRefs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxScreenshotBytes": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxServiceSessions": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxSessionsPerAgent": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxSessionsPerProfile": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pageLoadTimeoutMs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "startupTimeoutMs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "maxServiceSessions",
+            "maxSessionsPerAgent",
+            "idleTimeoutMs",
+            "hardLifetimeMs",
+            "startupTimeoutMs",
+            "cdpCallTimeoutMs",
+            "pageLoadTimeoutMs",
+            "maxRefs",
+            "consoleRingSize",
+            "maxScreenshotBytes",
+            "allowPrivateNet"
+          ],
+          "type": "object"
+        },
+        "denialReasonCodes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "web": {
+          "properties": {
+            "allowPrivateNet": {
+              "type": "boolean"
+            },
+            "allowedNonstandardPorts": {
+              "items": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "maxExtractBytes": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxExtractChars": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxExtractUrls": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxRedirects": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "searchDefaultLimit": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "searchMaxResults": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "searchDefaultLimit",
+            "searchMaxResults",
+            "maxExtractUrls",
+            "maxExtractChars",
+            "maxExtractBytes",
+            "maxRedirects",
+            "allowPrivateNet",
+            "allowedNonstandardPorts"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "web",
+        "browser",
+        "denialReasonCodes"
+      ],
+      "title": "WebBrowserResourcePolicyPlan",
       "type": "object"
     },
     "rusty_crew_roleplay_core::RoleplayAssistantAlternativePlan": {
@@ -12106,9 +17010,12 @@ export const bridgeWireSchemaArtifact = {
     "apply_roleplay_alternative": "rusty_crew_core_persistence::contracts::ApplyRoleplayAlternativeResult",
     "apply_roleplay_session_projection": "rusty_crew_core_persistence::contracts::RoleplaySessionProjectionRecord",
     "archive_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
+    "brain_catalog": "rusty_crew_brain_runtime::catalog::BrainCatalog",
     "build_roleplay_prompt_context": "rusty_crew_roleplay_core::RoleplayPromptContextOutput",
+    "build_session_memory_prompt_context": "rusty_crew_core_persistence::contracts::SessionMemoryPromptContext",
     "capture_lore_fact": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "chat_read_model_page": "rusty_crew_core_persistence::contracts::ChatReadModelPage",
+    "claim_scheduled_host_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "create_chat_attachment": "rusty_crew_core_persistence::contracts::CreateChatAttachmentResult",
     "create_chat_conversation_branch": "rusty_crew_core_persistence::contracts::ConversationBranchRecord",
     "create_chat_conversation_snapshot": "rusty_crew_core_persistence::contracts::CreateChatConversationSnapshotResult",
@@ -12136,16 +17043,33 @@ export const bridgeWireSchemaArtifact = {
     "list_roleplay_imports": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayImportRecord>",
     "list_roleplay_player_personas": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>",
     "list_roleplay_session_metadata": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
+    "list_scheduled_jobs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput>",
+    "list_scheduled_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "lore_entry_provenance_events": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreProvenanceEvent>",
     "merge_roleplay_character": "rusty_crew_roleplay_core::RoleplayCharacter",
     "merge_roleplay_player_persona": "rusty_crew_roleplay_core::RoleplayPlayerPersona",
     "normalize_roleplay_lore_search_controls": "rusty_crew_roleplay_core::RoleplayLoreSearchControls",
     "normalize_roleplay_narrator_config": "rusty_crew_roleplay_core::RoleplayNarratorConfig",
     "patch_roleplay_session_metadata": "rusty_crew_roleplay_core::RoleplaySessionMetadataPatchOutput",
+    "plan_background_memory_auto_mutations": "rusty_crew_core_protocol::memory_space::BackgroundMemoryAutoMutationPlan",
+    "plan_brain_selection": "rusty_crew_brain_runtime::catalog::BrainSelectionPlan",
+    "plan_capture_memory_proposals": "rusty_crew_core_protocol::memory_space::CaptureMemoryProposalPlan",
+    "plan_create_profile": "rusty_crew_core_config::CreateProfilePlan",
+    "plan_curator_governance_transition": "rusty_crew_core_protocol::memory_space::CuratorGovernancePlan",
+    "plan_curator_lifecycle_transition": "rusty_crew_core_protocol::memory_space::CuratorLifecyclePlan",
+    "plan_delegated_role_lifecycle": "rusty_crew_core_config::DelegatedRoleLifecyclePlan",
+    "plan_local_code_resource_policy": "rusty_crew_core_tool_registry::LocalCodeResourcePolicyPlan",
+    "plan_new_session_control": "rusty_crew_core_config::NewSessionControlPlan",
+    "plan_profile_registry_mutation": "rusty_crew_core_config::ProfileRegistryMutationPlan",
+    "plan_reload_mcp_control": "rusty_crew_core_config::ReloadMcpControlPlan",
     "plan_roleplay_assistant_alternative": "rusty_crew_roleplay_core::RoleplayAssistantAlternativePlan",
     "plan_roleplay_chat_layer_binding": "rusty_crew_roleplay_core::RoleplayChatLayerBindingPlan",
     "plan_roleplay_scene_state_update": "rusty_crew_roleplay_core::RoleplaySceneStateUpdatePlan",
     "plan_roleplay_session_lifecycle": "rusty_crew_roleplay_core::RoleplaySessionLifecyclePlan",
+    "plan_runtime_config": "rusty_crew_core_config::RuntimeConfigPlan",
+    "plan_runtime_graph": "rusty_crew_core_config::runtime_graph::RuntimeGraphPlan",
+    "plan_tool_availability": "rusty_crew_core_tool_registry::ToolAvailabilityPlan",
+    "plan_web_browser_resource_policy": "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan",
     "promote_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "put_roleplay_character": "rusty_crew_core_persistence::contracts::RoleplayCharacterRecord",
     "put_roleplay_import": "rusty_crew_core_persistence::contracts::RoleplayImportRecord",
@@ -12164,10 +17088,13 @@ export const bridgeWireSchemaArtifact = {
     "query_message_slots_page": "rusty_crew_core_persistence::contracts::ExactPage<rusty_crew_core_persistence::contracts::MessageSlotRecord>",
     "query_message_variants": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageVariantRecord>",
     "query_message_variants_page": "rusty_crew_core_persistence::contracts::ExactPage<rusty_crew_core_persistence::contracts::MessageVariantRecord>",
+    "query_session_memory_records": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::SessionMemoryRecord>",
     "read_chat_session": "rusty_crew_core_persistence::contracts::ChatSessionReadResult",
     "read_conversation_tree": "rusty_crew_core_persistence::contracts::ConversationTreeReadResult",
     "read_roleplay_scene_state": "rusty_crew_roleplay_core::RoleplaySceneStateReadOutput",
     "recall_lore": "rusty_crew_core_persistence::contracts::LoreRecallResult",
+    "register_scheduled_host_job": "rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput",
+    "register_scheduled_wake_job": "rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput",
     "remove_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
     "remove_chat_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
     "remove_chat_data_bank_scope": "rusty_crew_core_persistence::contracts::DataBankScopeRecord",
@@ -12175,12 +17102,16 @@ export const bridgeWireSchemaArtifact = {
     "reorder_chat_message_variants": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageVariantRecord>",
     "reorder_message_variants": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageVariantRecord>",
     "replace_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
+    "request_scheduled_host_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "request_scheduled_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "resolve_conversation_jump": "rusty_crew_core_persistence::contracts::ConversationJumpResult",
     "roleplay_speaker_identity": "rusty_crew_roleplay_core::RoleplaySpeakerIdentitySnapshot",
+    "run_scheduler_tick": "rusty_crew_core_bridge_api::scheduler_wire::SchedulerTickWireOutput",
     "save_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
     "save_conversation_branch": "rusty_crew_core_persistence::contracts::ConversationBranchRecord",
     "save_conversation_snapshot": "rusty_crew_core_persistence::contracts::ConversationSnapshotRecord",
     "save_data_bank_scope": "rusty_crew_core_persistence::contracts::DataBankScopeRecord",
+    "save_memory_proposal": "rusty_crew_core_protocol::memory_space::MemoryProposalRecord",
     "save_message_variant": "rusty_crew_core_persistence::contracts::MessageVariantRecord",
     "search_chat_transcript": "rusty_crew_core_persistence::contracts::ChatTranscriptSearchPage",
     "select_active_chat_message_variant": "rusty_crew_core_persistence::contracts::SelectActiveChatMessageVariantResult",
@@ -12192,6 +17123,7 @@ export const bridgeWireSchemaArtifact = {
     "tombstone_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
     "update_conversation_branch_head": "rusty_crew_core_persistence::contracts::UpdateBranchHeadResult",
     "update_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
+    "validate_runtime_config_draft": "rusty_crew_core_config::RuntimeConfigValidationResult",
     "write_roleplay_character": "rusty_crew_roleplay_core::RoleplayCharacter",
     "write_roleplay_player_persona": "rusty_crew_roleplay_core::RoleplayPlayerPersona"
   },

@@ -10,6 +10,7 @@ use rusty_crew_core_protocol::{
     ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
     ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind, TaskId,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -33,14 +34,14 @@ const CONTEXT_STRATEGY_IDS: &[&str] = &[
 ];
 const CONTEXT_DEBUG_VISIBILITY_VALUES: &[&str] = &["off", "status", "verbose"];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ClockConfig {
     System,
     Fixed { at: IsoTimestamp },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EngineConfig {
     pub engine_data_dir: String,
     pub clock: ClockConfig,
@@ -49,7 +50,7 @@ pub struct EngineConfig {
     pub storage: Option<EngineStorageConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub enum EngineStorageConfig {
     Sqlite,
@@ -80,7 +81,7 @@ impl EngineStorageConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfigDraft {
     pub profiles_dir: String,
     pub skills_dir: Option<String>,
@@ -96,14 +97,14 @@ pub struct RuntimeConfigDraft {
     pub mcp_bindings: Vec<McpBindingConfigDraft>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfigValidationInput {
     pub runtime_config: RuntimeConfigDraft,
     #[serde(default)]
     pub profiles: Vec<ProfileRuntimeMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfilePlanInput {
     pub runtime_config: RuntimeConfigDraft,
     #[serde(default)]
@@ -113,7 +114,7 @@ pub struct CreateProfilePlanInput {
     pub request: CreateProfileRequest,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NewSessionControlPlanInput {
     pub command: AdminControlPlanCommand,
     pub template: Option<NewSessionControlTemplate>,
@@ -122,7 +123,7 @@ pub struct NewSessionControlPlanInput {
     pub rebind_handler_available: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReloadMcpControlPlanInput {
     pub command: AdminControlPlanCommand,
     pub binding: Option<ReloadMcpControlBinding>,
@@ -130,7 +131,7 @@ pub struct ReloadMcpControlPlanInput {
     pub reload_handler_available: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedRoleLifecyclePlanInput {
     pub parent_session: DelegatedRoleParentSession,
     pub delegated_session_id: String,
@@ -144,7 +145,7 @@ pub struct DelegatedRoleLifecyclePlanInput {
     pub correlation_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedRoleParentSession {
     pub session_id: SessionId,
     pub agent_id: AgentId,
@@ -152,7 +153,7 @@ pub struct DelegatedRoleParentSession {
     pub resource_limits: Option<ResourceLimits>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedRoleLifecyclePlan {
     pub accepted: bool,
     pub reason_code: String,
@@ -171,7 +172,7 @@ pub struct DelegatedRoleLifecyclePlan {
     pub correlation_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelIngressRoutePlanInput {
     pub message: ChannelIngressRouteMessage,
     #[serde(default)]
@@ -184,7 +185,7 @@ pub struct ChannelIngressRoutePlanInput {
     pub seen_idempotency_keys: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelIngressRouteMessage {
     pub adapter_id: AdapterId,
     pub binding_id: String,
@@ -200,7 +201,7 @@ pub struct ChannelIngressRouteMessage {
     pub runtime_agent_id: Option<AgentId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelIngressRoutePlan {
     pub status: ChannelIngressRouteDecision,
     pub reason_code: String,
@@ -212,7 +213,7 @@ pub struct ChannelIngressRoutePlan {
     pub route: Option<ChannelIngressRouteRequest>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelIngressRouteDecision {
     Routed,
@@ -224,7 +225,7 @@ pub enum ChannelIngressRouteDecision {
     Denied,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelIngressRouteRequest {
     pub from: AgentId,
     pub to: AgentId,
@@ -234,7 +235,7 @@ pub struct ChannelIngressRouteRequest {
     pub session_id: Option<SessionId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DenProductIngressPolicyInput {
     pub operation: String,
     pub entity_kind: String,
@@ -242,7 +243,7 @@ pub struct DenProductIngressPolicyInput {
     pub project_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DenProductIngressPolicyPlan {
     pub status: DenProductIngressPolicyStatus,
     pub operation: String,
@@ -251,14 +252,14 @@ pub struct DenProductIngressPolicyPlan {
     pub lifecycle_operation: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DenProductIngressPolicyStatus {
     Allowed,
     Denied,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AdminControlPlanCommand {
     pub command_kind: String,
     pub target_session_id: Option<String>,
@@ -268,7 +269,7 @@ pub struct AdminControlPlanCommand {
     pub operator_reason_code: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReloadMcpControlBinding {
     pub binding_id: String,
     pub session_id: String,
@@ -277,7 +278,7 @@ pub struct ReloadMcpControlBinding {
     pub endpoint_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NewSessionControlTemplate {
     pub agent_id: AgentId,
     pub profile_id: ProfileId,
@@ -287,7 +288,7 @@ pub struct NewSessionControlTemplate {
     pub tool_profile_key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NewSessionControlPlan {
     pub accepted: bool,
     pub command_kind: String,
@@ -302,7 +303,7 @@ pub struct NewSessionControlPlan {
     pub actions: Vec<NewSessionControlAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReloadMcpControlPlan {
     pub accepted: bool,
     pub command_kind: String,
@@ -317,7 +318,7 @@ pub struct ReloadMcpControlPlan {
     pub actions: Vec<ReloadMcpControlAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NewSessionControlTarget {
     pub old_session_id: Option<String>,
     pub new_session_id: Option<String>,
@@ -328,7 +329,7 @@ pub struct NewSessionControlTarget {
     pub tool_profile_key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReloadMcpControlTarget {
     pub session_id: Option<String>,
     pub binding_id: Option<String>,
@@ -337,27 +338,27 @@ pub struct ReloadMcpControlTarget {
     pub endpoint_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AdminControlPlanDenial {
     pub reason_code: String,
     pub summary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AdminControlPlanPrecondition {
     pub code: String,
     pub status: AdminControlPlanPreconditionStatus,
     pub summary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminControlPlanPreconditionStatus {
     Satisfied,
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NewSessionControlAction {
     pub action: NewSessionControlActionKind,
     pub session_id: Option<String>,
@@ -366,7 +367,7 @@ pub struct NewSessionControlAction {
     pub reason_code: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NewSessionControlActionKind {
     ArchiveSession,
@@ -374,7 +375,7 @@ pub enum NewSessionControlActionKind {
     RebindChannel,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReloadMcpControlAction {
     pub action: ReloadMcpControlActionKind,
     pub session_id: String,
@@ -382,13 +383,13 @@ pub struct ReloadMcpControlAction {
     pub reason_code: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReloadMcpControlActionKind {
     ReloadMcpSurface,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfileRequest {
     pub profile_id: String,
     pub display_name: Option<String>,
@@ -408,7 +409,7 @@ pub struct CreateProfileRequest {
     pub profile_file_exists: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfileMcpBindingRequest {
     pub server_id: String,
     pub binding_id: Option<String>,
@@ -418,21 +419,21 @@ pub struct CreateProfileMcpBindingRequest {
     pub tool_profile_key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryRuntimeMetadata {
     pub profile_id: ProfileId,
     pub lifecycle_status: Option<ProfileRegistryLifecycleStatus>,
     pub revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfileSourceRequest {
     pub template_id: Option<String>,
     pub source_profile_id: Option<ProfileId>,
     pub source_bundle_path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileModelConfigSeed {
     pub provider: String,
     pub model_name: String,
@@ -443,7 +444,7 @@ pub struct ProfileModelConfigSeed {
     pub max_output_tokens: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfilePlan {
     pub diagnostics: Vec<RuntimeConfigDiagnostic>,
     pub registry_write: Option<ProfileRegistryWrite>,
@@ -468,7 +469,7 @@ impl CreateProfilePlan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileRegistryMutationKind {
     Update,
@@ -476,14 +477,14 @@ pub enum ProfileRegistryMutationKind {
     Prompt,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileRegistryMutationMode {
     Plan,
     Apply,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryMutationRequest {
     pub profile_id: ProfileId,
     pub kind: ProfileRegistryMutationKind,
@@ -493,7 +494,7 @@ pub struct ProfileRegistryMutationRequest {
     pub now: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryMutationImplications {
     pub registry_revision_will_increment: bool,
     pub profile_files_unchanged: bool,
@@ -502,7 +503,7 @@ pub struct ProfileRegistryMutationImplications {
     pub lifecycle_effects: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryMutationPlan {
     pub ok: bool,
     pub profile_id: ProfileId,
@@ -516,7 +517,7 @@ pub struct ProfileRegistryMutationPlan {
     pub implications: ProfileRegistryMutationImplications,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfileSeedMetadata {
     pub profile_id: ProfileId,
     pub display_name: Option<String>,
@@ -526,13 +527,13 @@ pub struct CreateProfileSeedMetadata {
     pub skills_mode: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CreateProfileFileAssetActionKind {
     WriteProfileJson,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfileFileAssetAction {
     pub kind: CreateProfileFileAssetActionKind,
     pub profile_id: ProfileId,
@@ -541,7 +542,7 @@ pub struct CreateProfileFileAssetAction {
     pub metadata_json: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CreateProfileDerivedRuntimeActionKind {
     AddBrain,
@@ -550,7 +551,7 @@ pub enum CreateProfileDerivedRuntimeActionKind {
     AddMcpBinding,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateProfileDerivedRuntimeAction {
     pub kind: CreateProfileDerivedRuntimeActionKind,
     pub ref_kind: String,
@@ -559,13 +560,13 @@ pub struct CreateProfileDerivedRuntimeAction {
     pub metadata_json: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainConfigDraft {
     pub implementation_id: BrainImplementationId,
     pub profile_id: ProfileId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionConfigDraft {
     pub session_id: SessionId,
     pub agent_id: AgentId,
@@ -578,7 +579,7 @@ pub struct SessionConfigDraft {
     pub turn_timeout_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ScheduledJobShape {
     HostJob,
@@ -587,7 +588,7 @@ pub enum ScheduledJobShape {
     DataCollection,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ScheduledJobConfigDraft {
     pub id: String,
     pub schedule: String,
@@ -598,7 +599,7 @@ pub struct ScheduledJobConfigDraft {
     pub delivery_channel_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalBindingStatusDraft {
     Active,
@@ -607,7 +608,7 @@ pub enum ExternalBindingStatusDraft {
     Archived,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelBindingConfigDraft {
     pub binding_id: String,
     pub adapter_id: AdapterId,
@@ -625,7 +626,7 @@ pub struct ChannelBindingConfigDraft {
     pub status: ExternalBindingStatusDraft,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct McpBindingConfigDraft {
     pub binding_id: String,
     pub adapter_id: AdapterId,
@@ -640,7 +641,7 @@ pub struct McpBindingConfigDraft {
     pub status: ExternalBindingStatusDraft,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRuntimeMetadata {
     pub profile_id: ProfileId,
     pub brain: Option<ProfileBrainMetadata>,
@@ -652,27 +653,27 @@ pub struct ProfileRuntimeMetadata {
     pub context_policy: Option<ProfileContextPolicy>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileBrainMetadata {
     pub module: Option<String>,
     pub strategy: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRuntimeOptions {
     pub default_resource_limits: Option<ResourceLimits>,
     pub max_turn_duration_ms: Option<u32>,
     pub max_tokens_per_turn: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileSessionDefaults {
     pub owner_id: Option<String>,
     pub max_history_messages: Option<u32>,
     pub turn_timeout_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileMcpConfig {
     pub binding_id: Option<String>,
     pub endpoint_ref: Option<String>,
@@ -681,7 +682,7 @@ pub struct ProfileMcpConfig {
     pub tool_profile: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileBackgroundReviewType {
     Memory,
@@ -689,7 +690,7 @@ pub enum ProfileBackgroundReviewType {
     Combined,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileBackgroundReviewConfig {
     pub enabled: bool,
     pub review_type: Option<ProfileBackgroundReviewType>,
@@ -705,7 +706,7 @@ pub struct ProfileBackgroundReviewConfig {
     pub dry_run: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelWakePolicy {
     Subscription,
@@ -713,12 +714,12 @@ pub enum ChannelWakePolicy {
     Disabled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileChannelDefaults {
     pub wake_policy: Option<ChannelWakePolicy>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileContextPolicy {
     pub enabled: bool,
     pub strategy_id: String,
@@ -732,7 +733,7 @@ pub struct ProfileContextPolicy {
     pub strategy_config: Value,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeConfigDiagnosticSeverity {
     Error,
@@ -740,7 +741,7 @@ pub enum RuntimeConfigDiagnosticSeverity {
     Info,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfigDiagnostic {
     pub severity: RuntimeConfigDiagnosticSeverity,
     pub code: String,
@@ -776,7 +777,7 @@ impl RuntimeConfigDiagnostic {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfigValidationResult {
     pub diagnostics: Vec<RuntimeConfigDiagnostic>,
 }
@@ -872,7 +873,7 @@ fn validate_engine_storage_config(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfigPlan {
     pub runtime_config: RuntimeConfigDraft,
     pub diagnostics: Vec<RuntimeConfigDiagnostic>,

@@ -5,6 +5,7 @@
 
 mod brain_stream;
 mod buffers;
+mod scheduler_wire;
 
 pub use brain_stream::{
     brain_wake_stream_channel, BrainWakeStream, BrainWakeStreamProducer, BrainWakeStreamSender,
@@ -15,6 +16,7 @@ pub use buffers::{
 };
 pub use rusty_crew_core_config::{ClockConfig, EngineConfig, EngineStorageConfig};
 pub use rusty_crew_core_protocol::*;
+pub use scheduler_wire::{ScheduledJobWireOutput, ScheduledRunWireOutput, SchedulerTickWireOutput};
 
 pub const MANIFEST_TEXT: &str = include_str!("../bridge-manifest.toml");
 pub const WIRE_SHAPE_FINGERPRINT_TEXT: &str = include_str!("../bridge-wire-shape-fingerprint.txt");

@@ -50,6 +50,14 @@ import {
 import { withGeneratedBridgeOutputValidation } from "./generated-binding-validation.js";
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
+import {
+  nativeRuntimeDatabaseSizeSchema,
+  nativeRuntimeMaintenanceReportSchema,
+  nativeRuntimeModuleSchemaRegistryDiagnosticsSchema,
+  nativeRuntimeStorageDiagnosticsSchema,
+  nativeSimpleKvRecordArraySchema,
+  nativeSimpleKvRecordSchema,
+} from "./native-admin-validation-schemas.js";
 
 export {
   coreConfigFacadeArtifact,
@@ -3908,8 +3916,20 @@ function createNativeBridgeModule(
       });
     },
     diagnosticCountRows: async (table) => binding.countRows(table),
-    databaseSize: async () => binding.databaseSize(),
-    storageDiagnostics: async () => binding.storageDiagnostics(),
+    databaseSize: async () =>
+      validateBridgeValue<NativeRuntimeDatabaseSize>({
+        operation: "database_size",
+        direction: "rust_to_ts",
+        schema: nativeRuntimeDatabaseSizeSchema,
+        value: binding.databaseSize(),
+      }),
+    storageDiagnostics: async () =>
+      validateBridgeValue<NativeRuntimeStorageDiagnostics>({
+        operation: "storage_diagnostics",
+        direction: "rust_to_ts",
+        schema: nativeRuntimeStorageDiagnosticsSchema,
+        value: binding.storageDiagnostics(),
+      }),
     bufferedBrainRunDiagnostics: async () =>
       JSON.parse(
         binding.bufferedBrainRunDiagnosticsJson(),
@@ -3942,7 +3962,13 @@ function createNativeBridgeModule(
       return raw === null ? undefined : fromRawGitHubGateWaitRecord(raw);
     },
     gitHubGateEventCursor: async () => binding.githubGateEventCursor(),
-    storageSchema: async () => binding.storageSchema(),
+    storageSchema: async () =>
+      validateBridgeValue<NativeRuntimeModuleSchemaRegistryDiagnostics>({
+        operation: "storage_schema",
+        direction: "rust_to_ts",
+        schema: nativeRuntimeModuleSchemaRegistryDiagnosticsSchema,
+        value: binding.storageSchema(),
+      }),
     createProfileRegistryRecord: async (write) =>
       toNativeProfileRegistryRecord(
         validateBridgeValue<RawProfileRegistryRecord>({
@@ -4245,7 +4271,13 @@ function createNativeBridgeModule(
       (JSON.parse(
         binding.getRecallTraceJson(traceId),
       ) as NativeLoreRecallTraceRecord | null) ?? undefined,
-    runMaintenance: async (policy) => binding.runMaintenance(policy),
+    runMaintenance: async (policy) =>
+      validateBridgeValue<NativeRuntimeMaintenanceReport>({
+        operation: "run_maintenance",
+        direction: "rust_to_ts",
+        schema: nativeRuntimeMaintenanceReportSchema,
+        value: binding.runMaintenance(policy),
+      }),
     ...createNativeBridgeMemoryMethods(binding),
     planRoleplayAssistantAlternative: async (input) =>
       JSON.parse(
@@ -4652,9 +4684,27 @@ function createNativeBridgeModule(
       binding.listProfileMemory(
         query,
       ) as unknown as NativeProfileMemoryRecord[],
-    listSimpleKv: async (query) => binding.listSimpleKv(query),
-    putSimpleKv: async (write) => binding.putSimpleKv(write),
-    deleteSimpleKv: async (input) => binding.deleteSimpleKv(input),
+    listSimpleKv: async (query) =>
+      validateBridgeValue<NativeSimpleKvRecord[]>({
+        operation: "list_simple_kv",
+        direction: "rust_to_ts",
+        schema: nativeSimpleKvRecordArraySchema,
+        value: binding.listSimpleKv(query),
+      }),
+    putSimpleKv: async (write) =>
+      validateBridgeValue<NativeSimpleKvRecord>({
+        operation: "put_simple_kv",
+        direction: "rust_to_ts",
+        schema: nativeSimpleKvRecordSchema,
+        value: binding.putSimpleKv(write),
+      }),
+    deleteSimpleKv: async (input) =>
+      validateBridgeValue<NativeSimpleKvRecord>({
+        operation: "delete_simple_kv",
+        direction: "rust_to_ts",
+        schema: nativeSimpleKvRecordSchema,
+        value: binding.deleteSimpleKv(input),
+      }),
     getProfileMemory: async (input) =>
       (binding.getProfileMemory(
         input.profileId,

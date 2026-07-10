@@ -23,9 +23,9 @@ interface OperationExemptionGroup {
 const EXPECTED_MANIFEST_OPERATION_COUNT = 200;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
-const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 94;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 125;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 75;
+const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 122;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 160;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 40;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -51,6 +51,13 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "start_brain_run",
   "submit_brain_host_result",
   "cancel_brain_run",
+  "database_size",
+  "delete_simple_kv",
+  "list_simple_kv",
+  "put_simple_kv",
+  "run_maintenance",
+  "storage_diagnostics",
+  "storage_schema",
   "submit_brain_actions",
   "submit_brain_event",
   "update_profile_registry_record",
@@ -92,12 +99,6 @@ const RUST_FIXTURE_FAMILY_NAMES = [
 
 const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
-    group: "brain_catalog",
-    reason:
-      "Rust catalog DTOs are checked through the generated native declaration surface, Rust selection tests, and the runtime catalog smoke; add TypeBox validation before admitting foreign brain catalog entries.",
-    operations: ["brain_catalog", "plan_brain_selection"],
-  },
-  {
     group: "engine_lifecycle",
     reason:
       "Core engine and brain-registration calls currently use narrow command/receipt shapes; add fixture coverage when their payloads grow beyond startup plumbing.",
@@ -128,19 +129,9 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
     group: "config_and_adapter_ingress",
     reason:
-      "Runtime config, create-profile planning, adapter registration, and external ingress are validated by focused config/adapter smokes; bridge fixtures should be added before new UI-facing wire fields land.",
+      "The remaining adapter registration and external-ingress operations use direct napi command/receipt shapes; JSON-returning runtime/profile/tool planning operations use generated Rust schemas.",
     operations: [
       "register_platform_adapter",
-      "plan_tool_availability",
-      "plan_local_code_resource_policy",
-      "plan_web_browser_resource_policy",
-      "validate_runtime_config_draft",
-      "plan_runtime_config",
-      "plan_runtime_graph",
-      "plan_create_profile",
-      "plan_profile_registry_mutation",
-      "plan_new_session_control",
-      "plan_reload_mcp_control",
       "inject_external_event",
       "inject_den_data_update",
       "enqueue_body_follow_up_message",
@@ -149,22 +140,13 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
     group: "sessions_scheduler_delegation",
     reason:
-      "Session lifecycle, scheduler, and delegation records are active Rust coordination surfaces; fixture coverage is intentionally deferred to a dedicated family expansion.",
+      "Value-returning scheduler operations use named Rust wire DTOs and generated schemas. The remaining lifecycle/delegation operations are direct napi DTOs or unit-return commands.",
     operations: [
       "archive_session",
       "ensure_configured_session",
-      "register_scheduled_wake_job",
-      "register_scheduled_host_job",
-      "list_scheduled_jobs",
-      "list_scheduled_runs",
-      "claim_scheduled_host_runs",
-      "request_scheduled_host_job_run",
       "complete_scheduled_host_run",
-      "run_scheduler_tick",
-      "request_scheduled_job_run",
       "pause_scheduled_job",
       "resume_scheduled_job",
-      "plan_delegated_role_lifecycle",
       "cancel_delegated_session",
       "request_delegated_checkpoint",
       "drain_delegated_sessions",
@@ -177,17 +159,6 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     reason:
       "save_message_slot returns unit; its Rust-owned input contract is covered by transaction tests while every value-returning chat operation uses generated output validation.",
     operations: ["save_message_slot"],
-  },
-  {
-    group: "storage_diagnostics",
-    reason:
-      "Storage/admin diagnostics are backend-neutral operational readbacks; fixture coverage is deferred until the diagnostics family stabilizes.",
-    operations: [
-      "database_size",
-      "storage_schema",
-      "storage_diagnostics",
-      "run_maintenance",
-    ],
   },
   {
     group: "model_secrets",
@@ -206,23 +177,6 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "add_entry_to_layer",
       "remove_entry_from_layer",
       "set_entry_constant",
-    ],
-  },
-  {
-    group: "local_stores_memory_compaction",
-    reason:
-      "Simple KV, session memory, and memory planning are covered by storage/API tests today; digest and compaction record shapes are fixture-backed separately.",
-    operations: [
-      "list_simple_kv",
-      "put_simple_kv",
-      "delete_simple_kv",
-      "query_session_memory_records",
-      "build_session_memory_prompt_context",
-      "save_memory_proposal",
-      "plan_capture_memory_proposals",
-      "plan_curator_governance_transition",
-      "plan_curator_lifecycle_transition",
-      "plan_background_memory_auto_mutations",
     ],
   },
   {

@@ -4,31 +4,32 @@ mod bridge_contracts;
 mod protocol_contracts;
 
 use anyhow::{bail, Context, Result};
-use rusty_crew_brain_runtime::BufferedBrainRunDrain;
+use rusty_crew_brain_runtime::{self as brain_runtime, BufferedBrainRunDrain};
 use rusty_crew_core_bridge_api::*;
 use rusty_crew_core_config::{
-    BrainConfigDraft, ChannelBindingConfigDraft, ChannelWakePolicy, CreateProfileMcpBindingRequest,
-    CreateProfilePlanInput, CreateProfileRequest, CreateProfileSourceRequest,
-    ExternalBindingStatusDraft, McpBindingConfigDraft, ProfileBackgroundReviewConfig,
-    ProfileBackgroundReviewType, ProfileBrainMetadata, ProfileChannelDefaults,
-    ProfileContextPolicy, ProfileMcpConfig, ProfileModelConfigSeed, ProfileRegistryMutationKind,
-    ProfileRegistryMutationMode, ProfileRegistryMutationPlan, ProfileRegistryMutationRequest,
-    ProfileRegistryRuntimeMetadata, ProfileRuntimeMetadata, ProfileRuntimeOptions,
-    ProfileSessionDefaults, RuntimeConfigDiagnostic, RuntimeConfigDiagnosticSeverity,
-    RuntimeConfigDraft, RuntimeConfigPlan, RuntimeConfigValidationInput,
-    RuntimeConfigValidationResult, RuntimeGraphDefaultSource, RuntimeGraphDerivedKind,
-    RuntimeGraphPlanInput, RuntimeGraphPostgresBootMode, RuntimeGraphStorageBackend,
-    RuntimeGraphStorageImplementationStatus, RuntimeGraphWakeTimeoutMode,
-    RuntimeGraphWakeTimeoutSourceKind, ScheduledJobConfigDraft, ScheduledJobShape,
-    SessionConfigDraft,
+    self as config, BrainConfigDraft, ChannelBindingConfigDraft, ChannelWakePolicy,
+    CreateProfileMcpBindingRequest, CreateProfilePlanInput, CreateProfileRequest,
+    CreateProfileSourceRequest, ExternalBindingStatusDraft, McpBindingConfigDraft,
+    ProfileBackgroundReviewConfig, ProfileBackgroundReviewType, ProfileBrainMetadata,
+    ProfileChannelDefaults, ProfileContextPolicy, ProfileMcpConfig, ProfileModelConfigSeed,
+    ProfileRegistryMutationKind, ProfileRegistryMutationMode, ProfileRegistryMutationPlan,
+    ProfileRegistryMutationRequest, ProfileRegistryRuntimeMetadata, ProfileRuntimeMetadata,
+    ProfileRuntimeOptions, ProfileSessionDefaults, RuntimeConfigDiagnostic,
+    RuntimeConfigDiagnosticSeverity, RuntimeConfigDraft, RuntimeConfigPlan,
+    RuntimeConfigValidationInput, RuntimeConfigValidationResult, RuntimeGraphDefaultSource,
+    RuntimeGraphDerivedKind, RuntimeGraphPlanInput, RuntimeGraphPostgresBootMode,
+    RuntimeGraphStorageBackend, RuntimeGraphStorageImplementationStatus,
+    RuntimeGraphWakeTimeoutMode, RuntimeGraphWakeTimeoutSourceKind, ScheduledJobConfigDraft,
+    ScheduledJobShape, SessionConfigDraft,
 };
 use rusty_crew_core_persistence as persistence;
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, AttachmentId, AttachmentLinkId, BrainImplementationId,
-    ConversationBranchId, ConversationSnapshotId, DataBankScopeId, MessageBlockId, MessageId,
-    MessageSlotId, MessageVariantId, ProfileId, ProfileRegistryLifecycleStatus, ResourceLimits,
-    SessionHistoryWindow, SessionId, SessionKind,
+    self as protocol, AdapterId, AgentId, AgentInstanceId, AttachmentId, AttachmentLinkId,
+    BrainImplementationId, ConversationBranchId, ConversationSnapshotId, DataBankScopeId,
+    MessageBlockId, MessageId, MessageSlotId, MessageVariantId, ProfileId,
+    ProfileRegistryLifecycleStatus, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind,
 };
+use rusty_crew_core_tool_registry as tool_registry;
 use rusty_crew_roleplay_core as roleplay;
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde::{Deserialize, Serialize};
@@ -616,6 +617,77 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         };
     }
 
+    schema!("brain_catalog", brain_runtime::BrainCatalog);
+    schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
+
+    schema!(
+        "plan_tool_availability",
+        tool_registry::ToolAvailabilityPlan
+    );
+    schema!(
+        "plan_local_code_resource_policy",
+        tool_registry::LocalCodeResourcePolicyPlan
+    );
+    schema!(
+        "plan_web_browser_resource_policy",
+        tool_registry::WebBrowserResourcePolicyPlan
+    );
+    schema!(
+        "validate_runtime_config_draft",
+        config::RuntimeConfigValidationResult
+    );
+    schema!("plan_runtime_config", config::RuntimeConfigPlan);
+    schema!("plan_runtime_graph", config::RuntimeGraphPlan);
+    schema!("plan_create_profile", config::CreateProfilePlan);
+    schema!(
+        "plan_profile_registry_mutation",
+        config::ProfileRegistryMutationPlan
+    );
+    schema!("plan_new_session_control", config::NewSessionControlPlan);
+    schema!("plan_reload_mcp_control", config::ReloadMcpControlPlan);
+    schema!(
+        "plan_delegated_role_lifecycle",
+        config::DelegatedRoleLifecyclePlan
+    );
+
+    schema!("register_scheduled_wake_job", ScheduledJobWireOutput);
+    schema!("register_scheduled_host_job", ScheduledJobWireOutput);
+    schema!("list_scheduled_jobs", Vec<ScheduledJobWireOutput>);
+    schema!("list_scheduled_runs", Vec<ScheduledRunWireOutput>);
+    schema!("claim_scheduled_host_runs", Vec<ScheduledRunWireOutput>);
+    schema!(
+        "request_scheduled_host_job_run",
+        Option<ScheduledRunWireOutput>
+    );
+    schema!("run_scheduler_tick", SchedulerTickWireOutput);
+    schema!("request_scheduled_job_run", Option<ScheduledRunWireOutput>);
+
+    schema!(
+        "query_session_memory_records",
+        Vec<persistence::SessionMemoryRecord>
+    );
+    schema!(
+        "build_session_memory_prompt_context",
+        persistence::SessionMemoryPromptContext
+    );
+    schema!("save_memory_proposal", protocol::MemoryProposalRecord);
+    schema!(
+        "plan_capture_memory_proposals",
+        protocol::CaptureMemoryProposalPlan
+    );
+    schema!(
+        "plan_curator_governance_transition",
+        protocol::CuratorGovernancePlan
+    );
+    schema!(
+        "plan_curator_lifecycle_transition",
+        protocol::CuratorLifecyclePlan
+    );
+    schema!(
+        "plan_background_memory_auto_mutations",
+        protocol::BackgroundMemoryAutoMutationPlan
+    );
+
     schema!("save_message_variant", persistence::MessageVariantRecord);
     schema!(
         "create_chat_message_slot",
@@ -968,7 +1040,7 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
 
     Ok(BridgeWireSchemaArtifact {
         format_version: 1,
-        source: "schemars schemas derived from Rust persistence and roleplay DTOs".to_owned(),
+        source: "schemars schemas derived from Rust bridge, brain, config, tool, protocol, persistence, and roleplay DTOs".to_owned(),
         schemas,
         operation_schema_keys,
         sample_outputs,

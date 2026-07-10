@@ -1,9 +1,12 @@
-use rusty_crew_core_bridge_api::{CoreError, CoreErrorKind, CoreResult, RunId, SessionId, Unit};
+use rusty_crew_core_bridge_api::{
+    CoreError, CoreErrorKind, CoreResult, RunId, ScheduledJobWireOutput, ScheduledRunWireOutput,
+    SchedulerTickWireOutput, SessionId, Unit,
+};
 use rusty_crew_core_persistence::{
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
     ScheduledRunTrigger,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::NativeBridge;
 
@@ -14,10 +17,10 @@ impl NativeBridge {
         target_session_id: SessionId,
         interval_ms: Option<u64>,
         first_due_at: String,
-    ) -> CoreResult<Value> {
+    ) -> CoreResult<ScheduledJobWireOutput> {
         self.engine()?
             .register_scheduled_wake_job(job_id, target_session_id, interval_ms, first_due_at)
-            .map(scheduled_job_json)
+            .map(scheduled_job_wire_output)
     }
 
     pub fn register_scheduled_host_job(
@@ -27,10 +30,10 @@ impl NativeBridge {
         interval_ms: Option<u64>,
         first_due_at: String,
         payload_json: Value,
-    ) -> CoreResult<Value> {
+    ) -> CoreResult<ScheduledJobWireOutput> {
         self.engine()?
             .register_scheduled_host_job(job_id, job_kind, interval_ms, first_due_at, payload_json)
-            .map(scheduled_job_json)
+            .map(scheduled_job_wire_output)
     }
 
     pub fn list_scheduled_jobs(
@@ -39,14 +42,14 @@ impl NativeBridge {
         job_kind: Option<String>,
         limit: Option<u32>,
         offset: Option<u32>,
-    ) -> CoreResult<Vec<Value>> {
+    ) -> CoreResult<Vec<ScheduledJobWireOutput>> {
         let status = status
             .as_deref()
             .map(scheduled_job_status_from_str)
             .transpose()?;
         self.engine()?
             .list_scheduled_jobs(status, job_kind, limit, offset)
-            .map(|jobs| jobs.into_iter().map(scheduled_job_json).collect())
+            .map(|jobs| jobs.into_iter().map(scheduled_job_wire_output).collect())
     }
 
     pub fn list_scheduled_runs(
@@ -57,7 +60,7 @@ impl NativeBridge {
         target_session_id: Option<String>,
         limit: Option<u32>,
         offset: Option<u32>,
-    ) -> CoreResult<Vec<Value>> {
+    ) -> CoreResult<Vec<ScheduledRunWireOutput>> {
         let status = status
             .as_deref()
             .map(scheduled_run_status_from_str)
@@ -75,27 +78,27 @@ impl NativeBridge {
                 limit,
                 offset,
             )
-            .map(|runs| runs.into_iter().map(scheduled_run_json).collect())
+            .map(|runs| runs.into_iter().map(scheduled_run_wire_output).collect())
     }
 
     pub fn claim_scheduled_host_runs(
         &self,
         supported_job_kinds: Vec<String>,
         limit: Option<u32>,
-    ) -> CoreResult<Vec<Value>> {
+    ) -> CoreResult<Vec<ScheduledRunWireOutput>> {
         self.engine()?
             .claim_scheduled_host_runs(supported_job_kinds, limit)
-            .map(|runs| runs.into_iter().map(scheduled_run_json).collect())
+            .map(|runs| runs.into_iter().map(scheduled_run_wire_output).collect())
     }
 
     pub fn request_scheduled_host_job_run(
         &self,
         job_id: String,
         supported_job_kinds: Vec<String>,
-    ) -> CoreResult<Option<Value>> {
+    ) -> CoreResult<Option<ScheduledRunWireOutput>> {
         self.engine()?
             .request_scheduled_host_job_run(&job_id, supported_job_kinds)
-            .map(|run| run.map(scheduled_run_json))
+            .map(|run| run.map(scheduled_run_wire_output))
     }
 
     pub fn complete_scheduled_host_run(
@@ -111,23 +114,26 @@ impl NativeBridge {
         Ok(Unit)
     }
 
-    pub fn run_scheduler_tick(&self) -> CoreResult<Value> {
-        self.engine()?.run_scheduler_tick().map(|report| {
-            json!({
-                "stale_runs_expired": report.stale_runs_expired,
-                "due_runs_claimed": report.due_runs_claimed,
-                "wakes_requested": report.wakes_requested,
-                "runs_completed": report.runs_completed,
-                "runs_skipped": report.runs_skipped,
-                "runs_failed": report.runs_failed,
+    pub fn run_scheduler_tick(&self) -> CoreResult<SchedulerTickWireOutput> {
+        self.engine()?
+            .run_scheduler_tick()
+            .map(|report| SchedulerTickWireOutput {
+                stale_runs_expired: report.stale_runs_expired,
+                due_runs_claimed: report.due_runs_claimed,
+                wakes_requested: report.wakes_requested,
+                runs_completed: report.runs_completed,
+                runs_skipped: report.runs_skipped,
+                runs_failed: report.runs_failed,
             })
-        })
     }
 
-    pub fn request_scheduled_job_run(&self, job_id: String) -> CoreResult<Option<Value>> {
+    pub fn request_scheduled_job_run(
+        &self,
+        job_id: String,
+    ) -> CoreResult<Option<ScheduledRunWireOutput>> {
         self.engine()?
             .request_scheduled_job_run(&job_id)
-            .map(|run| run.map(scheduled_run_json))
+            .map(|run| run.map(scheduled_run_wire_output))
     }
 
     pub fn pause_scheduled_job(&self, job_id: String) -> CoreResult<Unit> {
@@ -141,37 +147,37 @@ impl NativeBridge {
     }
 }
 
-fn scheduled_job_json(record: ScheduledJobRecord) -> Value {
-    json!({
-        "job_id": record.job_id,
-        "job_kind": record.job_kind,
-        "target_session_id": record.target_session_id.map(|session_id| session_id.0),
-        "interval_ms": record.interval_ms,
-        "next_due_at": record.next_due_at,
-        "status": scheduled_job_status_as_str(record.status),
-        "created_at": record.created_at,
-        "updated_at": record.updated_at,
-        "paused_at": record.paused_at,
-    })
+fn scheduled_job_wire_output(record: ScheduledJobRecord) -> ScheduledJobWireOutput {
+    ScheduledJobWireOutput {
+        job_id: record.job_id,
+        job_kind: record.job_kind,
+        target_session_id: record.target_session_id.map(|session_id| session_id.0),
+        interval_ms: record.interval_ms,
+        next_due_at: record.next_due_at,
+        status: scheduled_job_status_as_str(record.status).to_owned(),
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        paused_at: record.paused_at,
+    }
 }
 
-fn scheduled_run_json(record: ScheduledRunRecord) -> Value {
-    json!({
-        "run_id": record.run_id.0,
-        "job_id": record.job_id,
-        "job_kind": record.job_kind,
-        "target_session_id": record.target_session_id.map(|session_id| session_id.0),
-        "status": scheduled_run_status_as_str(record.status),
-        "trigger": scheduled_run_trigger_as_str(record.trigger),
-        "scheduled_for": record.scheduled_for,
-        "claimed_at": record.claimed_at,
-        "claim_deadline_at": record.claim_deadline_at,
-        "completed_at": record.completed_at,
-        "error": record.error,
-        "output": record.output_json,
-        "created_at": record.created_at,
-        "updated_at": record.updated_at,
-    })
+fn scheduled_run_wire_output(record: ScheduledRunRecord) -> ScheduledRunWireOutput {
+    ScheduledRunWireOutput {
+        run_id: record.run_id.0,
+        job_id: record.job_id,
+        job_kind: record.job_kind,
+        target_session_id: record.target_session_id.map(|session_id| session_id.0),
+        status: scheduled_run_status_as_str(record.status).to_owned(),
+        trigger: scheduled_run_trigger_as_str(record.trigger).to_owned(),
+        scheduled_for: record.scheduled_for,
+        claimed_at: record.claimed_at,
+        claim_deadline_at: record.claim_deadline_at,
+        completed_at: record.completed_at,
+        error: record.error,
+        output: record.output_json,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+    }
 }
 
 fn scheduled_job_status_as_str(status: ScheduledJobStatus) -> &'static str {
