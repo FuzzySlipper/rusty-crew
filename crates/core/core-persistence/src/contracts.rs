@@ -90,6 +90,230 @@ pub struct ExactPage<T> {
     pub next_offset: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorCandidateStatus {
+    Proposed,
+    Previewed,
+    Approved,
+    Applied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorCandidateLifecycleState {
+    Active,
+    Stale,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CuratorCandidateRecord {
+    pub candidate_id: String,
+    pub batch_id: String,
+    pub profile_id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub kind: String,
+    pub summary: String,
+    pub fingerprint: String,
+    pub mutation: JsonValue,
+    #[serde(default)]
+    pub source_refs: Vec<JsonValue>,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    pub status: CuratorCandidateStatus,
+    pub lifecycle_state: CuratorCandidateLifecycleState,
+    #[serde(default)]
+    pub lifecycle_reason_code: Option<String>,
+    pub revision: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CuratorCandidateWrite {
+    pub record: CuratorCandidateRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct CuratorCandidateQuery {
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub status: Option<CuratorCandidateStatus>,
+    #[serde(default)]
+    pub lifecycle_state: Option<CuratorCandidateLifecycleState>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CuratorApprovalRecord {
+    pub approval_id: String,
+    pub receipt_id: String,
+    pub candidate_id: String,
+    pub candidate_revision: u64,
+    pub fingerprint: String,
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    pub reason: String,
+    pub approved_at: String,
+    #[serde(default)]
+    pub superseded_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CuratorSnapshotRefRecord {
+    pub snapshot_id: String,
+    pub candidate_id: String,
+    pub snapshot_root_ref: String,
+    pub manifest: JsonValue,
+    pub status: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorMutationStatus {
+    Prepared,
+    Applied,
+    Failed,
+    RollbackPrepared,
+    RolledBack,
+    RollbackFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CuratorMutationRecord {
+    pub mutation_id: String,
+    pub receipt_id: String,
+    pub candidate_id: String,
+    pub candidate_revision: u64,
+    pub action: String,
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    pub reason: String,
+    pub snapshot_id: String,
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
+    #[serde(default)]
+    pub management: Option<JsonValue>,
+    pub status: CuratorMutationStatus,
+    #[serde(default)]
+    pub error_reason_code: Option<String>,
+    pub revision: u64,
+    pub created_at: String,
+    #[serde(default)]
+    pub applied_at: Option<String>,
+    #[serde(default)]
+    pub rolled_back_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CuratorMutationWrite {
+    pub record: CuratorMutationRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct CuratorMutationQuery {
+    #[serde(default)]
+    pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub status: Option<CuratorMutationStatus>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CuratorAuditReceiptRecord {
+    pub sequence: u64,
+    pub receipt_id: String,
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub mutation_id: Option<String>,
+    pub activity_kind: String,
+    pub outcome: String,
+    #[serde(default)]
+    pub reason_code: Option<String>,
+    pub summary: String,
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    #[serde(default)]
+    pub details: Option<JsonValue>,
+    pub occurred_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct CuratorAuditQuery {
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub mutation_id: Option<String>,
+    #[serde(default)]
+    pub activity_kind: Option<String>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CuratorGovernanceWrite {
+    #[serde(default)]
+    pub candidate: Option<CuratorCandidateWrite>,
+    #[serde(default)]
+    pub approval: Option<CuratorApprovalRecord>,
+    #[serde(default)]
+    pub snapshot: Option<CuratorSnapshotRefRecord>,
+    #[serde(default)]
+    pub mutation: Option<CuratorMutationWrite>,
+    pub receipt: CuratorAuditReceiptRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CuratorGovernanceWriteResult {
+    #[serde(default)]
+    pub candidate: Option<CuratorCandidateRecord>,
+    #[serde(default)]
+    pub mutation: Option<CuratorMutationRecord>,
+    pub receipt: CuratorAuditReceiptRecord,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct CuratorPurgeReport {
+    pub candidates: u64,
+    pub approvals: u64,
+    pub snapshots: u64,
+    pub mutations: u64,
+    pub audit_receipts: u64,
+}
+
 impl<T> ExactPage<T> {
     pub fn new(items: Vec<T>, total: u64, limit: u32, offset: u32) -> Self {
         let next_offset = (u64::from(offset) + (items.len() as u64) < total)

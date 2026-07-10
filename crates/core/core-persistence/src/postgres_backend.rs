@@ -7,6 +7,7 @@
 mod capabilities;
 mod chat_events;
 mod conversation_attachment;
+mod curator;
 mod memory_lore;
 mod pool;
 mod profile_config;

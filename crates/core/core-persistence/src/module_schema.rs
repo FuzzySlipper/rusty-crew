@@ -303,8 +303,120 @@ impl ModuleSchemaRegistry {
 }
 
 pub fn compiled_module_schema_registry() -> ModuleSchemaRegistry {
-    ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(), roleplay_schema_bundle()])
-        .expect("compiled module schema registry must be valid")
+    ModuleSchemaRegistry::new(vec![
+        simple_kv_schema_bundle(),
+        roleplay_schema_bundle(),
+        curator_schema_bundle(),
+    ])
+    .expect("compiled module schema registry must be valid")
+}
+
+pub fn curator_schema_bundle() -> ModuleSchemaBundle {
+    let stores = [
+        ("candidates", "Curator candidate lifecycle records"),
+        ("approvals", "Curator candidate approval history"),
+        (
+            "snapshot_refs",
+            "Opaque curator filesystem snapshot references",
+        ),
+        ("mutations", "Curator mutation and rollback records"),
+        ("audit_receipts", "Append-only curator activity receipts"),
+    ];
+    ModuleSchemaBundle {
+        module_id: ModuleId::new("curator").expect("valid curator module id"),
+        schema_version: 1,
+        owner: ModuleOwner {
+            crate_name: "core_persistence".to_string(),
+            rust_module: "curator".to_string(),
+        },
+        logical_stores: stores
+            .iter()
+            .map(|(name, description)| LogicalStoreDescriptor {
+                store_name: StoreName::new(*name).expect("valid curator store name"),
+                description: (*description).to_string(),
+            })
+            .collect(),
+        tables: stores
+            .iter()
+            .map(|(name, _)| ModuleTableDescriptor {
+                table_name: TableName::new(*name).expect("valid curator table name"),
+                logical_store: StoreName::new(*name).expect("valid curator store name"),
+                declaration: TableDeclaration::Owned,
+            })
+            .collect(),
+        indexes: vec![
+            curator_index(
+                "candidates",
+                "profile_status",
+                &["profile_id", "status", "updated_at"],
+            ),
+            curator_index(
+                "candidates",
+                "profile_lifecycle",
+                &["profile_id", "lifecycle_state", "updated_at"],
+            ),
+            curator_index("candidates", "batch", &["batch_id", "candidate_id"]),
+            curator_index("mutations", "candidate", &["candidate_id", "created_at"]),
+            curator_index("mutations", "status", &["status", "created_at"]),
+            curator_index(
+                "audit_receipts",
+                "candidate_sequence",
+                &["candidate_id", "sequence"],
+            ),
+            curator_index(
+                "audit_receipts",
+                "mutation_sequence",
+                &["mutation_id", "sequence"],
+            ),
+            curator_index(
+                "audit_receipts",
+                "profile_sequence",
+                &["profile_id", "sequence"],
+            ),
+        ],
+        retention: Vec::new(),
+        capability_requirements: vec![
+            ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
+            ModuleCapabilityRequirement::required(ModuleSchemaCapability::JsonDocuments),
+        ],
+        repository_contracts: [
+            "apply_curator_governance_write",
+            "get_curator_candidate",
+            "list_curator_candidates",
+            "get_curator_mutation",
+            "list_curator_mutations",
+            "list_curator_audit_receipts",
+            "purge_curator_profile",
+            "purge_curator_session",
+        ]
+        .into_iter()
+        .map(|name| RepositoryContractDescriptor {
+            contract_name: name.to_string(),
+            description: name.replace('_', " "),
+        })
+        .collect(),
+        query_catalog_entries: ["candidates", "mutations", "audit_receipts"]
+            .into_iter()
+            .map(|name| QueryCatalogEntryDescriptor {
+                query_id: format!("list_curator_{name}"),
+                store_name: StoreName::new(name).expect("valid curator store name"),
+                description: format!("List typed curator {name}"),
+                parameter_schema_id: Some(format!("curator_{name}_query")),
+            })
+            .collect(),
+        export_hooks: Vec::new(),
+        import_hooks: Vec::new(),
+        migration_notes: vec!["clean break from curator simple_kv snapshot storage".to_string()],
+    }
+}
+
+fn curator_index(table: &str, purpose: &str, columns: &[&str]) -> ModuleIndexDescriptor {
+    ModuleIndexDescriptor {
+        table_name: TableName::new(table).expect("valid curator table name"),
+        purpose: IndexPurpose::new(purpose).expect("valid curator index purpose"),
+        columns: columns.iter().map(|column| (*column).to_string()).collect(),
+        unique: false,
+    }
 }
 
 pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {

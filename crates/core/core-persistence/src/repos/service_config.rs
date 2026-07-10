@@ -437,6 +437,30 @@ fn purge_profile_in_tx(
         "DELETE FROM module_roleplay_imports WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
         params![profile_id.0.as_str()],
     )?;
+    for (table, sql) in [
+        (
+            "module_curator_approvals",
+            "DELETE FROM module_curator_approvals WHERE candidate_id IN (SELECT candidate_id FROM module_curator_candidates WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))",
+        ),
+        (
+            "module_curator_snapshot_refs",
+            "DELETE FROM module_curator_snapshot_refs WHERE candidate_id IN (SELECT candidate_id FROM module_curator_candidates WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))",
+        ),
+        (
+            "module_curator_mutations",
+            "DELETE FROM module_curator_mutations WHERE candidate_id IN (SELECT candidate_id FROM module_curator_candidates WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))",
+        ),
+        (
+            "module_curator_audit_receipts",
+            "DELETE FROM module_curator_audit_receipts WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        ),
+        (
+            "module_curator_candidates",
+            "DELETE FROM module_curator_candidates WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        ),
+    ] {
+        purge_delete(tx, &mut counts, table, sql, params![profile_id.0.as_str()])?;
+    }
     purge_delete(tx, &mut counts, "module_roleplay_session_metadata", "DELETE FROM module_roleplay_session_metadata WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)", params![profile_id.0.as_str()])?;
     purge_delete(
         tx,

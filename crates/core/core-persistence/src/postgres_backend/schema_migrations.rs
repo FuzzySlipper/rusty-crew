@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 18;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 19;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -104,6 +104,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 18,
         description: "add typed roleplay character persona session and import records",
         apply: Some(apply_postgres_roleplay_records),
+    },
+    PostgresSchemaMigration {
+        version: 19,
+        description: "add typed curator governance records and audit receipts",
+        apply: Some(apply_postgres_curator_governance),
     },
 ];
 
@@ -946,6 +951,50 @@ fn apply_postgres_baseline_schema(tx: &mut Transaction<'_>, schema: &str) -> Cor
                  );"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL durable backend baseline", error))
+}
+
+fn apply_postgres_curator_governance(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.module_curator_candidates (
+            candidate_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, profile_id TEXT NOT NULL,
+            session_id TEXT, status TEXT NOT NULL, lifecycle_state TEXT NOT NULL,
+            fingerprint TEXT NOT NULL, expires_at TEXT, revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+         CREATE INDEX IF NOT EXISTS module_curator_candidates_profile_status_idx ON {schema}.module_curator_candidates(profile_id, status, updated_at DESC, candidate_id);
+         CREATE INDEX IF NOT EXISTS module_curator_candidates_profile_lifecycle_idx ON {schema}.module_curator_candidates(profile_id, lifecycle_state, updated_at DESC, candidate_id);
+         CREATE INDEX IF NOT EXISTS module_curator_candidates_batch_idx ON {schema}.module_curator_candidates(batch_id, candidate_id);
+         CREATE INDEX IF NOT EXISTS module_curator_candidates_session_idx ON {schema}.module_curator_candidates(session_id, updated_at DESC, candidate_id);
+         CREATE INDEX IF NOT EXISTS module_curator_candidates_expires_idx ON {schema}.module_curator_candidates(expires_at);
+         CREATE TABLE IF NOT EXISTS {schema}.module_curator_approvals (
+            approval_id TEXT PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE, candidate_id TEXT NOT NULL,
+            actor_id TEXT, approved_at TEXT NOT NULL, record_json JSONB NOT NULL);
+         CREATE INDEX IF NOT EXISTS module_curator_approvals_candidate_idx ON {schema}.module_curator_approvals(candidate_id, approved_at DESC, approval_id);
+         CREATE INDEX IF NOT EXISTS module_curator_approvals_actor_idx ON {schema}.module_curator_approvals(actor_id, approved_at DESC, approval_id);
+         CREATE TABLE IF NOT EXISTS {schema}.module_curator_snapshot_refs (
+            snapshot_id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, status TEXT NOT NULL,
+            created_at TEXT NOT NULL, record_json JSONB NOT NULL);
+         CREATE INDEX IF NOT EXISTS module_curator_snapshots_candidate_idx ON {schema}.module_curator_snapshot_refs(candidate_id, created_at DESC, snapshot_id);
+         CREATE TABLE IF NOT EXISTS {schema}.module_curator_mutations (
+            mutation_id TEXT PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE, candidate_id TEXT NOT NULL,
+            snapshot_id TEXT NOT NULL, actor_id TEXT, status TEXT NOT NULL, revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL, created_at TEXT NOT NULL, applied_at TEXT, rolled_back_at TEXT);
+         CREATE INDEX IF NOT EXISTS module_curator_mutations_candidate_idx ON {schema}.module_curator_mutations(candidate_id, created_at DESC, mutation_id);
+         CREATE INDEX IF NOT EXISTS module_curator_mutations_status_idx ON {schema}.module_curator_mutations(status, created_at DESC, mutation_id);
+         CREATE INDEX IF NOT EXISTS module_curator_mutations_snapshot_idx ON {schema}.module_curator_mutations(snapshot_id);
+         CREATE INDEX IF NOT EXISTS module_curator_mutations_actor_idx ON {schema}.module_curator_mutations(actor_id, created_at DESC, mutation_id);
+         CREATE TABLE IF NOT EXISTS {schema}.module_curator_audit_receipts (
+            sequence BIGSERIAL PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE, correlation_id TEXT,
+            idempotency_key TEXT, profile_id TEXT, session_id TEXT, candidate_id TEXT, mutation_id TEXT,
+            activity_kind TEXT NOT NULL, outcome TEXT NOT NULL, reason_code TEXT, occurred_at TEXT NOT NULL,
+            record_json JSONB NOT NULL, UNIQUE(activity_kind, idempotency_key));
+         CREATE INDEX IF NOT EXISTS module_curator_audit_candidate_idx ON {schema}.module_curator_audit_receipts(candidate_id, sequence);
+         CREATE INDEX IF NOT EXISTS module_curator_audit_mutation_idx ON {schema}.module_curator_audit_receipts(mutation_id, sequence);
+         CREATE INDEX IF NOT EXISTS module_curator_audit_profile_idx ON {schema}.module_curator_audit_receipts(profile_id, sequence);
+         CREATE INDEX IF NOT EXISTS module_curator_audit_session_idx ON {schema}.module_curator_audit_receipts(session_id, sequence);
+         CREATE INDEX IF NOT EXISTS module_curator_audit_kind_idx ON {schema}.module_curator_audit_receipts(activity_kind, sequence);
+         CREATE INDEX IF NOT EXISTS module_curator_audit_time_idx ON {schema}.module_curator_audit_receipts(occurred_at, sequence);"
+    ))
+    .map_err(|error| postgres_error("create typed PostgreSQL curator governance tables", error))
 }
 
 fn apply_postgres_chat_event_log(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {

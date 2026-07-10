@@ -210,6 +210,16 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         ],
     },
     RepositoryGroupDescriptor {
+        group_id: "curator_governance",
+        label: "Curator Governance",
+        correctness_sensitive: true,
+        backend_requirements: &[TXN, JSON, SIZE, PLAN],
+        notes: &[
+            "Owns typed candidate, approval, snapshot-reference, mutation, rollback, and audit receipt records.",
+            "Filesystem changes remain a capability boundary, while revisions, idempotency, and terminal outcomes are transactional Rust authority.",
+        ],
+    },
+    RepositoryGroupDescriptor {
         group_id: "bindings",
         label: "Bindings",
         correctness_sensitive: true,

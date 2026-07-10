@@ -464,6 +464,36 @@ impl PostgresBackendStore {
             &format!("DELETE FROM {schema}.module_roleplay_imports WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"),
             &[&profile_id.0],
         )?;
+        for (table, predicate) in [
+            (
+                "module_curator_approvals",
+                "candidate_id IN (SELECT candidate_id FROM {schema}.module_curator_candidates WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))",
+            ),
+            (
+                "module_curator_snapshot_refs",
+                "candidate_id IN (SELECT candidate_id FROM {schema}.module_curator_candidates WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))",
+            ),
+            (
+                "module_curator_mutations",
+                "candidate_id IN (SELECT candidate_id FROM {schema}.module_curator_candidates WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))",
+            ),
+            (
+                "module_curator_audit_receipts",
+                "profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+            ),
+            (
+                "module_curator_candidates",
+                "profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+            ),
+        ] {
+            postgres_purge_delete(
+                &mut tx,
+                &mut counts,
+                table,
+                &format!("DELETE FROM {schema}.{table} WHERE {}", predicate.replace("{schema}", &schema)),
+                &[&profile_id.0],
+            )?;
+        }
         postgres_purge_delete(&mut tx, &mut counts, "module_roleplay_session_metadata", &format!("DELETE FROM {schema}.module_roleplay_session_metadata WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"), &[&profile_id.0])?;
         postgres_purge_delete(
             &mut tx,

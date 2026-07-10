@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 33;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 34;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -183,6 +183,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 33,
         description: "add typed roleplay character persona session and import records",
         apply: repos::roleplay_records::migrate_v33_add_roleplay_records,
+    },
+    SchemaMigration {
+        version: 34,
+        description: "add typed curator governance records and audit receipts",
+        apply: repos::curator::migrate_v34_add_curator_governance,
     },
 ];
 
@@ -1914,6 +1919,18 @@ fn apply_module_schema_migration_in_tx(
             }
             repos::roleplay_records::migrate_v33_add_roleplay_records(tx)
         }
+        "curator" => {
+            if bundle.schema_version != 1 {
+                return Err(CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!(
+                        "curator schema version {} has no migration implementation",
+                        bundle.schema_version
+                    ),
+                ));
+            }
+            repos::curator::migrate_v34_add_curator_governance(tx)
+        }
         module_id => Err(CoreError::new(
             CoreErrorKind::PersistenceFailure,
             format!("module {module_id} has no registered migration implementation"),
@@ -2235,6 +2252,8 @@ mod tests {
         assert!(table_exists(&db_path, "module_roleplay_lore_recall_traces"));
         assert!(table_exists(&db_path, "module_roleplay_lore_layer_config"));
         assert!(table_exists(&db_path, "module_roleplay_lore_records_fts"));
+        assert!(table_exists(&db_path, "module_curator_candidates"));
+        assert!(table_exists(&db_path, "module_curator_audit_receipts"));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_scope_key"
@@ -2259,8 +2278,8 @@ mod tests {
             "idx_module_simple_kv_entries_expires_at"
         ));
         let installed = store.installed_module_schemas().unwrap();
-        assert_eq!(installed.len(), 2);
-        for module_id in ["roleplay", "simple_kv"] {
+        assert_eq!(installed.len(), 3);
+        for module_id in ["curator", "roleplay", "simple_kv"] {
             let record = installed
                 .iter()
                 .find(|record| record.module_id.as_str() == module_id)

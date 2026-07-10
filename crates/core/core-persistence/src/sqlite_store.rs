@@ -464,6 +464,88 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn apply_curator_governance_write(
+        &self,
+        write: &CuratorGovernanceWrite,
+    ) -> CoreResult<CuratorGovernanceWriteResult> {
+        match self {
+            Self::Sqlite(store) => store.apply_curator_governance_write(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.apply_curator_governance_write(write),
+        }
+    }
+
+    pub fn get_curator_candidate(
+        &self,
+        candidate_id: &str,
+    ) -> CoreResult<Option<CuratorCandidateRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_curator_candidate(candidate_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_curator_candidate(candidate_id),
+        }
+    }
+
+    pub fn list_curator_candidates(
+        &self,
+        query: &CuratorCandidateQuery,
+    ) -> CoreResult<ExactPage<CuratorCandidateRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_curator_candidates(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_curator_candidates(query),
+        }
+    }
+
+    pub fn get_curator_mutation(
+        &self,
+        mutation_id: &str,
+    ) -> CoreResult<Option<CuratorMutationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_curator_mutation(mutation_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_curator_mutation(mutation_id),
+        }
+    }
+
+    pub fn list_curator_mutations(
+        &self,
+        query: &CuratorMutationQuery,
+    ) -> CoreResult<ExactPage<CuratorMutationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_curator_mutations(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_curator_mutations(query),
+        }
+    }
+
+    pub fn list_curator_audit_receipts(
+        &self,
+        query: &CuratorAuditQuery,
+    ) -> CoreResult<ExactPage<CuratorAuditReceiptRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_curator_audit_receipts(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_curator_audit_receipts(query),
+        }
+    }
+
+    pub fn purge_curator_profile(&self, profile_id: &str) -> CoreResult<CuratorPurgeReport> {
+        match self {
+            Self::Sqlite(store) => store.purge_curator_profile(profile_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.purge_curator_profile(profile_id),
+        }
+    }
+
+    pub fn purge_curator_session(&self, session_id: &str) -> CoreResult<CuratorPurgeReport> {
+        match self {
+            Self::Sqlite(store) => store.purge_curator_session(session_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.purge_curator_session(session_id),
+        }
+    }
+
     pub fn put_roleplay_character(
         &self,
         write: &RoleplayCharacterWrite,
