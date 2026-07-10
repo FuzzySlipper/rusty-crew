@@ -1,8 +1,4 @@
-import type {
-  AgentMessage,
-  SessionId,
-  SessionState,
-} from "@rusty-crew/contracts";
+import type { SessionId, SessionState } from "@rusty-crew/contracts";
 import type {
   AdminApiEnvelope,
   AdminErrorCode,
@@ -35,21 +31,16 @@ export interface RustyViewChatRouteRequest {
 
 export interface RustyViewChatContext {
   listSessions(): Promise<SessionState[]>;
-  projectBodyStateJson(sessionId: SessionId): Promise<Uint8Array>;
   effectiveSessionDefaults?(
     session: SessionState,
   ):
     | Promise<Record<string, unknown> | undefined>
     | Record<string, unknown>
     | undefined;
-  listChatEvents?(
-    session: SessionState,
-    cursor: string | undefined,
-    limit: number,
-  ): Promise<readonly ChatEvent[]>;
-  chatReadModelPage?(
-    input: ChatReadModelPageInput,
-  ): Promise<ChatReadModelEventPage>;
+  querySessionSummaries?(
+    input: ChatSessionSummaryQuery,
+  ): Promise<ChatSessionReadFactsPage>;
+  readSession?(input: ChatSessionReadInput): Promise<ChatSessionReadProjection>;
   executeCommand?(
     input: ExecuteChatCommandInput,
   ): Promise<ExecuteChatCommandResult>;
@@ -125,8 +116,6 @@ export interface RustyViewChatContext {
   now?: () => string;
 }
 
-const CHAT_SUMMARY_EVENT_LIMIT = 1_000;
-
 export interface ChatSessionSummary {
   session_id: string;
   agent_id: string;
@@ -155,6 +144,53 @@ export interface ChatSessionOpenResult {
   message_slots?: MessageSlotRecord[];
   latest_cursor: string;
   has_more_before: boolean;
+}
+
+export type ChatReadModelSource =
+  | "event_log"
+  | "message_slots"
+  | "pending_messages"
+  | "empty";
+
+export interface ChatSessionReadFacts {
+  session: SessionState;
+  message_count: number;
+  latest_cursor: string;
+  source: ChatReadModelSource;
+}
+
+export interface ChatSessionReadFactsPage {
+  items: ChatSessionReadFacts[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+}
+
+export interface ChatSessionSummaryQuery {
+  profileId?: string;
+  status?: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ChatSessionReadInput {
+  sessionId: SessionId;
+  cursor?: string | null;
+  limit: number;
+  includeAlternates: boolean;
+}
+
+export interface ChatSessionReadProjection {
+  session: SessionState;
+  events: ChatEvent[];
+  latest_cursor: string;
+  has_more: boolean;
+  has_more_before: boolean;
+  total: number;
+  message_count: number;
+  source: ChatReadModelSource;
+  message_slots: MessageSlotPage;
 }
 
 export interface ChatEvent {
@@ -963,10 +999,6 @@ export interface RemoveDataBankScopeInput {
   requestId: string;
 }
 
-interface RawBodyStateJson {
-  pending_messages?: AgentMessage[];
-}
-
 export async function handleRustyViewChatRequest(
   request: RustyViewChatRouteRequest,
   context: RustyViewChatContext,
@@ -1157,8 +1189,7 @@ export async function handleRustyViewChatRequest(
   }
 
   if (url.pathname === "/v1/chat/sessions") {
-    const sessions = await context.listSessions();
-    return success(requestId, await sessionPage(sessions, context, url));
+    return success(requestId, await sessionPage(context, url));
   }
 
   if (url.pathname === "/v1/chat/commands") {
@@ -2119,7 +2150,6 @@ async function handleRemoveDataBankScope(
 }
 
 async function sessionPage(
-  sessions: SessionState[],
   context: RustyViewChatContext,
   url: URL,
 ): Promise<ChatSessionPage> {
@@ -2127,47 +2157,32 @@ async function sessionPage(
   const offset = pageOffset(url);
   const profileId = trimmedParam(url, "profile_id");
   const status = trimmedParam(url, "status");
-  const filtered = sessions
-    .filter(
-      (session) => profileId === undefined || session.profileId === profileId,
-    )
-    .filter((session) => status === undefined || session.status === status)
-    .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+  if (!context.querySessionSummaries) {
+    throw new Error("chat session summary operation is not configured");
+  }
+  const page = await context.querySessionSummaries({
+    ...(profileId === undefined ? {} : { profileId }),
+    ...(status === undefined ? {} : { status }),
+    limit,
+    offset,
+  });
   const items = await Promise.all(
-    filtered.slice(offset, offset + limit).map(async (session) => {
-      const stats = await chatEventStats(session, context);
-      const slotCount =
-        stats.hasLoggedEvents || context.listMessageSlots === undefined
-          ? undefined
-          : (
-              await context.listMessageSlots({
-                session,
-                includeAlternates: false,
-                limit: CHAT_SUMMARY_EVENT_LIMIT,
-                offset: 0,
-              })
-            ).items.length;
-      return sessionSummary(session, {
-        messageCount: stats.hasLoggedEvents
-          ? stats.messageCount
-          : (slotCount ?? stats.messageCount),
-        latestCursor:
-          stats.latestCursor ??
-          (slotCount === undefined
-            ? undefined
-            : cursorFor(session.sessionId, slotCount)),
-        effectiveDefaults: await context.effectiveSessionDefaults?.(session),
-      });
-    }),
+    page.items.map(async (facts) =>
+      sessionSummary(facts.session, {
+        messageCount: facts.message_count,
+        latestCursor: facts.latest_cursor,
+        effectiveDefaults: await context.effectiveSessionDefaults?.(
+          facts.session,
+        ),
+      }),
+    ),
   );
   return {
     items,
-    total: filtered.length,
-    limit,
-    offset,
-    ...(offset + items.length < filtered.length
-      ? { nextOffset: offset + items.length }
-      : {}),
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+    ...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }),
   };
 }
 
@@ -2178,87 +2193,36 @@ async function openSessionResult(
   cursor: string | undefined,
   includeAlternates: boolean,
 ): Promise<ChatSessionOpenResult> {
-  const now = context.now?.() ?? new Date().toISOString();
-  const pendingMessages = await pendingMessagesForSession(session, context);
-  const stats = await chatEventStats(session, context);
+  if (!context.readSession) {
+    throw new Error("chat session read operation is not configured");
+  }
   const eventLimit = Math.max(0, limit - 1);
-  const loggedEvents =
-    eventLimit === 0
-      ? []
-      : ((await context.listChatEvents?.(session, cursor, eventLimit)) ?? []);
-  const durableReadModelPage =
-    loggedEvents.length > 0 || eventLimit === 0
-      ? undefined
-      : await context
-          .chatReadModelPage?.({
-            session,
-            cursor,
-            limit: eventLimit,
-            requestId: "open-session-read-model",
-          })
-          .catch(() => undefined);
-  const durableEvents =
-    durableReadModelPage !== undefined && durableReadModelPage.items.length > 0
-      ? durableReadModelPage
-      : undefined;
-  const messageSlots = await context
-    .listMessageSlots?.({
-      session,
-      includeAlternates,
-      limit,
-      offset: 0,
-    })
-    .then((page) => page.items)
-    .catch(() => undefined);
-  const fallbackMessageCount = messageSlots?.length ?? pendingMessages.length;
-  const fallbackLatestCursor = cursorFor(
-    session.sessionId,
-    fallbackMessageCount,
-  );
+  const read = await context.readSession({
+    sessionId: session.sessionId,
+    cursor,
+    limit: Math.max(eventLimit, 1),
+    includeAlternates,
+  });
+  const summary = sessionSummary(read.session, {
+    messageCount: read.message_count,
+    latestCursor: read.latest_cursor,
+    effectiveDefaults: await context.effectiveSessionDefaults?.(read.session),
+  });
   const snapshot: ChatEvent = {
-    event_id: eventId(session.sessionId, 0),
-    session_id: session.sessionId,
+    event_id: eventId(read.session.sessionId, 0),
+    session_id: read.session.sessionId,
     sequence_id: 0,
-    created_at: session.lastActiveAt,
+    created_at: read.session.lastActiveAt,
     kind: "session_snapshot",
-    payload: {
-      session: sessionSummary(session, {
-        messageCount: stats.hasLoggedEvents
-          ? stats.messageCount
-          : fallbackMessageCount,
-        latestCursor: stats.latestCursor ?? fallbackLatestCursor,
-        effectiveDefaults: await context.effectiveSessionDefaults?.(session),
-      }),
-    },
+    payload: { session: summary },
   };
-  const events: ChatEvent[] = [
-    snapshot,
-    ...(loggedEvents.length > 0
-      ? loggedEvents
-      : durableEvents !== undefined
-        ? durableEvents.items
-        : messageSlots !== undefined && messageSlots.length > 0
-          ? messageSlotEvents(session, messageSlots, cursor)
-          : pendingMessages.map((message, index) =>
-              messageCreatedEvent(session, message, index + 1, now),
-            )),
-  ].slice(0, limit);
-  const latestSequence = events.at(-1)?.sequence_id ?? 0;
-  const hasMoreBefore =
-    cursor === undefined &&
-    (loggedEvents.at(0)?.sequence_id ?? Number.POSITIVE_INFINITY) > 1;
+  const events: ChatEvent[] = [snapshot, ...read.events].slice(0, limit);
   return {
-    session: sessionSummary(session, {
-      messageCount: stats.hasLoggedEvents
-        ? stats.messageCount
-        : fallbackMessageCount,
-      latestCursor: stats.latestCursor ?? fallbackLatestCursor,
-      effectiveDefaults: await context.effectiveSessionDefaults?.(session),
-    }),
+    session: summary,
     events,
-    ...(messageSlots === undefined ? {} : { message_slots: messageSlots }),
-    latest_cursor: cursorFor(session.sessionId, latestSequence),
-    has_more_before: hasMoreBefore,
+    message_slots: read.message_slots.items,
+    latest_cursor: read.latest_cursor,
+    has_more_before: read.has_more_before,
   };
 }
 
@@ -2268,125 +2232,20 @@ async function eventPageResult(
   limit: number,
   cursor: string | undefined,
 ): Promise<{ items: ChatEvent[]; latest_cursor: string; has_more: boolean }> {
-  const pageProbeLimit = limit + 1;
-  const loggedEvents =
-    (await context.listChatEvents?.(session, cursor, pageProbeLimit)) ?? [];
-  const durableEvents =
-    loggedEvents.length > 0
-      ? undefined
-      : await context
-          .chatReadModelPage?.({
-            session,
-            cursor,
-            limit,
-            requestId: "event-page-read-model",
-          })
-          .catch(() => undefined);
-  const rawEvents =
-    loggedEvents.length > 0
-      ? loggedEvents
-      : durableEvents !== undefined
-        ? durableEvents.items
-        : context.listMessageSlots !== undefined
-          ? messageSlotEvents(
-              session,
-              (
-                await context.listMessageSlots({
-                  session,
-                  includeAlternates: false,
-                  limit: pageProbeLimit,
-                  offset: 0,
-                })
-              ).items,
-              cursor,
-            )
-          : (await pendingMessagesForSession(session, context)).map(
-              (message, index) =>
-                messageCreatedEvent(
-                  session,
-                  message,
-                  cursorSequence(cursor, session.sessionId) + index + 1,
-                  context.now?.() ?? new Date().toISOString(),
-                ),
-            );
-  const events = rawEvents.slice(0, limit);
-  const latestSequence =
-    events.at(-1)?.sequence_id ?? cursorSequence(cursor, session.sessionId);
-  return {
-    items: [...events],
-    latest_cursor:
-      durableEvents?.latest_cursor ??
-      cursorFor(session.sessionId, latestSequence),
-    has_more: durableEvents?.has_more ?? rawEvents.length > limit,
-  };
-}
-
-function messageSlotEvents(
-  session: SessionState,
-  slots: readonly MessageSlotRecord[],
-  cursor: string | undefined,
-): ChatEvent[] {
-  const after = cursorSequence(cursor, session.sessionId);
-  return [...slots]
-    .sort((left, right) => left.created_at.localeCompare(right.created_at))
-    .map((slot, index) => {
-      const variant =
-        slot.active_variant_id === undefined || slot.active_variant_id === null
-          ? slot.primary
-          : (slot.alternates.find(
-              (candidate) => candidate.variant_id === slot.active_variant_id,
-            ) ?? slot.primary);
-      return durableMessageEvent(session, variant.message, index + 1);
-    })
-    .filter((event) => event.sequence_id > after);
-}
-
-function durableMessageEvent(
-  session: SessionState,
-  message: DurableMessageRecord,
-  sequence: number,
-): ChatEvent {
-  return {
-    event_id: eventId(session.sessionId, sequence),
-    session_id: session.sessionId,
-    sequence_id: sequence,
-    created_at: message.created_at,
-    kind: "message_created",
-    payload: {
-      message_id: message.message_id,
-      role:
-        message.author_role === "assistant" ||
-        message.author_id === session.agentId
-          ? "assistant"
-          : "user",
-      body: message.body,
-      correlation_id: recordString(message.metadata_json, "correlation_id"),
-      source: "durable_message_slot",
-      slot_status: message.status,
-    },
-  };
-}
-
-function recordString(value: unknown, key: string): string | undefined {
-  if (!isRecord(value)) return undefined;
-  const field = value[key];
-  return typeof field === "string" ? field : undefined;
-}
-
-async function pendingMessagesForSession(
-  session: SessionState,
-  context: RustyViewChatContext,
-): Promise<AgentMessage[]> {
-  try {
-    const raw = context.projectBodyStateJson(session.sessionId);
-    const bytes = await raw;
-    const parsed = JSON.parse(
-      new TextDecoder().decode(bytes),
-    ) as RawBodyStateJson;
-    return parsed.pending_messages ?? [];
-  } catch {
-    return [];
+  if (!context.readSession) {
+    throw new Error("chat session read operation is not configured");
   }
+  const read = await context.readSession({
+    sessionId: session.sessionId,
+    cursor,
+    limit,
+    includeAlternates: false,
+  });
+  return {
+    items: read.events,
+    latest_cursor: read.latest_cursor,
+    has_more: read.has_more,
+  };
 }
 
 function sessionSummary(
@@ -2419,74 +2278,12 @@ function sessionSummary(
   };
 }
 
-async function chatEventStats(
-  session: SessionState,
-  context: RustyViewChatContext,
-): Promise<{
-  hasLoggedEvents: boolean;
-  latestCursor?: string;
-  messageCount: number;
-}> {
-  const events =
-    (await context.listChatEvents?.(
-      session,
-      undefined,
-      CHAT_SUMMARY_EVENT_LIMIT,
-    )) ?? [];
-  return {
-    hasLoggedEvents: events.length > 0,
-    latestCursor: events.at(-1)?.event_id,
-    messageCount: countChatMessages(events),
-  };
-}
-
-function countChatMessages(events: readonly ChatEvent[]): number {
-  return events.filter(
-    (event) =>
-      event.kind === "message_created" ||
-      event.kind === "assistant_message_completed",
-  ).length;
-}
-
-function messageCreatedEvent(
-  session: SessionState,
-  message: AgentMessage,
-  sequence: number,
-  now: string,
-): ChatEvent {
-  const role = message.from === session.agentId ? "assistant" : "user";
-  return {
-    event_id: eventId(session.sessionId, sequence),
-    session_id: session.sessionId,
-    sequence_id: sequence,
-    created_at: now,
-    kind: "message_created",
-    payload: {
-      message_id: `pending:${message.correlationId ?? sequence}`,
-      role,
-      body: message.body,
-      correlation_id: message.correlationId,
-    },
-  };
-}
-
 function eventId(sessionId: string, sequence: number): string {
   return `${sessionId}:${sequence}`;
 }
 
 function cursorFor(sessionId: string, sequence: number): string {
   return eventId(sessionId, sequence);
-}
-
-export function cursorSequence(
-  cursor: string | undefined,
-  sessionId: string,
-): number {
-  if (!cursor) return 0;
-  const prefix = `${sessionId}:`;
-  if (!cursor.startsWith(prefix)) return 0;
-  const sequence = Number(cursor.slice(prefix.length));
-  return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : 0;
 }
 
 function cursorParam(

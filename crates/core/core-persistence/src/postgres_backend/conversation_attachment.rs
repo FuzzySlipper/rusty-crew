@@ -1,6 +1,7 @@
 //! PostgreSQL conversation, message-variant, attachment, and data-bank repositories.
 
 use super::*;
+use crate::repos::conversations::inherit_alternate_lineage;
 use crate::{ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult};
 
 const CHAT_SLOT_RECEIPT_SCOPE_TYPE: &str = "chat_message_ingest";
@@ -684,8 +685,10 @@ impl PostgresBackendStore {
             &request.session_id,
             &request.slot_id,
         )?;
+        let slot = load_message_slot_in_tx(&mut tx, &schema, &request.slot_id, true)?;
         let mut variant = request.variant.clone();
         variant.ordinal = next_alternate_variant_ordinal_in_tx(&mut tx, &schema, &request.slot_id)?;
+        inherit_alternate_lineage(&mut variant, &slot.primary);
         save_message_variant_in_tx(&mut tx, &schema, &variant)?;
         let record = load_message_variant_in_tx(&mut tx, &schema, &variant.variant_id)?;
         tx.commit().map_err(|error| {

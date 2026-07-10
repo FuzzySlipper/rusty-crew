@@ -9324,6 +9324,10 @@ mod tests {
             &self,
             request: &CreateChatMessageSlotRequest,
         ) -> CoreResult<CreateChatMessageSlotResult>;
+        fn create_chat_message_variant(
+            &self,
+            request: &CreateChatMessageVariantRequest,
+        ) -> CoreResult<CreateChatMessageVariantResult>;
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()>;
         fn save_message_variant(
             &self,
@@ -9769,6 +9773,13 @@ mod tests {
             request: &CreateChatMessageSlotRequest,
         ) -> CoreResult<CreateChatMessageSlotResult> {
             CoordinationStore::create_chat_message_slot(self, request)
+        }
+
+        fn create_chat_message_variant(
+            &self,
+            request: &CreateChatMessageVariantRequest,
+        ) -> CoreResult<CreateChatMessageVariantResult> {
+            CoordinationStore::create_chat_message_variant(self, request)
         }
 
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
@@ -10305,6 +10316,13 @@ mod tests {
             request: &CreateChatMessageSlotRequest,
         ) -> CoreResult<CreateChatMessageSlotResult> {
             PostgresBackendStore::create_chat_message_slot(self, request)
+        }
+
+        fn create_chat_message_variant(
+            &self,
+            request: &CreateChatMessageVariantRequest,
+        ) -> CoreResult<CreateChatMessageVariantResult> {
+            PostgresBackendStore::create_chat_message_variant(self, request)
         }
 
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
@@ -11703,7 +11721,7 @@ mod tests {
                 .iter()
                 .find(|count| count.table == "message_variants")
                 .map(|count| count.rows),
-            Some(5)
+            Some(6)
         );
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "conversations_attachments"
@@ -13107,6 +13125,22 @@ mod tests {
         assert!(replayed.conflict.is_none());
         assert_eq!(replayed.slot, created.slot);
         assert_eq!(replayed.branch, created.branch);
+        let mut alternate = ingest.primary_variant.clone();
+        alternate.variant_id = MessageVariantId::new("variant-chat-ingest-alternate");
+        alternate.source = MessageVariantSource::Alternate;
+        alternate.message.message_id = MessageId::new("message-chat-ingest-alternate");
+        alternate.message.branch_id = None;
+        let inherited = store
+            .create_chat_message_variant(&CreateChatMessageVariantRequest {
+                session_id: ingest.slot.session_id.clone(),
+                slot_id: ingest.slot.slot_id.clone(),
+                variant: alternate,
+            })
+            .unwrap();
+        assert_eq!(
+            inherited.variant.message.branch_id,
+            Some(ingest.branch_id.clone())
+        );
         let ingest_slots = store
             .query_message_slots(&MessageSlotQuery {
                 session_id: Some(SessionId::new("session-chat-ingest")),
@@ -13158,8 +13192,8 @@ mod tests {
                 },
             })
             .unwrap();
-        assert_eq!(variant_page.total, 1);
-        assert_eq!(variant_page.next_offset, None);
+        assert_eq!(variant_page.total, 2);
+        assert_eq!(variant_page.next_offset, Some(1));
 
         seed_conversation_base_fixture(store, "session-conversation", "slot-conversation");
 

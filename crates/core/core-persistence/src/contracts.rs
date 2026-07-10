@@ -537,6 +537,7 @@ pub struct ChatSessionReadResult {
     pub has_more: bool,
     pub has_more_before: bool,
     pub total: u64,
+    pub message_count: u64,
     pub source: ChatReadModelSource,
     pub message_slots: ExactPage<MessageSlotRecord>,
 }

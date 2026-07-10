@@ -243,11 +243,12 @@ import {
   listRustyViewDataBankScopes,
   listRustyViewMessageSlots,
   listRustyViewMessageVariants,
+  queryRustyViewChatSessionSummaries,
+  readRustyViewChatSession,
   removeRustyViewAttachment,
   removeRustyViewDataBankScope,
   reorderRustyViewMessageVariants,
   resolveRustyViewConversationJump,
-  rustyViewChatReadModelPage,
   rustyViewConversationTree,
   rustyViewProviderRequestDebugDetail,
   rustyViewSessionContextUsage,
@@ -1183,7 +1184,7 @@ async function handleHttpRequest(
       stream: {
         listSessions: () => state.bridge.listSessions(),
         streamReplayEvents: (session, cursor, streamUrl) =>
-          streamReplayEvents(state, session, cursor, streamUrl),
+          streamReplayEvents(chatOperations, session, cursor, streamUrl),
         subscribersForSession: (sessionId) =>
           chatSubscribersFromModule(chatEventLogContext(state), sessionId),
         deleteSubscribersForSession: (sessionId) =>
@@ -1193,18 +1194,10 @@ async function handleHttpRequest(
       },
       chat: {
         listSessions: () => state.bridge.listSessions(),
-        projectBodyStateJson: (sessionId) =>
-          state.bridge.projectBodyStateJson(sessionId),
         effectiveSessionDefaults: effectiveDefaultsForChatSession,
-        listChatEvents: (session, cursor, limit) =>
-          listChatEventsAfterCursorFromModule(
-            chatEventLogContext(state),
-            session,
-            cursor,
-            limit,
-          ),
-        chatReadModelPage: (input) =>
-          rustyViewChatReadModelPage(chatOperations, input),
+        querySessionSummaries: (input) =>
+          queryRustyViewChatSessionSummaries(chatOperations, input),
+        readSession: (input) => readRustyViewChatSession(chatOperations, input),
         getToolCallDebugDetail: (input) =>
           rustyViewToolCallDebugDetail(chatOperations, input),
         getProviderRequestDebugDetail: (input) =>
@@ -4674,19 +4667,20 @@ function boundedPercent(value: number | undefined): number | undefined {
 }
 
 async function streamReplayEvents(
-  state: ServiceState,
+  context: RustyViewChatOperationsContext,
   session: SessionState,
   cursor: string | undefined,
   url: URL,
 ): Promise<readonly ChatEvent[]> {
   const limit = optionalInteger(url.searchParams.get("limit")) ?? 500;
   const after = chatCursorSequence(cursor, session.sessionId);
-  const events = await listChatEventsAfterCursorFromModule(
-    chatEventLogContext(state),
-    session,
+  const read = await readRustyViewChatSession(context, {
+    sessionId: session.sessionId,
     cursor,
-    Math.min(Math.max(limit, 1), 1_000),
-  );
+    limit: Math.min(Math.max(limit, 1), 1_000),
+    includeAlternates: false,
+  });
+  const events = read.events;
   if (after > 0 || cursor === undefined) return events;
   return [
     {

@@ -60,7 +60,7 @@ fn query_chat_events(
         .query_one(
             &format!(
                 "SELECT COUNT(*), COALESCE(MAX(sequence_id), 0),
-                        COALESCE(SUM(CASE WHEN kind = 'message_created' THEN 1 ELSE 0 END), 0)
+                        COALESCE(SUM(CASE WHEN kind IN ('message_created', 'assistant_message_completed') THEN 1 ELSE 0 END), 0)
                  FROM {schema}.chat_events WHERE session_id = $1"
             ),
             &[&query.session_id.0],

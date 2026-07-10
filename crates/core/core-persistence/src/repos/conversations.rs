@@ -111,8 +111,10 @@ impl CoordinationStore {
             .unchecked_transaction()
             .map_err(|error| persistence_error("begin create chat message variant", error))?;
         ensure_slot_belongs_to_session_in_tx(&tx, &request.session_id, &request.slot_id)?;
+        let slot = load_message_slot_in_tx(&tx, &request.slot_id, true)?;
         let mut variant = request.variant.clone();
         variant.ordinal = next_alternate_variant_ordinal_in_tx(&tx, &request.slot_id)?;
+        inherit_alternate_lineage(&mut variant, &slot.primary);
         save_message_variant_in_tx(&tx, &variant)?;
         let record = load_message_variant_in_tx(&tx, &variant.variant_id)?;
         tx.commit()
@@ -1017,6 +1019,30 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<ContextCompactionArtifact>> {
         let conn = self.conn()?;
         list_context_compaction_artifacts(&conn, query)
+    }
+}
+
+pub(crate) fn inherit_alternate_lineage(
+    variant: &mut MessageVariantWrite,
+    primary: &MessageVariantRecord,
+) {
+    if variant.message.branch_id.is_none() {
+        variant
+            .message
+            .branch_id
+            .clone_from(&primary.message.branch_id);
+    }
+    if variant.message.parent_message_id.is_none() {
+        variant
+            .message
+            .parent_message_id
+            .clone_from(&primary.message.parent_message_id);
+    }
+    if variant.message.previous_message_id.is_none() {
+        variant
+            .message
+            .previous_message_id
+            .clone_from(&primary.message.previous_message_id);
     }
 }
 

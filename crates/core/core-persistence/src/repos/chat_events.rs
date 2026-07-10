@@ -90,7 +90,7 @@ fn query_chat_events(conn: &Connection, query: &ChatEventLogQuery) -> CoreResult
     let (total, latest_sequence, message_count): (i64, i64, i64) = conn
         .query_row(
             "SELECT COUNT(*), COALESCE(MAX(sequence_id), 0),
-                    COALESCE(SUM(CASE WHEN kind = 'message_created' THEN 1 ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN kind IN ('message_created', 'assistant_message_completed') THEN 1 ELSE 0 END), 0)
              FROM chat_events WHERE session_id = ?1",
             params![query.session_id.0],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),

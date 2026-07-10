@@ -34,8 +34,10 @@ import type {
   AttachmentPage,
   AttachmentRecord,
   ChatEvent,
-  ChatReadModelEventPage,
-  ChatReadModelPageInput,
+  ChatSessionReadFactsPage,
+  ChatSessionReadInput,
+  ChatSessionReadProjection,
+  ChatSessionSummaryQuery,
   ChatSendMessageInput,
   ConversationBranchMutationResult,
   ConversationBranchRecord,
@@ -81,7 +83,6 @@ import type {
   SendChatMessageResult,
   SessionContextUsageResult,
   ToolCallDebugDetail,
-  TranscriptSearchResult,
   TranscriptSearchResultPage,
   UpdateConversationBranchHeadInput,
   UpdateConversationBranchHeadResult,
@@ -773,130 +774,75 @@ export async function listRustyViewMessageSlots(
   context: RustyViewChatOperationsContext,
   input: ListMessageSlotsInput,
 ): Promise<MessageSlotPage> {
-  const items = (await context.bridge.queryMessageSlots({
+  const page = await context.bridge.queryMessageSlotsPage({
     session_id: input.session.sessionId,
     include_alternates: input.includeAlternates,
     page: { limit: input.limit, offset: input.offset },
-  })) as MessageSlotRecord[];
-  return {
-    items,
-    total: input.offset + items.length,
-    limit: input.limit,
-    offset: input.offset,
-    ...(items.length >= input.limit
-      ? { nextOffset: input.offset + items.length }
-      : {}),
-  };
+  });
+  return publicExactPage(page as ExactPageWire<MessageSlotRecord>);
 }
 
-export async function rustyViewChatReadModelPage(
+export async function queryRustyViewChatSessionSummaries(
   context: RustyViewChatOperationsContext,
-  input: ChatReadModelPageInput,
-): Promise<ChatReadModelEventPage> {
-  return context.bridge.chatReadModelPage({
-    session_id: input.session.sessionId,
-    agent_id: input.session.agentId,
+  input: ChatSessionSummaryQuery,
+): Promise<ChatSessionReadFactsPage> {
+  const result = await context.bridge.queryChatSessionSummaries({
+    profile_id: input.profileId,
+    status: input.status,
+    page: { limit: input.limit, offset: input.offset },
+  });
+  return publicExactPage(result.page);
+}
+
+export async function readRustyViewChatSession(
+  context: RustyViewChatOperationsContext,
+  input: ChatSessionReadInput,
+): Promise<ChatSessionReadProjection> {
+  const result = await context.bridge.readChatSession({
+    session_id: input.sessionId,
     cursor: input.cursor ?? undefined,
     limit: input.limit,
-  }) as Promise<ChatReadModelEventPage>;
+    include_alternates: input.includeAlternates,
+  });
+  return {
+    session: result.session,
+    events: result.events as ChatEvent[],
+    latest_cursor: result.latest_cursor,
+    has_more: result.has_more,
+    has_more_before: result.has_more_before,
+    total: result.total,
+    message_count: result.message_count,
+    source: result.source,
+    message_slots: publicExactPage(
+      result.message_slots as ExactPageWire<MessageSlotRecord>,
+    ),
+  };
 }
 
 export async function searchRustyViewTranscript(
   context: RustyViewChatOperationsContext,
   input: SearchTranscriptInput,
 ): Promise<TranscriptSearchResultPage> {
-  const sessions =
-    input.scope === "current_session" && input.session
-      ? [input.session]
-      : (await context.bridge.listSessions()).filter(
-          (session) =>
-            (input.sessionId === undefined ||
-              session.sessionId === input.sessionId) &&
-            (input.profileId === undefined ||
-              session.profileId === input.profileId),
-        );
   const query = input.query.trim();
-  const loweredQuery = query.toLowerCase();
-  const results: TranscriptSearchResult[] = [];
-  for (const session of sessions) {
-    const slots = (await context.bridge.queryMessageSlots({
-      session_id: session.sessionId,
-      include_alternates: true,
-      page: { limit: 500, offset: 0 },
-    })) as MessageSlotRecord[];
-    for (const slot of slots) {
-      for (const variant of [slot.primary, ...slot.alternates]) {
-        if (variant.status === "deleted") continue;
-        const message = variant.message;
-        if (input.role !== undefined && message.author_role !== input.role) {
-          continue;
-        }
-        if (
-          input.createdAfter !== undefined &&
-          message.created_at < input.createdAfter
-        ) {
-          continue;
-        }
-        if (
-          input.createdBefore !== undefined &&
-          message.created_at > input.createdBefore
-        ) {
-          continue;
-        }
-        const matchIndex = message.body.toLowerCase().indexOf(loweredQuery);
-        if (matchIndex < 0) continue;
-        const snippet = transcriptSnippet(
-          message.body,
-          matchIndex,
-          query.length,
-        );
-        results.push({
-          result_id: stableChatRecordId(
-            "search-result",
-            `${session.sessionId}:${message.message_id}:${variant.variant_id}:${matchIndex}`,
-          ),
-          scope: input.scope,
-          session_id: session.sessionId,
-          slot_id: slot.slot_id,
-          variant_id: variant.variant_id,
-          message_id: message.message_id,
-          branch_id: message.branch_id ?? null,
-          author_role: message.author_role,
-          created_at: message.created_at,
-          snippet: snippet.text,
-          highlights: [
-            {
-              start: snippet.highlightStart,
-              end: snippet.highlightEnd,
-            },
-          ],
-          jump: {
-            session_id: session.sessionId,
-            target: { type: "message", message_id: message.message_id },
-            branch_id: message.branch_id ?? null,
-            message_id: message.message_id,
-            cursor: null,
-            snapshot_id: null,
-          },
-          source: "rust_coordination",
-        });
-      }
-    }
-  }
-  results.sort((left, right) =>
-    left.created_at === right.created_at
-      ? left.result_id.localeCompare(right.result_id)
-      : left.created_at.localeCompare(right.created_at),
-  );
-  const items = results.slice(input.offset, input.offset + input.limit);
+  const result = (await context.bridge.searchChatTranscript({
+    scope:
+      input.scope === "current_session"
+        ? "current_session"
+        : "all_conversations",
+    session_id: input.session?.sessionId ?? input.sessionId,
+    profile_id: input.profileId,
+    query,
+    author_role: input.role,
+    created_after: input.createdAfter,
+    created_before: input.createdBefore,
+    page: { limit: input.limit, offset: input.offset },
+  })) as {
+    page: ExactPageWire<TranscriptSearchResultPage["items"][number]>;
+  };
+  const page = publicExactPage(result.page);
   return {
-    items,
-    total: results.length,
-    limit: input.limit,
-    offset: input.offset,
-    ...(input.offset + items.length < results.length
-      ? { nextOffset: input.offset + items.length }
-      : {}),
+    ...page,
+    items: page.items.map((item) => ({ ...item, scope: input.scope })),
     query,
     scope: input.scope,
     source: "rust_coordination",
@@ -907,24 +853,22 @@ export async function rustyViewConversationTree(
   context: RustyViewChatOperationsContext,
   input: ConversationTreeInput,
 ): Promise<ConversationTreeProjection> {
-  const branches = (await context.bridge.queryConversationBranches({
+  const result = (await context.bridge.readConversationTree({
     session_id: input.session.sessionId,
+    include_snapshots: input.includeSnapshots,
     page: { limit: input.limit, offset: input.offset },
-  })) as ConversationBranchRecord[];
-  const snapshots = input.includeSnapshots
-    ? ((await context.bridge.queryConversationSnapshots({
-        session_id: input.session.sessionId,
-        page: { limit: input.limit, offset: input.offset },
-      })) as ConversationSnapshotRecord[])
-    : [];
-  const branchState = await getRustyViewConversationBranchState(context, {
-    session: input.session,
-  });
+    default_updated_at: context.now(),
+  })) as {
+    branches: ExactPageWire<ConversationBranchRecord>;
+    snapshots: ExactPageWire<ConversationSnapshotRecord>;
+    branch_state: ConversationBranchStateRecord;
+    active_branch_id?: string | null;
+  };
   return {
-    branches,
-    snapshots,
-    branch_state: branchState,
-    active_branch_id: branchState.active_branch_id,
+    branches: result.branches.items,
+    snapshots: result.snapshots.items,
+    branch_state: result.branch_state,
+    active_branch_id: result.active_branch_id,
   };
 }
 
@@ -1143,7 +1087,7 @@ export async function listRustyViewAttachments(
   context: RustyViewChatOperationsContext,
   input: ListAttachmentsInput,
 ): Promise<AttachmentPage> {
-  const items = (await context.bridge.queryAttachments({
+  const page = await context.bridge.queryAttachmentsPage({
     session_id: input.session.sessionId,
     message_id: input.messageId,
     scope_id: input.scopeId,
@@ -1151,16 +1095,8 @@ export async function listRustyViewAttachments(
     include_expired: false,
     expired_only: false,
     page: { limit: input.limit, offset: input.offset },
-  })) as AttachmentRecord[];
-  return {
-    items,
-    total: input.offset + items.length,
-    limit: input.limit,
-    offset: input.offset,
-    ...(items.length >= input.limit
-      ? { nextOffset: input.offset + items.length }
-      : {}),
-  };
+  });
+  return publicExactPage(page as ExactPageWire<AttachmentRecord>);
 }
 
 export async function removeRustyViewAttachment(
@@ -1225,20 +1161,12 @@ export async function listRustyViewDataBankScopes(
   context: RustyViewChatOperationsContext,
   input: ListDataBankScopesInput,
 ): Promise<DataBankScopePage> {
-  const items = (await context.bridge.queryDataBankScopes({
+  const page = await context.bridge.queryDataBankScopesPage({
     session_id: input.session.sessionId,
     include_removed: input.includeRemoved,
     page: { limit: input.limit, offset: input.offset },
-  })) as DataBankScopeRecord[];
-  return {
-    items,
-    total: input.offset + items.length,
-    limit: input.limit,
-    offset: input.offset,
-    ...(items.length >= input.limit
-      ? { nextOffset: input.offset + items.length }
-      : {}),
-  };
+  });
+  return publicExactPage(page as ExactPageWire<DataBankScopeRecord>);
 }
 
 export async function removeRustyViewDataBankScope(
@@ -1261,21 +1189,18 @@ export async function listRustyViewMessageVariants(
   context: RustyViewChatOperationsContext,
   input: ListMessageVariantsInput,
 ): Promise<MessageVariantPage> {
-  await requireMessageSlotForSession(
-    context,
-    input.session.sessionId,
-    input.slotId,
-  );
-  const items = (await context.bridge.queryMessageVariants({
+  const page = await context.bridge.queryMessageVariantsPage({
+    session_id: input.session.sessionId,
     slot_id: input.slotId,
     include_deleted: false,
     page: { limit: input.limit, offset: input.offset },
-  })) as MessageVariantRecord[];
+  });
+  const exact = publicExactPage(page as ExactPageWire<MessageVariantRecord>);
   return {
-    items,
-    total: input.offset + items.length,
-    limit: input.limit,
-    offset: input.offset,
+    items: exact.items,
+    total: exact.total,
+    limit: exact.limit,
+    offset: exact.offset,
   };
 }
 
@@ -1374,12 +1299,6 @@ export async function createRustyViewMessageVariant(
   context: RustyViewChatOperationsContext,
   input: CreateMessageVariantInput,
 ): Promise<MessageVariantMutationResult> {
-  const slot = await requireMessageSlotForSession(
-    context,
-    input.session.sessionId,
-    input.slotId,
-    true,
-  );
   const now = context.now();
   const variantId =
     input.request.variant_id ??
@@ -1403,9 +1322,6 @@ export async function createRustyViewMessageVariant(
       ordinal: 0,
       actor: input.request.actor,
       body: input.request.body,
-      branchId: slot.primary.message.branch_id ?? undefined,
-      parentMessageId: slot.primary.message.parent_message_id ?? undefined,
-      previousMessageId: slot.primary.message.previous_message_id ?? undefined,
       metadataJson: {
         ...(optionalRecord(input.request.metadata_json) ?? {}),
         ...(speakerIdentity === undefined
@@ -1466,11 +1382,6 @@ export async function selectRustyViewActiveMessageVariant(
   context: RustyViewChatOperationsContext,
   input: SelectActiveMessageVariantInput,
 ): Promise<SelectActiveMessageVariantResult> {
-  await requireMessageSlotForSession(
-    context,
-    input.session.sessionId,
-    input.slotId,
-  );
   const result = (await context.bridge.selectActiveChatMessageVariant({
     session_id: input.session.sessionId,
     slot_id: input.slotId,
@@ -1497,24 +1408,6 @@ export async function selectRustyViewActiveMessageVariant(
     ...(result.conflict ? { conflict: result.conflict } : {}),
     latest_cursor: event.event_id,
   };
-}
-
-async function requireMessageSlotForSession(
-  context: RustyViewChatOperationsContext,
-  sessionId: SessionId,
-  slotId: string,
-  includeAlternates = false,
-): Promise<MessageSlotRecord> {
-  const slots = (await context.bridge.queryMessageSlots({
-    session_id: sessionId,
-    include_alternates: includeAlternates,
-    page: { limit: 500, offset: 0 },
-  })) as MessageSlotRecord[];
-  const slot = slots.find((candidate) => candidate.slot_id === slotId);
-  if (!slot) {
-    throw new Error(`message slot ${slotId} was not found for ${sessionId}`);
-  }
-  return slot;
 }
 
 function messageVariantWrite(input: {
@@ -1587,22 +1480,29 @@ function stableChatRecordId(prefix: string, raw: string): string {
   return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
 }
 
-function transcriptSnippet(
-  body: string,
-  matchIndex: number,
-  queryLength: number,
-): { text: string; highlightStart: number; highlightEnd: number } {
-  const radius = 80;
-  const start = Math.max(0, matchIndex - radius);
-  const end = Math.min(body.length, matchIndex + queryLength + radius);
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < body.length ? "..." : "";
-  const text = `${prefix}${body.slice(start, end)}${suffix}`;
-  const highlightStart = prefix.length + matchIndex - start;
+interface ExactPageWire<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  next_offset?: number | null;
+}
+
+function publicExactPage<T>(page: ExactPageWire<T>): {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+} {
   return {
-    text,
-    highlightStart,
-    highlightEnd: highlightStart + queryLength,
+    items: page.items,
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+    ...(page.next_offset === undefined || page.next_offset === null
+      ? {}
+      : { nextOffset: page.next_offset }),
   };
 }
 

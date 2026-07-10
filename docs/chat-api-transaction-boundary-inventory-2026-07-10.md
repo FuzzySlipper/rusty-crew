@@ -175,7 +175,9 @@ cursor validation, and retention boundaries consumed by that transport.
   summary/open/replay facts with explicit `event_log`, `message_slots`,
   `pending_messages`, or `empty` source selection. SQLite and PostgreSQL share
   conformance coverage, including restart readback.
-- #5383 remains responsible for switching the HTTP route layer to these typed
-  calls and deleting the superseded TypeScript fallback ladders, scans, and
-  capped ownership pre-reads. SSE framing and live subscriber fan-out remain
-  TypeScript transport concerns.
+- #5383 switched session list/open/events and SSE replay to the unified Rust
+  read facts; switched slots, variants, trees, transcript search, attachments,
+  and data-bank scopes to exact Rust reads; and deleted the TypeScript fallback
+  ladders, scans, inferred totals, and capped ownership pre-reads. Alternate
+  lineage inheritance now occurs inside the backend transaction. SSE framing
+  and live subscriber fan-out remain TypeScript transport concerns.

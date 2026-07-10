@@ -1538,6 +1538,7 @@ impl CoreEngine {
                 has_more: event_page.has_more,
                 has_more_before: event_page.has_more_before,
                 total: event_page.total,
+                message_count: event_page.message_count,
                 source: ChatReadModelSource::EventLog,
                 message_slots,
             });
@@ -1559,6 +1560,7 @@ impl CoreEngine {
             has_more: read_model.has_more,
             has_more_before: false,
             total: read_model.total,
+            message_count: read_model.total,
             source: read_model.source,
             message_slots,
         })
@@ -6751,6 +6753,14 @@ mod tests {
         engine
             .append_chat_event(&ChatEventLogAppend {
                 session_id: logged.session_id.clone(),
+                created_at: "2026-06-19T00:01:02Z".to_string(),
+                kind: "assistant_message_completed".to_string(),
+                payload_json: json!({"body": "logged reply"}),
+            })
+            .unwrap();
+        engine
+            .append_chat_event(&ChatEventLogAppend {
+                session_id: logged.session_id.clone(),
                 created_at: "2026-06-19T00:01:01Z".to_string(),
                 kind: "tool_call_completed".to_string(),
                 payload_json: json!({"tool_name": "read_file"}),
@@ -6779,7 +6789,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(logged_read.source, ChatReadModelSource::EventLog);
-        assert_eq!(logged_read.total, 2);
+        assert_eq!(logged_read.total, 3);
+        assert_eq!(logged_read.message_count, 2);
         assert_eq!(logged_read.events[0].payload_json["body"], "logged hello");
 
         let summaries = engine
@@ -6795,7 +6806,7 @@ mod tests {
         assert_eq!(summaries.page.total, 2);
         assert_eq!(summaries.page.items.len(), 1);
         assert_eq!(summaries.page.next_offset, Some(1));
-        assert_eq!(summaries.page.items[0].message_count, 1);
+        assert_eq!(summaries.page.items[0].message_count, 2);
     }
 
     #[test]

@@ -2474,6 +2474,37 @@ export interface NativeChatEventLogPage {
   has_more_before: boolean;
 }
 
+export interface NativeExactPage<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  next_offset?: number | null;
+}
+
+export interface NativeChatSessionReadFacts {
+  session: SessionState;
+  message_count: number;
+  latest_cursor: string;
+  source: NativeChatReadModelPage["source"];
+}
+
+export interface NativeChatSessionSummaryPage {
+  page: NativeExactPage<NativeChatSessionReadFacts>;
+}
+
+export interface NativeChatSessionReadResult {
+  session: SessionState;
+  events: NativeChatEventLogEvent[];
+  latest_cursor: string;
+  has_more: boolean;
+  has_more_before: boolean;
+  total: number;
+  message_count: number;
+  source: NativeChatReadModelPage["source"];
+  message_slots: NativeExactPage<unknown>;
+}
+
 export interface NativeBridgeModule {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
@@ -2852,14 +2883,16 @@ export interface NativeBridgeModule {
   createChatMessageVariant(input: unknown): Promise<unknown>;
   applyRoleplayAlternative(input: unknown): Promise<unknown>;
   chatReadModelPage(input: unknown): Promise<NativeChatReadModelPage>;
-  readChatSession(input: unknown): Promise<unknown>;
-  queryChatSessionSummaries(input: unknown): Promise<unknown>;
+  readChatSession(input: unknown): Promise<NativeChatSessionReadResult>;
+  queryChatSessionSummaries(
+    input: unknown,
+  ): Promise<NativeChatSessionSummaryPage>;
   appendChatEvent(input: unknown): Promise<NativeChatEventLogEvent>;
   queryChatEvents(input: unknown): Promise<NativeChatEventLogPage>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
-  queryMessageSlotsPage(query: unknown): Promise<unknown>;
+  queryMessageSlotsPage(query: unknown): Promise<NativeExactPage<unknown>>;
   queryMessageVariants(query: unknown): Promise<unknown[]>;
-  queryMessageVariantsPage(query: unknown): Promise<unknown>;
+  queryMessageVariantsPage(query: unknown): Promise<NativeExactPage<unknown>>;
   selectActiveMessageVariant(input: unknown): Promise<unknown>;
   selectActiveChatMessageVariant(input: unknown): Promise<unknown>;
   deleteChatMessageVariant(input: unknown): Promise<unknown>;
@@ -2882,13 +2915,13 @@ export interface NativeBridgeModule {
   saveAttachment(input: unknown): Promise<unknown>;
   createChatAttachment(input: unknown): Promise<unknown>;
   queryAttachments(query: unknown): Promise<unknown[]>;
-  queryAttachmentsPage(query: unknown): Promise<unknown>;
+  queryAttachmentsPage(query: unknown): Promise<NativeExactPage<unknown>>;
   removeAttachment(input: unknown): Promise<unknown>;
   removeChatAttachment(input: unknown): Promise<unknown>;
   saveDataBankScope(input: unknown): Promise<unknown>;
   createChatDataBankScope(input: unknown): Promise<unknown>;
   queryDataBankScopes(query: unknown): Promise<unknown[]>;
-  queryDataBankScopesPage(query: unknown): Promise<unknown>;
+  queryDataBankScopesPage(query: unknown): Promise<NativeExactPage<unknown>>;
   removeDataBankScope(input: unknown): Promise<unknown>;
   removeChatDataBankScope(input: unknown): Promise<unknown>;
   providerStateDiagnostics(
@@ -4777,11 +4810,17 @@ function createNativeBridgeModule(
         ) as unknown,
       }),
     readChatSession: async (input) =>
-      JSON.parse(binding.readChatSessionJson(JSON.stringify(input))) as unknown,
+      toNativeChatSessionReadResult(
+        JSON.parse(
+          binding.readChatSessionJson(JSON.stringify(input)),
+        ) as RawChatSessionReadResult,
+      ),
     queryChatSessionSummaries: async (input) =>
-      JSON.parse(
-        binding.queryChatSessionSummariesJson(JSON.stringify(input)),
-      ) as unknown,
+      toNativeChatSessionSummaryPage(
+        JSON.parse(
+          binding.queryChatSessionSummariesJson(JSON.stringify(input)),
+        ) as RawChatSessionSummaryPage,
+      ),
     appendChatEvent: async (input) =>
       validateBridgeValue<NativeChatEventLogEvent>({
         operation: "append_chat_event",
@@ -4807,7 +4846,7 @@ function createNativeBridgeModule(
     queryMessageSlotsPage: async (query) =>
       JSON.parse(
         binding.queryMessageSlotsPageJson(JSON.stringify(query)),
-      ) as unknown,
+      ) as NativeExactPage<unknown>,
     queryMessageVariants: async (query) =>
       JSON.parse(
         binding.queryMessageVariantsJson(JSON.stringify(query)),
@@ -4815,7 +4854,7 @@ function createNativeBridgeModule(
     queryMessageVariantsPage: async (query) =>
       JSON.parse(
         binding.queryMessageVariantsPageJson(JSON.stringify(query)),
-      ) as unknown,
+      ) as NativeExactPage<unknown>,
     selectActiveMessageVariant: async (input) =>
       JSON.parse(
         binding.selectActiveMessageVariantJson(JSON.stringify(input)),
@@ -4905,7 +4944,7 @@ function createNativeBridgeModule(
     queryAttachmentsPage: async (query) =>
       JSON.parse(
         binding.queryAttachmentsPageJson(JSON.stringify(query)),
-      ) as unknown,
+      ) as NativeExactPage<unknown>,
     removeAttachment: async (input) =>
       JSON.parse(
         binding.removeAttachmentJson(JSON.stringify(input)),
@@ -4929,7 +4968,7 @@ function createNativeBridgeModule(
     queryDataBankScopesPage: async (query) =>
       JSON.parse(
         binding.queryDataBankScopesPageJson(JSON.stringify(query)),
-      ) as unknown,
+      ) as NativeExactPage<unknown>,
     removeDataBankScope: async (input) =>
       JSON.parse(
         binding.removeDataBankScopeJson(JSON.stringify(input)),
@@ -6683,6 +6722,36 @@ function toSessionState(state: RawSessionState): SessionState {
   };
 }
 
+function toNativeChatSessionReadResult(
+  raw: RawChatSessionReadResult,
+): NativeChatSessionReadResult {
+  return {
+    session: toSessionState(raw.session),
+    events: raw.events,
+    latest_cursor: raw.latest_cursor,
+    has_more: raw.has_more,
+    has_more_before: raw.has_more_before,
+    total: raw.total,
+    message_count: raw.message_count,
+    source: raw.source,
+    message_slots: raw.message_slots,
+  };
+}
+
+function toNativeChatSessionSummaryPage(
+  raw: RawChatSessionSummaryPage,
+): NativeChatSessionSummaryPage {
+  return {
+    page: {
+      ...raw.page,
+      items: raw.page.items.map((facts) => ({
+        ...facts,
+        session: toSessionState(facts.session),
+      })),
+    },
+  };
+}
+
 function toAgentMessage(message: RawAgentMessage): AgentMessage {
   return {
     from: message.from,
@@ -7805,6 +7874,29 @@ interface RawSessionState {
   brain_turn_count: number;
   created_at: string;
   last_active_at: string;
+}
+
+interface RawChatSessionReadFacts {
+  session: RawSessionState;
+  message_count: number;
+  latest_cursor: string;
+  source: NativeChatReadModelPage["source"];
+}
+
+interface RawChatSessionSummaryPage {
+  page: NativeExactPage<RawChatSessionReadFacts>;
+}
+
+interface RawChatSessionReadResult {
+  session: RawSessionState;
+  events: NativeChatEventLogEvent[];
+  latest_cursor: string;
+  has_more: boolean;
+  has_more_before: boolean;
+  total: number;
+  message_count: number;
+  source: NativeChatReadModelPage["source"];
+  message_slots: NativeExactPage<unknown>;
 }
 
 interface RawBodyState {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type {
   AgentId,
   ProfileId,
@@ -15,6 +16,58 @@ const activeSession = session("chat-authority-session", "idle");
 const archivedSession = session("chat-authority-archived", "archived");
 const submitted: ChatSendMessageInput[] = [];
 
+const apiSource = readFileSync(
+  new URL("../src/rusty-view-chat-api.ts", import.meta.url),
+  "utf8",
+);
+for (const forbidden of [
+  "pendingMessagesForSession",
+  "messageSlotEvents",
+  "chatEventStats",
+  "projectBodyStateJson",
+  "listChatEvents?",
+  "chatReadModelPage?",
+]) {
+  assert.equal(
+    apiSource.includes(forbidden),
+    false,
+    `chat HTTP envelope must not reconstruct Rust read policy via ${forbidden}`,
+  );
+}
+const operationSource = readFileSync(
+  new URL("../src/service-rusty-view-chat-operations.ts", import.meta.url),
+  "utf8",
+);
+for (const forbidden of [
+  "bridge.queryMessageSlots(",
+  "bridge.queryMessageVariants(",
+  "bridge.queryConversationBranches(",
+  "bridge.queryConversationSnapshots(",
+  "bridge.queryAttachments(",
+  "bridge.queryDataBankScopes(",
+]) {
+  assert.equal(
+    operationSource.includes(forbidden),
+    false,
+    `chat operation boundary must not restore non-exact read ${forbidden}`,
+  );
+}
+for (const required of [
+  "queryChatSessionSummaries",
+  "readChatSession",
+  "queryMessageSlotsPage",
+  "queryMessageVariantsPage",
+  "readConversationTree",
+  "searchChatTranscript",
+  "queryAttachmentsPage",
+  "queryDataBankScopesPage",
+]) {
+  assert.ok(
+    operationSource.includes(`bridge.${required}`),
+    `chat operation boundary must delegate through bridge.${required}`,
+  );
+}
+
 const accepted = await handleRustyViewChatRequest(
   {
     method: "POST",
@@ -29,7 +82,6 @@ const accepted = await handleRustyViewChatRequest(
   },
   {
     listSessions: async () => [activeSession, archivedSession],
-    projectBodyStateJson: async () => new Uint8Array(),
     sendMessage: async (input) => {
       submitted.push(input);
       return {
@@ -77,7 +129,6 @@ const headerIdempotency = await handleRustyViewChatRequest(
   },
   {
     listSessions: async () => [activeSession],
-    projectBodyStateJson: async () => new Uint8Array(),
     sendMessage: async (input) => {
       submitted.push(input);
       return {
@@ -106,7 +157,6 @@ const archived = await handleRustyViewChatRequest(
   },
   {
     listSessions: async () => [archivedSession],
-    projectBodyStateJson: async () => new Uint8Array(),
     sendMessage: async () => {
       archivedPortCalled = true;
       throw new Error("archived session should not submit chat wake");
