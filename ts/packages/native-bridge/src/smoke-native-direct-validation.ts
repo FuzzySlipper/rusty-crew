@@ -81,6 +81,58 @@ const validBinding = withDirectBridgeOutputValidation(
         run_status: "running",
         terminal: false,
       }),
+    exchangeOpenaiOauthCodeJson: async () =>
+      JSON.stringify({
+        ok: true,
+        secret: "synthetic-secret-not-a-credential",
+        summary: {
+          kind: "openai_oauth",
+          version: 1,
+          has_secret: true,
+          account_id: "synthetic-account",
+          email: null,
+          plan_type: null,
+          is_fedramp_account: false,
+          access_token_expires_at: null,
+        },
+      }),
+    bufferedBrainRunDiagnosticsJson: () =>
+      JSON.stringify({
+        active_run_count: 0,
+        modules: [{ module_label: "pi-agent", active_run_count: 0 }],
+        runs: [],
+      }),
+    cleanupBufferedBrainRunsJson: () =>
+      JSON.stringify({
+        active_runs: 0,
+        terminal_runs: 0,
+        cancelled_nonterminal_runs: 0,
+        removed_runs: 0,
+        modules: [
+          {
+            module_label: "pi-agent",
+            active_runs: 0,
+            terminal_runs: 0,
+            cancelled_nonterminal_runs: 0,
+            removed_runs: 0,
+          },
+        ],
+      }),
+    getModelProviderSecretJson: () =>
+      JSON.stringify("synthetic-secret-not-a-credential"),
+    suspendForGithubGateJson: () => JSON.stringify(githubWait()),
+    consumeGithubGateTerminalEventJson: () =>
+      JSON.stringify({
+        event_id: 9,
+        cursor: 9,
+        duplicate: false,
+        wake_scheduled: true,
+        ignored_reason: null,
+        wait: githubWait(),
+      }),
+    recoverGithubGateWakes: () => 1,
+    githubGateWaitJson: () => JSON.stringify(githubWait()),
+    githubGateEventCursor: () => 9,
   },
   env,
 );
@@ -88,7 +140,7 @@ const validBinding = withDirectBridgeOutputValidation(
 for (const method of Object.keys(validBinding) as Array<
   keyof typeof validBinding
 >) {
-  Reflect.apply(validBinding[method], validBinding, []);
+  await Promise.resolve(Reflect.apply(validBinding[method], validBinding, []));
 }
 
 const wrongCase = withDirectBridgeOutputValidation(
@@ -114,12 +166,30 @@ const extraField = withDirectBridgeOutputValidation(
 );
 assert.throws(() => extraField.injectExternalEvent(), BridgeValidationError);
 
-assert.equal(new Set(directBridgeValidatedOperations).size, 16);
+assert.equal(new Set(directBridgeValidatedOperations).size, 25);
 console.log(
   JSON.stringify({
     directOperationsValidated: directBridgeValidatedOperations.length,
     camelCaseChokepoint: true,
     strictAdditionalProperties: true,
     jsonTextValidation: true,
+    syntheticSecretSamples: true,
+    secretPayloadsLogged: false,
   }),
 );
+
+function githubWait() {
+  return {
+    session_id: "session-1",
+    run_id: "run-1",
+    provider_thread_id: null,
+    project_id: "rusty-crew",
+    task_id: "5565",
+    gate_id: 9,
+    commit_sha: "synthetic-commit-sha",
+    phase: "waiting",
+    terminal_event_id: null,
+    created_at: "2026-07-10T00:00:00Z",
+    updated_at: "2026-07-10T00:00:00Z",
+  };
+}

@@ -174,3 +174,145 @@ export const rawDelegatedSessionRuntimeStatusSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+const rawBufferedBrainRunModuleDiagnosticsSchema = Type.Object(
+  {
+    module_label: Type.String(),
+    active_run_count: Type.Number({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+const rawBufferedBrainRunDiagnosticSchema = Type.Object(
+  {
+    module_label: Type.String(),
+    wake_id: Type.String(),
+    queued_stream_item_count: Type.Number({ minimum: 0 }),
+    pending_tool_request_count: Type.Number({ minimum: 0 }),
+    submitted_tool_output_count: Type.Number({ minimum: 0 }),
+    age_ms: Type.Number({ minimum: 0 }),
+    wake_timeout_ms: Type.Number({ minimum: 0 }),
+    terminal: Type.Boolean(),
+    cancelled: Type.Boolean(),
+    has_error: Type.Boolean(),
+    started_at: Type.String(),
+    last_transition_at: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+export const rawBufferedBrainRunDiagnosticsSchema = Type.Object(
+  {
+    active_run_count: Type.Number({ minimum: 0 }),
+    modules: Type.Array(rawBufferedBrainRunModuleDiagnosticsSchema),
+    runs: Type.Array(rawBufferedBrainRunDiagnosticSchema),
+  },
+  { additionalProperties: false },
+);
+
+const rawBufferedBrainRunCleanupModuleSchema = Type.Object(
+  {
+    module_label: Type.String(),
+    active_runs: Type.Number({ minimum: 0 }),
+    terminal_runs: Type.Number({ minimum: 0 }),
+    cancelled_nonterminal_runs: Type.Number({ minimum: 0 }),
+    removed_runs: Type.Number({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+export const rawBufferedBrainRunCleanupSummarySchema = Type.Object(
+  {
+    active_runs: Type.Number({ minimum: 0 }),
+    terminal_runs: Type.Number({ minimum: 0 }),
+    cancelled_nonterminal_runs: Type.Number({ minimum: 0 }),
+    removed_runs: Type.Number({ minimum: 0 }),
+    modules: Type.Array(rawBufferedBrainRunCleanupModuleSchema),
+  },
+  { additionalProperties: false },
+);
+
+const rawGitHubGateWaitRecordSchema = Type.Object(
+  {
+    session_id: Type.String(),
+    run_id: nullableString,
+    provider_thread_id: nullableString,
+    project_id: Type.String(),
+    task_id: Type.String(),
+    gate_id: Type.Number({ minimum: 0 }),
+    commit_sha: Type.String(),
+    phase: Type.Union([
+      Type.Literal("waiting"),
+      Type.Literal("wake_scheduled"),
+      Type.Literal("consumed"),
+      Type.Literal("cancelled"),
+    ]),
+    terminal_event_id: nullableNumber,
+    created_at: Type.String(),
+    updated_at: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+export const rawNullableGitHubGateWaitRecordSchema = Type.Union([
+  rawGitHubGateWaitRecordSchema,
+  Type.Null(),
+]);
+
+export const rawGitHubGateTerminalReceiptSchema = Type.Object(
+  {
+    event_id: Type.Number({ minimum: 0 }),
+    cursor: Type.Number({ minimum: 0 }),
+    duplicate: Type.Boolean(),
+    wake_scheduled: Type.Boolean(),
+    ignored_reason: nullableString,
+    wait: Type.Union([rawGitHubGateWaitRecordSchema, Type.Null()]),
+  },
+  { additionalProperties: false },
+);
+
+const rawOpenAiOauthSummarySchema = Type.Object(
+  {
+    kind: Type.Literal("openai_oauth"),
+    version: Type.Number({ minimum: 0 }),
+    has_secret: Type.Boolean(),
+    account_id: nullableString,
+    email: nullableString,
+    plan_type: nullableString,
+    is_fedramp_account: Type.Boolean(),
+    access_token_expires_at: nullableString,
+  },
+  { additionalProperties: false },
+);
+
+export const rawOpenAiOauthCodeExchangeResultSchema = Type.Union([
+  Type.Object(
+    {
+      ok: Type.Literal(true),
+      secret: Type.String(),
+      summary: rawOpenAiOauthSummarySchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ok: Type.Literal(false),
+      error: Type.Object(
+        {
+          code: Type.String(),
+          reasonCode: Type.String(),
+          status: Type.Optional(Type.Number()),
+          message: Type.String(),
+          retryable: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+export const rawModelProviderSecretSchema = Type.Union([
+  Type.String(),
+  Type.Null(),
+]);

@@ -14,8 +14,14 @@ import {
   nativeSessionIdArraySchema,
   nativeSessionStateSummarySchema,
   nativeShutdownSummarySchema,
+  rawBufferedBrainRunCleanupSummarySchema,
+  rawBufferedBrainRunDiagnosticsSchema,
   rawDelegatedResourceCleanupReportSchema,
   rawDelegatedSessionRuntimeStatusSchema,
+  rawGitHubGateTerminalReceiptSchema,
+  rawModelProviderSecretSchema,
+  rawNullableGitHubGateWaitRecordSchema,
+  rawOpenAiOauthCodeExchangeResultSchema,
 } from "./native-direct-validation-schemas.js";
 
 interface DirectOutputDescriptor {
@@ -86,6 +92,39 @@ const directOutputByMethod = {
     "delegated_session_status",
     rawDelegatedSessionRuntimeStatusSchema,
   ),
+  exchangeOpenaiOauthCodeJson: jsonText(
+    "exchange_openai_oauth_code",
+    rawOpenAiOauthCodeExchangeResultSchema,
+  ),
+  bufferedBrainRunDiagnosticsJson: jsonText(
+    "buffered_brain_run_diagnostics",
+    rawBufferedBrainRunDiagnosticsSchema,
+  ),
+  cleanupBufferedBrainRunsJson: jsonText(
+    "cleanup_buffered_brain_runs",
+    rawBufferedBrainRunCleanupSummarySchema,
+  ),
+  getModelProviderSecretJson: jsonText(
+    "get_model_provider_secret",
+    rawModelProviderSecretSchema,
+  ),
+  suspendForGithubGateJson: jsonText(
+    "suspend_for_github_gate",
+    rawNullableGitHubGateWaitRecordSchema,
+  ),
+  consumeGithubGateTerminalEventJson: jsonText(
+    "consume_github_gate_terminal_event",
+    rawGitHubGateTerminalReceiptSchema,
+  ),
+  recoverGithubGateWakes: value(
+    "recover_github_gate_wakes",
+    nativeHandleSchema,
+  ),
+  githubGateWaitJson: jsonText(
+    "github_gate_wait",
+    rawNullableGitHubGateWaitRecordSchema,
+  ),
+  githubGateEventCursor: value("github_gate_event_cursor", nativeHandleSchema),
 } as const satisfies Record<string, DirectOutputDescriptor>;
 
 export const directBridgeValidatedOperations = Object.freeze(

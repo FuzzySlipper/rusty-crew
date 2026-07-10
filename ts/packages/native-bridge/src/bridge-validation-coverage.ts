@@ -26,8 +26,8 @@ const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 122;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 189;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 11;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 198;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 2;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -117,39 +117,6 @@ const UNIT_RETURN_MANIFEST_OPERATIONS = [
 ] as const satisfies readonly ManifestOperationName[];
 
 const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
-  {
-    group: "openai_oauth",
-    reason:
-      "OAuth code exchange is independently covered by the Rust OAuth client tests and service authorization flow.",
-    operations: ["exchange_openai_oauth_code"],
-  },
-  {
-    group: "buffered_run_host_diagnostics",
-    reason:
-      "Buffered run host diagnostics and cleanup are metadata-only native helper surfaces covered by Rust shutdown tests and the pi-agent bridge smoke; add fixture coverage if their envelopes become UI-write contracts.",
-    operations: [
-      "buffered_brain_run_diagnostics",
-      "cleanup_buffered_brain_runs",
-    ],
-  },
-  {
-    group: "model_secrets",
-    reason:
-      "Secret readback is intentionally narrow and redacted by callers; do not add fixture payloads that could normalize secret exposure.",
-    operations: ["get_model_provider_secret"],
-  },
-  {
-    group: "github_gate_wait",
-    reason:
-      "GitHub gate suspension/recovery is covered by its Rust lifecycle tests and focused native service smoke; add wire fixtures when these receipts become a browser-facing contract.",
-    operations: [
-      "suspend_for_github_gate",
-      "consume_github_gate_terminal_event",
-      "recover_github_gate_wakes",
-      "github_gate_wait",
-      "github_gate_event_cursor",
-    ],
-  },
   {
     group: "subscriptions_and_buffers",
     reason:
