@@ -1,8 +1,8 @@
 # Native Bridge Rust Contract Mapping Migration
 
-Status: planning note for task 4587
+Status: active migration plan for tasks 5366 and 5392-5411
 
-Date: 2026-07-07
+Date: 2026-07-10
 
 Related docs:
 
@@ -54,6 +54,101 @@ Remaining risk:
 - TypeBox schemas still mirror Rust shapes manually for covered families;
 - contract exports and fixtures are checked, but not enough operation families
   are fixture-backed for the UI-heavy surfaces now growing.
+
+## Task 5392 Baseline
+
+The post-5302 baseline was refreshed on 2026-07-10. Counts below describe the
+authored source, not generated artifact line counts:
+
+| Surface | Current count | Ownership today |
+| --- | ---: | --- |
+| Manifest operations | 200 | Rust manifest/codegen |
+| `NativeBridgeBinding` methods | 215 | Handwritten TypeScript, checked against napi declarations only for `*Json` methods |
+| Generated-inventory raw methods | 139 | Rust-generated inventory checking handwritten TypeScript |
+| Generated-inventory direct methods | 13 | Rust-generated inventory checking handwritten TypeScript |
+| `Raw*` DTO declarations | 74 | Handwritten TypeScript |
+| Converter functions (`to*`, `from*`, `map*`, `parse*`, `convert*`) | 91 | Handwritten TypeScript |
+| TypeBox schema declarations | 77 | Handwritten TypeScript |
+| Exported TypeBox schemas | 41 | Handwritten TypeScript with an exact-count ratchet |
+| Rust fixture families | 11 | Rust-authored values |
+| Runtime-validated or fixture-backed manifest operations | 34 | Mixed Rust evidence and TypeScript validators |
+| Explicit manifest-operation exemptions | 166 | Handwritten TypeScript catalog |
+| `index.ts` lines | 8,213 | Loader, interfaces, DTOs, converters, wrappers, and composition mixed together |
+
+The generated mapping inventory covers seven families, 141 manifest
+operations, 177 DTO types, and 1,189 serialized fields:
+
+| Family | Operations | Raw/direct methods | DTO types/fields | Risk and target |
+| --- | ---: | ---: | ---: | --- |
+| Roleplay | 43 | 43/0 | 56/364 | Highest nested-record and enum/tag risk. Move narrator, lore, recall, and record validators out of exemptions. |
+| Conversation/chat | 44 | 44/0 | 38/268 | Highest active UI transaction/readback risk. Cover slots, variants, branches, snapshots, attachments, and data-bank records. |
+| Memory | 14 | 14/5 | 19/162 | High optional/null and lifecycle-state risk. Cover session memory, proposals, curator transitions, digests, and compaction. |
+| Runtime/scheduler/admin | 17 | 17/0 | 22/152 | High tagged status/report risk. Cover runtime plans, jobs/runs, storage diagnostics, and maintenance receipts. |
+| Brain/provider | 11 | 9/8 | 25/128 | High stream/tagged-union risk. Keep buffer helpers authored, but generate/check wake, stream, tool, and provider-state schemas. |
+| Profile registry | 6 | 6/0 | 11/76 | Medium nested/defaulting risk; mostly runtime validated already. |
+| Model provider | 6 | 6/0 | 6/39 | Medium credential/optional-field risk; keep secret payloads deliberately outside fixture values. |
+
+The zero-exemption target applies to active UI/service operations in the seven
+families above. Secret-bearing values, runtime-buffer lease mechanics, and
+event-subscription callbacks may remain explicit non-schema exceptions only
+when they are not browser/service DTO contracts and their protocol ownership is
+covered by Rust lifecycle tests. Any remaining exception at task 5411 needs a
+named follow-up task; an exemption group is not a permanent design home.
+
+### Reproduction Commands
+
+Run the checked gates first:
+
+```bash
+npm run check:native-mapping-inventory
+npm run smoke:bridge-validation
+```
+
+Measure authored TypeScript declarations with the TypeScript parser rather
+than line-oriented guesses:
+
+```bash
+node --input-type=module <<'NODE'
+import ts from "typescript";
+import { readFileSync } from "node:fs";
+
+const source = readFileSync("ts/packages/native-bridge/src/index.ts", "utf8");
+const file = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true);
+let bindingMethods = 0;
+let rawDtos = 0;
+let converters = 0;
+for (const statement of file.statements) {
+  if (ts.isInterfaceDeclaration(statement) && statement.name.text === "NativeBridgeBinding") {
+    bindingMethods = statement.members.filter(ts.isMethodSignature).length;
+  }
+  if ((ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) && /^Raw/.test(statement.name.text)) {
+    rawDtos += 1;
+  }
+  if (ts.isFunctionDeclaration(statement) && statement.name && /^(to|from|map|parse|convert)/.test(statement.name.text)) {
+    converters += 1;
+  }
+}
+console.log({ bindingMethods, rawDtos, converters, lines: source.split(/\r?\n/).length - 1 });
+NODE
+```
+
+The coverage constants in
+`ts/packages/native-bridge/src/bridge-validation-coverage.ts` are executable
+ratchets for manifest operations, exported schemas, fixture families, covered
+operations, and exemptions. The generated family/field counts come from
+`ts/packages/native-bridge/src/generated/native-mapping-inventory.ts` and must
+be refreshed through `npm run codegen:native-mapping-inventory`, never edited
+by hand.
+
+### Generated Check Versus Generated Implementation
+
+Current generated artifacts are **generated checks**. They prove that named
+methods, wrappers, interfaces, and field reads still exist in handwritten
+TypeScript. They do not generate `NativeBridgeBinding`, TypeBox validators, or
+converter implementations. Tasks 5396-5404 move signatures and schema evidence
+into generated implementation/check artifacts. Task 5408 then decomposes the
+remaining ergonomic wrappers; it must not move a monolithic handwritten mapper
+unchanged into a new dumping-ground file.
 
 ## Target Ownership
 
