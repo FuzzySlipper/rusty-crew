@@ -797,7 +797,7 @@ impl CoordinationStore {
         )
         .map_err(|error| persistence_error("clear roleplay chat layers", error))?;
         for layer in &write.layers {
-            if get_lore_layer_in_tx(&tx, &layer.layer_id)?.is_none() {
+            if get_lore_layer_in_tx(tx, &layer.layer_id)?.is_none() {
                 return Err(CoreError::new(
                     CoreErrorKind::NotFound,
                     format!("roleplay lore layer {} not found", layer.layer_id),

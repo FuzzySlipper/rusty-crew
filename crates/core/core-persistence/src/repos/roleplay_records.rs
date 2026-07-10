@@ -573,6 +573,17 @@ fn validate_status(status: &str) -> CoreResult<()> {
     }
 }
 
+fn require_text(field: &str, value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{field} must not be empty"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -841,16 +852,5 @@ mod tests {
         );
         drop(store);
         let _ = std::fs::remove_file(db_path);
-    }
-}
-
-fn require_text(field: &str, value: &str) -> CoreResult<()> {
-    if value.trim().is_empty() {
-        Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            format!("{field} must not be empty"),
-        ))
-    } else {
-        Ok(())
     }
 }

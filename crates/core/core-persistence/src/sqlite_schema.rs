@@ -2259,9 +2259,14 @@ mod tests {
             "idx_module_simple_kv_entries_expires_at"
         ));
         let installed = store.installed_module_schemas().unwrap();
-        assert_eq!(installed.len(), 1);
-        assert_eq!(installed[0].module_id.as_str(), "simple_kv");
-        assert_eq!(installed[0].installed_version, 1);
+        assert_eq!(installed.len(), 2);
+        for module_id in ["roleplay", "simple_kv"] {
+            let record = installed
+                .iter()
+                .find(|record| record.module_id.as_str() == module_id)
+                .unwrap_or_else(|| panic!("missing installed module schema {module_id}"));
+            assert_eq!(record.installed_version, 1);
+        }
 
         remove_temp_db(&db_path);
     }
