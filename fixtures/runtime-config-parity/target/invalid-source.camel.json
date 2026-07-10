@@ -74,8 +74,8 @@
     "duplicate_brain_profile_id",
     "missing_profile_metadata",
     "duplicate_session_id",
-    "scheduled_job_schedule_invalid",
-    "scheduled_job_target_missing",
+    "invalid_schedule",
+    "missing_session",
     "binding_session_mismatch"
   ]
 }

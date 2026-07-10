@@ -45,8 +45,8 @@
         "ownerId": "parity-owner",
         "maxHistoryMessages": 128,
         "turnTimeoutMs": 45000,
-        "effectiveWakeTimeoutMs": 45000,
-        "wakeTimeoutSource": "session_default",
+        "effectiveWakeTimeoutMs": 30000,
+        "wakeTimeoutSource": "profile_runtime",
         "localToolProfileId": "full-agent",
         "contextPolicyProfileId": "parity-runner",
         "sessionMemoryPromptProfileId": "parity-runner"
@@ -122,12 +122,16 @@
       "source": "service_default"
     },
     {
-      "path": "sessions[parity-runner-session].resourceLimits.workdir",
-      "source": "host_default_workdir"
-    },
-    {
       "path": "sessions[parity-runner-session].ownerId",
       "source": "profile_session_default"
+    },
+    {
+      "path": "sessions[parity-runner-session].resourceLimits",
+      "source": "profile_runtime_default"
+    },
+    {
+      "path": "sessions[parity-runner-session].resourceLimits.workdir",
+      "source": "host_default_workdir"
     }
   ],
   "diagnostics": []

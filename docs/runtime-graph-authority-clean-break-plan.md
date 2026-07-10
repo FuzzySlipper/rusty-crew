@@ -1,6 +1,6 @@
 # Runtime Graph Authority Clean-Break Plan
 
-Status: implementation contract for Den task #5369
+Status: implementation contract; Rust normalization landed in #5373
 
 Date: 2026-07-10
 
@@ -163,9 +163,10 @@ Rust validator afterward.
   duplicate ids, broken references, invalid storage config, and invalid
   scheduled-job shape/targets.
 
-These are target fixtures, not evidence that current code already implements
-the contract. #5373 makes Rust produce the valid plan and diagnostics; #5377
-makes their DTO coverage generated or generated-checked.
+`core-config::plan_runtime_graph` now consumes these fixtures directly in Rust
+tests and produces the valid plan and required diagnostics. This proves Rust
+normalization, not bridge/TypeScript adoption. #5377 makes the DTO coverage
+generated or generated-checked, and #5381 removes the superseded TS path.
 
 ## Migration Sequence
 

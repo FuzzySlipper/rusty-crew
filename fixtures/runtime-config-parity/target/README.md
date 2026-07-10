@@ -1,7 +1,8 @@
 # Target Runtime Graph Fixtures
 
-These fixtures describe the clean-break endpoint for Den task #5362. They are
-intentionally ahead of the current runtime planner until #5373 lands.
+These fixtures describe the clean-break endpoint for Den task #5362.
+`core-config::plan_runtime_graph` consumes them directly in its #5373 tests.
+The service does not use that planner until the bridge and TS adoption slices.
 
 - `complete-source.camel.json` is decoded input before graph defaults and
   profile-derived records.
