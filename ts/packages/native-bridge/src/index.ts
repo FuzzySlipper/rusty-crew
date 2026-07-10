@@ -285,6 +285,18 @@ interface NativeBridgeBinding {
   queryDataBankScopesJson(inputJson: string): string;
   removeDataBankScopeJson(inputJson: string): string;
   removeChatDataBankScopeJson(inputJson: string): string;
+  putRoleplayCharacterJson(inputJson: string): string;
+  getRoleplayCharacterJson(id: string): string;
+  listRoleplayCharactersJson(inputJson: string): string;
+  putRoleplayPlayerPersonaJson(inputJson: string): string;
+  getRoleplayPlayerPersonaJson(id: string): string;
+  listRoleplayPlayerPersonasJson(inputJson: string): string;
+  putRoleplaySessionMetadataJson(inputJson: string): string;
+  getRoleplaySessionMetadataJson(id: string): string;
+  listRoleplaySessionMetadataJson(inputJson: string): string;
+  putRoleplayImportJson(inputJson: string): string;
+  getRoleplayImportJson(id: string): string;
+  listRoleplayImportsJson(inputJson: string): string;
   addLoreEntryJson(inputJson: string): string;
   replaceLoreEntryJson(inputJson: string): string;
   supersedeLoreEntryJson(inputJson: string): string;
@@ -2684,6 +2696,18 @@ export interface NativeBridgeModule {
     chatId: string;
     layerIds: string[];
   }): Promise<void>;
+  putRoleplayCharacter(write: unknown): Promise<unknown>;
+  getRoleplayCharacter(id: string): Promise<unknown | undefined>;
+  listRoleplayCharacters(query: unknown): Promise<unknown[]>;
+  putRoleplayPlayerPersona(write: unknown): Promise<unknown>;
+  getRoleplayPlayerPersona(id: string): Promise<unknown | undefined>;
+  listRoleplayPlayerPersonas(query: unknown): Promise<unknown[]>;
+  putRoleplaySessionMetadata(write: unknown): Promise<unknown>;
+  getRoleplaySessionMetadata(id: string): Promise<unknown | undefined>;
+  listRoleplaySessionMetadata(query: unknown): Promise<unknown[]>;
+  putRoleplayImport(write: unknown): Promise<unknown>;
+  getRoleplayImport(id: string): Promise<unknown | undefined>;
+  listRoleplayImports(query: unknown): Promise<unknown[]>;
   addLoreEntry(
     write: NativeRoleplayLoreWrite,
   ): Promise<NativeRoleplayLoreRecord>;
@@ -3070,6 +3094,18 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     getModelProviderSecret: unavailable("initialize_engine"),
     modelProviderRefreshImpact: unavailable("initialize_engine"),
     planModelProviderRefresh: unavailable("initialize_engine"),
+    putRoleplayCharacter: unavailable("initialize_engine"),
+    getRoleplayCharacter: unavailable("initialize_engine"),
+    listRoleplayCharacters: unavailable("initialize_engine"),
+    putRoleplayPlayerPersona: unavailable("initialize_engine"),
+    getRoleplayPlayerPersona: unavailable("initialize_engine"),
+    listRoleplayPlayerPersonas: unavailable("initialize_engine"),
+    putRoleplaySessionMetadata: unavailable("initialize_engine"),
+    getRoleplaySessionMetadata: unavailable("initialize_engine"),
+    listRoleplaySessionMetadata: unavailable("initialize_engine"),
+    putRoleplayImport: unavailable("initialize_engine"),
+    getRoleplayImport: unavailable("initialize_engine"),
+    listRoleplayImports: unavailable("initialize_engine"),
     createLoreLayer: unavailable("initialize_engine"),
     getLoreLayer: unavailable("initialize_engine"),
     listLoreLayers: unavailable("initialize_engine"),
@@ -4298,6 +4334,52 @@ function createNativeBridgeModule(
           ),
         }),
       ),
+    putRoleplayCharacter: async (write) =>
+      JSON.parse(
+        binding.putRoleplayCharacterJson(JSON.stringify(write)),
+      ) as unknown,
+    getRoleplayCharacter: async (id) =>
+      (JSON.parse(binding.getRoleplayCharacterJson(id)) as unknown | null) ??
+      undefined,
+    listRoleplayCharacters: async (query) =>
+      JSON.parse(
+        binding.listRoleplayCharactersJson(JSON.stringify(query)),
+      ) as unknown[],
+    putRoleplayPlayerPersona: async (write) =>
+      JSON.parse(
+        binding.putRoleplayPlayerPersonaJson(JSON.stringify(write)),
+      ) as unknown,
+    getRoleplayPlayerPersona: async (id) =>
+      (JSON.parse(binding.getRoleplayPlayerPersonaJson(id)) as
+        | unknown
+        | null) ?? undefined,
+    listRoleplayPlayerPersonas: async (query) =>
+      JSON.parse(
+        binding.listRoleplayPlayerPersonasJson(JSON.stringify(query)),
+      ) as unknown[],
+    putRoleplaySessionMetadata: async (write) =>
+      JSON.parse(
+        binding.putRoleplaySessionMetadataJson(JSON.stringify(write)),
+      ) as unknown,
+    getRoleplaySessionMetadata: async (id) =>
+      (JSON.parse(binding.getRoleplaySessionMetadataJson(id)) as
+        | unknown
+        | null) ?? undefined,
+    listRoleplaySessionMetadata: async (query) =>
+      JSON.parse(
+        binding.listRoleplaySessionMetadataJson(JSON.stringify(query)),
+      ) as unknown[],
+    putRoleplayImport: async (write) =>
+      JSON.parse(
+        binding.putRoleplayImportJson(JSON.stringify(write)),
+      ) as unknown,
+    getRoleplayImport: async (id) =>
+      (JSON.parse(binding.getRoleplayImportJson(id)) as unknown | null) ??
+      undefined,
+    listRoleplayImports: async (query) =>
+      JSON.parse(
+        binding.listRoleplayImportsJson(JSON.stringify(query)),
+      ) as unknown[],
     createLoreLayer: async (write) =>
       JSON.parse(
         binding.createLoreLayerJson(JSON.stringify(write)),

@@ -1867,7 +1867,11 @@ fn module_schema_registry_tracks_fresh_install_and_existing_descriptor() {
         )
         .unwrap();
     assert_eq!(second, installed);
-    assert_eq!(store.installed_module_schemas().unwrap(), installed);
+    let all_installed = store.installed_module_schemas().unwrap();
+    assert_eq!(all_installed.len(), 2);
+    assert!(all_installed
+        .iter()
+        .any(|record| record.module_id.as_str() == "roleplay"));
 
     remove_temp_db(&db_path);
 }

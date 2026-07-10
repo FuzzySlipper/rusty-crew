@@ -7,6 +7,7 @@ mod memory_spaces;
 mod memory_store;
 mod provider_state_store;
 mod roleplay_lore_store;
+mod roleplay_records_store;
 mod runtime_admin_store;
 mod scheduler;
 mod session_store;
@@ -31,6 +32,7 @@ use provider_state_store::{
     load_provider_state_for_wake, save_provider_state as save_provider_state_store,
 };
 use roleplay_lore_store::RoleplayLoreStore;
+use roleplay_records_store::RoleplayRecordsStore;
 use runtime_admin_store::{
     RuntimeModuleDataStore, RuntimeServiceDataStore, RuntimeStorageAdminStore,
 };
@@ -61,12 +63,16 @@ use rusty_crew_core_persistence::{
     ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
     ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState,
     RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest,
-    RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayLoreEntryPromotion,
-    RoleplayLoreFactCapture, RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord,
-    RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink,
-    RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite,
-    RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace,
-    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery,
+    RoleplayCharacterQuery, RoleplayCharacterRecord, RoleplayCharacterWrite,
+    RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayImportQuery, RoleplayImportRecord,
+    RoleplayImportWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
+    RoleplayLoreTombstone, RoleplayLoreWrite, RoleplayPlayerPersonaQuery,
+    RoleplayPlayerPersonaRecord, RoleplayPlayerPersonaWrite, RoleplaySessionMetadataQuery,
+    RoleplaySessionMetadataRecord, RoleplaySessionMetadataWrite, RuntimeCounterQuery,
     RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
     RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
     RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
@@ -863,6 +869,73 @@ impl CoreEngine {
             affected_profiles: impact.affected_profiles,
             actions,
         })
+    }
+
+    pub fn put_roleplay_character(
+        &self,
+        write: &RoleplayCharacterWrite,
+    ) -> CoreResult<RoleplayCharacterRecord> {
+        RoleplayRecordsStore::put_character(&self.store, write)
+    }
+    pub fn get_roleplay_character(&self, id: &str) -> CoreResult<Option<RoleplayCharacterRecord>> {
+        RoleplayRecordsStore::get_character(&self.store, id)
+    }
+    pub fn list_roleplay_characters(
+        &self,
+        query: &RoleplayCharacterQuery,
+    ) -> CoreResult<Vec<RoleplayCharacterRecord>> {
+        RoleplayRecordsStore::list_characters(&self.store, query)
+    }
+    pub fn put_roleplay_player_persona(
+        &self,
+        write: &RoleplayPlayerPersonaWrite,
+    ) -> CoreResult<RoleplayPlayerPersonaRecord> {
+        RoleplayRecordsStore::put_persona(&self.store, write)
+    }
+    pub fn get_roleplay_player_persona(
+        &self,
+        id: &str,
+    ) -> CoreResult<Option<RoleplayPlayerPersonaRecord>> {
+        RoleplayRecordsStore::get_persona(&self.store, id)
+    }
+    pub fn list_roleplay_player_personas(
+        &self,
+        query: &RoleplayPlayerPersonaQuery,
+    ) -> CoreResult<Vec<RoleplayPlayerPersonaRecord>> {
+        RoleplayRecordsStore::list_personas(&self.store, query)
+    }
+    pub fn put_roleplay_session_metadata(
+        &self,
+        write: &RoleplaySessionMetadataWrite,
+    ) -> CoreResult<RoleplaySessionMetadataRecord> {
+        RoleplayRecordsStore::put_session_metadata(&self.store, write)
+    }
+    pub fn get_roleplay_session_metadata(
+        &self,
+        id: &str,
+    ) -> CoreResult<Option<RoleplaySessionMetadataRecord>> {
+        RoleplayRecordsStore::get_session_metadata(&self.store, id)
+    }
+    pub fn list_roleplay_session_metadata(
+        &self,
+        query: &RoleplaySessionMetadataQuery,
+    ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>> {
+        RoleplayRecordsStore::list_session_metadata(&self.store, query)
+    }
+    pub fn put_roleplay_import(
+        &self,
+        write: &RoleplayImportWrite,
+    ) -> CoreResult<RoleplayImportRecord> {
+        RoleplayRecordsStore::put_import(&self.store, write)
+    }
+    pub fn get_roleplay_import(&self, id: &str) -> CoreResult<Option<RoleplayImportRecord>> {
+        RoleplayRecordsStore::get_import(&self.store, id)
+    }
+    pub fn list_roleplay_imports(
+        &self,
+        query: &RoleplayImportQuery,
+    ) -> CoreResult<Vec<RoleplayImportRecord>> {
+        RoleplayRecordsStore::list_imports(&self.store, query)
     }
 
     pub fn add_roleplay_lore_record(

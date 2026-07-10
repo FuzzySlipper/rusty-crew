@@ -456,6 +456,121 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn put_roleplay_character(
+        &self,
+        write: &RoleplayCharacterWrite,
+    ) -> CoreResult<RoleplayCharacterRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_roleplay_character(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_roleplay_character(write),
+        }
+    }
+    pub fn get_roleplay_character(&self, id: &str) -> CoreResult<Option<RoleplayCharacterRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_roleplay_character(id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_roleplay_character(id),
+        }
+    }
+    pub fn list_roleplay_characters(
+        &self,
+        query: &RoleplayCharacterQuery,
+    ) -> CoreResult<Vec<RoleplayCharacterRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_characters(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_characters(query),
+        }
+    }
+    pub fn put_roleplay_player_persona(
+        &self,
+        write: &RoleplayPlayerPersonaWrite,
+    ) -> CoreResult<RoleplayPlayerPersonaRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_roleplay_player_persona(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_roleplay_player_persona(write),
+        }
+    }
+    pub fn get_roleplay_player_persona(
+        &self,
+        id: &str,
+    ) -> CoreResult<Option<RoleplayPlayerPersonaRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_roleplay_player_persona(id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_roleplay_player_persona(id),
+        }
+    }
+    pub fn list_roleplay_player_personas(
+        &self,
+        query: &RoleplayPlayerPersonaQuery,
+    ) -> CoreResult<Vec<RoleplayPlayerPersonaRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_player_personas(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_player_personas(query),
+        }
+    }
+    pub fn put_roleplay_session_metadata(
+        &self,
+        write: &RoleplaySessionMetadataWrite,
+    ) -> CoreResult<RoleplaySessionMetadataRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_roleplay_session_metadata(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_roleplay_session_metadata(write),
+        }
+    }
+    pub fn get_roleplay_session_metadata(
+        &self,
+        id: &str,
+    ) -> CoreResult<Option<RoleplaySessionMetadataRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_roleplay_session_metadata(id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_roleplay_session_metadata(id),
+        }
+    }
+    pub fn list_roleplay_session_metadata(
+        &self,
+        query: &RoleplaySessionMetadataQuery,
+    ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_session_metadata(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_session_metadata(query),
+        }
+    }
+    pub fn put_roleplay_import(
+        &self,
+        write: &RoleplayImportWrite,
+    ) -> CoreResult<RoleplayImportRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_roleplay_import(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_roleplay_import(write),
+        }
+    }
+    pub fn get_roleplay_import(&self, id: &str) -> CoreResult<Option<RoleplayImportRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_roleplay_import(id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_roleplay_import(id),
+        }
+    }
+    pub fn list_roleplay_imports(
+        &self,
+        query: &RoleplayImportQuery,
+    ) -> CoreResult<Vec<RoleplayImportRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_imports(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_imports(query),
+        }
+    }
+
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,

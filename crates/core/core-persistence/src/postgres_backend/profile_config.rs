@@ -460,6 +460,28 @@ impl PostgresBackendStore {
         postgres_purge_delete(
             &mut tx,
             &mut counts,
+            "module_roleplay_imports",
+            &format!("DELETE FROM {schema}.module_roleplay_imports WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"),
+            &[&profile_id.0],
+        )?;
+        postgres_purge_delete(&mut tx, &mut counts, "module_roleplay_session_metadata", &format!("DELETE FROM {schema}.module_roleplay_session_metadata WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"), &[&profile_id.0])?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_player_personas",
+            &format!("DELETE FROM {schema}.module_roleplay_player_personas WHERE profile_id = $1"),
+            &[&profile_id.0],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_characters",
+            &format!("DELETE FROM {schema}.module_roleplay_characters WHERE profile_id = $1"),
+            &[&profile_id.0],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
             "module_roleplay_lore_records",
             &format!(
                 "DELETE FROM {schema}.module_roleplay_lore_records

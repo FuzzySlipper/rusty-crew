@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 17;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 18;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -99,6 +99,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 17,
         description: "add durable chat event replay log",
         apply: Some(apply_postgres_chat_event_log),
+    },
+    PostgresSchemaMigration {
+        version: 18,
+        description: "add typed roleplay character persona session and import records",
+        apply: Some(apply_postgres_roleplay_records),
     },
 ];
 
@@ -960,6 +965,42 @@ fn apply_postgres_chat_event_log(tx: &mut Transaction<'_>, schema: &str) -> Core
             ON {schema}.chat_events(kind, created_at, session_id, sequence_id);"
     ))
     .map_err(|error| postgres_error("apply PostgreSQL chat event log migration", error))
+}
+
+fn apply_postgres_roleplay_records(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_characters (
+            character_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, status TEXT NOT NULL,
+            name TEXT NOT NULL, revision BIGINT NOT NULL, record_json JSONB NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_characters_profile_status_idx
+            ON {schema}.module_roleplay_characters(profile_id, status, updated_at DESC, character_id);
+         CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_player_personas (
+            persona_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, status TEXT NOT NULL,
+            display_name TEXT NOT NULL, revision BIGINT NOT NULL, record_json JSONB NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_personas_profile_status_idx
+            ON {schema}.module_roleplay_player_personas(profile_id, status, updated_at DESC, persona_id);
+         CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_session_metadata (
+            session_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, archived BOOLEAN NOT NULL,
+            character_id TEXT, persona_id TEXT, revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_sessions_profile_archived_idx
+            ON {schema}.module_roleplay_session_metadata(profile_id, archived, updated_at DESC, session_id);
+         CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_imports (
+            import_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, session_id TEXT NOT NULL,
+            source_kind TEXT NOT NULL, status TEXT NOT NULL, revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL, imported_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_imports_profile_status_idx
+            ON {schema}.module_roleplay_imports(profile_id, status, imported_at DESC, import_id);
+         CREATE INDEX IF NOT EXISTS roleplay_imports_session_idx
+            ON {schema}.module_roleplay_imports(session_id, imported_at DESC, import_id);"
+    ))
+    .map_err(|error| postgres_error("apply PostgreSQL typed roleplay record migration", error))
 }
 
 fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {

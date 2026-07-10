@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 32;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 33;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -178,6 +178,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 32,
         description: "add durable chat event replay log",
         apply: repos::chat_events::migrate_v32_add_chat_event_log,
+    },
+    SchemaMigration {
+        version: 33,
+        description: "add typed roleplay character persona session and import records",
+        apply: repos::roleplay_records::migrate_v33_add_roleplay_records,
     },
 ];
 
@@ -1897,6 +1902,18 @@ fn apply_module_schema_migration_in_tx(
 ) -> CoreResult<()> {
     match bundle.module_id.as_str() {
         "simple_kv" => apply_simple_kv_module_schema_in_tx(tx, bundle, installed_version),
+        "roleplay" => {
+            if bundle.schema_version != 1 {
+                return Err(CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!(
+                        "roleplay schema version {} has no migration implementation",
+                        bundle.schema_version
+                    ),
+                ));
+            }
+            repos::roleplay_records::migrate_v33_add_roleplay_records(tx)
+        }
         module_id => Err(CoreError::new(
             CoreErrorKind::PersistenceFailure,
             format!("module {module_id} has no registered migration implementation"),

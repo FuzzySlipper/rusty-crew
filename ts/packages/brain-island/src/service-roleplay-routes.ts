@@ -3,10 +3,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ProfileId, SessionId, SessionState } from "@rusty-crew/contracts";
-import type {
-  NativeBridgeModule,
-  NativeSimpleKvRecord,
-} from "@rusty-crew/native-bridge";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
 import { failure, successRoute } from "./service-route-results.js";
 import { loadProfileConfig } from "./profile-loading.js";
@@ -76,8 +73,9 @@ interface RoleplayCharacterRecord {
   tags: string[];
   avatarUrl?: string;
   status: "active" | "archived";
+  revision: number;
   createdAt: string;
-  updatedAt?: string;
+  updatedAt: string;
 }
 
 interface RoleplayPlayerPersonaRecord {
@@ -89,8 +87,9 @@ interface RoleplayPlayerPersonaRecord {
   description: string;
   notes: string;
   status: "active" | "archived";
+  revision: number;
   createdAt: string;
-  updatedAt?: string;
+  updatedAt: string;
 }
 
 interface RoleplaySessionMetadata {
@@ -101,6 +100,7 @@ interface RoleplaySessionMetadata {
   characterId?: string;
   activeLayerIds: string[];
   archived: boolean;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -347,11 +347,8 @@ async function handleRoleplayCharacterRequest(
           fallback_id: `character-${randomBytes(6).toString("hex")}`,
           body: recordBody(await readJsonBody(request)),
         })) as RoleplayCharacterRecord;
-        await putRoleplayJson(state, roleplayCharacterScope(profileId), {
-          key: roleplayCharacterKey(character.id),
-          value: character,
-        });
-        return successRoute(requestIdValue, { character });
+        const stored = await putRoleplayCharacter(state, character);
+        return successRoute(requestIdValue, { character: stored });
       }
       return roleplayLoreMethodNotAllowed(
         requestIdValue,
@@ -385,11 +382,8 @@ async function handleRoleplayCharacterRequest(
         body: recordBody(await readJsonBody(request)),
         now: state.now(),
       })) as RoleplayCharacterRecord;
-      await putRoleplayJson(state, roleplayCharacterScope(profileId), {
-        key: roleplayCharacterKey(character.id),
-        value: character,
-      });
-      return successRoute(requestIdValue, { character });
+      const stored = await putRoleplayCharacter(state, character, current.revision);
+      return successRoute(requestIdValue, { character: stored });
     }
     if (method === "DELETE") {
       const current = await requireRoleplayCharacter(
@@ -402,11 +396,8 @@ async function handleRoleplayCharacterRequest(
         body: { status: "archived" },
         now: state.now(),
       })) as RoleplayCharacterRecord;
-      await putRoleplayJson(state, roleplayCharacterScope(profileId), {
-        key: roleplayCharacterKey(character.id),
-        value: character,
-      });
-      return successRoute(requestIdValue, { character });
+      const stored = await putRoleplayCharacter(state, character, current.revision);
+      return successRoute(requestIdValue, { character: stored });
     }
     return roleplayLoreMethodNotAllowed(
       requestIdValue,
@@ -453,11 +444,8 @@ async function handleRoleplayPlayerPersonaRequest(
           fallback_id: `persona-${randomBytes(6).toString("hex")}`,
           body: recordBody(await readJsonBody(request)),
         })) as RoleplayPlayerPersonaRecord;
-        await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
-          key: roleplayPlayerPersonaKey(persona.id),
-          value: persona,
-        });
-        return successRoute(requestIdValue, { persona });
+        const stored = await putRoleplayPlayerPersona(state, persona);
+        return successRoute(requestIdValue, { persona: stored });
       }
       return roleplayLoreMethodNotAllowed(
         requestIdValue,
@@ -491,11 +479,8 @@ async function handleRoleplayPlayerPersonaRequest(
         body: recordBody(await readJsonBody(request)),
         now: state.now(),
       })) as RoleplayPlayerPersonaRecord;
-      await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
-        key: roleplayPlayerPersonaKey(persona.id),
-        value: persona,
-      });
-      return successRoute(requestIdValue, { persona });
+      const stored = await putRoleplayPlayerPersona(state, persona, current.revision);
+      return successRoute(requestIdValue, { persona: stored });
     }
     if (method === "DELETE") {
       const current = await requireRoleplayPlayerPersona(
@@ -508,11 +493,8 @@ async function handleRoleplayPlayerPersonaRequest(
         body: { status: "archived" },
         now: state.now(),
       })) as RoleplayPlayerPersonaRecord;
-      await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
-        key: roleplayPlayerPersonaKey(persona.id),
-        value: persona,
-      });
-      return successRoute(requestIdValue, { persona });
+      const stored = await putRoleplayPlayerPersona(state, persona, current.revision);
+      return successRoute(requestIdValue, { persona: stored });
     }
     return roleplayLoreMethodNotAllowed(
       requestIdValue,
@@ -825,14 +807,15 @@ async function importRoleplayStPacket(
       body.transcriptRows ?? body.transcript_rows ?? body.messages,
     ),
   });
-  await putRoleplayJson(state, roleplayImportScope(profileId), {
-    key: roleplayImportKey(importId),
-    value: {
+  await state.bridge.putRoleplayImport({
+    record: {
       importId,
       profileId,
+      sourceKind: "sillytavern_packet",
       provenance,
       rawSource,
       importedAt: now,
+      updatedAt: now,
       characterId: character?.id,
       personaId: persona?.id,
       loreLayerId: lore.layerId,
@@ -846,6 +829,8 @@ async function importRoleplayStPacket(
         assistantMultiSwipeRows: session.assistantMultiSwipeRows,
         variants: session.variantCount,
       },
+      status: "completed",
+      revision: 0,
     },
   });
   return {
@@ -868,101 +853,53 @@ async function importRoleplayStPacket(
   };
 }
 
-function roleplayCharacterScope(profileId: string): {
-  scopeType: string;
-  scopeId: string;
-} {
-  return { scopeType: "roleplay_profile", scopeId: profileId };
-}
-
-function roleplayPlayerPersonaScope(profileId: string): {
-  scopeType: string;
-  scopeId: string;
-} {
-  return { scopeType: "roleplay_profile", scopeId: profileId };
-}
-
-function roleplaySessionScope(sessionId: string): {
-  scopeType: string;
-  scopeId: string;
-} {
-  return { scopeType: "roleplay_session", scopeId: sessionId };
-}
-
-function roleplayImportScope(profileId: string): {
-  scopeType: string;
-  scopeId: string;
-} {
-  return { scopeType: "roleplay_import", scopeId: profileId };
-}
-
-function roleplayImportKey(importId: string): string {
-  return `st-packet:${importId}`;
-}
-
-function roleplayCharacterKey(characterId: string): string {
-  return `character:${characterId}`;
-}
-
-function roleplayPlayerPersonaKey(personaId: string): string {
-  return `player_persona:${personaId}`;
-}
-
-function roleplaySessionMetadataKey(): string {
-  return "metadata";
-}
-
-async function putRoleplayJson(
+async function putRoleplayCharacter(
   state: RoleplayRouteContext,
-  scope: { scopeType: string; scopeId: string },
-  input: { key: string; value: unknown },
-): Promise<NativeSimpleKvRecord> {
-  return state.bridge.putSimpleKv({
-    ...scope,
-    key: input.key,
-    valueJson: JSON.stringify(input.value),
-    now: state.now(),
-  });
+  record: RoleplayCharacterRecord,
+  expectedRevision?: number,
+): Promise<RoleplayCharacterRecord> {
+  return state.bridge.putRoleplayCharacter({
+    record: { ...record, revision: expectedRevision ?? 0 },
+    ...(expectedRevision === undefined
+      ? {}
+      : { expected_revision: expectedRevision }),
+  }) as Promise<RoleplayCharacterRecord>;
 }
 
-async function listRoleplayJson<T>(
+async function putRoleplayPlayerPersona(
   state: RoleplayRouteContext,
-  scope: { scopeType: string; scopeId: string },
-  keyPrefix: string,
-): Promise<T[]> {
-  const records = await state.bridge.listSimpleKv({
-    ...scope,
-    keyPrefix,
-    limit: 1_000,
-    offset: 0,
-  });
-  return records.map((record) => JSON.parse(record.valueJson) as T);
+  record: RoleplayPlayerPersonaRecord,
+  expectedRevision?: number,
+): Promise<RoleplayPlayerPersonaRecord> {
+  return state.bridge.putRoleplayPlayerPersona({
+    record: { ...record, revision: expectedRevision ?? 0 },
+    ...(expectedRevision === undefined
+      ? {}
+      : { expected_revision: expectedRevision }),
+  }) as Promise<RoleplayPlayerPersonaRecord>;
 }
 
-async function getRoleplayJson<T>(
+async function putRoleplaySessionMetadataRecord(
   state: RoleplayRouteContext,
-  scope: { scopeType: string; scopeId: string },
-  key: string,
-): Promise<T | undefined> {
-  const records = await state.bridge.listSimpleKv({
-    ...scope,
-    keyPrefix: key,
-    limit: 1,
-    offset: 0,
-  });
-  const exact = records.find((record) => record.key === key);
-  return exact === undefined ? undefined : (JSON.parse(exact.valueJson) as T);
+  record: RoleplaySessionMetadata,
+  expectedRevision?: number,
+): Promise<RoleplaySessionMetadata> {
+  return state.bridge.putRoleplaySessionMetadata({
+    record: { ...record, revision: expectedRevision ?? record.revision ?? 0 },
+    ...(expectedRevision === undefined
+      ? {}
+      : { expected_revision: expectedRevision }),
+  }) as Promise<RoleplaySessionMetadata>;
 }
 
 async function listRoleplayCharacters(
   state: RoleplayRouteContext,
   profileId: string,
 ): Promise<RoleplayCharacterRecord[]> {
-  return listRoleplayJson<RoleplayCharacterRecord>(
-    state,
-    roleplayCharacterScope(profileId),
-    "character:",
-  );
+  return state.bridge.listRoleplayCharacters({
+    profile_id: profileId,
+    page: { limit: 1_000, offset: 0 },
+  }) as Promise<RoleplayCharacterRecord[]>;
 }
 
 async function getRoleplayCharacter(
@@ -970,11 +907,10 @@ async function getRoleplayCharacter(
   profileId: string,
   characterId: string,
 ): Promise<RoleplayCharacterRecord | undefined> {
-  return getRoleplayJson<RoleplayCharacterRecord>(
-    state,
-    roleplayCharacterScope(profileId),
-    roleplayCharacterKey(characterId),
-  );
+  const record = (await state.bridge.getRoleplayCharacter(characterId)) as
+    | RoleplayCharacterRecord
+    | undefined;
+  return record?.profileId === profileId ? record : undefined;
 }
 
 async function requireRoleplayCharacter(
@@ -993,11 +929,10 @@ async function listRoleplayPlayerPersonas(
   state: RoleplayRouteContext,
   profileId: string,
 ): Promise<RoleplayPlayerPersonaRecord[]> {
-  return listRoleplayJson<RoleplayPlayerPersonaRecord>(
-    state,
-    roleplayPlayerPersonaScope(profileId),
-    "player_persona:",
-  );
+  return state.bridge.listRoleplayPlayerPersonas({
+    profile_id: profileId,
+    page: { limit: 1_000, offset: 0 },
+  }) as Promise<RoleplayPlayerPersonaRecord[]>;
 }
 
 async function getRoleplayPlayerPersona(
@@ -1005,11 +940,10 @@ async function getRoleplayPlayerPersona(
   profileId: string,
   personaId: string,
 ): Promise<RoleplayPlayerPersonaRecord | undefined> {
-  return getRoleplayJson<RoleplayPlayerPersonaRecord>(
-    state,
-    roleplayPlayerPersonaScope(profileId),
-    roleplayPlayerPersonaKey(personaId),
-  );
+  const record = (await state.bridge.getRoleplayPlayerPersona(personaId)) as
+    | RoleplayPlayerPersonaRecord
+    | undefined;
+  return record?.profileId === profileId ? record : undefined;
 }
 
 async function requireRoleplayPlayerPersona(
@@ -1031,16 +965,15 @@ async function roleplaySessionMetadata(
     "sessionId" | "profileId" | "createdAt" | "lastActiveAt" | "status"
   >,
 ): Promise<RoleplaySessionMetadata> {
-  const stored = await getRoleplayJson<RoleplaySessionMetadata>(
-    state,
-    roleplaySessionScope(session.sessionId),
-    roleplaySessionMetadataKey(),
-  );
+  const stored = (await state.bridge.getRoleplaySessionMetadata(
+    session.sessionId,
+  )) as RoleplaySessionMetadata | undefined;
   return {
     sessionId: session.sessionId,
     profileId: session.profileId,
     activeLayerIds: [],
     archived: session.status === "archived",
+    revision: 0,
     createdAt: session.createdAt,
     updatedAt: session.lastActiveAt,
     ...(stored ?? {}),
@@ -1062,11 +995,11 @@ async function upsertRoleplaySessionMetadata(
     activeLayerIds: patch.activeLayerIds ?? current.activeLayerIds,
     updatedAt: state.now(),
   };
-  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
-    key: roleplaySessionMetadataKey(),
-    value: next,
-  });
-  return next;
+  return putRoleplaySessionMetadataRecord(
+    state,
+    next,
+    current.revision === 0 ? undefined : current.revision,
+  );
 }
 
 async function roleplaySessionMetadataPatchFromBody(
@@ -1444,24 +1377,7 @@ async function importRoleplayCharacter(
         ),
     },
   })) as RoleplayCharacterRecord;
-  await putRoleplayJson(state, roleplayCharacterScope(input.profileId), {
-    key: roleplayCharacterKey(character.id),
-    value: character,
-  });
-  await putRoleplayJson(state, roleplayImportScope(input.profileId), {
-    key: `${roleplayImportKey(input.importId)}:character:${character.id}`,
-    value: {
-      kind: "character",
-      importId: input.importId,
-      profileId: input.profileId,
-      recordId: character.id,
-      provenance: input.provenance,
-      raw: input.body,
-      rawSource: input.rawSource,
-      importedAt: input.now,
-    },
-  });
-  return character;
+  return putRoleplayCharacter(state, character);
 }
 
 async function importRoleplayPersona(
@@ -1494,24 +1410,7 @@ async function importRoleplayPersona(
         optionalString(input.body.name),
     },
   })) as RoleplayPlayerPersonaRecord;
-  await putRoleplayJson(state, roleplayPlayerPersonaScope(input.profileId), {
-    key: roleplayPlayerPersonaKey(persona.id),
-    value: persona,
-  });
-  await putRoleplayJson(state, roleplayImportScope(input.profileId), {
-    key: `${roleplayImportKey(input.importId)}:persona:${persona.id}`,
-    value: {
-      kind: "persona",
-      importId: input.importId,
-      profileId: input.profileId,
-      recordId: persona.id,
-      provenance: input.provenance,
-      raw: input.body,
-      rawSource: input.rawSource,
-      importedAt: input.now,
-    },
-  });
-  return persona;
+  return putRoleplayPlayerPersona(state, persona);
 }
 
 async function importRoleplayLore(
@@ -1836,10 +1735,10 @@ async function createRoleplaySession(
     resourceLimits: {},
     toolProfile: { tools: [] },
   });
-  await putRoleplayJson(state, roleplaySessionScope(session.sessionId), {
-    key: roleplaySessionMetadataKey(),
-    value: plan.metadata,
-  });
+  await putRoleplaySessionMetadataRecord(
+    state,
+    plan.metadata as RoleplaySessionMetadata,
+  );
   await applyRoleplayLifecycleChatLayers(state, plan);
   return (
     (await getRoleplaySessionSummary(state, session.sessionId)) ?? {
@@ -1876,10 +1775,11 @@ async function updateRoleplaySessionMetadata(
       now: state.now(),
     });
   }
-  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
-    key: roleplaySessionMetadataKey(),
-    value: patch.metadata,
-  });
+  await putRoleplaySessionMetadataRecord(
+    state,
+    patch.metadata,
+    current.revision,
+  );
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
     throw new Error(`roleplay session ${sessionId} missing`);
@@ -1902,10 +1802,11 @@ async function archiveRoleplaySession(
   if (plan.runtime.archive_session) {
     await state.bridge.archiveSession(sessionId as SessionId);
   }
-  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
-    key: roleplaySessionMetadataKey(),
-    value: plan.metadata,
-  });
+  await putRoleplaySessionMetadataRecord(
+    state,
+    plan.metadata as RoleplaySessionMetadata,
+    current.revision,
+  );
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
     throw new Error(`roleplay session ${sessionId} missing`);
@@ -1938,10 +1839,11 @@ async function restoreRoleplaySession(
       historyWindow: existing.historyWindow,
     });
   }
-  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
-    key: roleplaySessionMetadataKey(),
-    value: plan.metadata,
-  });
+  await putRoleplaySessionMetadataRecord(
+    state,
+    plan.metadata as RoleplaySessionMetadata,
+    current.revision,
+  );
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
     throw new Error(`roleplay session ${sessionId} missing`);
@@ -1998,10 +1900,10 @@ async function forkRoleplaySessionAtMessage(
     toolProfile: sourceSession.toolProfile,
     historyWindow: sourceSession.historyWindow,
   });
-  await putRoleplayJson(state, roleplaySessionScope(targetSession.sessionId), {
-    key: roleplaySessionMetadataKey(),
-    value: plan.metadata,
-  });
+  await putRoleplaySessionMetadataRecord(
+    state,
+    plan.metadata as RoleplaySessionMetadata,
+  );
   await applyRoleplayLifecycleChatLayers(state, plan);
   const branch = (await state.bridge.saveConversationBranch({
     branch_id: fork.branch_id,

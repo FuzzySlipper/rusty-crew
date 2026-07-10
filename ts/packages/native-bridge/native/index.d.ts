@@ -121,6 +121,18 @@ export declare class NativeBridgeBinding {
   normalizeRoleplayNarratorConfigJson(inputJson: string): string
   startRoleplayNarratorTurnJson(inputJson: string): string
   advanceRoleplayNarratorTurnJson(inputJson: string): string
+  putRoleplayCharacterJson(inputJson: string): string
+  getRoleplayCharacterJson(id: string): string
+  listRoleplayCharactersJson(inputJson: string): string
+  putRoleplayPlayerPersonaJson(inputJson: string): string
+  getRoleplayPlayerPersonaJson(id: string): string
+  listRoleplayPlayerPersonasJson(inputJson: string): string
+  putRoleplaySessionMetadataJson(inputJson: string): string
+  getRoleplaySessionMetadataJson(id: string): string
+  listRoleplaySessionMetadataJson(inputJson: string): string
+  putRoleplayImportJson(inputJson: string): string
+  getRoleplayImportJson(id: string): string
+  listRoleplayImportsJson(inputJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string

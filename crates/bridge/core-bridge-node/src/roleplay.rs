@@ -1,6 +1,73 @@
 use super::*;
 
 impl NativeBridge {
+    pub fn put_roleplay_character(
+        &self,
+        write: &RoleplayCharacterWrite,
+    ) -> CoreResult<RoleplayCharacterRecord> {
+        self.engine()?.put_roleplay_character(write)
+    }
+    pub fn get_roleplay_character(&self, id: &str) -> CoreResult<Option<RoleplayCharacterRecord>> {
+        self.engine()?.get_roleplay_character(id)
+    }
+    pub fn list_roleplay_characters(
+        &self,
+        query: &RoleplayCharacterQuery,
+    ) -> CoreResult<Vec<RoleplayCharacterRecord>> {
+        self.engine()?.list_roleplay_characters(query)
+    }
+    pub fn put_roleplay_player_persona(
+        &self,
+        write: &RoleplayPlayerPersonaWrite,
+    ) -> CoreResult<RoleplayPlayerPersonaRecord> {
+        self.engine()?.put_roleplay_player_persona(write)
+    }
+    pub fn get_roleplay_player_persona(
+        &self,
+        id: &str,
+    ) -> CoreResult<Option<RoleplayPlayerPersonaRecord>> {
+        self.engine()?.get_roleplay_player_persona(id)
+    }
+    pub fn list_roleplay_player_personas(
+        &self,
+        query: &RoleplayPlayerPersonaQuery,
+    ) -> CoreResult<Vec<RoleplayPlayerPersonaRecord>> {
+        self.engine()?.list_roleplay_player_personas(query)
+    }
+    pub fn put_roleplay_session_metadata(
+        &self,
+        write: &RoleplaySessionMetadataWrite,
+    ) -> CoreResult<RoleplaySessionMetadataRecord> {
+        self.engine()?.put_roleplay_session_metadata(write)
+    }
+    pub fn get_roleplay_session_metadata(
+        &self,
+        id: &str,
+    ) -> CoreResult<Option<RoleplaySessionMetadataRecord>> {
+        self.engine()?.get_roleplay_session_metadata(id)
+    }
+    pub fn list_roleplay_session_metadata(
+        &self,
+        query: &RoleplaySessionMetadataQuery,
+    ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>> {
+        self.engine()?.list_roleplay_session_metadata(query)
+    }
+    pub fn put_roleplay_import(
+        &self,
+        write: &RoleplayImportWrite,
+    ) -> CoreResult<RoleplayImportRecord> {
+        self.engine()?.put_roleplay_import(write)
+    }
+    pub fn get_roleplay_import(&self, id: &str) -> CoreResult<Option<RoleplayImportRecord>> {
+        self.engine()?.get_roleplay_import(id)
+    }
+    pub fn list_roleplay_imports(
+        &self,
+        query: &RoleplayImportQuery,
+    ) -> CoreResult<Vec<RoleplayImportRecord>> {
+        self.engine()?.list_roleplay_imports(query)
+    }
+
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,

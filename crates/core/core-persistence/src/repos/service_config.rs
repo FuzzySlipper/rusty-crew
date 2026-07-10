@@ -433,6 +433,28 @@ fn purge_profile_in_tx(
     purge_delete(
         tx,
         &mut counts,
+        "module_roleplay_imports",
+        "DELETE FROM module_roleplay_imports WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(tx, &mut counts, "module_roleplay_session_metadata", "DELETE FROM module_roleplay_session_metadata WHERE profile_id = ?1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)", params![profile_id.0.as_str()])?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_player_personas",
+        "DELETE FROM module_roleplay_player_personas WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_characters",
+        "DELETE FROM module_roleplay_characters WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
         "module_roleplay_lore_records",
         "DELETE FROM module_roleplay_lore_records
          WHERE record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)",

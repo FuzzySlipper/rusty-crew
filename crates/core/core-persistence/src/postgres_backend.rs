@@ -10,6 +10,7 @@ mod conversation_attachment;
 mod memory_lore;
 mod pool;
 mod profile_config;
+mod roleplay_records;
 mod runtime_counters;
 mod schema_migrations;
 mod session_event_queue;
@@ -10588,6 +10589,62 @@ mod tests {
         let schema = unique_schema("rusty_crew_session_event_backend");
         let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         session_event_conformance(&store);
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_typed_roleplay_records_match_revision_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_roleplay_records");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let created = store
+            .put_roleplay_character(&crate::RoleplayCharacterWrite {
+                record: crate::RoleplayCharacterRecord {
+                    id: "character-pg".into(),
+                    profile_id: "profile-pg".into(),
+                    name: "Postgres".into(),
+                    description: String::new(),
+                    personality: String::new(),
+                    scenario: String::new(),
+                    first_message: "hello".into(),
+                    alternate_greetings: Vec::new(),
+                    example_messages: Vec::new(),
+                    tags: Vec::new(),
+                    avatar_url: None,
+                    status: "active".into(),
+                    revision: 0,
+                    created_at: "2026-07-10T00:00:00Z".into(),
+                    updated_at: "2026-07-10T00:00:00Z".into(),
+                },
+                expected_revision: None,
+            })
+            .unwrap();
+        assert_eq!(created.revision, 1);
+        assert_eq!(
+            store
+                .list_roleplay_characters(&crate::RoleplayCharacterQuery {
+                    profile_id: "profile-pg".into(),
+                    status: None,
+                    page: None
+                })
+                .unwrap(),
+            vec![created.clone()]
+        );
+        let mut changed = created;
+        changed.name = "Updated".into();
+        assert_eq!(
+            store
+                .put_roleplay_character(&crate::RoleplayCharacterWrite {
+                    record: changed,
+                    expected_revision: Some(1)
+                })
+                .unwrap()
+                .revision,
+            2
+        );
         store.drop_schema_for_test().unwrap();
     }
 

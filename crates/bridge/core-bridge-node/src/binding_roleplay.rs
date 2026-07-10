@@ -171,6 +171,143 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn put_roleplay_character_json(&self, input_json: String) -> napi::Result<String> {
+        let write = parse_json::<RoleplayCharacterWrite>(&input_json, "roleplay character write")?;
+        serialize_json(
+            &self
+                .bridge()?
+                .put_roleplay_character(&write)
+                .map_err(to_napi_error)?,
+            "roleplay character",
+        )
+    }
+    #[napi]
+    pub fn get_roleplay_character_json(&self, id: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_character(&id)
+                .map_err(to_napi_error)?,
+            "roleplay character",
+        )
+    }
+    #[napi]
+    pub fn list_roleplay_characters_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<RoleplayCharacterQuery>(&input_json, "roleplay character query")?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_characters(&query)
+                .map_err(to_napi_error)?,
+            "roleplay characters",
+        )
+    }
+    #[napi]
+    pub fn put_roleplay_player_persona_json(&self, input_json: String) -> napi::Result<String> {
+        let write =
+            parse_json::<RoleplayPlayerPersonaWrite>(&input_json, "roleplay persona write")?;
+        serialize_json(
+            &self
+                .bridge()?
+                .put_roleplay_player_persona(&write)
+                .map_err(to_napi_error)?,
+            "roleplay persona",
+        )
+    }
+    #[napi]
+    pub fn get_roleplay_player_persona_json(&self, id: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_player_persona(&id)
+                .map_err(to_napi_error)?,
+            "roleplay persona",
+        )
+    }
+    #[napi]
+    pub fn list_roleplay_player_personas_json(&self, input_json: String) -> napi::Result<String> {
+        let query =
+            parse_json::<RoleplayPlayerPersonaQuery>(&input_json, "roleplay persona query")?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_player_personas(&query)
+                .map_err(to_napi_error)?,
+            "roleplay personas",
+        )
+    }
+    #[napi]
+    pub fn put_roleplay_session_metadata_json(&self, input_json: String) -> napi::Result<String> {
+        let write = parse_json::<RoleplaySessionMetadataWrite>(
+            &input_json,
+            "roleplay session metadata write",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .put_roleplay_session_metadata(&write)
+                .map_err(to_napi_error)?,
+            "roleplay session metadata",
+        )
+    }
+    #[napi]
+    pub fn get_roleplay_session_metadata_json(&self, id: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_session_metadata(&id)
+                .map_err(to_napi_error)?,
+            "roleplay session metadata",
+        )
+    }
+    #[napi]
+    pub fn list_roleplay_session_metadata_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<RoleplaySessionMetadataQuery>(
+            &input_json,
+            "roleplay session metadata query",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_session_metadata(&query)
+                .map_err(to_napi_error)?,
+            "roleplay session metadata",
+        )
+    }
+    #[napi]
+    pub fn put_roleplay_import_json(&self, input_json: String) -> napi::Result<String> {
+        let write = parse_json::<RoleplayImportWrite>(&input_json, "roleplay import write")?;
+        serialize_json(
+            &self
+                .bridge()?
+                .put_roleplay_import(&write)
+                .map_err(to_napi_error)?,
+            "roleplay import",
+        )
+    }
+    #[napi]
+    pub fn get_roleplay_import_json(&self, id: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_import(&id)
+                .map_err(to_napi_error)?,
+            "roleplay import",
+        )
+    }
+    #[napi]
+    pub fn list_roleplay_imports_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<RoleplayImportQuery>(&input_json, "roleplay import query")?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_imports(&query)
+                .map_err(to_napi_error)?,
+            "roleplay imports",
+        )
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;

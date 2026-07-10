@@ -303,8 +303,98 @@ impl ModuleSchemaRegistry {
 }
 
 pub fn compiled_module_schema_registry() -> ModuleSchemaRegistry {
-    ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle()])
+    ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(), roleplay_schema_bundle()])
         .expect("compiled module schema registry must be valid")
+}
+
+pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {
+    let stores = [
+        ("characters", "Roleplay character profiles"),
+        ("player_personas", "Roleplay player personas"),
+        ("session_metadata", "Roleplay session metadata"),
+        ("imports", "Roleplay import receipts and provenance"),
+    ];
+    ModuleSchemaBundle {
+        module_id: ModuleId::new("roleplay").expect("valid roleplay module id"),
+        schema_version: 1,
+        owner: ModuleOwner {
+            crate_name: "core_persistence".to_string(),
+            rust_module: "roleplay_records".to_string(),
+        },
+        logical_stores: stores
+            .iter()
+            .map(|(name, description)| LogicalStoreDescriptor {
+                store_name: StoreName::new(*name).expect("valid roleplay store name"),
+                description: (*description).to_string(),
+            })
+            .collect(),
+        tables: stores
+            .iter()
+            .map(|(name, _)| ModuleTableDescriptor {
+                table_name: TableName::new(*name).expect("valid roleplay table name"),
+                logical_store: StoreName::new(*name).expect("valid roleplay store name"),
+                declaration: TableDeclaration::Owned,
+            })
+            .collect(),
+        indexes: vec![
+            roleplay_index(
+                "characters",
+                "profile_status",
+                &["profile_id", "status", "updated_at"],
+            ),
+            roleplay_index(
+                "player_personas",
+                "profile_status",
+                &["profile_id", "status", "updated_at"],
+            ),
+            roleplay_index(
+                "session_metadata",
+                "profile_archived",
+                &["profile_id", "archived", "updated_at"],
+            ),
+            roleplay_index(
+                "imports",
+                "profile_status",
+                &["profile_id", "status", "imported_at"],
+            ),
+            roleplay_index("imports", "session", &["session_id", "imported_at"]),
+        ],
+        retention: Vec::new(),
+        capability_requirements: vec![
+            ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
+            ModuleCapabilityRequirement::required(ModuleSchemaCapability::JsonDocuments),
+        ],
+        repository_contracts: ["character", "player_persona", "session_metadata", "import"]
+            .into_iter()
+            .flat_map(|name| {
+                ["put", "get", "list"].map(move |verb| RepositoryContractDescriptor {
+                    contract_name: format!("{verb}_roleplay_{name}"),
+                    description: format!("{verb} typed roleplay {name} records"),
+                })
+            })
+            .collect(),
+        query_catalog_entries: stores
+            .iter()
+            .map(|(name, description)| QueryCatalogEntryDescriptor {
+                query_id: format!("list_roleplay_{name}"),
+                store_name: StoreName::new(*name).expect("valid roleplay store name"),
+                description: format!("List {description}"),
+                parameter_schema_id: Some(format!("roleplay_{name}_query")),
+            })
+            .collect(),
+        export_hooks: Vec::new(),
+        import_hooks: Vec::new(),
+        migration_notes: vec!["clean break from roleplay simple_kv storage".to_string()],
+    }
+}
+
+fn roleplay_index(table: &str, purpose: &str, columns: &[&str]) -> ModuleIndexDescriptor {
+    ModuleIndexDescriptor {
+        table_name: TableName::new(table).expect("valid roleplay table name"),
+        purpose: IndexPurpose::new(purpose).expect("valid roleplay index purpose"),
+        columns: columns.iter().map(|column| (*column).to_string()).collect(),
+        unique: false,
+    }
 }
 
 pub fn simple_kv_schema_bundle() -> ModuleSchemaBundle {

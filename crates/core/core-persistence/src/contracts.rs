@@ -1137,6 +1137,177 @@ pub struct SessionMemoryPromptDiagnostics {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayCharacterRecord {
+    pub id: String,
+    pub profile_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub personality: String,
+    #[serde(default)]
+    pub scenario: String,
+    #[serde(default)]
+    pub first_message: String,
+    #[serde(default)]
+    pub alternate_greetings: Vec<String>,
+    #[serde(default)]
+    pub example_messages: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    pub status: String,
+    pub revision: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayCharacterWrite {
+    pub record: RoleplayCharacterRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RoleplayCharacterQuery {
+    pub profile_id: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayPlayerPersonaRecord {
+    pub id: String,
+    pub profile_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub avatar_asset_ref: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub notes: String,
+    pub status: String,
+    pub revision: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayPlayerPersonaWrite {
+    pub record: RoleplayPlayerPersonaRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RoleplayPlayerPersonaQuery {
+    pub profile_id: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplaySessionMetadataRecord {
+    pub session_id: String,
+    pub profile_id: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub player_persona_id: Option<String>,
+    #[serde(default)]
+    pub character_id: Option<String>,
+    #[serde(default)]
+    pub active_layer_ids: Vec<String>,
+    #[serde(default)]
+    pub archived: bool,
+    pub revision: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionMetadataWrite {
+    pub record: RoleplaySessionMetadataRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RoleplaySessionMetadataQuery {
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayImportCounts {
+    pub characters: u64,
+    pub personas: u64,
+    pub lore_entries: u64,
+    pub messages: u64,
+    pub assistant_variant_rows: u64,
+    pub assistant_multi_swipe_rows: u64,
+    pub variants: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayImportRecord {
+    pub import_id: String,
+    pub profile_id: String,
+    pub source_kind: String,
+    #[serde(default)]
+    pub provenance: JsonValue,
+    #[serde(default)]
+    pub raw_source: Option<JsonValue>,
+    #[serde(default)]
+    pub character_id: Option<String>,
+    #[serde(default)]
+    pub persona_id: Option<String>,
+    #[serde(default)]
+    pub lore_layer_id: Option<String>,
+    pub session_id: String,
+    pub counts: RoleplayImportCounts,
+    pub status: String,
+    #[serde(default)]
+    pub failure_reason: Option<String>,
+    pub revision: u64,
+    pub imported_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleplayImportWrite {
+    pub record: RoleplayImportRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RoleplayImportQuery {
+    pub profile_id: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionMemorySelectedRecordDiagnostic {
     pub record_id: String,
     pub shape_id: String,
