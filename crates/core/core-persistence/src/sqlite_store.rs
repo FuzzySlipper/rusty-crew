@@ -144,6 +144,14 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_session_configs(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_session_configs(),
+        }
+    }
+
     pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
         match self {
             Self::Sqlite(sqlite) => sqlite.save_event(sequence, event),

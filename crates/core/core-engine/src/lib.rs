@@ -109,7 +109,8 @@ use rusty_crew_core_protocol::{
 use rusty_crew_core_session::SessionRegistry;
 use serde_json::json;
 use session_store::{
-    load_engine_bootstrap, save_engine_event, save_engine_session, save_engine_session_with_config,
+    load_engine_bootstrap, load_engine_session_configs, save_engine_event, save_engine_session,
+    save_engine_session_with_config,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -196,7 +197,37 @@ impl CoreEngine {
         };
         engine.cleanup_orphaned_delegated_sessions()?;
         engine.expire_delegated_sessions()?;
+        engine.reactivate_active_roleplay_sessions()?;
         Ok(engine)
+    }
+
+    fn reactivate_active_roleplay_sessions(&self) -> CoreResult<()> {
+        let configs = load_engine_session_configs(&self.store)?
+            .into_iter()
+            .map(|config| (config.session_id.clone(), config))
+            .collect::<HashMap<_, _>>();
+        let active_roleplay_sessions = RoleplayRecordsStore::list_session_metadata(
+            &self.store,
+            &RoleplaySessionMetadataQuery {
+                profile_id: None,
+                archived: Some(false),
+                page: None,
+            },
+        )?;
+        for metadata in active_roleplay_sessions {
+            let session_id = SessionId::new(metadata.session_id.clone());
+            let config = configs.get(&session_id).cloned().ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!(
+                        "active roleplay session {} has no persisted session config",
+                        metadata.session_id
+                    ),
+                )
+            })?;
+            self.ensure_configured_session(config)?;
+        }
+        Ok(())
     }
 
     pub fn handle(&self) -> EngineHandle {
@@ -3079,6 +3110,63 @@ mod tests {
         assert_eq!(refreshed.resource_limits.max_duration_ms, Some(120_000));
         assert_eq!(refreshed.tool_profile.tools.len(), 1);
         assert_eq!(refreshed.tool_profile.tools[0].name, "read_file");
+    }
+
+    #[test]
+    fn restart_reactivates_only_roleplay_sessions_with_active_metadata() {
+        let data_dir = unique_data_dir("roleplay-session-restart");
+        {
+            let engine = test_engine_with_data_dir(data_dir.clone());
+            for (session_id, archived) in [
+                ("active-roleplay-session", false),
+                ("archived-roleplay-session", true),
+            ] {
+                engine
+                    .create_session(session_config(
+                        session_id,
+                        "narrator",
+                        "roleplay-profile",
+                        SessionKind::Full,
+                    ))
+                    .unwrap();
+                engine
+                    .put_roleplay_session_metadata(&RoleplaySessionMetadataWrite {
+                        record: RoleplaySessionMetadataRecord {
+                            session_id: session_id.to_string(),
+                            profile_id: "roleplay-profile".to_string(),
+                            display_name: Some(session_id.to_string()),
+                            player_persona_id: None,
+                            character_id: None,
+                            active_layer_ids: Vec::new(),
+                            archived,
+                            revision: 1,
+                            created_at: "2026-06-19T00:00:00Z".to_string(),
+                            updated_at: "2026-06-19T00:00:00Z".to_string(),
+                        },
+                        expected_revision: None,
+                    })
+                    .unwrap();
+            }
+            engine.shutdown_with_timeout(25).unwrap();
+        }
+
+        let reopened = test_engine_with_data_dir(data_dir.clone());
+        assert_eq!(
+            reopened
+                .get_session(&SessionId::new("active-roleplay-session"))
+                .unwrap()
+                .status,
+            SessionStatus::Idle
+        );
+        assert_eq!(
+            reopened
+                .get_session(&SessionId::new("archived-roleplay-session"))
+                .unwrap()
+                .status,
+            SessionStatus::Archived
+        );
+        drop(reopened);
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[test]

@@ -64,6 +64,67 @@ const moduleRegistryFixture = {
       degradedReasons: [],
       blockedReasons: [],
     },
+    {
+      moduleId: "roleplay",
+      ownerCrate: "core_persistence",
+      ownerModule: "roleplay",
+      descriptorVersion: 1,
+      installedVersion: 1,
+      migrationStatus: "installed",
+      descriptorFingerprint: "fnv1a64:5678",
+      installedDescriptorFingerprint: "fnv1a64:5678",
+      installedAt: "2026-07-10T00:00:00Z",
+      updatedAt: "2026-07-10T00:00:00Z",
+      capabilityStatus: [
+        {
+          capability: "transactions",
+          required: true,
+          supported: true,
+          backendVariant: "sqlite",
+        },
+      ],
+      logicalStores: [
+        { storeName: "characters", description: "Roleplay characters" },
+        { storeName: "player_personas", description: "Player personas" },
+        { storeName: "session_metadata", description: "Session metadata" },
+        { storeName: "imports", description: "Import receipts" },
+      ],
+      physicalTables: [],
+      physicalIndexes: [],
+      retention: [],
+      repositoryContracts: [],
+      queryCatalogEntries: [
+        {
+          queryId: "list_roleplay_characters",
+          storeName: "characters",
+          description: "List roleplay characters",
+          parameterSchemaId: "roleplay_characters_query",
+        },
+        {
+          queryId: "list_roleplay_player_personas",
+          storeName: "player_personas",
+          description: "List roleplay personas",
+          parameterSchemaId: "roleplay_player_personas_query",
+        },
+        {
+          queryId: "list_roleplay_session_metadata",
+          storeName: "session_metadata",
+          description: "List roleplay sessions",
+          parameterSchemaId: "roleplay_session_metadata_query",
+        },
+        {
+          queryId: "list_roleplay_imports",
+          storeName: "imports",
+          description: "List roleplay imports",
+          parameterSchemaId: "roleplay_imports_query",
+        },
+      ],
+      exportHooks: [],
+      importHooks: [],
+      migrationNotes: [],
+      degradedReasons: [],
+      blockedReasons: [],
+    },
   ],
   orphanInstalledModules: [],
 } satisfies Awaited<ReturnType<StorageQueryContext["bridge"]["storageSchema"]>>;
@@ -226,6 +287,29 @@ const bridge = {
       },
     ];
   },
+  async listRoleplayCharacters(query) {
+    assert.equal(query.profile_id, "rp-profile");
+    return [{ id: "elara", profile_id: "rp-profile", status: "active" }];
+  },
+  async listRoleplayPlayerPersonas(query) {
+    assert.equal(query.profile_id, "rp-profile");
+    return [{ id: "rowan", profile_id: "rp-profile", status: "active" }];
+  },
+  async listRoleplaySessionMetadata(query) {
+    assert.equal(query.profile_id, "rp-profile");
+    assert.equal(query.archived, false);
+    return [
+      {
+        session_id: "rp-session",
+        profile_id: "rp-profile",
+        archived: false,
+      },
+    ];
+  },
+  async listRoleplayImports(query) {
+    assert.equal(query.profile_id, "rp-profile");
+    return [{ import_id: "rp-import", profile_id: "rp-profile" }];
+  },
 } satisfies StorageQueryContext["bridge"];
 
 const context: StorageQueryContext = { bridge };
@@ -242,6 +326,8 @@ assert.equal(catalog.status, 200);
 const catalogData = okData<StorageQueryCatalog>(catalog);
 assert.ok(catalogData.items.some((item) => item.id === "runtime.search"));
 assert.ok(catalogData.items.some((item) => item.id === "storage.schema"));
+assert.ok(catalogData.items.some((item) => item.id === "roleplay.characters"));
+assert.ok(catalogData.items.some((item) => item.id === "roleplay.sessions"));
 const simpleKvDescriptor = catalogData.items.find(
   (item) => item.id === "simple_kv.entries",
 );
@@ -358,11 +444,19 @@ assert.ok(!("ok" in memory.details));
 assert.equal(memory.details.query_id, "profile.memory");
 assert.equal(memory.details.items?.length, 1);
 
+const roleplaySessions = await memoryTool.execute("call-roleplay-sessions", {
+  queryId: "roleplay.sessions",
+  input: { profileId: "rp-profile", archived: false },
+});
+assert.ok(!("ok" in roleplaySessions.details));
+assert.equal(roleplaySessions.details.query_id, "roleplay.sessions");
+assert.equal(roleplaySessions.details.items?.length, 1);
+
 const catalogTool = await storageQueryCatalogTool(context).execute(
   "call-catalog",
   {},
 );
-assert.equal(catalogTool.details.total, 7);
+assert.equal(catalogTool.details.total, 11);
 
 const unmappedCatalog = await handleStorageQueryRequest(
   {

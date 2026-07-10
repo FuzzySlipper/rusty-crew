@@ -261,11 +261,16 @@ export function captureLoreFactTool(
       "Record a roleplay fact into an auto-capture lore layer for later recall or promotion.",
     parameters: captureLoreFactParameters,
     executionMode: "sequential",
-    execute: async (_callId, params) =>
+    execute: async (callId, params) =>
       runLoreTool("capture_lore_fact", context, "written", async (client) =>
         client.captureLoreFact({
           layer_id: params.layerId,
-          write: loreWriteFromParams(params, "capture_producer", context),
+          write: loreWriteFromParams(
+            params,
+            "capture_producer",
+            context,
+            callId,
+          ),
           is_constant: params.isConstant ?? false,
           priority: params.priority ?? 0,
           capture_reason: params.captureReason,
@@ -474,7 +479,24 @@ function loreWriteFromParams(
   params: CaptureLoreFactParams,
   source: "capture_producer" | "in_wake_tool" | "ui",
   context: LoreMemoryToolContext,
+  callId: string,
 ): Record<string, unknown> {
+  const canonStatus = params.canonStatus ?? "draft";
+  const visibility = params.visibility ?? "tool_only";
+  const evidenceRefs =
+    params.evidenceRefs !== undefined && params.evidenceRefs.length > 0
+      ? params.evidenceRefs.map((ref) => ({
+          evidence_type: ref.evidenceType,
+          ref_id: ref.refId,
+          label: ref.label,
+        }))
+      : [
+          {
+            evidence_type: "tool_call",
+            ref_id: callId,
+            label: "capture_lore_fact tool call",
+          },
+        ];
   return {
     record_id: params.recordId,
     world_id: params.worldId,
@@ -485,16 +507,20 @@ function loreWriteFromParams(
       shape_id: params.shapeId,
       version: params.shapeVersion ?? 1,
     },
-    canon_status: params.canonStatus ?? "draft",
-    visibility: params.visibility ?? "tool_only",
+    canon_status: canonStatus,
+    visibility,
     title: params.title,
     body: params.body,
-    content: params.content ?? {},
-    evidence_refs: (params.evidenceRefs ?? []).map((ref) => ({
-      evidence_type: ref.evidenceType,
-      ref_id: ref.refId,
-      label: ref.label,
-    })),
+    content: {
+      ...(params.content ?? {}),
+      world_id: params.worldId,
+      ...(params.entityId === undefined ? {} : { entity_id: params.entityId }),
+      title: params.title,
+      body: params.body,
+      canon_status: canonStatus,
+      visibility,
+    },
+    evidence_refs: evidenceRefs,
     source,
     confidence: params.confidence ?? 0.7,
     durability_rationale:

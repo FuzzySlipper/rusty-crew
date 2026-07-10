@@ -9,6 +9,7 @@ pub(crate) trait EngineBootstrapStore {
 }
 
 pub(crate) trait SessionLifecycleStore {
+    fn load_engine_session_configs(&self) -> CoreResult<Vec<SessionConfig>>;
     fn save_engine_session(&self, state: &SessionState) -> CoreResult<()>;
     fn save_engine_session_with_config(
         &self,
@@ -32,6 +33,14 @@ impl EngineBootstrapStore for CoreCoordinationStore {
 }
 
 impl SessionLifecycleStore for CoreCoordinationStore {
+    fn load_engine_session_configs(&self) -> CoreResult<Vec<SessionConfig>> {
+        Ok(self
+            .load_session_configs()?
+            .into_iter()
+            .map(|record| record.config)
+            .collect())
+    }
+
     fn save_engine_session(&self, state: &SessionState) -> CoreResult<()> {
         self.save_session(state)
     }
@@ -43,6 +52,12 @@ impl SessionLifecycleStore for CoreCoordinationStore {
     ) -> CoreResult<()> {
         self.save_session_with_config(state, config)
     }
+}
+
+pub(crate) fn load_engine_session_configs(
+    store: &impl SessionLifecycleStore,
+) -> CoreResult<Vec<SessionConfig>> {
+    store.load_engine_session_configs()
 }
 
 pub(crate) fn load_engine_bootstrap(
@@ -118,6 +133,10 @@ mod tests {
     }
 
     impl SessionLifecycleStore for FakeSessionStore {
+        fn load_engine_session_configs(&self) -> CoreResult<Vec<SessionConfig>> {
+            Ok(self.saved_configs.lock().unwrap().clone())
+        }
+
         fn save_engine_session(&self, state: &SessionState) -> CoreResult<()> {
             let mut sessions = self.sessions.lock().unwrap();
             if let Some(existing) = sessions

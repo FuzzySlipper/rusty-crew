@@ -51,6 +51,7 @@
     "smoke:roleplay-st-import-api": "tsx ../../smokes/brain-island/smoke-roleplay-st-import-api.ts",
     "smoke:roleplay-behavior-eval": "tsx smokes/smoke-roleplay-behavior-eval.ts",
     "smoke:roleplay-quality-spike-live": "tsx smokes/smoke-roleplay-quality-spike-live.ts",
+    "smoke:roleplay-persistence-live": "tsx smokes/smoke-roleplay-persistence-live.ts",
     "smoke:memory-space-api": "tsx smokes/smoke-memory-space-api.ts",
     "smoke:session-memory-prompt-context": "tsx smokes/smoke-session-memory-prompt-context.ts",
     "smoke:memory-proposals": "tsx smokes/smoke-memory-proposals.ts",

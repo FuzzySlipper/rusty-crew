@@ -66,13 +66,6 @@ async function runSmoke(): Promise<void> {
     title: "Silver Orchard",
     body: "The silver orchard blooms after the clockmaker sings.",
     content: { tags: ["orchard", "clockmaker"] },
-    evidenceRefs: [
-      {
-        evidenceType: "transcript",
-        refId: "message-1",
-        label: "chat turn",
-      },
-    ],
     captureReason: "smoke test capture",
   });
   assert.equal(capture.details.ok, true);
@@ -81,6 +74,23 @@ async function runSmoke(): Promise<void> {
     "lore-silver-orchard",
   );
   assert.equal(bridge.calls.at(-1)?.method, "captureLoreFact");
+  const captureWrite = record(record(bridge.calls.at(-1)?.input).write);
+  assert.deepEqual(captureWrite.evidence_refs, [
+    {
+      evidence_type: "tool_call",
+      ref_id: "capture",
+      label: "capture_lore_fact tool call",
+    },
+  ]);
+  assert.deepEqual(captureWrite.content, {
+    tags: ["orchard", "clockmaker"],
+    world_id: "world-moonlit",
+    entity_id: "entity-clockmaker",
+    title: "Silver Orchard",
+    body: "The silver orchard blooms after the clockmaker sings.",
+    canon_status: "draft",
+    visibility: "tool_only",
+  });
 
   const promote = await promoteLoreEntryTool(context).execute("promote", {
     sourceLayerId: "layer-auto",

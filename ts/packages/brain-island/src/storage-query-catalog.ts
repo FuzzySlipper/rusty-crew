@@ -14,6 +14,10 @@ import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 export type StorageQueryId =
   | "conversation.branches"
   | "profile.memory"
+  | "roleplay.characters"
+  | "roleplay.imports"
+  | "roleplay.personas"
+  | "roleplay.sessions"
   | "runtime.counters"
   | "runtime.search"
   | "simple_kv.entries"
@@ -77,6 +81,10 @@ export interface StorageQueryContext {
   bridge: Pick<
     NativeBridgeModule,
     | "listProfileMemory"
+    | "listRoleplayCharacters"
+    | "listRoleplayImports"
+    | "listRoleplayPlayerPersonas"
+    | "listRoleplaySessionMetadata"
     | "queryConversationBranches"
     | "queryRuntimeCounters"
     | "searchRuntime"
@@ -226,6 +234,10 @@ const STORAGE_SYSTEM_QUERY_DESCRIPTORS = [
 
 const ALL_STORAGE_QUERY_IDS = new Set<StorageQueryId>([
   "simple_kv.entries",
+  "roleplay.characters",
+  "roleplay.imports",
+  "roleplay.personas",
+  "roleplay.sessions",
   ...STORAGE_SYSTEM_QUERY_DESCRIPTORS.map((descriptor) => descriptor.id),
 ]);
 
@@ -236,7 +248,12 @@ type NativeRuntimeModuleQueryCatalogDiagnostic =
 type NativeRuntimeModuleLogicalStoreDiagnostic =
   NativeRuntimeModuleSchemaDiagnostic["logicalStores"][number];
 
-type RustModuleQueryMappingKey = "simple_kv.list_entries_by_scope";
+type RustModuleQueryMappingKey =
+  | "roleplay.list_roleplay_characters"
+  | "roleplay.list_roleplay_imports"
+  | "roleplay.list_roleplay_player_personas"
+  | "roleplay.list_roleplay_session_metadata"
+  | "simple_kv.list_entries_by_scope";
 
 const RUST_MODULE_QUERY_MAPPINGS: Record<
   RustModuleQueryMappingKey,
@@ -247,6 +264,75 @@ const RUST_MODULE_QUERY_MAPPINGS: Record<
     backendCapabilities: readonly string[],
   ) => StorageQueryDescriptor
 > = {
+  "roleplay.list_roleplay_characters": (
+    module,
+    entry,
+    logicalStore,
+    backendCapabilities,
+  ) =>
+    roleplayModuleQueryDescriptor({
+      id: "roleplay.characters",
+      title: "Roleplay characters",
+      resultShape: "module.roleplay.character.v1",
+      module,
+      entry,
+      logicalStore,
+      backendCapabilities,
+      parameters: profileStatusPageParameters("Character status filter."),
+    }),
+  "roleplay.list_roleplay_player_personas": (
+    module,
+    entry,
+    logicalStore,
+    backendCapabilities,
+  ) =>
+    roleplayModuleQueryDescriptor({
+      id: "roleplay.personas",
+      title: "Roleplay player personas",
+      resultShape: "module.roleplay.player_persona.v1",
+      module,
+      entry,
+      logicalStore,
+      backendCapabilities,
+      parameters: profileStatusPageParameters("Persona status filter."),
+    }),
+  "roleplay.list_roleplay_session_metadata": (
+    module,
+    entry,
+    logicalStore,
+    backendCapabilities,
+  ) =>
+    roleplayModuleQueryDescriptor({
+      id: "roleplay.sessions",
+      title: "Roleplay session metadata",
+      resultShape: "module.roleplay.session_metadata.v1",
+      module,
+      entry,
+      logicalStore,
+      backendCapabilities,
+      parameters: [
+        parameter("profileId", "string", false, "Optional profile id."),
+        parameter("archived", "boolean", false, "Archived state filter."),
+        parameter("limit", "integer", false, "Maximum rows to return.", 25),
+        parameter("offset", "integer", false, "Rows to skip.", 0),
+      ],
+    }),
+  "roleplay.list_roleplay_imports": (
+    module,
+    entry,
+    logicalStore,
+    backendCapabilities,
+  ) =>
+    roleplayModuleQueryDescriptor({
+      id: "roleplay.imports",
+      title: "Roleplay import receipts",
+      resultShape: "module.roleplay.import_receipt.v1",
+      module,
+      entry,
+      logicalStore,
+      backendCapabilities,
+      parameters: profileStatusPageParameters("Import status filter."),
+    }),
   "simple_kv.list_entries_by_scope": (
     module,
     entry,
@@ -444,6 +530,14 @@ export async function executeStorageQuery(
       return runtimeSearch(body, context);
     case "profile.memory":
       return profileMemory(body, context);
+    case "roleplay.characters":
+      return roleplayCharacters(body, context);
+    case "roleplay.personas":
+      return roleplayPersonas(body, context);
+    case "roleplay.sessions":
+      return roleplaySessions(body, context);
+    case "roleplay.imports":
+      return roleplayImports(body, context);
     case "conversation.branches":
       return conversationBranches(body, context);
     case "runtime.counters":
@@ -680,6 +774,90 @@ async function conversationBranches(
   };
 }
 
+async function roleplayCharacters(
+  body: Record<string, unknown>,
+  context: StorageQueryContext,
+): Promise<StorageQueryResult> {
+  const { limit, offset } = pageInput(body, 25);
+  const items = await context.bridge.listRoleplayCharacters(
+    compactRecord({
+      profile_id: requiredString(body, "profileId"),
+      status: optionalString(body, "status"),
+      page: { limit, offset },
+    }),
+  );
+  return storageItems("roleplay.characters", items, limit, offset);
+}
+
+async function roleplayPersonas(
+  body: Record<string, unknown>,
+  context: StorageQueryContext,
+): Promise<StorageQueryResult> {
+  const { limit, offset } = pageInput(body, 25);
+  const items = await context.bridge.listRoleplayPlayerPersonas(
+    compactRecord({
+      profile_id: requiredString(body, "profileId"),
+      status: optionalString(body, "status"),
+      page: { limit, offset },
+    }),
+  );
+  return storageItems("roleplay.personas", items, limit, offset);
+}
+
+async function roleplaySessions(
+  body: Record<string, unknown>,
+  context: StorageQueryContext,
+): Promise<StorageQueryResult> {
+  const { limit, offset } = pageInput(body, 25);
+  const archived = body.archived;
+  if (archived !== undefined && typeof archived !== "boolean") {
+    throw new StorageQueryInputError(
+      "invalid_boolean_parameter",
+      "archived must be a boolean",
+    );
+  }
+  const items = await context.bridge.listRoleplaySessionMetadata(
+    compactRecord({
+      profile_id: optionalString(body, "profileId"),
+      archived,
+      page: { limit, offset },
+    }),
+  );
+  return storageItems("roleplay.sessions", items, limit, offset);
+}
+
+async function roleplayImports(
+  body: Record<string, unknown>,
+  context: StorageQueryContext,
+): Promise<StorageQueryResult> {
+  const { limit, offset } = pageInput(body, 25);
+  const items = await context.bridge.listRoleplayImports(
+    compactRecord({
+      profile_id: requiredString(body, "profileId"),
+      status: optionalString(body, "status"),
+      page: { limit, offset },
+    }),
+  );
+  return storageItems("roleplay.imports", items, limit, offset);
+}
+
+function storageItems(
+  queryId: StorageQueryId,
+  items: unknown[],
+  limit: number,
+  offset: number,
+): StorageQueryResult {
+  return {
+    query_id: queryId,
+    read_only: true,
+    source: "rust_bridge_read_model",
+    items,
+    total: items.length,
+    limit,
+    offset,
+  };
+}
+
 async function runtimeCounters(
   body: Record<string, unknown>,
   context: StorageQueryContext,
@@ -783,6 +961,60 @@ function enumParameter(
     required,
     description,
     enumValues,
+  };
+}
+
+function profileStatusPageParameters(
+  statusDescription: string,
+): StorageQueryParameter[] {
+  return [
+    parameter("profileId", "string", true, "Profile id."),
+    parameter("status", "string", false, statusDescription),
+    parameter("limit", "integer", false, "Maximum rows to return.", 25),
+    parameter("offset", "integer", false, "Rows to skip.", 0),
+  ];
+}
+
+function roleplayModuleQueryDescriptor(input: {
+  id: StorageQueryId;
+  title: string;
+  resultShape: string;
+  module: NativeRuntimeModuleSchemaDiagnostic;
+  entry: NativeRuntimeModuleQueryCatalogDiagnostic;
+  logicalStore: NativeRuntimeModuleLogicalStoreDiagnostic;
+  backendCapabilities: readonly string[];
+  parameters: StorageQueryParameter[];
+}): StorageQueryDescriptor {
+  return {
+    id: input.id,
+    title: input.title,
+    description: input.entry.description,
+    owner: "rust_coordination",
+    readOnly: true,
+    backendAgnostic: true,
+    resultShape: input.resultShape,
+    module: {
+      moduleId: input.module.moduleId,
+      schemaVersion: input.module.descriptorVersion,
+      logicalStore: input.entry.storeName,
+      logicalStoreDescription: input.logicalStore.description,
+      ownerCrate: input.module.ownerCrate,
+      ownerModule: input.module.ownerModule,
+      rustQueryId: input.entry.queryId,
+      ...(input.entry.parameterSchemaId === undefined
+        ? {}
+        : { parameterSchemaId: input.entry.parameterSchemaId }),
+      backendCapabilities: [...input.backendCapabilities],
+      capabilityStatus: input.module.capabilityStatus.map((status) => ({
+        capability: status.capability,
+        required: status.required,
+        supported: status.supported,
+        ...(status.backendVariant === undefined
+          ? {}
+          : { backendVariant: status.backendVariant }),
+      })),
+    },
+    parameters: input.parameters,
   };
 }
 

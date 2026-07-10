@@ -202,6 +202,12 @@ export async function submitRustyViewChatMessage(
       reason: input.reason,
     },
   });
+  await context.bridge.updateConversationBranchHead({
+    branch_id: branch.branch_id,
+    head_message_id: messageId,
+    expected: { type: "any" },
+    updated_at: context.now(),
+  });
   const wakeReport = await context.submitServiceTurn({
     sessionId: input.session.sessionId,
     from: input.actor.id,
@@ -209,12 +215,15 @@ export async function submitRustyViewChatMessage(
     correlationId,
     source: "chat",
   });
-  await context.bridge.updateConversationBranchHead({
-    branch_id: branch.branch_id,
-    head_message_id: messageId,
-    expected: { type: "any" },
-    updated_at: context.now(),
-  });
+  if (wakeReport.status === "completed") {
+    await persistCompletedAssistantTurn(context, {
+      session: input.session,
+      branch,
+      userMessageId: messageId,
+      correlationId,
+      wakeReport,
+    });
+  }
   const result: SendChatMessageResult = {
     status: wakeReport.status === "completed" ? "accepted" : "rejected",
     message_id: messageId,
@@ -228,6 +237,79 @@ export async function submitRustyViewChatMessage(
   };
   rememberChatMessageReceipt(context, receiptKey, result);
   return result;
+}
+
+async function persistCompletedAssistantTurn(
+  context: RustyViewChatOperationsContext,
+  input: {
+    session: ChatSendMessageInput["session"];
+    branch: ConversationBranchRecord;
+    userMessageId: string;
+    correlationId: string;
+    wakeReport: RustyViewChatWakeReport;
+  },
+): Promise<void> {
+  const body = assistantTextFromCoreEvents(
+    input.wakeReport.observedEvents ?? [],
+  );
+  if (body === undefined) return;
+  const now = context.now();
+  const stableWakeId = input.wakeReport.wakeId ?? input.correlationId;
+  const messageId = stableChatRecordId("assistant-message", stableWakeId);
+  const slotId = stableChatRecordId("slot", messageId);
+  const variantId = stableChatRecordId("variant", slotId);
+  const actor = { id: input.session.agentId, kind: "agent" as const };
+  const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
+    context.roleplayRouteContext(),
+    input.session,
+    actor,
+    now,
+  ).catch(() => undefined);
+  const metadataJson = {
+    source: "rusty_view_chat_assistant_wake",
+    correlation_id: input.correlationId,
+    wake_id: input.wakeReport.wakeId,
+    ...(speakerIdentity === undefined
+      ? {}
+      : { speaker_identity: speakerIdentity }),
+  };
+  const result = (await context.bridge.createChatMessageSlot({
+    slot: {
+      slot_id: slotId,
+      session_id: input.session.sessionId,
+      primary_variant_id: variantId,
+      active_variant_id: null,
+      metadata_json: metadataJson,
+      created_at: now,
+      updated_at: now,
+    },
+    primary_variant: messageVariantWrite({
+      sessionId: input.session.sessionId,
+      slotId,
+      variantId,
+      messageId,
+      source: "primary",
+      ordinal: 0,
+      actor,
+      body,
+      branchId: input.branch.branch_id,
+      parentMessageId: input.userMessageId,
+      previousMessageId: input.userMessageId,
+      metadataJson,
+      now,
+    }),
+    branch_id: input.branch.branch_id,
+    expected_branch_head: { type: "any" },
+    updated_at: now,
+  })) as {
+    slot?: MessageSlotRecord | null;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  if (result.conflict || !result.slot) {
+    throw new Error(
+      `assistant chat slot persistence conflicted for ${input.session.sessionId}`,
+    );
+  }
 }
 
 export async function generateRoleplayAssistantAlternativeViaWake(

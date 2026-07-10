@@ -610,8 +610,9 @@ async function seedViaDirectApi(sessionId: string): Promise<void> {
 async function cleanupTestProfile(): Promise<void> {
   console.log("\n── Cleanup ──");
   try {
-    await adminPost(`/control/profiles/${TEST_PROFILE}/decommission`, {
+    await adminPost(`/control/profiles/${TEST_PROFILE}/delete`, {
       reason: "quality-spike-cleanup",
+      confirmProfileId: TEST_PROFILE,
     });
     console.log("✅ Test profile cleaned up");
   } catch (err) {
@@ -662,8 +663,9 @@ async function sendMessageAndCollect(
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
-runQualitySpike().catch((err: unknown) => {
+runQualitySpike().catch(async (err: unknown) => {
   console.error("❌ Quality spike failed:", err);
+  await cleanupTestProfile();
   process.exitCode = 1;
 });
 

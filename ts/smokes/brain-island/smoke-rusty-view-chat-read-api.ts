@@ -147,7 +147,7 @@ try {
     "stream should receive assistant/tool progress before chat POST completes",
   );
   const sent = await sentPromise;
-  assert.equal(sent.status, 202);
+  assert.equal(sent.status, 202, JSON.stringify(sent.body));
   assert.equal(sent.body.ok, true);
   assert.equal(sent.body.data.status, "accepted");
   assert.equal(sent.body.data.message_id, "client-message-1");
@@ -164,7 +164,10 @@ try {
     (branch: { label?: string }) => branch.label === "Default",
   );
   assert.ok(defaultBranch, "chat send should create a default branch");
-  assert.equal(defaultBranch.head_message_id, "client-message-1");
+  assert.equal(
+    defaultBranch.head_message_id,
+    `assistant-message:${sent.body.data.wake_id}`,
+  );
   assert.equal(
     initialTree.body.data.branch_state.active_branch_id,
     defaultBranch.branch_id,
@@ -427,6 +430,19 @@ try {
   );
   assert.ok(sentSlot, "sent message slot should be queryable");
   assert.equal(sentSlot.primary.variant_id, sent.body.data.primary_variant_id);
+  const assistantSlot = slots.body.data.items.find(
+    (slot: { primary?: { message?: { author_role?: string } } }) =>
+      slot.primary?.message?.author_role === "assistant",
+  );
+  assert.ok(
+    assistantSlot,
+    "completed assistant wake text should be persisted as a durable message slot",
+  );
+  assert.match(
+    assistantSlot.primary.message.body,
+    /live streaming delta/,
+    "assistant slot should contain the completed wake text",
+  );
 
   const createdSlot = await post(
     "/v1/chat/sessions/chat-session/slots",
@@ -1680,7 +1696,8 @@ function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
         profileId: "chat-profile",
         modelConfig: {
           provider: "local",
-          modelName: "deterministic",
+          modelName: "smoke-model",
+          baseUrl: `http://127.0.0.1:${mcpServerPort}/v1`,
         },
         prompt: {
           system: "Chat profile system prompt.",
@@ -1698,6 +1715,37 @@ function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
 
 function startMcpServer(portToListen: number): Promise<Server> {
   const server = createHttpServer(async (request, response) => {
+    if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      for await (const _chunk of request) {
+        // Drain the request body before returning the local provider fixture.
+      }
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-rusty-view-smoke",
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: " provider completion" },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-rusty-view-smoke",
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
+      return;
+    }
     if (request.method !== "POST" || request.url !== "/mcp") {
       response.writeHead(404).end();
       return;
