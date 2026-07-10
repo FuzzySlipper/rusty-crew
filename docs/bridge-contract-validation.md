@@ -33,6 +33,38 @@ ts/packages/native-bridge/src/generated/core-config-facade.ts
 Do not edit that file manually. If `crates/core/core-config` changes one of the
 covered request shapes, regenerate the facade and keep the drift smoke green.
 
+## Generated Neutral Protocol Contracts
+
+Selected Rust-owned protocol families now derive `schemars::JsonSchema` and
+generate the public TypeScript declarations consumed through
+`@rusty-crew/contracts`:
+
+```text
+ts/packages/contracts/src/generated/core-protocol.ts
+ts/packages/contracts/src/generated/core-protocol.schema.json
+```
+
+The selected closure covers session/resource/delegation records, brain
+wake/event/action/provider-state records, core events and errors, and the
+memory-space/proposal/activity/compaction families. Memory records preserve
+their direct Rust `snake_case` JSON names; native-bridge DTOs use the existing
+camel-case ergonomic projection. Branded identifiers remain a thin TypeScript
+typing layer over the generated wire primitives.
+
+Regenerate and check them with:
+
+```bash
+npm run codegen:protocol-contracts
+npm run check:protocol-contracts
+```
+
+The check regenerates in memory and compares both committed artifacts exactly.
+Unsupported schema constructs fail generation rather than emitting `any`.
+Adapter-composed channel/MCP views and bridge-only scheduler presentation
+types remain authored because they are not direct `core-protocol` serde DTOs.
+Their Rust config and persistence inputs continue to be covered by the native
+mapping and fixture inventories.
+
 The checked-in fixture file lives at:
 
 ```text
@@ -152,9 +184,9 @@ including:
 - native loader compatibility assumptions;
 - any intentionally breaking change to an uncovered bridge family.
 
-`schemars` remains the preferred future path for full JSON Schema generation,
-but this fixture scaffold avoids forcing schema derives through every nested
-protocol type before the checker workflow is proven.
+`schemars` is now the active path for selected neutral protocol families. The
+fixture scaffold remains necessary for bridge projections that reshape Rust
+records or combine types owned by more than one Rust crate.
 
 ## Current Coverage
 

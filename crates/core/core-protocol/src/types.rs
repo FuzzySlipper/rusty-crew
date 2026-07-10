@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -5,7 +6,7 @@ use thiserror::Error;
 
 macro_rules! handle_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
         #[serde(transparent)]
         pub struct $name(pub u64);
 
@@ -23,7 +24,7 @@ macro_rules! handle_type {
 
 macro_rules! string_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
         #[serde(transparent)]
         pub struct $name(pub String);
 
@@ -70,23 +71,23 @@ string_id!(DataBankScopeId);
 
 pub type IsoTimestamp = String;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Unit;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShutdownRequest {
     pub engine: EngineHandle,
     pub drain_timeout_ms: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShutdownSummary {
     pub engine: EngineHandle,
     pub archived_sessions: u32,
     pub dropped_subscriptions: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CoreErrorKind {
     InvalidInput,
@@ -101,7 +102,7 @@ pub enum CoreErrorKind {
     InternalError,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize, JsonSchema)]
 #[error("{kind:?}: {message}")]
 pub struct CoreError {
     pub kind: CoreErrorKind,
@@ -119,7 +120,7 @@ impl CoreError {
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
     Full,
@@ -127,7 +128,7 @@ pub enum SessionKind {
     Delegated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
     Active,
@@ -135,7 +136,7 @@ pub enum SessionStatus {
     Archived,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DurableAgentKind {
     Prime,
@@ -144,26 +145,26 @@ pub enum DurableAgentKind {
     WorkerPoolWorker,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DurableIdentityStatus {
     Active,
     Archived,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceSystemReference {
     pub system: String,
     pub external_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DenRuntimeReference {
     pub project_id: Option<ProjectId>,
     pub task_id: Option<TaskId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DurableAgentRecord {
     pub agent_id: AgentId,
     pub display_label: String,
@@ -176,7 +177,7 @@ pub struct DurableAgentRecord {
     pub archived_at: Option<IsoTimestamp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentInstanceRecord {
     pub instance_id: AgentInstanceId,
     pub agent_id: AgentId,
@@ -190,7 +191,7 @@ pub struct AgentInstanceRecord {
     pub archived_at: Option<IsoTimestamp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionIdentityRecord {
     pub session_id: SessionId,
     pub instance_id: AgentInstanceId,
@@ -205,7 +206,7 @@ pub struct SessionIdentityRecord {
     pub archived_at: Option<IsoTimestamp>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileRegistryLifecycleStatus {
     Active,
@@ -214,7 +215,7 @@ pub enum ProfileRegistryLifecycleStatus {
     Archived,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistrySourceAssetRef {
     pub asset_kind: String,
     pub path: String,
@@ -223,7 +224,7 @@ pub struct ProfileRegistrySourceAssetRef {
     pub metadata_json: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryDerivedRuntimeRef {
     pub ref_kind: String,
     pub ref_id: String,
@@ -232,7 +233,7 @@ pub struct ProfileRegistryDerivedRuntimeRef {
     pub metadata_json: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryImportExportMetadata {
     pub imported_from: Option<String>,
     pub imported_at: Option<IsoTimestamp>,
@@ -241,7 +242,7 @@ pub struct ProfileRegistryImportExportMetadata {
     pub metadata_json: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryRecord {
     pub profile_id: ProfileId,
     pub lifecycle_status: ProfileRegistryLifecycleStatus,
@@ -261,7 +262,7 @@ pub struct ProfileRegistryRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryWrite {
     pub profile_id: ProfileId,
     pub lifecycle_status: ProfileRegistryLifecycleStatus,
@@ -279,19 +280,19 @@ pub struct ProfileRegistryWrite {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryUpdate {
     pub write: ProfileRegistryWrite,
     pub expected_revision: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfilePurgeTableCount {
     pub table: String,
     pub rows_deleted: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfilePurgeReport {
     pub profile_id: ProfileId,
     pub profile_registry_deleted: bool,
@@ -301,7 +302,7 @@ pub struct ProfilePurgeReport {
     pub rows_deleted: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRegistryLifecycleUpdate {
     pub profile_id: ProfileId,
     pub lifecycle_status: ProfileRegistryLifecycleStatus,
@@ -309,14 +310,14 @@ pub struct ProfileRegistryLifecycleUpdate {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ResourceLimits {
     pub workdir: Option<String>,
     pub max_duration_ms: Option<u32>,
     pub max_delegation_depth: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegationLineage {
     pub parent_session_id: SessionId,
     pub parent_agent_id: AgentId,
@@ -326,7 +327,7 @@ pub struct DelegationLineage {
     pub correlation_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DelegationPriority {
     Low,
@@ -334,33 +335,33 @@ pub enum DelegationPriority {
     High,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ParentConsumptionPolicy {
     AwaitCompletion,
     ObserveOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FanOutFailurePolicy {
     FailFast,
     FailSoft,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
     pub input_schema: Option<RuntimeBufferHandle>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolProfile {
     pub tools: Vec<ToolDescriptor>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallSource {
     Local,
@@ -369,7 +370,7 @@ pub enum ToolCallSource {
     Browser,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolCallPolicyMetadata {
     pub allowed: Option<bool>,
     pub denial_reason: Option<String>,
@@ -378,7 +379,7 @@ pub struct ToolCallPolicyMetadata {
     pub archive_cleanup: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolCallMetadata {
     pub source: ToolCallSource,
     pub adapter_id: Option<AdapterId>,
@@ -393,7 +394,7 @@ pub struct ToolCallMetadata {
     pub policy: Option<ToolCallPolicyMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionConfig {
     pub session_id: SessionId,
     pub agent_id: AgentId,
@@ -405,7 +406,7 @@ pub struct SessionConfig {
     pub history_window: Option<SessionHistoryWindow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionState {
     pub handle: SessionHandle,
     pub session_id: SessionId,
@@ -422,12 +423,12 @@ pub struct SessionState {
     pub last_active_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionHistoryWindow {
     pub max_messages: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GitHubGateWaitPhase {
     Waiting,
@@ -436,7 +437,7 @@ pub enum GitHubGateWaitPhase {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitHubGateSuspendRequest {
     pub session_id: SessionId,
     pub run_id: Option<RunId>,
@@ -448,7 +449,7 @@ pub struct GitHubGateSuspendRequest {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitHubGateWaitRecord {
     pub session_id: SessionId,
     pub run_id: Option<RunId>,
@@ -463,7 +464,7 @@ pub struct GitHubGateWaitRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitHubGateTerminalEvent {
     pub event_id: u64,
     pub gate_id: u64,
@@ -477,7 +478,7 @@ pub struct GitHubGateTerminalEvent {
     pub completed_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitHubGateWakeResult {
     pub event_id: u64,
     pub gate_id: u64,
@@ -489,7 +490,7 @@ pub struct GitHubGateWakeResult {
     pub completed_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitHubGateTerminalReceipt {
     pub event_id: u64,
     pub cursor: u64,
@@ -499,7 +500,7 @@ pub struct GitHubGateTerminalReceipt {
     pub wait: Option<GitHubGateWaitRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentMessage {
     pub from: AgentId,
     pub to: AgentId,
@@ -509,7 +510,7 @@ pub struct AgentMessage {
     pub projection: Option<AgentMessageProjectionHint>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentMessageProjectionHint {
     pub visibility: ProjectionVisibility,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -520,21 +521,21 @@ pub struct AgentMessageProjectionHint {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectionVisibility {
     Observation,
     UserVisible,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectionRef {
     pub system: String,
     pub kind: String,
     pub id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EventSubscription {
     pub event_kinds: Vec<CoreEventKind>,
     pub session_id: Option<SessionId>,
@@ -542,7 +543,7 @@ pub struct EventSubscription {
     pub adapter_id: Option<AdapterId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CoreEventKind {
     SessionCreated,
@@ -574,7 +575,7 @@ impl CoreEventKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DenDataUpdate {
     pub project_id: ProjectId,
     pub entity_kind: String,
@@ -582,21 +583,24 @@ pub struct DenDataUpdate {
     pub revision: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ExternalEvent {
     pub adapter_id: AdapterId,
     pub source: String,
     pub payload: ExternalEventPayload,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalEventPayload {
     HumanMessage {
         from: String,
         text: String,
     },
-    ChannelMessage(Box<ChannelMessageExternalPayload>),
+    ChannelMessage {
+        #[serde(flatten)]
+        payload: Box<ChannelMessageExternalPayload>,
+    },
     AdapterStatus {
         status: String,
         detail: Option<String>,
@@ -609,7 +613,7 @@ pub enum ExternalEventPayload {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelMessageExternalPayload {
     pub binding_id: String,
     pub correlation_id: String,
@@ -624,14 +628,14 @@ pub struct ChannelMessageExternalPayload {
     pub expires_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CompletionPacket {
     pub session_id: SessionId,
     pub status: CompletionStatus,
     pub summary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CompletionStatus {
     Completed,
@@ -640,7 +644,7 @@ pub enum CompletionStatus {
     Exhausted,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedCompletion {
     pub run_id: RunId,
     pub child_session_id: SessionId,
@@ -652,7 +656,7 @@ pub struct DelegatedCompletion {
     pub packet: CompletionPacket,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedFanOutGroup {
     pub group_id: String,
     pub total: u32,
@@ -668,7 +672,7 @@ pub struct DelegatedFanOutGroup {
     pub status: FanOutGroupStatus,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FanOutGroupStatus {
     InProgress,
@@ -677,7 +681,7 @@ pub enum FanOutGroupStatus {
     FailedFast,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DelegationLifecyclePhase {
     Created,
@@ -691,7 +695,7 @@ pub enum DelegationLifecyclePhase {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegationLifecycleEvent {
     pub parent_session_id: SessionId,
     pub delegated_session_id: SessionId,
@@ -700,7 +704,7 @@ pub struct DelegationLifecycleEvent {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DelegatedRunStatus {
     Requested,
@@ -716,7 +720,7 @@ pub enum DelegatedRunStatus {
     Expired,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedSessionRuntimeStatus {
     pub session: SessionState,
     pub parent_session_id: Option<SessionId>,
@@ -725,7 +729,7 @@ pub struct DelegatedSessionRuntimeStatus {
     pub terminal: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegatedResourceCleanupReport {
     pub cleaned_at: IsoTimestamp,
     pub terminal_archived: Vec<SessionId>,
@@ -734,7 +738,7 @@ pub struct DelegatedResourceCleanupReport {
     pub resources_released: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
     SessionCreated {
@@ -772,7 +776,7 @@ pub enum CoreEvent {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BodyState {
     pub session: SessionState,
     pub pending_messages: Vec<AgentMessage>,
@@ -782,7 +786,7 @@ pub struct BodyState {
     pub delta_policy: BodyDeltaPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BodyDeltaPolicy {
     pub mode: MidTurnDeltaMode,
     pub queue_owner: DeltaQueueOwner,
@@ -790,19 +794,19 @@ pub struct BodyDeltaPolicy {
     pub max_queued_messages: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MidTurnDeltaMode {
     FrozenSnapshotNextWake,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeltaQueueOwner {
     Body,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeRequest {
     pub brain: BrainImplementationHandle,
     pub session_id: SessionId,
@@ -816,13 +820,13 @@ pub struct BrainWakeRequest {
     pub provider_state_absence: Option<ProviderStateAbsenceReason>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeAccepted {
     pub wake_id: String,
     pub accepted: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BrainEvent {
     Started,
@@ -866,7 +870,7 @@ pub enum BrainEvent {
     Finished,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainPhase {
     Idle,
@@ -875,7 +879,7 @@ pub enum BrainPhase {
     Reviewing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainProviderStatusLevel {
     Info,
@@ -883,14 +887,14 @@ pub enum BrainProviderStatusLevel {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainEventEnvelope {
     pub wake_id: String,
     pub session_id: SessionId,
     pub event: BrainEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BrainAction {
     SendMessage {
@@ -917,7 +921,7 @@ pub enum BrainAction {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkerPoolCapacityRequest {
     pub member_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -926,7 +930,7 @@ pub struct WorkerPoolCapacityRequest {
     pub fallback_policy: WorkerPoolCapacityFallbackPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerPoolCapacityFallbackPolicy {
     #[default]
@@ -944,14 +948,14 @@ impl BrainAction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainActionBatch {
     pub wake_id: String,
     pub session_id: SessionId,
     pub actions: Vec<BrainAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderStateMode {
     Unused,
@@ -959,7 +963,7 @@ pub enum ProviderStateMode {
     Required,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainProviderStateStrategyMetadata {
     pub mode: ProviderStateMode,
 }
@@ -978,15 +982,14 @@ impl Default for BrainProviderStateStrategyMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainStrategyMetadata {
     pub module_id: String,
     pub strategy_id: String,
-    #[serde(default)]
     pub provider_state: BrainProviderStateStrategyMetadata,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainProviderStateScope {
     pub profile_fingerprint: String,
     pub provider_fingerprint: String,
@@ -1002,7 +1005,7 @@ impl BrainStrategyMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderStateAbsenceReason {
     NotConfigured,
@@ -1013,7 +1016,7 @@ pub enum ProviderStateAbsenceReason {
     LoadFailed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeProviderStateInput {
     pub module_id: String,
     pub strategy_id: String,
@@ -1025,7 +1028,7 @@ pub struct BrainWakeProviderStateInput {
     pub expires_at: Option<IsoTimestamp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeProviderStateUpdate {
     pub module_id: String,
     pub strategy_id: String,
@@ -1037,7 +1040,7 @@ pub struct BrainWakeProviderStateUpdate {
     pub ttl_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BrainWakeProviderStateOutput {
     Unchanged,
@@ -1045,13 +1048,13 @@ pub enum BrainWakeProviderStateOutput {
     Clear { reason: ProviderStateClearReason },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderStateClearReason {
     BrainRequestedClear,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeFailure {
     pub wake_id: String,
     pub session_id: SessionId,
@@ -1059,7 +1062,7 @@ pub struct BrainWakeFailure {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum BrainWakeStreamItem {
@@ -1086,27 +1089,27 @@ impl BrainWakeStreamItem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ActionBatchReceipt {
     pub wake_id: String,
     pub accepted_actions: u32,
     pub rejected_actions: Vec<ActionRejection>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ActionRejection {
     pub index: u32,
     pub kind: CoreErrorKind,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EventReceipt {
     pub accepted: bool,
     pub sequence: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeBufferView {
     pub handle: RuntimeBufferHandle,
     pub media_type: String,
@@ -1114,7 +1117,7 @@ pub struct RuntimeBufferView {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainImplementationRegistration {
     pub implementation_id: BrainImplementationId,
     pub profile_id: ProfileId,
@@ -1126,7 +1129,7 @@ pub struct BrainImplementationRegistration {
     pub provider_state_scope: Option<BrainProviderStateScope>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainModelConfig {
     pub provider: String,
     pub model_name: String,
@@ -1134,7 +1137,7 @@ pub struct BrainModelConfig {
     pub max_output_tokens: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelProviderStatus {
     Active,
@@ -1142,7 +1145,7 @@ pub enum ModelProviderStatus {
     Archived,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelProviderProtocol {
     Responses,
@@ -1151,7 +1154,7 @@ pub enum ModelProviderProtocol {
 
 pub const MODEL_PROVIDER_SECRET_ENVELOPE_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelProviderCredentialKind {
     ApiKey,
@@ -1160,7 +1163,7 @@ pub enum ModelProviderCredentialKind {
     LegacyRawApiKey,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum ModelProviderSecretEnvelope {
@@ -1193,7 +1196,7 @@ pub enum ModelProviderSecretEnvelope {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderSecretSummary {
     pub kind: ModelProviderCredentialKind,
     pub version: u32,
@@ -1347,7 +1350,7 @@ fn validate_secret_text(context: &str, value: &str) -> CoreResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderCredential {
     pub has_secret: bool,
     pub secret_ref: Option<String>,
@@ -1356,7 +1359,7 @@ pub struct ModelProviderCredential {
     pub kind: Option<ModelProviderCredentialKind>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderRecord {
     pub alias: String,
     pub status: ModelProviderStatus,
@@ -1378,7 +1381,7 @@ pub struct ModelProviderRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderWrite {
     pub alias: String,
     pub status: ModelProviderStatus,
@@ -1400,7 +1403,7 @@ pub struct ModelProviderWrite {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderQuery {
     pub status: Option<ModelProviderStatus>,
     pub alias_prefix: Option<String>,
@@ -1408,12 +1411,12 @@ pub struct ModelProviderQuery {
     pub offset: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderRefreshImpactRequest {
     pub provider_alias: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelProviderRefreshMode {
     None,
@@ -1421,13 +1424,13 @@ pub enum ModelProviderRefreshMode {
     Apply,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderRefreshPlanRequest {
     pub provider_alias: String,
     pub mode: ModelProviderRefreshMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderAffectedProfile {
     pub profile_id: ProfileId,
     pub session_ids: Vec<SessionId>,
@@ -1435,13 +1438,13 @@ pub struct ModelProviderAffectedProfile {
     pub active_session_ids: Vec<SessionId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderRefreshImpact {
     pub provider_alias: String,
     pub affected_profiles: Vec<ModelProviderAffectedProfile>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderRefreshProfileAction {
     pub profile_id: ProfileId,
     pub command_name: String,
@@ -1452,7 +1455,7 @@ pub struct ModelProviderRefreshProfileAction {
     pub failure_reason_code: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderRefreshPlan {
     pub provider_alias: String,
     pub mode: ModelProviderRefreshMode,
@@ -1460,14 +1463,14 @@ pub struct ModelProviderRefreshPlan {
     pub actions: Vec<ModelProviderRefreshProfileAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PlatformAdapterRegistration {
     pub adapter_id: AdapterId,
     pub kind: PlatformAdapterKind,
     pub display_name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PlatformAdapterKind {
     Den,
@@ -1483,8 +1486,8 @@ mod tests {
 
     #[test]
     fn channel_external_event_payload_keeps_flat_tagged_json_shape() {
-        let payload =
-            ExternalEventPayload::ChannelMessage(Box::new(ChannelMessageExternalPayload {
+        let payload = ExternalEventPayload::ChannelMessage {
+            payload: Box::new(ChannelMessageExternalPayload {
                 binding_id: "binding-alpha".to_string(),
                 correlation_id: "channel:binding-alpha:message-1".to_string(),
                 idempotency_key: "den_channels:crew-room:thread-1:message-1".to_string(),
@@ -1496,7 +1499,8 @@ mod tests {
                 text: "hello".to_string(),
                 received_at: "2026-06-20T05:01:00.000Z".to_string(),
                 expires_at: "2026-06-20T05:01:05.000Z".to_string(),
-            }));
+            }),
+        };
 
         let json = serde_json::to_value(&payload).expect("serialize payload");
         assert_eq!(json["type"], "channel_message");

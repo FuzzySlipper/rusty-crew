@@ -1,0 +1,3360 @@
+{
+  "$defs": {
+    "ActionBatchReceipt": {
+      "properties": {
+        "accepted_actions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rejected_actions": {
+          "items": {
+            "$ref": "#/$defs/ActionRejection"
+          },
+          "type": "array"
+        },
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wake_id",
+        "accepted_actions",
+        "rejected_actions"
+      ],
+      "type": "object"
+    },
+    "ActionRejection": {
+      "properties": {
+        "index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/CoreErrorKind"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "AgentMessage": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "type": "string"
+        },
+        "projection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentMessageProjectionHint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "body"
+      ],
+      "type": "object"
+    },
+    "AgentMessageProjectionHint": {
+      "properties": {
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "$ref": "#/$defs/ProjectionVisibility"
+        },
+        "work_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "BodyDeltaPolicy": {
+      "properties": {
+        "max_queued_messages": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/MidTurnDeltaMode"
+        },
+        "queue_owner": {
+          "$ref": "#/$defs/DeltaQueueOwner"
+        },
+        "queued_message_ttl_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mode",
+        "queue_owner",
+        "queued_message_ttl_ms",
+        "max_queued_messages"
+      ],
+      "type": "object"
+    },
+    "BodyState": {
+      "properties": {
+        "child_completions": {
+          "items": {
+            "$ref": "#/$defs/DelegatedCompletion"
+          },
+          "type": "array"
+        },
+        "delta_policy": {
+          "$ref": "#/$defs/BodyDeltaPolicy"
+        },
+        "fan_out_groups": {
+          "items": {
+            "$ref": "#/$defs/DelegatedFanOutGroup"
+          },
+          "type": "array"
+        },
+        "pending_messages": {
+          "items": {
+            "$ref": "#/$defs/AgentMessage"
+          },
+          "type": "array"
+        },
+        "recent_events": {
+          "items": {
+            "$ref": "#/$defs/CoreEvent"
+          },
+          "type": "array"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionState"
+        }
+      },
+      "required": [
+        "session",
+        "pending_messages",
+        "recent_events",
+        "child_completions",
+        "fan_out_groups",
+        "delta_policy"
+      ],
+      "type": "object"
+    },
+    "BrainAction": {
+      "oneOf": [
+        {
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/AgentMessage"
+            },
+            "type": {
+              "const": "send_message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "capacity_request": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkerPoolCapacityRequest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "correlation_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "expected_output": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fan_out_failure_policy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FanOutFailurePolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fan_out_group_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fan_out_max_concurrency": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "parent_consumption": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ParentConsumptionPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "priority": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DelegationPriority"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "resource_limits": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ResourceLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "task_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeout_ms": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "request_delegation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "profile_id",
+            "prompt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "packet": {
+              "$ref": "#/$defs/CompletionPacket"
+            },
+            "type": {
+              "const": "deliver_completion",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "packet"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrainActionBatch": {
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/BrainAction"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wake_id",
+        "session_id",
+        "actions"
+      ],
+      "type": "object"
+    },
+    "BrainEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text_delta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "format": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reasoning_delta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phase": {
+              "$ref": "#/$defs/BrainPhase"
+            },
+            "type": {
+              "const": "phase_change",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "phase"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "metadata": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ToolCallMetadata"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool_name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "is_error": {
+              "type": "boolean"
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ToolCallMetadata"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call_finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool_name",
+            "is_error"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "level": {
+              "$ref": "#/$defs/BrainProviderStatusLevel"
+            },
+            "message": {
+              "type": "string"
+            },
+            "metadata_json": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "provider_status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrainEventEnvelope": {
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/BrainEvent"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wake_id",
+        "session_id",
+        "event"
+      ],
+      "type": "object"
+    },
+    "BrainPhase": {
+      "enum": [
+        "idle",
+        "exploring",
+        "composing",
+        "reviewing"
+      ],
+      "type": "string"
+    },
+    "BrainProviderStateScope": {
+      "properties": {
+        "profile_fingerprint": {
+          "type": "string"
+        },
+        "provider_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_fingerprint",
+        "provider_fingerprint"
+      ],
+      "type": "object"
+    },
+    "BrainProviderStateStrategyMetadata": {
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/ProviderStateMode"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "BrainProviderStatusLevel": {
+      "enum": [
+        "info",
+        "degraded",
+        "error"
+      ],
+      "type": "string"
+    },
+    "BrainStrategyMetadata": {
+      "properties": {
+        "module_id": {
+          "type": "string"
+        },
+        "provider_state": {
+          "$ref": "#/$defs/BrainProviderStateStrategyMetadata"
+        },
+        "strategy_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "module_id",
+        "strategy_id",
+        "provider_state"
+      ],
+      "type": "object"
+    },
+    "BrainWakeAccepted": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wake_id",
+        "accepted"
+      ],
+      "type": "object"
+    },
+    "BrainWakeFailure": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CoreErrorKind"
+        },
+        "message": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wake_id",
+        "session_id",
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "BrainWakeProviderStateInput": {
+      "properties": {
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "payload": true,
+        "payload_version": {
+          "type": "string"
+        },
+        "profile_fingerprint": {
+          "type": "string"
+        },
+        "provider_fingerprint": {
+          "type": "string"
+        },
+        "strategy_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "module_id",
+        "strategy_id",
+        "profile_fingerprint",
+        "provider_fingerprint",
+        "payload_version",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "BrainWakeProviderStateOutput": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "unchanged",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "$ref": "#/$defs/BrainWakeProviderStateUpdate"
+            },
+            "type": {
+              "const": "replace",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/ProviderStateClearReason"
+            },
+            "type": {
+              "const": "clear",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrainWakeProviderStateUpdate": {
+      "properties": {
+        "module_id": {
+          "type": "string"
+        },
+        "payload": true,
+        "payload_version": {
+          "type": "string"
+        },
+        "profile_fingerprint": {
+          "type": "string"
+        },
+        "provider_fingerprint": {
+          "type": "string"
+        },
+        "strategy_id": {
+          "type": "string"
+        },
+        "ttl_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "module_id",
+        "strategy_id",
+        "profile_fingerprint",
+        "provider_fingerprint",
+        "payload_version",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "BrainWakeRequest": {
+      "properties": {
+        "body_state": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "brain": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BrainWakeProviderStateInput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_state_absence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderStateAbsenceReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role_assembly": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "system_prompt": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "brain",
+        "session_id",
+        "body_state",
+        "system_prompt",
+        "role_assembly",
+        "wake_id"
+      ],
+      "type": "object"
+    },
+    "BrainWakeStreamItem": {
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/BrainEventEnvelope"
+            },
+            "type": {
+              "const": "event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "batch": {
+              "$ref": "#/$defs/BrainActionBatch"
+            },
+            "type": {
+              "const": "actions",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "batch"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/BrainWakeFailure"
+            },
+            "type": {
+              "const": "wake_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "failure"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CompletionPacket": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CompletionStatus"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "CompletionStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "blocked",
+        "exhausted"
+      ],
+      "type": "string"
+    },
+    "ContextCompactionArtifact": {
+      "description": "Durable record for a derived context-compaction summary.\n\nCompaction artifacts are not raw transcript storage and are not ordinary\nsession memory. They preserve provenance, model metadata, token estimates,\nand strategy decisions so future context strategies can decide whether and\nhow to project them into model context while keeping source transcript\nhistory intact.",
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "branch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context_policy": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "enters_future_context": {
+          "type": "boolean"
+        },
+        "estimate_after_json": true,
+        "estimate_before_json": true,
+        "metadata_json": true,
+        "provider_metadata_json": true,
+        "session_id": {
+          "type": "string"
+        },
+        "source_refs_json": true,
+        "strategy_id": {
+          "type": "string"
+        },
+        "summary_text": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "session_id",
+        "strategy_id",
+        "source_refs_json",
+        "provider_metadata_json",
+        "estimate_before_json",
+        "summary_text",
+        "enters_future_context",
+        "context_policy",
+        "metadata_json",
+        "created_at",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "ContextCompactionArtifactQuery": {
+      "properties": {
+        "branch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enters_future_context": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "latest_only": {
+          "type": "boolean"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strategy_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "latest_only"
+      ],
+      "type": "object"
+    },
+    "CoreError": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CoreErrorKind"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "CoreErrorKind": {
+      "enum": [
+        "invalid_input",
+        "not_found",
+        "already_exists",
+        "session_expired",
+        "timeout_expired",
+        "persistence_failure",
+        "adapter_unavailable",
+        "brain_unavailable",
+        "action_rejected",
+        "internal_error"
+      ],
+      "type": "string"
+    },
+    "CoreEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "$ref": "#/$defs/SessionState"
+            },
+            "type": {
+              "const": "session_created",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_archived",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/AgentMessage"
+            },
+            "type": {
+              "const": "agent_message_routed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "$ref": "#/$defs/DelegationLifecycleEvent"
+            },
+            "type": {
+              "const": "delegation_lifecycle_observed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "lifecycle"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/ExternalEvent"
+            },
+            "type": {
+              "const": "external_event_injected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "den_data_updated",
+              "type": "string"
+            },
+            "update": {
+              "$ref": "#/$defs/DenDataUpdate"
+            }
+          },
+          "required": [
+            "type",
+            "update"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "brain_wake_requested",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/BrainEvent"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "brain_event_observed",
+              "type": "string"
+            },
+            "wake_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "brain_actions_accepted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "count"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "packet": {
+              "$ref": "#/$defs/CompletionPacket"
+            },
+            "type": {
+              "const": "completion_packet_delivered",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "packet"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CoreEventKind": {
+      "enum": [
+        "session_created",
+        "session_archived",
+        "agent_message_routed",
+        "delegation_lifecycle_observed",
+        "external_event_injected",
+        "den_data_updated",
+        "brain_wake_requested",
+        "brain_event_observed",
+        "brain_actions_accepted",
+        "completion_packet_delivered"
+      ],
+      "type": "string"
+    },
+    "DelegatedCompletion": {
+      "properties": {
+        "child_session_id": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "packet": {
+          "$ref": "#/$defs/CompletionPacket"
+        },
+        "parent_consumption": {
+          "$ref": "#/$defs/ParentConsumptionPolicy"
+        },
+        "requested_task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_action_index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "child_session_id",
+        "source_wake_id",
+        "source_action_index",
+        "parent_consumption",
+        "packet"
+      ],
+      "type": "object"
+    },
+    "DelegatedFanOutGroup": {
+      "properties": {
+        "blocked": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cancelled": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "completed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "exhausted": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expired": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failure_policy": {
+          "$ref": "#/$defs/FanOutFailurePolicy"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "max_concurrency": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pending": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/FanOutGroupStatus"
+        },
+        "total": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "group_id",
+        "total",
+        "pending",
+        "completed",
+        "failed",
+        "blocked",
+        "exhausted",
+        "cancelled",
+        "expired",
+        "failure_policy",
+        "status"
+      ],
+      "type": "object"
+    },
+    "DelegatedResourceCleanupReport": {
+      "properties": {
+        "cleaned_at": {
+          "type": "string"
+        },
+        "expired_archived": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "orphaned_archived": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resources_released": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_archived": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cleaned_at",
+        "terminal_archived",
+        "orphaned_archived",
+        "expired_archived",
+        "resources_released"
+      ],
+      "type": "object"
+    },
+    "DelegatedRunStatus": {
+      "enum": [
+        "requested",
+        "session_created",
+        "wake_requested",
+        "running",
+        "checkpoint_waiting",
+        "completed",
+        "failed",
+        "blocked",
+        "exhausted",
+        "cancelled",
+        "expired"
+      ],
+      "type": "string"
+    },
+    "DelegatedSessionRuntimeStatus": {
+      "properties": {
+        "parent_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DelegatedRunStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "terminal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session",
+        "terminal"
+      ],
+      "type": "object"
+    },
+    "DelegationLifecycleEvent": {
+      "properties": {
+        "delegated_session_id": {
+          "type": "string"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_session_id": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/DelegationLifecyclePhase"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "parent_session_id",
+        "delegated_session_id",
+        "phase"
+      ],
+      "type": "object"
+    },
+    "DelegationLifecyclePhase": {
+      "enum": [
+        "created",
+        "wake_requested",
+        "checkpoint_requested",
+        "completed",
+        "failed",
+        "blocked",
+        "exhausted",
+        "timed_out",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "DelegationLineage": {
+      "properties": {
+        "correlation_id": {
+          "type": "string"
+        },
+        "parent_agent_id": {
+          "type": "string"
+        },
+        "parent_session_id": {
+          "type": "string"
+        },
+        "requested_task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_action_index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "parent_session_id",
+        "parent_agent_id",
+        "source_wake_id",
+        "source_action_index",
+        "correlation_id"
+      ],
+      "type": "object"
+    },
+    "DelegationPriority": {
+      "enum": [
+        "low",
+        "normal",
+        "high"
+      ],
+      "type": "string"
+    },
+    "DeltaQueueOwner": {
+      "enum": [
+        "body"
+      ],
+      "type": "string"
+    },
+    "DenDataUpdate": {
+      "properties": {
+        "entity_id": {
+          "type": "string"
+        },
+        "entity_kind": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project_id",
+        "entity_kind",
+        "entity_id"
+      ],
+      "type": "object"
+    },
+    "EventReceipt": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accepted",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "EventSubscription": {
+      "properties": {
+        "adapter_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_kinds": {
+          "items": {
+            "$ref": "#/$defs/CoreEventKind"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "event_kinds"
+      ],
+      "type": "object"
+    },
+    "ExternalEvent": {
+      "properties": {
+        "adapter_id": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ExternalEventPayload"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "source",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "ExternalEventPayload": {
+      "oneOf": [
+        {
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "human_message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "from",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "binding_id": {
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "expires_at": {
+              "type": "string"
+            },
+            "external_channel_id": {
+              "type": "string"
+            },
+            "external_message_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "external_thread_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "from": {
+              "type": "string"
+            },
+            "idempotency_key": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "received_at": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "channel_message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "binding_id",
+            "correlation_id",
+            "idempotency_key",
+            "provider",
+            "external_channel_id",
+            "from",
+            "text",
+            "received_at",
+            "expires_at"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "type": {
+              "const": "adapter_status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "catalog_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_catalog_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "catalog_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "json": {
+              "type": "string"
+            },
+            "type": {
+              "const": "raw_json",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "json"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FanOutFailurePolicy": {
+      "enum": [
+        "fail_fast",
+        "fail_soft"
+      ],
+      "type": "string"
+    },
+    "FanOutGroupStatus": {
+      "enum": [
+        "in_progress",
+        "completed",
+        "partial_failure",
+        "failed_fast"
+      ],
+      "type": "string"
+    },
+    "MemoryConflictPolicy": {
+      "enum": [
+        "expected_revision",
+        "supersession",
+        "merge",
+        "immutable",
+        "domain_specific"
+      ],
+      "type": "string"
+    },
+    "MemoryDiagnosticsPolicy": {
+      "properties": {
+        "expose_catalog": {
+          "type": "boolean"
+        },
+        "expose_policy_decisions": {
+          "type": "boolean"
+        },
+        "expose_record_counts": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expose_catalog",
+        "expose_record_counts",
+        "expose_policy_decisions"
+      ],
+      "type": "object"
+    },
+    "MemoryEvidenceKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "wake",
+            "event",
+            "tool_call",
+            "transcript",
+            "user_correction",
+            "source_document",
+            "import",
+            "migration",
+            "ui",
+            "other"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "den_memory",
+          "description": "Explicit bridge/import evidence from external Den-owned memory.",
+          "type": "string"
+        }
+      ]
+    },
+    "MemoryEvidenceRef": {
+      "properties": {
+        "evidence_type": {
+          "$ref": "#/$defs/MemoryEvidenceKind"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_type",
+        "ref_id"
+      ],
+      "type": "object"
+    },
+    "MemoryExportImportPolicy": {
+      "properties": {
+        "export_supported": {
+          "type": "boolean"
+        },
+        "import_governance_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "import_supported": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "export_supported",
+        "import_supported",
+        "import_governance_mode"
+      ],
+      "type": "object"
+    },
+    "MemoryFieldType": {
+      "enum": [
+        "string",
+        "markdown",
+        "json",
+        "integer",
+        "float",
+        "boolean",
+        "timestamp"
+      ],
+      "type": "string"
+    },
+    "MemoryGovernanceDecisionInput": {
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "confidence": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "decided_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "$ref": "#/$defs/MemoryGovernanceDecisionKind"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/MemoryEvidenceRef"
+          },
+          "type": "array"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "resulting_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/MemoryProposalSource"
+        }
+      },
+      "required": [
+        "decision_id",
+        "proposal_id",
+        "decision",
+        "actor",
+        "source",
+        "evidence_refs",
+        "policy_mode"
+      ],
+      "type": "object"
+    },
+    "MemoryGovernanceDecisionKind": {
+      "enum": [
+        "routed_to_review",
+        "approved",
+        "rejected",
+        "applied"
+      ],
+      "type": "string"
+    },
+    "MemoryGovernanceDecisionRecord": {
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "confidence": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "decided_at": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/MemoryGovernanceDecisionKind"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/MemoryEvidenceRef"
+          },
+          "type": "array"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "resulting_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/MemoryProposalSource"
+        }
+      },
+      "required": [
+        "decision_id",
+        "proposal_id",
+        "decision",
+        "actor",
+        "source",
+        "evidence_refs",
+        "policy_mode",
+        "decided_at"
+      ],
+      "type": "object"
+    },
+    "MemoryGovernanceMode": {
+      "enum": [
+        "read_only",
+        "direct_write",
+        "candidate",
+        "manual_review",
+        "curator_route",
+        "auto_apply_threshold"
+      ],
+      "type": "string"
+    },
+    "MemoryIndexingPolicy": {
+      "properties": {
+        "optional_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "required_capabilities",
+        "optional_capabilities"
+      ],
+      "type": "object"
+    },
+    "MemoryOperation": {
+      "enum": [
+        "read",
+        "list",
+        "add",
+        "replace",
+        "merge",
+        "supersede",
+        "remove",
+        "archive",
+        "candidate_only"
+      ],
+      "type": "string"
+    },
+    "MemoryOperationPolicy": {
+      "properties": {
+        "governance_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "min_confidence": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "operation": {
+          "$ref": "#/$defs/MemoryOperation"
+        },
+        "requires_expected_revision": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation",
+        "governance_mode",
+        "requires_expected_revision"
+      ],
+      "type": "object"
+    },
+    "MemoryPromptPolicy": {
+      "enum": [
+        "auto_context",
+        "summary_context",
+        "tool_only",
+        "explicit_user_context",
+        "never_prompt"
+      ],
+      "type": "string"
+    },
+    "MemoryProposalEnvelope": {
+      "description": "Proposed Crew memory mutation.\n\nThis envelope may be produced by a brain/tool/UI/importer. It is not a write\nby itself: Rust validates it against the Rust-owned descriptor and routes it\nthrough the descriptor's governance policy before any Crew storage changes.",
+      "properties": {
+        "confidence": {
+          "format": "float",
+          "type": "number"
+        },
+        "content": true,
+        "created_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dedupe_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durability_rationale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/MemoryEvidenceRef"
+          },
+          "type": "array"
+        },
+        "governance_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "operation": {
+          "$ref": "#/$defs/MemoryOperation"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
+        },
+        "shape": {
+          "$ref": "#/$defs/MemoryRecordShapeRef"
+        },
+        "source": {
+          "$ref": "#/$defs/MemoryProposalSource"
+        },
+        "space_id": {
+          "$ref": "#/$defs/MemorySpaceId"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "space_id",
+        "operation",
+        "scope",
+        "shape",
+        "content",
+        "evidence_refs",
+        "confidence",
+        "governance_mode",
+        "source"
+      ],
+      "type": "object"
+    },
+    "MemoryProposalQuery": {
+      "properties": {
+        "dedupe_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "space_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemorySpaceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryProposalReviewStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MemoryProposalRecord": {
+      "properties": {
+        "applied_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "decided_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duplicate_of": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proposal": {
+          "$ref": "#/$defs/MemoryProposalEnvelope"
+        },
+        "resulting_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "selected_governance_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "status": {
+          "$ref": "#/$defs/MemoryProposalReviewStatus"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal",
+        "status",
+        "selected_governance_mode",
+        "created_at",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "MemoryProposalReviewStatus": {
+      "enum": [
+        "pending_review",
+        "approved",
+        "rejected",
+        "applied"
+      ],
+      "type": "string"
+    },
+    "MemoryProposalSource": {
+      "enum": [
+        "in_wake_tool",
+        "capture_producer",
+        "ui",
+        "import",
+        "migration",
+        "human",
+        "den_memory_import"
+      ],
+      "type": "string"
+    },
+    "MemoryProvenancePolicy": {
+      "properties": {
+        "rationale_required": {
+          "type": "boolean"
+        },
+        "required_evidence": {
+          "items": {
+            "$ref": "#/$defs/MemoryEvidenceKind"
+          },
+          "type": "array"
+        },
+        "source_required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "required_evidence",
+        "source_required",
+        "rationale_required"
+      ],
+      "type": "object"
+    },
+    "MemoryRecordFieldDescriptor": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "field_name": {
+          "type": "string"
+        },
+        "field_type": {
+          "$ref": "#/$defs/MemoryFieldType"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "field_name",
+        "field_type",
+        "required",
+        "description"
+      ],
+      "type": "object"
+    },
+    "MemoryRecordShapeDescriptor": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MemoryRecordFieldDescriptor"
+          },
+          "type": "array"
+        },
+        "shape_id": {
+          "$ref": "#/$defs/MemoryRecordShapeId"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shape_id",
+        "version",
+        "description",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "MemoryRecordShapeId": {
+      "description": "Record shape id inside a memory space, such as `profile_dense_item`.",
+      "type": "string"
+    },
+    "MemoryRecordShapeRef": {
+      "properties": {
+        "shape_id": {
+          "$ref": "#/$defs/MemoryRecordShapeId"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shape_id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "MemoryRetentionPolicy": {
+      "enum": [
+        "manual_only",
+        "expire",
+        "archive",
+        "tombstone",
+        "compact",
+        "domain_specific"
+      ],
+      "type": "string"
+    },
+    "MemoryRetrievalStrategy": {
+      "enum": [
+        "direct_lookup",
+        "query_search",
+        "recency",
+        "relevance",
+        "branch_aware",
+        "domain_specific"
+      ],
+      "type": "string"
+    },
+    "MemoryScope": {
+      "properties": {
+        "scope_id": {
+          "type": "string"
+        },
+        "scope_type": {
+          "$ref": "#/$defs/MemoryScopeType"
+        }
+      },
+      "required": [
+        "scope_type",
+        "scope_id"
+      ],
+      "type": "object"
+    },
+    "MemoryScopeModel": {
+      "properties": {
+        "allowed_scopes": {
+          "items": {
+            "$ref": "#/$defs/MemoryScopeType"
+          },
+          "type": "array"
+        },
+        "primary_scope": {
+          "$ref": "#/$defs/MemoryScopeType"
+        }
+      },
+      "required": [
+        "allowed_scopes",
+        "primary_scope"
+      ],
+      "type": "object"
+    },
+    "MemoryScopeType": {
+      "enum": [
+        "profile",
+        "user",
+        "session",
+        "conversation_branch",
+        "world",
+        "entity",
+        "project"
+      ],
+      "type": "string"
+    },
+    "MemorySpaceDescriptor": {
+      "description": "Rust-owned memory-space descriptor projected outward to TypeScript clients.\n\nTypeScript may consume these descriptors for UI, tools, adapters, and\nproposal validation, but physical registration and storage ownership remain\nin Rusty Crew core. Descriptors describe Crew runtime memory; external Den\nmemory remains a separate Den service unless explicitly imported/proposed.",
+      "properties": {
+        "conflict_policy": {
+          "$ref": "#/$defs/MemoryConflictPolicy"
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "$ref": "#/$defs/MemoryDiagnosticsPolicy"
+        },
+        "export_import": {
+          "$ref": "#/$defs/MemoryExportImportPolicy"
+        },
+        "indexing": {
+          "$ref": "#/$defs/MemoryIndexingPolicy"
+        },
+        "module_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/MemoryOperation"
+          },
+          "type": "array"
+        },
+        "prompt_policy": {
+          "$ref": "#/$defs/MemoryPromptPolicy"
+        },
+        "provenance_policy": {
+          "$ref": "#/$defs/MemoryProvenancePolicy"
+        },
+        "record_shapes": {
+          "items": {
+            "$ref": "#/$defs/MemoryRecordShapeDescriptor"
+          },
+          "type": "array"
+        },
+        "retention_policy": {
+          "$ref": "#/$defs/MemoryRetentionPolicy"
+        },
+        "retrieval_strategies": {
+          "items": {
+            "$ref": "#/$defs/MemoryRetrievalStrategy"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scope_model": {
+          "$ref": "#/$defs/MemoryScopeModel"
+        },
+        "space_id": {
+          "$ref": "#/$defs/MemorySpaceId"
+        },
+        "visibility_model": {
+          "$ref": "#/$defs/MemoryVisibilityModel"
+        },
+        "write_policy": {
+          "$ref": "#/$defs/MemoryWritePolicy"
+        }
+      },
+      "required": [
+        "space_id",
+        "schema_version",
+        "description",
+        "record_shapes",
+        "scope_model",
+        "visibility_model",
+        "retrieval_strategies",
+        "indexing",
+        "prompt_policy",
+        "write_policy",
+        "operations",
+        "provenance_policy",
+        "retention_policy",
+        "conflict_policy",
+        "diagnostics",
+        "export_import"
+      ],
+      "type": "object"
+    },
+    "MemorySpaceId": {
+      "description": "Runtime-owned durable memory space id.\n\nCrew memory spaces live in Rusty Crew service storage and may be projected\ninto prompts according to their descriptor policy. They are distinct from\nDen memory, which is external Den-owned product memory and should only enter\nCrew memory through explicit import/proposal flows with provenance.",
+      "type": "string"
+    },
+    "MemoryVisibilityModel": {
+      "enum": [
+        "profile_local",
+        "user_scoped",
+        "session_scoped",
+        "world_scoped",
+        "project_scoped",
+        "service_internal",
+        "explicit_policy"
+      ],
+      "type": "string"
+    },
+    "MemoryWritePolicy": {
+      "properties": {
+        "default_mode": {
+          "$ref": "#/$defs/MemoryGovernanceMode"
+        },
+        "operation_policies": {
+          "items": {
+            "$ref": "#/$defs/MemoryOperationPolicy"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "default_mode",
+        "operation_policies"
+      ],
+      "type": "object"
+    },
+    "MidTurnDeltaMode": {
+      "enum": [
+        "frozen_snapshot_next_wake"
+      ],
+      "type": "string"
+    },
+    "ParentConsumptionPolicy": {
+      "enum": [
+        "await_completion",
+        "observe_only"
+      ],
+      "type": "string"
+    },
+    "PlatformAdapterKind": {
+      "enum": [
+        "den",
+        "telegram",
+        "mcp",
+        "tui",
+        "cli"
+      ],
+      "type": "string"
+    },
+    "PlatformAdapterRegistration": {
+      "properties": {
+        "adapter_id": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PlatformAdapterKind"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "kind",
+        "display_name"
+      ],
+      "type": "object"
+    },
+    "ProjectionRef": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "system": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "kind",
+        "id"
+      ],
+      "type": "object"
+    },
+    "ProjectionVisibility": {
+      "enum": [
+        "observation",
+        "user_visible"
+      ],
+      "type": "string"
+    },
+    "ProviderStateAbsenceReason": {
+      "enum": [
+        "not_configured",
+        "missing",
+        "expired",
+        "invalidated",
+        "module_does_not_use_state",
+        "load_failed"
+      ],
+      "type": "string"
+    },
+    "ProviderStateClearReason": {
+      "enum": [
+        "brain_requested_clear"
+      ],
+      "type": "string"
+    },
+    "ProviderStateMode": {
+      "enum": [
+        "unused",
+        "optional",
+        "required"
+      ],
+      "type": "string"
+    },
+    "ResourceLimits": {
+      "properties": {
+        "max_delegation_depth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_duration_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workdir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionActivityDigest": {
+      "description": "Bounded per-wake activity digest used by the post-wake capture producer.\n\nThe digest is intentionally not a raw transcript. TypeScript builds it from\nthe warm post-wake event stream, then Rust persists it for scheduled\nbackground review. Capture Phase 1 validates `profile_dense` proposals first;\n`session_memory` and `roleplay_lore` remain gated expansion targets.",
+      "properties": {
+        "allowed_capture_spaces": {
+          "items": {
+            "$ref": "#/$defs/MemorySpaceId"
+          },
+          "type": "array"
+        },
+        "completion_summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "digest_id": {
+          "type": "string"
+        },
+        "event_counts_json": true,
+        "profile_id": {
+          "type": "string"
+        },
+        "retention_until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "signals_json": true,
+        "source": {
+          "type": "string"
+        },
+        "summary_text": {
+          "type": "string"
+        },
+        "tool_calls_json": true,
+        "wake_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest_id",
+        "profile_id",
+        "session_id",
+        "wake_id",
+        "source",
+        "summary_text",
+        "event_counts_json",
+        "tool_calls_json",
+        "signals_json",
+        "allowed_capture_spaces",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "SessionActivityDigestQuery": {
+      "properties": {
+        "include_reviewed": {
+          "type": "boolean"
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "profile_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wake_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "include_reviewed"
+      ],
+      "type": "object"
+    },
+    "SessionConfig": {
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "delegation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DelegationLineage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionHistoryWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "resource_limits": {
+          "$ref": "#/$defs/ResourceLimits"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_profile": {
+          "$ref": "#/$defs/ToolProfile"
+        }
+      },
+      "required": [
+        "session_id",
+        "agent_id",
+        "profile_id",
+        "kind",
+        "resource_limits",
+        "tool_profile"
+      ],
+      "type": "object"
+    },
+    "SessionHistoryWindow": {
+      "properties": {
+        "max_messages": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionKind": {
+      "enum": [
+        "full",
+        "worker",
+        "delegated"
+      ],
+      "type": "string"
+    },
+    "SessionState": {
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "brain_turn_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "delegation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DelegationLineage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "handle": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "history_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionHistoryWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "last_active_at": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "resource_limits": {
+          "$ref": "#/$defs/ResourceLimits"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "tool_profile": {
+          "$ref": "#/$defs/ToolProfile"
+        }
+      },
+      "required": [
+        "handle",
+        "session_id",
+        "agent_id",
+        "profile_id",
+        "kind",
+        "resource_limits",
+        "tool_profile",
+        "status",
+        "brain_turn_count",
+        "created_at",
+        "last_active_at"
+      ],
+      "type": "object"
+    },
+    "SessionStatus": {
+      "enum": [
+        "active",
+        "idle",
+        "archived"
+      ],
+      "type": "string"
+    },
+    "ToolCallMetadata": {
+      "properties": {
+        "adapter_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "binding_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "catalog_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debug_detail_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCallPolicyMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/ToolCallSource"
+        },
+        "source_tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_profile_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "server_names"
+      ],
+      "type": "object"
+    },
+    "ToolCallPolicyMetadata": {
+      "properties": {
+        "allowed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "archive_cleanup": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cancelled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "denial_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolCallSource": {
+      "enum": [
+        "local",
+        "mcp",
+        "web",
+        "browser"
+      ],
+      "type": "string"
+    },
+    "ToolDescriptor": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input_schema": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "type": "object"
+    },
+    "ToolProfile": {
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolDescriptor"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "type": "object"
+    },
+    "WorkerPoolCapacityFallbackPolicy": {
+      "enum": [
+        "reject_on_no_capacity",
+        "direct_on_no_capacity"
+      ],
+      "type": "string"
+    },
+    "WorkerPoolCapacityRequest": {
+      "properties": {
+        "claim_ttl_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "fallback_policy": {
+          "$ref": "#/$defs/WorkerPoolCapacityFallbackPolicy",
+          "default": "reject_on_no_capacity"
+        },
+        "member_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "member_id"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "action_batch_receipt": {
+      "$ref": "#/$defs/ActionBatchReceipt"
+    },
+    "adapter_id": {
+      "type": "string"
+    },
+    "agent_id": {
+      "type": "string"
+    },
+    "agent_instance_id": {
+      "type": "string"
+    },
+    "body_state": {
+      "$ref": "#/$defs/BodyState"
+    },
+    "brain_action_batch": {
+      "$ref": "#/$defs/BrainActionBatch"
+    },
+    "brain_event_envelope": {
+      "$ref": "#/$defs/BrainEventEnvelope"
+    },
+    "brain_implementation_handle": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "brain_implementation_id": {
+      "type": "string"
+    },
+    "brain_provider_state_scope": {
+      "$ref": "#/$defs/BrainProviderStateScope"
+    },
+    "brain_strategy_metadata": {
+      "$ref": "#/$defs/BrainStrategyMetadata"
+    },
+    "brain_wake_accepted": {
+      "$ref": "#/$defs/BrainWakeAccepted"
+    },
+    "brain_wake_failure": {
+      "$ref": "#/$defs/BrainWakeFailure"
+    },
+    "brain_wake_provider_state_output": {
+      "$ref": "#/$defs/BrainWakeProviderStateOutput"
+    },
+    "brain_wake_request": {
+      "$ref": "#/$defs/BrainWakeRequest"
+    },
+    "brain_wake_stream_item": {
+      "$ref": "#/$defs/BrainWakeStreamItem"
+    },
+    "context_compaction_artifact": {
+      "$ref": "#/$defs/ContextCompactionArtifact"
+    },
+    "context_compaction_artifact_query": {
+      "$ref": "#/$defs/ContextCompactionArtifactQuery"
+    },
+    "core_error": {
+      "$ref": "#/$defs/CoreError"
+    },
+    "delegated_resource_cleanup_report": {
+      "$ref": "#/$defs/DelegatedResourceCleanupReport"
+    },
+    "delegated_session_runtime_status": {
+      "$ref": "#/$defs/DelegatedSessionRuntimeStatus"
+    },
+    "engine_handle": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "event_receipt": {
+      "$ref": "#/$defs/EventReceipt"
+    },
+    "event_subscription": {
+      "$ref": "#/$defs/EventSubscription"
+    },
+    "external_event": {
+      "$ref": "#/$defs/ExternalEvent"
+    },
+    "memory_governance_decision_input": {
+      "$ref": "#/$defs/MemoryGovernanceDecisionInput"
+    },
+    "memory_governance_decision_record": {
+      "$ref": "#/$defs/MemoryGovernanceDecisionRecord"
+    },
+    "memory_proposal_envelope": {
+      "$ref": "#/$defs/MemoryProposalEnvelope"
+    },
+    "memory_proposal_query": {
+      "$ref": "#/$defs/MemoryProposalQuery"
+    },
+    "memory_proposal_record": {
+      "$ref": "#/$defs/MemoryProposalRecord"
+    },
+    "memory_space_descriptor": {
+      "$ref": "#/$defs/MemorySpaceDescriptor"
+    },
+    "platform_adapter_handle": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "platform_adapter_registration": {
+      "$ref": "#/$defs/PlatformAdapterRegistration"
+    },
+    "profile_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "resource_limits": {
+      "$ref": "#/$defs/ResourceLimits"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "runtime_buffer_handle": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_activity_digest": {
+      "$ref": "#/$defs/SessionActivityDigest"
+    },
+    "session_activity_digest_query": {
+      "$ref": "#/$defs/SessionActivityDigestQuery"
+    },
+    "session_config": {
+      "$ref": "#/$defs/SessionConfig"
+    },
+    "session_handle": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "session_state": {
+      "$ref": "#/$defs/SessionState"
+    },
+    "subscription_handle": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "task_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "engine_handle",
+    "session_handle",
+    "brain_implementation_handle",
+    "platform_adapter_handle",
+    "subscription_handle",
+    "runtime_buffer_handle",
+    "agent_id",
+    "agent_instance_id",
+    "session_id",
+    "profile_id",
+    "project_id",
+    "task_id",
+    "run_id",
+    "adapter_id",
+    "brain_implementation_id",
+    "resource_limits",
+    "session_config",
+    "session_state",
+    "delegated_session_runtime_status",
+    "delegated_resource_cleanup_report",
+    "event_subscription",
+    "external_event",
+    "body_state",
+    "brain_wake_request",
+    "brain_wake_accepted",
+    "brain_event_envelope",
+    "brain_action_batch",
+    "brain_wake_stream_item",
+    "brain_wake_failure",
+    "brain_strategy_metadata",
+    "brain_provider_state_scope",
+    "brain_wake_provider_state_output",
+    "action_batch_receipt",
+    "event_receipt",
+    "core_error",
+    "platform_adapter_registration",
+    "memory_space_descriptor",
+    "memory_proposal_envelope",
+    "memory_proposal_record",
+    "memory_proposal_query",
+    "session_activity_digest",
+    "session_activity_digest_query",
+    "context_compaction_artifact",
+    "context_compaction_artifact_query",
+    "memory_governance_decision_input",
+    "memory_governance_decision_record"
+  ],
+  "title": "ProtocolContractRoots",
+  "type": "object"
+}

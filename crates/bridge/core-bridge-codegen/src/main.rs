@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 
+mod protocol_contracts;
+
 use anyhow::{bail, Context, Result};
 use rusty_crew_brain_runtime::BufferedBrainRunDrain;
 use rusty_crew_core_bridge_api::*;
@@ -142,6 +144,26 @@ fn main() -> Result<()> {
             check_native_mapping_inventory(Path::new(&path))?;
             println!("native bridge mapping inventory generated artifact drift check passed");
         }
+        Some("emit-protocol-contracts") => {
+            print!("{}", protocol_contracts::protocol_contracts_ts()?);
+        }
+        Some("check-protocol-contracts") => {
+            let path = args
+                .next()
+                .context("check-protocol-contracts requires a generated TypeScript path")?;
+            protocol_contracts::check_protocol_contracts(Path::new(&path))?;
+            println!("core protocol generated artifact drift check passed");
+        }
+        Some("emit-protocol-schema") => {
+            print!("{}", protocol_contracts::protocol_contract_schema_json()?);
+        }
+        Some("check-protocol-schema") => {
+            let path = args
+                .next()
+                .context("check-protocol-schema requires a generated JSON Schema path")?;
+            protocol_contracts::check_protocol_contract_schema(Path::new(&path))?;
+            println!("core protocol generated schema drift check passed");
+        }
         Some("--help" | "-h") => {
             print_help();
         }
@@ -171,6 +193,10 @@ Commands:
   emit-native-mapping-inventory   Emit generated TS inventory for bridge mapper drift checks.
   check-native-mapping-inventory <path>
                                   Compare <path> with the generated mapper inventory.
+  emit-protocol-contracts         Emit generated TypeScript neutral protocol contracts.
+  check-protocol-contracts <path> Compare <path> with generated protocol contracts.
+  emit-protocol-schema            Emit the selected neutral protocol JSON Schema.
+  check-protocol-schema <path>    Compare <path> with the generated JSON Schema.
 
 The fixtures are an incremental drift-check scaffold. They do not replace the
 bridge manifest operation inventory; they give TS validation smokes a Rust

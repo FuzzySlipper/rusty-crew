@@ -5,4 +5,5 @@ docs/
 ts/packages/native-bridge/native/*.d.ts
 ts/packages/native-bridge/native/*.js
 ts/packages/native-bridge/src/generated/
+ts/packages/contracts/src/generated/
 .claude/

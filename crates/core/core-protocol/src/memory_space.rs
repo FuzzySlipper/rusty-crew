@@ -1,4 +1,5 @@
 use crate::{CoreError, CoreErrorKind, CoreResult, IsoTimestamp, ProfileId, SessionId};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -12,7 +13,7 @@ const MAX_SCOPE_ID_LEN: usize = 256;
 /// into prompts according to their descriptor policy. They are distinct from
 /// Den memory, which is external Den-owned product memory and should only enter
 /// Crew memory through explicit import/proposal flows with provenance.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct MemorySpaceId(pub String);
 
@@ -43,7 +44,7 @@ impl fmt::Display for MemorySpaceId {
 }
 
 /// Record shape id inside a memory space, such as `profile_dense_item`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct MemoryRecordShapeId(pub String);
 
@@ -73,7 +74,7 @@ impl fmt::Display for MemoryRecordShapeId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScopeType {
     Profile,
@@ -85,7 +86,7 @@ pub enum MemoryScopeType {
     Project,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryScope {
     pub scope_type: MemoryScopeType,
     pub scope_id: String,
@@ -97,7 +98,7 @@ impl MemoryScope {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryRetrievalStrategy {
     DirectLookup,
@@ -108,7 +109,7 @@ pub enum MemoryRetrievalStrategy {
     DomainSpecific,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryPromptPolicy {
     AutoContext,
@@ -118,7 +119,7 @@ pub enum MemoryPromptPolicy {
     NeverPrompt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryGovernanceMode {
     ReadOnly,
@@ -129,7 +130,7 @@ pub enum MemoryGovernanceMode {
     AutoApplyThreshold,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryOperation {
     Read,
@@ -149,7 +150,7 @@ impl MemoryOperation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryVisibilityModel {
     ProfileLocal,
@@ -161,7 +162,7 @@ pub enum MemoryVisibilityModel {
     ExplicitPolicy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryFieldType {
     String,
@@ -173,7 +174,7 @@ pub enum MemoryFieldType {
     Timestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryEvidenceKind {
     Wake,
@@ -190,7 +191,7 @@ pub enum MemoryEvidenceKind {
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryRetentionPolicy {
     ManualOnly,
@@ -201,7 +202,7 @@ pub enum MemoryRetentionPolicy {
     DomainSpecific,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryConflictPolicy {
     ExpectedRevision,
@@ -211,7 +212,7 @@ pub enum MemoryConflictPolicy {
     DomainSpecific,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryProposalSource {
     InWakeTool,
@@ -223,7 +224,7 @@ pub enum MemoryProposalSource {
     DenMemoryImport,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryRecordFieldDescriptor {
     pub field_name: String,
     pub field_type: MemoryFieldType,
@@ -231,7 +232,7 @@ pub struct MemoryRecordFieldDescriptor {
     pub description: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryRecordShapeDescriptor {
     pub shape_id: MemoryRecordShapeId,
     pub version: u32,
@@ -239,19 +240,19 @@ pub struct MemoryRecordShapeDescriptor {
     pub fields: Vec<MemoryRecordFieldDescriptor>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryScopeModel {
     pub allowed_scopes: Vec<MemoryScopeType>,
     pub primary_scope: MemoryScopeType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryIndexingPolicy {
     pub required_capabilities: Vec<String>,
     pub optional_capabilities: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryOperationPolicy {
     pub operation: MemoryOperation,
     pub governance_mode: MemoryGovernanceMode,
@@ -259,27 +260,27 @@ pub struct MemoryOperationPolicy {
     pub min_confidence: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryWritePolicy {
     pub default_mode: MemoryGovernanceMode,
     pub operation_policies: Vec<MemoryOperationPolicy>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryProvenancePolicy {
     pub required_evidence: Vec<MemoryEvidenceKind>,
     pub source_required: bool,
     pub rationale_required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryDiagnosticsPolicy {
     pub expose_catalog: bool,
     pub expose_record_counts: bool,
     pub expose_policy_decisions: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryExportImportPolicy {
     pub export_supported: bool,
     pub import_supported: bool,
@@ -292,7 +293,7 @@ pub struct MemoryExportImportPolicy {
 /// proposal validation, but physical registration and storage ownership remain
 /// in Rusty Crew core. Descriptors describe Crew runtime memory; external Den
 /// memory remains a separate Den service unless explicitly imported/proposed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemorySpaceDescriptor {
     pub space_id: MemorySpaceId,
     pub schema_version: u32,
@@ -576,13 +577,13 @@ fn descriptor_op_policy(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryRecordShapeRef {
     pub shape_id: MemoryRecordShapeId,
     pub version: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryEvidenceRef {
     pub evidence_type: MemoryEvidenceKind,
     pub ref_id: String,
@@ -594,7 +595,7 @@ pub struct MemoryEvidenceRef {
 /// This envelope may be produced by a brain/tool/UI/importer. It is not a write
 /// by itself: Rust validates it against the Rust-owned descriptor and routes it
 /// through the descriptor's governance policy before any Crew storage changes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryProposalEnvelope {
     pub proposal_id: String,
     pub space_id: MemorySpaceId,
@@ -611,13 +612,13 @@ pub struct MemoryProposalEnvelope {
     pub created_at: Option<IsoTimestamp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryPolicyDiagnostic {
     pub reason_code: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryPolicyReport {
     pub accepted: bool,
     pub diagnostics: Vec<MemoryPolicyDiagnostic>,
@@ -902,7 +903,7 @@ pub fn validate_memory_proposal_policy(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryProposalReviewStatus {
     PendingReview,
@@ -911,7 +912,7 @@ pub enum MemoryProposalReviewStatus {
     Applied,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryProposalRecord {
     pub proposal: MemoryProposalEnvelope,
     pub status: MemoryProposalReviewStatus,
@@ -924,7 +925,7 @@ pub struct MemoryProposalRecord {
     pub duplicate_of: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryProposalQuery {
     pub space_id: Option<MemorySpaceId>,
     pub status: Option<MemoryProposalReviewStatus>,
@@ -939,7 +940,7 @@ pub struct MemoryProposalQuery {
 /// the warm post-wake event stream, then Rust persists it for scheduled
 /// background review. Capture Phase 1 validates `profile_dense` proposals first;
 /// `session_memory` and `roleplay_lore` remain gated expansion targets.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionActivityDigest {
     pub digest_id: String,
     pub profile_id: ProfileId,
@@ -976,7 +977,7 @@ impl SessionActivityDigest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionActivityDigestQuery {
     pub profile_id: Option<ProfileId>,
     pub session_id: Option<SessionId>,
@@ -993,7 +994,7 @@ pub struct SessionActivityDigestQuery {
 /// and strategy decisions so future context strategies can decide whether and
 /// how to project them into model context while keeping source transcript
 /// history intact.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ContextCompactionArtifact {
     pub artifact_id: String,
     pub session_id: SessionId,
@@ -1025,7 +1026,7 @@ impl ContextCompactionArtifact {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ContextCompactionArtifactQuery {
     pub session_id: Option<SessionId>,
     pub branch_id: Option<crate::ConversationBranchId>,
@@ -1036,7 +1037,7 @@ pub struct ContextCompactionArtifactQuery {
     pub offset: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryGovernanceDecisionKind {
     RoutedToReview,
@@ -1045,7 +1046,7 @@ pub enum MemoryGovernanceDecisionKind {
     Applied,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryGovernanceDecisionInput {
     pub decision_id: String,
     pub proposal_id: String,
@@ -1060,7 +1061,7 @@ pub struct MemoryGovernanceDecisionInput {
     pub decided_at: Option<IsoTimestamp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryGovernanceDecisionRecord {
     pub decision_id: String,
     pub proposal_id: String,
@@ -1174,7 +1175,7 @@ pub fn validate_memory_governance_transition_policy(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CuratorGovernanceAction {
     PreviewCandidate,
@@ -1182,7 +1183,7 @@ pub enum CuratorGovernanceAction {
     ApplyCandidate,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CuratorStoredCandidateStatus {
     Proposed,
@@ -1191,7 +1192,7 @@ pub enum CuratorStoredCandidateStatus {
     Applied,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CuratorCandidateLifecycleState {
     Active,
@@ -1199,7 +1200,7 @@ pub enum CuratorCandidateLifecycleState {
     Archived,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorGovernanceCandidateSnapshot {
     pub candidate_id: String,
     pub fingerprint: String,
@@ -1212,7 +1213,7 @@ pub struct CuratorGovernanceCandidateSnapshot {
     pub source_current_reason_code: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorGovernancePlanInput {
     pub action: CuratorGovernanceAction,
     pub candidate: CuratorGovernanceCandidateSnapshot,
@@ -1222,7 +1223,7 @@ pub struct CuratorGovernancePlanInput {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorGovernancePlan {
     pub accepted: bool,
     pub action: CuratorGovernanceAction,
@@ -1233,7 +1234,7 @@ pub struct CuratorGovernancePlan {
     pub diagnostics: Vec<MemoryPolicyDiagnostic>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CuratorLifecycleTransitionTarget {
     Active,
@@ -1243,13 +1244,13 @@ pub enum CuratorLifecycleTransitionTarget {
     Unchanged,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorLifecyclePolicyInput {
     pub stale_after_ms: u64,
     pub archive_after_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorLifecycleCandidateSnapshot {
     pub candidate_id: String,
     pub status: CuratorStoredCandidateStatus,
@@ -1263,14 +1264,14 @@ pub struct CuratorLifecycleCandidateSnapshot {
     pub pinned: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorLifecyclePlanInput {
     pub candidate: CuratorLifecycleCandidateSnapshot,
     pub now: IsoTimestamp,
     pub policy: CuratorLifecyclePolicyInput,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CuratorLifecyclePlan {
     pub accepted: bool,
     pub candidate_id: String,
@@ -1424,7 +1425,7 @@ fn curator_lifecycle_decision(
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BackgroundMemoryAutoMutationAction {
     ApproveProposal,
@@ -1433,7 +1434,7 @@ pub enum BackgroundMemoryAutoMutationAction {
     UpdateSkill,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BackgroundMemoryAutoMutationCandidate {
     pub action: BackgroundMemoryAutoMutationAction,
     pub target_ref: String,
@@ -1444,7 +1445,7 @@ pub struct BackgroundMemoryAutoMutationCandidate {
     pub rationale: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BackgroundMemoryAutoMutationPlanInput {
     pub run_id: String,
     pub profile_id: String,
@@ -1454,7 +1455,7 @@ pub struct BackgroundMemoryAutoMutationPlanInput {
     pub candidates: Vec<BackgroundMemoryAutoMutationCandidate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BackgroundMemoryAutoMutationDecision {
     pub accepted: bool,
     pub action: BackgroundMemoryAutoMutationAction,
@@ -1463,7 +1464,7 @@ pub struct BackgroundMemoryAutoMutationDecision {
     pub diagnostics: Vec<MemoryPolicyDiagnostic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BackgroundMemoryAutoMutationPlan {
     pub accepted_count: u32,
     pub rejected_count: u32,
@@ -1662,7 +1663,7 @@ pub fn plan_curator_governance_transition(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CaptureMemoryProposalPlanInput {
     pub run_id: String,
     pub profile_id: String,
@@ -1674,7 +1675,7 @@ pub struct CaptureMemoryProposalPlanInput {
     pub candidates: Vec<CaptureMemoryProposalCandidate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CaptureMemoryProposalCandidate {
     #[serde(default)]
     pub id: Option<String>,
@@ -1712,7 +1713,7 @@ pub struct CaptureMemoryProposalCandidate {
     pub expected_revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CaptureMemoryEvidenceRef {
     #[serde(default, alias = "eventType")]
     pub event_type: Option<String>,
@@ -1726,7 +1727,7 @@ pub struct CaptureMemoryEvidenceRef {
     pub evidence_type: Option<MemoryEvidenceKind>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CaptureMemoryProposalPlan {
     pub proposals: Vec<MemoryProposalEnvelope>,
     pub rejected: Vec<CaptureMemoryProposalRejection>,
@@ -1734,7 +1735,7 @@ pub struct CaptureMemoryProposalPlan {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CaptureMemoryProposalRejection {
     pub index: u32,
     pub reason_code: String,

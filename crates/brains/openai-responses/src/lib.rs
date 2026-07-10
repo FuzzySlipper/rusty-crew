@@ -420,7 +420,7 @@ impl ResponsesReplayProjection {
                             content: format!("{from}: {text}"),
                         });
                     }
-                    ExternalEventPayload::ChannelMessage(payload) => {
+                    ExternalEventPayload::ChannelMessage { payload } => {
                         input_items.push(ResponsesInputItem::UserMessage {
                             content: format!("{}: {}", payload.from, payload.text),
                         });

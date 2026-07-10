@@ -1,25 +1,128 @@
-export type Brand<T, Name extends string> = T & { readonly __brand: Name };
+export type { Brand } from "./brands.js";
+export * from "./generated/core-protocol.js";
 
-export type EngineHandle = Brand<number, "EngineHandle">;
-export type SessionHandle = Brand<number, "SessionHandle">;
-export type BrainImplementationHandle = Brand<
-  number,
-  "BrainImplementationHandle"
->;
-export type PlatformAdapterHandle = Brand<number, "PlatformAdapterHandle">;
-export type SubscriptionHandle = Brand<number, "SubscriptionHandle">;
-export type RuntimeBufferHandle = Brand<number, "RuntimeBufferHandle">;
-
-export type AgentId = Brand<string, "AgentId">;
-export type AgentInstanceId = Brand<string, "AgentInstanceId">;
-export type SessionId = Brand<string, "SessionId">;
-export type ProfileId = Brand<string, "ProfileId">;
-export type ConversationBranchId = Brand<string, "ConversationBranchId">;
-export type ProjectId = Brand<string, "ProjectId">;
-export type TaskId = Brand<string, "TaskId">;
-export type RunId = Brand<string, "RunId">;
-export type AdapterId = Brand<string, "AdapterId">;
-export type BrainImplementationId = Brand<string, "BrainImplementationId">;
+import type {
+  ActionBatchReceipt,
+  ActionRejection,
+  AdapterId,
+  AgentId,
+  AgentInstanceId,
+  AgentMessage,
+  AgentMessageProjectionHint,
+  BodyDeltaPolicy,
+  BodyState,
+  BrainAction,
+  BrainActionBatch,
+  BrainEvent,
+  BrainEventEnvelope,
+  BrainImplementationHandle,
+  BrainImplementationId,
+  BrainPhase,
+  BrainProviderStateScope,
+  BrainProviderStateStrategyMetadata,
+  BrainProviderStatusLevel,
+  BrainStrategyMetadata,
+  BrainWakeAccepted,
+  BrainWakeFailure,
+  BrainWakeProviderStateInput,
+  BrainWakeProviderStateOutput,
+  BrainWakeProviderStateUpdate,
+  BrainWakeRequest,
+  BrainWakeStreamItem,
+  CompletionPacket,
+  CompletionStatus,
+  ContextCompactionArtifact,
+  ContextCompactionArtifactQuery,
+  ConversationBranchId,
+  CoreError,
+  CoreErrorKind,
+  CoreEvent,
+  CoreEventKind,
+  DelegatedCompletion,
+  DelegatedFanOutGroup,
+  DelegatedResourceCleanupReport,
+  DelegatedRunStatus,
+  DelegatedSessionRuntimeStatus,
+  DelegationLifecycleEvent,
+  DelegationLifecyclePhase,
+  DelegationLineage,
+  DelegationPriority,
+  DeltaQueueOwner,
+  DenDataUpdate,
+  EngineHandle,
+  EventReceipt,
+  EventSubscription,
+  ExternalEvent,
+  ExternalEventPayload,
+  FanOutFailurePolicy,
+  FanOutGroupStatus,
+  MemoryConflictPolicy,
+  MemoryDiagnosticsPolicy,
+  MemoryEvidenceKind,
+  MemoryEvidenceRef,
+  MemoryExportImportPolicy,
+  MemoryFieldType,
+  MemoryGovernanceDecisionInput,
+  MemoryGovernanceDecisionKind,
+  MemoryGovernanceDecisionRecord,
+  MemoryGovernanceMode,
+  MemoryIndexingPolicy,
+  MemoryOperation,
+  MemoryOperationPolicy,
+  MemoryPromptPolicy,
+  MemoryProposalEnvelope,
+  MemoryProposalQuery,
+  MemoryProposalRecord,
+  MemoryProposalReviewStatus,
+  MemoryProposalSource,
+  MemoryProvenancePolicy,
+  MemoryRecordFieldDescriptor,
+  MemoryRecordShapeDescriptor,
+  MemoryRecordShapeId,
+  MemoryRecordShapeRef,
+  MemoryRetentionPolicy,
+  MemoryRetrievalStrategy,
+  MemoryScope,
+  MemoryScopeModel,
+  MemoryScopeType,
+  MemorySpaceDescriptor,
+  MemorySpaceId,
+  MemoryVisibilityModel,
+  MemoryWritePolicy,
+  MidTurnDeltaMode,
+  ParentConsumptionPolicy,
+  PlatformAdapterHandle,
+  PlatformAdapterKind,
+  PlatformAdapterRegistration,
+  ProfileId,
+  ProjectId,
+  ProjectionRef,
+  ProjectionVisibility,
+  ProviderStateAbsenceReason,
+  ProviderStateClearReason,
+  ProviderStateMode,
+  ResourceLimits,
+  RunId,
+  RuntimeBufferHandle,
+  SessionActivityDigest,
+  SessionActivityDigestQuery,
+  SessionConfig,
+  SessionHandle,
+  SessionHistoryWindow,
+  SessionId,
+  SessionKind,
+  SessionState,
+  SessionStatus,
+  SubscriptionHandle,
+  TaskId,
+  ToolCallMetadata,
+  ToolCallPolicyMetadata,
+  ToolCallSource,
+  ToolDescriptor,
+  ToolProfile,
+  WorkerPoolCapacityFallbackPolicy,
+  WorkerPoolCapacityRequest,
+} from "./generated/core-protocol.js";
 
 export interface Unit {}
 
@@ -51,80 +154,6 @@ export interface ShutdownRequest {
 export interface ShutdownSummary {
   archivedSessions: number;
   droppedSubscriptions: number;
-}
-
-export type SessionKind = "full" | "worker" | "delegated";
-export type SessionStatus = "active" | "idle" | "archived";
-
-export interface ToolDescriptor {
-  name: string;
-  description: string;
-  inputSchema?: RuntimeBufferHandle;
-}
-
-export interface ToolProfile {
-  tools: ToolDescriptor[];
-}
-
-export type ToolCallSource = "local" | "mcp" | "web" | "browser";
-
-export interface ToolCallPolicyMetadata {
-  allowed?: boolean;
-  denialReason?: string;
-  timeoutMs?: number;
-  cancelled?: boolean;
-  archiveCleanup?: boolean;
-}
-
-export interface ToolCallMetadata {
-  source: ToolCallSource;
-  adapterId?: AdapterId;
-  bindingId?: string;
-  serverNames: string[];
-  profileId?: ProfileId;
-  toolProfileKey?: string;
-  sourceToolName?: string;
-  catalogRevision?: string;
-  debugDetailId?: string;
-  policy?: ToolCallPolicyMetadata;
-}
-
-export interface ResourceLimits {
-  workdir?: string;
-  maxDurationMs?: number;
-  maxDelegationDepth?: number;
-}
-
-export interface DelegationLineage {
-  parentSessionId: SessionId;
-  parentAgentId: AgentId;
-  sourceWakeId: string;
-  sourceActionIndex: number;
-  requestedTaskId?: TaskId;
-  correlationId: string;
-}
-
-export interface SessionConfig {
-  sessionId: SessionId;
-  agentId: AgentId;
-  profileId: ProfileId;
-  kind: SessionKind;
-  delegation?: DelegationLineage;
-  resourceLimits: ResourceLimits;
-  toolProfile: ToolProfile;
-  historyWindow?: SessionHistoryWindow;
-}
-
-export interface SessionHistoryWindow {
-  maxMessages?: number;
-}
-
-export interface SessionState extends SessionConfig {
-  handle: SessionHandle;
-  status: SessionStatus;
-  brainTurnCount: number;
-  createdAt: string;
-  lastActiveAt: string;
 }
 
 export type GitHubGateWaitPhase =
@@ -183,81 +212,6 @@ export interface GitHubGateTerminalReceipt {
   wakeScheduled: boolean;
   ignoredReason?: string;
   wait?: GitHubGateWaitRecord;
-}
-
-export interface AgentMessage {
-  from: AgentId;
-  to: AgentId;
-  body: string;
-  correlationId?: string;
-  projection?: AgentMessageProjectionHint;
-}
-
-export interface AgentMessageProjectionHint {
-  visibility: ProjectionVisibility;
-  targetRef?: ProjectionRef;
-  workRef?: ProjectionRef;
-  reason?: string;
-}
-
-export type ProjectionVisibility = "observation" | "user_visible";
-
-export interface ProjectionRef {
-  system: string;
-  kind: string;
-  id: string;
-}
-
-export type CoreEventKind =
-  | "session_created"
-  | "session_archived"
-  | "agent_message_routed"
-  | "delegation_lifecycle_observed"
-  | "external_event_injected"
-  | "den_data_updated"
-  | "brain_wake_requested"
-  | "brain_event_observed"
-  | "brain_actions_accepted"
-  | "completion_packet_delivered";
-
-export interface EventSubscription {
-  eventKinds: CoreEventKind[];
-  sessionId?: SessionId;
-  agentId?: AgentId;
-  adapterId?: AdapterId;
-}
-
-export interface DenDataUpdate {
-  projectId: ProjectId;
-  entityKind: string;
-  entityId: string;
-  revision?: string;
-}
-
-export type ExternalEventPayload =
-  | { type: "human_message"; from: string; text: string }
-  | {
-      type: "channel_message";
-      bindingId: string;
-      correlationId: string;
-      idempotencyKey: string;
-      provider: string;
-      externalChannelId: string;
-      externalThreadId?: string;
-      externalMessageId?: string;
-      from: string;
-      text: string;
-      receivedAt: string;
-      expiresAt: string;
-    }
-  | { type: "adapter_status"; status: string; detail?: string }
-  | { type: "tool_catalog_changed"; catalogId: string }
-  | { type: "raw_json"; json: string };
-
-export interface ExternalEvent {
-  adapterId: AdapterId;
-  source: string;
-  payload: ExternalEventPayload;
 }
 
 export type ChannelProvider = "den_channels" | "telegram" | "simulated";
@@ -613,321 +567,11 @@ export interface McpSurfaceDiagnostics {
   optional: boolean;
 }
 
-export type CompletionStatus = "completed" | "failed" | "blocked" | "exhausted";
-
-export interface CompletionPacket {
-  sessionId: SessionId;
-  status: CompletionStatus;
-  summary: string;
-}
-
-export type ParentConsumptionPolicy = "await_completion" | "observe_only";
-export type FanOutFailurePolicy = "fail_fast" | "fail_soft";
-export type DelegationLifecyclePhase =
-  | "created"
-  | "wake_requested"
-  | "checkpoint_requested"
-  | "completed"
-  | "failed"
-  | "blocked"
-  | "exhausted"
-  | "timed_out"
-  | "cancelled";
-export type DelegatedRunStatus =
-  | "requested"
-  | "session_created"
-  | "wake_requested"
-  | "running"
-  | "checkpoint_waiting"
-  | "completed"
-  | "failed"
-  | "blocked"
-  | "exhausted"
-  | "cancelled"
-  | "expired";
-export type FanOutGroupStatus =
-  | "in_progress"
-  | "completed"
-  | "partial_failure"
-  | "failed_fast";
-
-export interface DelegatedCompletion {
-  runId: RunId;
-  childSessionId: SessionId;
-  requestedTaskId?: TaskId;
-  sourceWakeId: string;
-  sourceActionIndex: number;
-  correlationId?: string;
-  parentConsumption: ParentConsumptionPolicy;
-  packet: CompletionPacket;
-}
-
-export interface DelegationLifecycleEvent {
-  parentSessionId: SessionId;
-  delegatedSessionId: SessionId;
-  runId?: RunId;
-  phase: DelegationLifecyclePhase;
-  detail?: string;
-}
-
-export interface DelegatedSessionRuntimeStatus {
-  session: SessionState;
-  parentSessionId?: SessionId;
-  runId?: RunId;
-  runStatus?: DelegatedRunStatus;
-  terminal: boolean;
-}
-
-export interface DelegatedResourceCleanupReport {
-  cleanedAt: string;
-  terminalArchived: SessionId[];
-  orphanedArchived: SessionId[];
-  expiredArchived: SessionId[];
-  resourcesReleased: number;
-}
-
-export interface DelegatedFanOutGroup {
-  groupId: string;
-  total: number;
-  pending: number;
-  completed: number;
-  failed: number;
-  blocked: number;
-  exhausted: number;
-  cancelled: number;
-  expired: number;
-  maxConcurrency?: number;
-  failurePolicy: FanOutFailurePolicy;
-  status: FanOutGroupStatus;
-}
-
-export type BrainPhase = "idle" | "exploring" | "composing" | "reviewing";
-
-export type BrainEvent =
-  | { type: "started" }
-  | { type: "text_delta"; text: string }
-  | {
-      type: "reasoning_delta";
-      text: string;
-      format?: string;
-    }
-  | { type: "phase_change"; phase: BrainPhase; message?: string }
-  | {
-      type: "tool_call_started";
-      toolName: string;
-      metadata?: ToolCallMetadata;
-    }
-  | {
-      type: "tool_call_finished";
-      toolName: string;
-      isError: boolean;
-      metadata?: ToolCallMetadata;
-    }
-  | {
-      type: "provider_status";
-      level: BrainProviderStatusLevel;
-      message: string;
-      metadataJson?: string;
-    }
-  | { type: "finished" };
-
-export type BrainProviderStatusLevel = "info" | "degraded" | "error";
-
-export type BrainAction =
-  | { type: "send_message"; message: AgentMessage }
-  | {
-      type: "request_delegation";
-      profileId: ProfileId;
-      taskId?: TaskId;
-      prompt: string;
-      expectedOutput?: string;
-      resourceLimits?: ResourceLimits;
-      timeoutMs?: number;
-      priority?: "low" | "normal" | "high";
-      fanOutGroupId?: string;
-      fanOutMaxConcurrency?: number;
-      fanOutFailurePolicy?: FanOutFailurePolicy;
-      correlationId?: string;
-      parentConsumption?: ParentConsumptionPolicy;
-      capacityRequest?: WorkerPoolCapacityRequest;
-    }
-  | { type: "deliver_completion"; packet: CompletionPacket };
-
-export interface WorkerPoolCapacityRequest {
-  memberId: string;
-  claimTtlMs?: number;
-  fallbackPolicy?: WorkerPoolCapacityFallbackPolicy;
-}
-
-export type WorkerPoolCapacityFallbackPolicy =
-  | "reject_on_no_capacity"
-  | "direct_on_no_capacity";
-
-export interface BrainWakeRequest {
-  brain: BrainImplementationHandle;
-  sessionId: SessionId;
-  bodyState: RuntimeBufferHandle;
-  systemPrompt: RuntimeBufferHandle;
-  roleAssembly: RuntimeBufferHandle;
-  wakeId: string;
-  providerState?: BrainWakeProviderStateInput;
-  providerStateAbsence?: ProviderStateAbsenceReason;
-}
-
-export interface BrainWakeAccepted {
-  wakeId: string;
-  accepted: boolean;
-}
-
-export interface BrainEventEnvelope {
-  wakeId: string;
-  sessionId: SessionId;
-  event: BrainEvent;
-}
-
-export interface BrainActionBatch {
-  wakeId: string;
-  sessionId: SessionId;
-  actions: BrainAction[];
-}
-
-export type ProviderStateMode = "unused" | "optional" | "required";
-
-export interface BrainProviderStateStrategyMetadata {
-  mode: ProviderStateMode;
-}
-
-export interface BrainStrategyMetadata {
-  moduleId: string;
-  strategyId: string;
-  providerState: BrainProviderStateStrategyMetadata;
-}
-
-export interface BrainProviderStateScope {
-  profileFingerprint: string;
-  providerFingerprint: string;
-}
-
-export type ProviderStateAbsenceReason =
-  | "not_configured"
-  | "missing"
-  | "expired"
-  | "invalidated"
-  | "module_does_not_use_state"
-  | "load_failed";
-
-export interface BrainWakeProviderStateInput {
-  moduleId: string;
-  strategyId: string;
-  profileFingerprint: string;
-  providerFingerprint: string;
-  payloadVersion: string;
-  payload: unknown;
-  expiresAt?: string;
-}
-
-export interface BrainWakeProviderStateUpdate {
-  moduleId: string;
-  strategyId: string;
-  profileFingerprint: string;
-  providerFingerprint: string;
-  payloadVersion: string;
-  payload: unknown;
-  ttlMs?: number;
-}
-
-export type BrainWakeProviderStateOutput =
-  | { type: "unchanged" }
-  | { type: "replace"; state: BrainWakeProviderStateUpdate }
-  | { type: "clear"; reason: "brain_requested_clear" };
-
-export interface BrainWakeFailure {
-  wakeId: string;
-  sessionId: SessionId;
-  kind: CoreErrorKind;
-  message: string;
-}
-
-export type BrainWakeStreamItem =
-  | { type: "event"; event: BrainEventEnvelope }
-  | { type: "actions"; batch: BrainActionBatch }
-  | { type: "wake_failed"; failure: BrainWakeFailure };
-
-export interface ActionRejection {
-  index: number;
-  kind: CoreErrorKind;
-  message: string;
-}
-
-export interface ActionBatchReceipt {
-  wakeId: string;
-  acceptedActions: number;
-  rejectedActions: ActionRejection[];
-}
-
-export interface EventReceipt {
-  accepted: boolean;
-  sequence: number;
-}
-
 export interface RuntimeBufferView {
   handle: RuntimeBufferHandle;
   mediaType: string;
   byteLen: number;
   bytes: Uint8Array;
-}
-
-export interface BodyDeltaPolicy {
-  mode: "frozen_snapshot_next_wake";
-  queueOwner: "body";
-  queuedMessageTtlMs: number;
-  maxQueuedMessages: number;
-}
-
-export interface BodyState {
-  session: SessionState;
-  pendingMessages: AgentMessage[];
-  recentEvents: CoreEvent[];
-  childCompletions: DelegatedCompletion[];
-  fanOutGroups: DelegatedFanOutGroup[];
-  deltaPolicy: BodyDeltaPolicy;
-}
-
-export type CoreEvent =
-  | { type: "session_created"; state: SessionState }
-  | { type: "session_archived"; sessionId: SessionId }
-  | { type: "agent_message_routed"; message: AgentMessage }
-  | {
-      type: "delegation_lifecycle_observed";
-      lifecycle: DelegationLifecycleEvent;
-    }
-  | { type: "external_event_injected"; event: ExternalEvent }
-  | { type: "den_data_updated"; update: DenDataUpdate }
-  | { type: "brain_wake_requested"; sessionId: SessionId }
-  | {
-      type: "brain_event_observed";
-      sessionId: SessionId;
-      wakeId?: string;
-      event: BrainEvent;
-    }
-  | { type: "brain_actions_accepted"; sessionId: SessionId; count: number }
-  | { type: "completion_packet_delivered"; packet: CompletionPacket };
-
-export type CoreErrorKind =
-  | "invalid_input"
-  | "not_found"
-  | "already_exists"
-  | "session_expired"
-  | "timeout_expired"
-  | "persistence_failure"
-  | "adapter_unavailable"
-  | "brain_unavailable"
-  | "action_rejected"
-  | "internal_error";
-
-export interface CoreError {
-  kind: CoreErrorKind;
-  message: string;
 }
 
 export interface BrainModelConfig {
@@ -948,14 +592,6 @@ export interface BrainImplementationRegistration {
   modelConfig: BrainModelConfig;
   strategy?: BrainStrategyMetadata;
   providerStateScope?: BrainProviderStateScope;
-}
-
-export type PlatformAdapterKind = "den" | "telegram" | "mcp" | "tui" | "cli";
-
-export interface PlatformAdapterRegistration {
-  adapterId: AdapterId;
-  kind: PlatformAdapterKind;
-  displayName: string;
 }
 
 export type ScheduledJobStatus = "active" | "paused" | "archived";
@@ -1051,342 +687,6 @@ export interface SchedulerTickReport {
   runsCompleted: number;
   runsSkipped: number;
   runsFailed: number;
-}
-
-export type MemorySpaceId = Brand<string, "MemorySpaceId">;
-export type MemoryRecordShapeId = Brand<string, "MemoryRecordShapeId">;
-
-export type MemoryScopeType =
-  | "profile"
-  | "user"
-  | "session"
-  | "conversation_branch"
-  | "world"
-  | "entity"
-  | "project";
-
-export type MemoryRetrievalStrategy =
-  | "direct_lookup"
-  | "query_search"
-  | "recency"
-  | "relevance"
-  | "branch_aware"
-  | "domain_specific";
-
-export type MemoryPromptPolicy =
-  | "auto_context"
-  | "summary_context"
-  | "tool_only"
-  | "explicit_user_context"
-  | "never_prompt";
-
-export type MemoryGovernanceMode =
-  | "read_only"
-  | "direct_write"
-  | "candidate"
-  | "manual_review"
-  | "curator_route"
-  | "auto_apply_threshold";
-
-export type MemoryOperation =
-  | "read"
-  | "list"
-  | "add"
-  | "replace"
-  | "merge"
-  | "supersede"
-  | "remove"
-  | "archive"
-  | "candidate_only";
-
-export type MemoryVisibilityModel =
-  | "profile_local"
-  | "user_scoped"
-  | "session_scoped"
-  | "world_scoped"
-  | "project_scoped"
-  | "service_internal"
-  | "explicit_policy";
-
-export type MemoryFieldType =
-  | "string"
-  | "markdown"
-  | "json"
-  | "integer"
-  | "float"
-  | "boolean"
-  | "timestamp";
-
-export type MemoryEvidenceKind =
-  | "wake"
-  | "event"
-  | "tool_call"
-  | "transcript"
-  | "user_correction"
-  | "source_document"
-  | "den_memory"
-  | "import"
-  | "migration"
-  | "ui"
-  | "other";
-
-export type MemoryRetentionPolicy =
-  | "manual_only"
-  | "expire"
-  | "archive"
-  | "tombstone"
-  | "compact"
-  | "domain_specific";
-
-export type MemoryConflictPolicy =
-  | "expected_revision"
-  | "supersession"
-  | "merge"
-  | "immutable"
-  | "domain_specific";
-
-export type MemoryProposalSource =
-  | "in_wake_tool"
-  | "capture_producer"
-  | "ui"
-  | "import"
-  | "migration"
-  | "human"
-  | "den_memory_import";
-
-export interface MemoryScope {
-  scope_type: MemoryScopeType;
-  scope_id: string;
-}
-
-export interface MemoryRecordFieldDescriptor {
-  field_name: string;
-  field_type: MemoryFieldType;
-  required: boolean;
-  description: string;
-}
-
-export interface MemoryRecordShapeDescriptor {
-  shape_id: MemoryRecordShapeId;
-  version: number;
-  description: string;
-  fields: MemoryRecordFieldDescriptor[];
-}
-
-export interface MemoryScopeModel {
-  allowed_scopes: MemoryScopeType[];
-  primary_scope: MemoryScopeType;
-}
-
-export interface MemoryIndexingPolicy {
-  required_capabilities: string[];
-  optional_capabilities: string[];
-}
-
-export interface MemoryOperationPolicy {
-  operation: MemoryOperation;
-  governance_mode: MemoryGovernanceMode;
-  requires_expected_revision: boolean;
-  min_confidence?: number;
-}
-
-export interface MemoryWritePolicy {
-  default_mode: MemoryGovernanceMode;
-  operation_policies: MemoryOperationPolicy[];
-}
-
-export interface MemoryProvenancePolicy {
-  required_evidence: MemoryEvidenceKind[];
-  source_required: boolean;
-  rationale_required: boolean;
-}
-
-export interface MemoryDiagnosticsPolicy {
-  expose_catalog: boolean;
-  expose_record_counts: boolean;
-  expose_policy_decisions: boolean;
-}
-
-export interface MemoryExportImportPolicy {
-  export_supported: boolean;
-  import_supported: boolean;
-  import_governance_mode: MemoryGovernanceMode;
-}
-
-/**
- * Rust-owned Crew runtime memory-space descriptor.
- *
- * Crew memory spaces live in Rusty Crew service storage and may be projected
- * into prompts according to descriptor policy. Den memory remains external
- * Den-owned memory unless explicitly imported or proposed with provenance.
- */
-export interface MemorySpaceDescriptor {
-  space_id: MemorySpaceId;
-  schema_version: number;
-  module_id?: string;
-  description: string;
-  record_shapes: MemoryRecordShapeDescriptor[];
-  scope_model: MemoryScopeModel;
-  visibility_model: MemoryVisibilityModel;
-  retrieval_strategies: MemoryRetrievalStrategy[];
-  indexing: MemoryIndexingPolicy;
-  prompt_policy: MemoryPromptPolicy;
-  write_policy: MemoryWritePolicy;
-  operations: MemoryOperation[];
-  provenance_policy: MemoryProvenancePolicy;
-  retention_policy: MemoryRetentionPolicy;
-  conflict_policy: MemoryConflictPolicy;
-  diagnostics: MemoryDiagnosticsPolicy;
-  export_import: MemoryExportImportPolicy;
-}
-
-export interface MemoryRecordShapeRef {
-  shape_id: MemoryRecordShapeId;
-  version: number;
-}
-
-export interface MemoryEvidenceRef {
-  evidence_type: MemoryEvidenceKind;
-  ref_id: string;
-  label?: string;
-}
-
-/**
- * Proposed Crew memory mutation. This is never a write by itself; Rust validates
- * it against the Rust-owned descriptor and routes it through governance.
- */
-export interface MemoryProposalEnvelope {
-  proposal_id: string;
-  space_id: MemorySpaceId;
-  operation: MemoryOperation;
-  scope: MemoryScope;
-  shape: MemoryRecordShapeRef;
-  content: unknown;
-  evidence_refs: MemoryEvidenceRef[];
-  confidence: number;
-  durability_rationale?: string;
-  governance_mode: MemoryGovernanceMode;
-  source: MemoryProposalSource;
-  dedupe_key?: string;
-  created_at?: string;
-}
-
-export type MemoryProposalReviewStatus =
-  | "pending_review"
-  | "approved"
-  | "rejected"
-  | "applied";
-
-export interface MemoryProposalRecord {
-  proposal: MemoryProposalEnvelope;
-  status: MemoryProposalReviewStatus;
-  selected_governance_mode: MemoryGovernanceMode;
-  created_at: string;
-  updated_at: string;
-  decided_at?: string;
-  applied_at?: string;
-  resulting_revision?: number;
-  duplicate_of?: string;
-}
-
-export interface MemoryProposalQuery {
-  space_id?: MemorySpaceId;
-  status?: MemoryProposalReviewStatus;
-  dedupe_key?: string;
-  limit?: number;
-  offset?: number;
-}
-
-/**
- * Bounded per-wake activity digest used by the post-wake capture producer.
- *
- * This is not a raw transcript. The service builds it from warm post-wake
- * events, then Rust persists it for scheduled background review. The first
- * capture target is `profile_dense`; `session_memory` and `roleplay_lore`
- * remain gated expansion spaces.
- */
-export interface SessionActivityDigest {
-  digest_id: string;
-  profile_id: ProfileId;
-  session_id: SessionId;
-  wake_id: string;
-  source: string;
-  summary_text: string;
-  event_counts_json: Record<string, number>;
-  tool_calls_json: unknown[];
-  signals_json: unknown[];
-  completion_summary?: string;
-  allowed_capture_spaces: MemorySpaceId[];
-  created_at: string;
-  retention_until?: string;
-  reviewed_at?: string;
-}
-
-export interface SessionActivityDigestQuery {
-  profile_id?: ProfileId;
-  session_id?: SessionId;
-  wake_id?: string;
-  include_reviewed: boolean;
-  limit?: number;
-  offset?: number;
-}
-
-/**
- * Durable record for a derived context-compaction summary.
- *
- * This is not raw transcript storage and is not ordinary session memory. It
- * keeps provenance and estimates so context strategies can decide whether to
- * project it into future model context while source history stays intact.
- */
-export interface ContextCompactionArtifact {
-  artifact_id: string;
-  session_id: SessionId;
-  branch_id?: ConversationBranchId;
-  strategy_id: string;
-  source_refs_json: unknown;
-  provider_metadata_json: unknown;
-  estimate_before_json: unknown;
-  estimate_after_json?: unknown;
-  summary_text: string;
-  enters_future_context: boolean;
-  context_policy: string;
-  metadata_json: unknown;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ContextCompactionArtifactQuery {
-  session_id?: SessionId;
-  branch_id?: ConversationBranchId;
-  strategy_id?: string;
-  enters_future_context?: boolean;
-  latest_only: boolean;
-  limit?: number;
-  offset?: number;
-}
-
-export type MemoryGovernanceDecisionKind =
-  | "routed_to_review"
-  | "approved"
-  | "rejected"
-  | "applied";
-
-export interface MemoryGovernanceDecisionInput {
-  decision_id: string;
-  proposal_id: string;
-  decision: MemoryGovernanceDecisionKind;
-  actor: string;
-  source: MemoryProposalSource;
-  evidence_refs: MemoryEvidenceRef[];
-  policy_mode: MemoryGovernanceMode;
-  confidence?: number;
-  message?: string;
-  resulting_revision?: number;
-  decided_at?: string;
-}
-
-export interface MemoryGovernanceDecisionRecord extends MemoryGovernanceDecisionInput {
-  decided_at: string;
 }
 
 const mutableMemoryOperations = new Set<MemoryOperation>([
