@@ -75,10 +75,8 @@ To update it after intentional protocol shape changes:
 
 ```bash
 npm run smoke:bridge-contract-parity
-npm run codegen:bridge-fixtures
-npm run codegen:bridge-fingerprint
-# Update ts/packages/contracts/src/index.ts bridgeWireShapeFingerprint
-# to match crates/bridge/core-bridge-api/bridge-wire-shape-fingerprint.txt.
+npm run codegen:bridge-contracts
+npm run check:bridge-contracts
 npm run smoke:bridge-fixture-drift
 npm run smoke:bridge-fingerprint-drift
 npm run smoke:bridge-validation
@@ -88,13 +86,15 @@ npm run smoke:bridge-validation
 
 - `crates/bridge/core-bridge-api/bridge-manifest.toml` `[[operation]]`
   names;
-- `core_bridge_api::OPERATION_NAMES`;
-- `ts/packages/contracts/src/index.ts` `manifestOperationNames`.
+- the build-generated `core_bridge_api::OPERATION_NAMES`;
+- `ts/packages/contracts/src/generated/bridge-manifest.ts`.
 
-The manifest may stay grouped for readability, but it must contain the exact
-same operation set as Rust. The TypeScript contract list must match Rust in
-both membership and order, and `@rusty-crew/native-bridge` imports that list
-instead of keeping a fourth operation-name mirror.
+The manifest stays grouped for readability and is the canonical ordered source.
+`core-bridge-api/build.rs` generates the Rust operation slice at compile time,
+and `core-bridge-codegen` emits the committed TypeScript operation metadata,
+name union, ordered runtime list, manifest version, and wire fingerprint.
+`@rusty-crew/native-bridge` imports that generated artifact through the
+contracts package; there is no separately authored Rust or TypeScript list.
 
 `smoke:bridge-native-surface` parses the generated napi declaration file at
 `ts/packages/native-bridge/native/index.d.ts`, derives operation names from
@@ -112,11 +112,11 @@ the bridge coverage ratchet in
 
 The ratchet currently pins:
 
-- manifest operations: 171;
-- exported TypeBox bridge schemas: 36;
+- manifest operations: 192;
+- exported TypeBox bridge schemas: 41;
 - Rust fixture families: 11;
-- manifest operations with TypeBox runtime validation and/or Rust fixtures: 31;
-- explicit operation exemptions: 140.
+- manifest operations with TypeBox runtime validation and/or Rust fixtures: 34;
+- explicit operation exemptions: 158.
 
 Together these provide the CI-capable drift guard while the full generator
 matures: adding a field to a covered Rust protocol shape fails until the TS
@@ -157,12 +157,11 @@ crates/bridge/core-bridge-api/bridge-wire-shape-fingerprint.txt
 Regenerate it with:
 
 ```bash
-npm run codegen:bridge-fixtures
-npm run codegen:bridge-fingerprint
+npm run codegen:bridge-contracts
 ```
 
-Then copy the generated value into the `bridgeWireShapeFingerprint` export in
-`ts/packages/contracts/src/index.ts`, rebuild the native bridge, and run:
+That command updates the fixtures, fingerprint text, and generated contracts
+module together in dependency order. Then rebuild the native bridge and run:
 
 ```bash
 npm run smoke:bridge-fingerprint-drift

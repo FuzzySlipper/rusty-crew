@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+mod bridge_contracts;
 mod protocol_contracts;
 
 use anyhow::{bail, Context, Result};
@@ -164,6 +165,16 @@ fn main() -> Result<()> {
             protocol_contracts::check_protocol_contract_schema(Path::new(&path))?;
             println!("core protocol generated schema drift check passed");
         }
+        Some("emit-bridge-contracts") => {
+            print!("{}", bridge_contracts::bridge_contracts_ts()?);
+        }
+        Some("check-bridge-contracts") => {
+            let path = args
+                .next()
+                .context("check-bridge-contracts requires a generated TypeScript path")?;
+            bridge_contracts::check_bridge_contracts(Path::new(&path))?;
+            println!("bridge manifest generated artifact drift check passed");
+        }
         Some("--help" | "-h") => {
             print_help();
         }
@@ -197,6 +208,8 @@ Commands:
   check-protocol-contracts <path> Compare <path> with generated protocol contracts.
   emit-protocol-schema            Emit the selected neutral protocol JSON Schema.
   check-protocol-schema <path>    Compare <path> with the generated JSON Schema.
+  emit-bridge-contracts           Emit generated bridge manifest TypeScript metadata.
+  check-bridge-contracts <path>   Compare <path> with generated bridge metadata.
 
 The fixtures are an incremental drift-check scaffold. They do not replace the
 bridge manifest operation inventory; they give TS validation smokes a Rust
@@ -224,7 +237,7 @@ fn check_fixtures(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn bridge_wire_shape_fingerprint() -> Result<String> {
+pub(crate) fn bridge_wire_shape_fingerprint() -> Result<String> {
     let payload = json!({
         "format": "rusty-crew-bridge-wire-shape-fingerprint-v1",
         "manifest_operation_names": operation_names_from_manifest(MANIFEST_TEXT)?,
@@ -254,21 +267,7 @@ fn check_fingerprint(fingerprint_path: &Path, contracts_index_path: &Path) -> Re
         );
     }
 
-    let contracts_source = fs::read_to_string(contracts_index_path).with_context(|| {
-        format!(
-            "failed to read TypeScript contracts file {}",
-            contracts_index_path.display()
-        )
-    })?;
-    let ts_value = wire_shape_fingerprint_from_ts_contracts(&contracts_source)?;
-    if ts_value != expected {
-        bail!(
-            "TypeScript bridgeWireShapeFingerprint drift detected in {}; expected {}; update the export to match {}",
-            contracts_index_path.display(),
-            expected,
-            fingerprint_path.display()
-        );
-    }
+    bridge_contracts::check_bridge_contracts(contracts_index_path)?;
     Ok(())
 }
 
@@ -278,26 +277,13 @@ fn check_contracts(contracts_index_path: &Path) -> Result<()> {
         .iter()
         .map(|name| (*name).to_owned())
         .collect::<Vec<_>>();
-    let contracts_source = fs::read_to_string(contracts_index_path).with_context(|| {
-        format!(
-            "failed to read TypeScript contracts file {}",
-            contracts_index_path.display()
-        )
-    })?;
-    let ts_operation_names = operation_names_from_ts_contracts(&contracts_source)?;
-
-    compare_operation_sets(
+    compare_operation_order(
         "bridge-manifest.toml [[operation]] names",
         &manifest_operation_names,
         "core_bridge_api::OPERATION_NAMES",
         &rust_operation_names,
     )?;
-    compare_operation_order(
-        "ts/packages/contracts manifestOperationNames",
-        &ts_operation_names,
-        "core_bridge_api::OPERATION_NAMES",
-        &rust_operation_names,
-    )?;
+    bridge_contracts::check_bridge_contracts(contracts_index_path)?;
 
     Ok(())
 }
@@ -1991,49 +1977,6 @@ fn operation_names_from_manifest(manifest_text: &str) -> Result<Vec<String>> {
 
     ensure_no_duplicate_operations("bridge manifest", &names)?;
     Ok(names)
-}
-
-fn operation_names_from_ts_contracts(source: &str) -> Result<Vec<String>> {
-    let marker = "export const manifestOperationNames = [";
-    let start = source
-        .find(marker)
-        .context("failed to find manifestOperationNames export in TypeScript contracts")?
-        + marker.len();
-    let rest = &source[start..];
-    let end = rest
-        .find("] as const")
-        .context("failed to find end of manifestOperationNames export")?;
-    let block = &rest[..end];
-    let mut names = Vec::new();
-    for line in block.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with('"') {
-            continue;
-        }
-        let Some(end_quote) = trimmed[1..].find('"') else {
-            bail!("malformed manifestOperationNames line `{trimmed}`");
-        };
-        names.push(trimmed[1..1 + end_quote].to_owned());
-    }
-    ensure_no_duplicate_operations("TypeScript contracts manifestOperationNames", &names)?;
-    Ok(names)
-}
-
-fn wire_shape_fingerprint_from_ts_contracts(source: &str) -> Result<String> {
-    let marker = "export const bridgeWireShapeFingerprint";
-    let start = source
-        .find(marker)
-        .context("failed to find bridgeWireShapeFingerprint export in TypeScript contracts")?
-        + marker.len();
-    let rest = &source[start..];
-    let quote = rest
-        .find('"')
-        .context("failed to find bridgeWireShapeFingerprint string literal")?;
-    let value = &rest[quote + 1..];
-    let end = value
-        .find('"')
-        .context("failed to find end of bridgeWireShapeFingerprint export")?;
-    Ok(value[..end].to_owned())
 }
 
 fn operation_names_from_native_json_methods(source: &str) -> Result<Vec<String>> {
