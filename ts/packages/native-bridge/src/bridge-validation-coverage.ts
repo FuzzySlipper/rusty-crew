@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 173;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 187;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 34;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 139;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 153;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -255,6 +255,27 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "normalize_roleplay_narrator_config",
       "start_roleplay_narrator_turn",
       "advance_roleplay_narrator_turn",
+    ],
+  },
+  {
+    group: "roleplay_records",
+    reason:
+      "Typed roleplay records and atomic persistence receipts are covered by Rust backend conformance, route smokes, and live certification; add TypeBox fixtures before changing their browser-facing wire shapes.",
+    operations: [
+      "put_roleplay_character",
+      "get_roleplay_character",
+      "list_roleplay_characters",
+      "put_roleplay_player_persona",
+      "get_roleplay_player_persona",
+      "list_roleplay_player_personas",
+      "put_roleplay_session_metadata",
+      "get_roleplay_session_metadata",
+      "list_roleplay_session_metadata",
+      "apply_roleplay_session_projection",
+      "put_roleplay_import",
+      "get_roleplay_import",
+      "list_roleplay_imports",
+      "apply_roleplay_alternative",
     ],
   },
   {
