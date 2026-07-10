@@ -9114,9 +9114,9 @@ mod tests {
     };
     use crate::repos::runtime_counters::{COUNTER_MESSAGES, COUNTER_WAKES};
     use crate::{
-        CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
-        RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
-        RoleplayLoreVisibility,
+        ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, CoordinationStore,
+        ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite, RoleplayChatLayerLink,
+        RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose, RoleplayLoreVisibility,
     };
     use postgres::NoTls;
     use rusty_crew_core_protocol::{
@@ -9311,6 +9311,10 @@ mod tests {
             &self,
             request: &SelectActiveVariantRequest,
         ) -> CoreResult<SelectActiveVariantResult>;
+        fn apply_roleplay_alternative(
+            &self,
+            request: &ApplyRoleplayAlternativeRequest,
+        ) -> CoreResult<ApplyRoleplayAlternativeResult>;
         fn save_conversation_branch(
             &self,
             branch: &ConversationBranchWrite,
@@ -9744,6 +9748,12 @@ mod tests {
             request: &SelectActiveVariantRequest,
         ) -> CoreResult<SelectActiveVariantResult> {
             CoordinationStore::select_active_message_variant(self, request)
+        }
+        fn apply_roleplay_alternative(
+            &self,
+            request: &ApplyRoleplayAlternativeRequest,
+        ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+            CoordinationStore::apply_roleplay_alternative(self, request)
         }
 
         fn save_conversation_branch(
@@ -10239,6 +10249,12 @@ mod tests {
             request: &SelectActiveVariantRequest,
         ) -> CoreResult<SelectActiveVariantResult> {
             PostgresBackendStore::select_active_message_variant(self, request)
+        }
+        fn apply_roleplay_alternative(
+            &self,
+            request: &ApplyRoleplayAlternativeRequest,
+        ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+            PostgresBackendStore::apply_roleplay_alternative(self, request)
         }
 
         fn save_conversation_branch(
@@ -12964,7 +12980,6 @@ mod tests {
             variant_conflict.conflict.unwrap().actual,
             Some(MessageVariantId::new("variant-conversation-a"))
         );
-
         let branches = store
             .query_conversation_branches(&ConversationBranchQuery {
                 session_id: Some(SessionId::new("session-conversation")),
@@ -13055,6 +13070,23 @@ mod tests {
         assert_eq!(
             head_updated.branch.head_message_id,
             Some(MessageId::new("message-conversation-a"))
+        );
+        let applied = store
+            .apply_roleplay_alternative(&ApplyRoleplayAlternativeRequest {
+                session_id: SessionId::new("session-conversation"),
+                slot_id: MessageSlotId::new("slot-conversation"),
+                create_variant: None,
+                active_variant_id: Some(MessageVariantId::new("variant-conversation-b")),
+                expected: ActiveVariantExpectation::Variant(MessageVariantId::new(
+                    "variant-conversation-a",
+                )),
+                updated_at: "2026-06-26T02:04:02Z".to_string(),
+            })
+            .unwrap();
+        assert!(applied.conflict.is_none());
+        assert_eq!(
+            applied.branch.unwrap().head_message_id,
+            Some(MessageId::new("message-conversation-b"))
         );
 
         let snapshot = store

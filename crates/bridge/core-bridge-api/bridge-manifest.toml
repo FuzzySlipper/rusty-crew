@@ -605,6 +605,15 @@ errors = "core_protocol::CoreError"
 summary = "Create a durable alternate chat message variant with Rust-owned ordinal allocation."
 
 [[operation]]
+name = "apply_roleplay_alternative"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ApplyRoleplayAlternativeRequest"
+output = "core_persistence::ApplyRoleplayAlternativeResult"
+errors = "core_protocol::CoreError"
+summary = "Atomically create or select a roleplay alternative and advance its branch head."
+
+[[operation]]
 name = "chat_read_model_page"
 surface = "stable"
 direction = "ts_to_rust"

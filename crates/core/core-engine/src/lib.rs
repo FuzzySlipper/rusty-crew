@@ -42,14 +42,14 @@ use rusty_crew_core_body::{
 use rusty_crew_core_bus::CoreBus;
 use rusty_crew_core_config::{validate_engine_config, ClockConfig, EngineConfig};
 use rusty_crew_core_persistence::{
-    AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
-    BranchHeadExpectation, ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage,
-    ChatEventLogQuery, ChatReadModelEvent, ChatReadModelEventKind, ChatReadModelPage,
-    ChatReadModelQuery, ConversationBranchQuery, ConversationBranchRecord,
-    ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
-    ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotWrite, CoreCoordinationStore, CreateChatAttachmentRequest,
-    CreateChatAttachmentResult, CreateChatConversationBranchRequest,
+    ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, AttachmentQuery,
+    AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery, BranchHeadExpectation,
+    ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage, ChatEventLogQuery, ChatReadModelEvent,
+    ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery, ConversationBranchQuery,
+    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
+    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
+    ConversationSnapshotRecord, ConversationSnapshotWrite, CoreCoordinationStore,
+    CreateChatAttachmentRequest, CreateChatAttachmentResult, CreateChatConversationBranchRequest,
     CreateChatConversationSnapshotRequest, CreateChatConversationSnapshotResult,
     CreateChatDataBankScopeRequest, CreateChatDataBankScopeResult, CreateChatMessageSlotRequest,
     CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
@@ -1156,6 +1156,12 @@ impl CoreEngine {
         request: &CreateChatMessageVariantRequest,
     ) -> CoreResult<CreateChatMessageVariantResult> {
         ChatConversationStore::create_chat_message_variant(&self.store, request)
+    }
+    pub fn apply_roleplay_alternative(
+        &self,
+        request: &ApplyRoleplayAlternativeRequest,
+    ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+        ChatConversationStore::apply_roleplay_alternative(&self.store, request)
     }
 
     pub fn delete_chat_message_variant(
@@ -2873,14 +2879,15 @@ mod tests {
     #[cfg(feature = "postgres")]
     use rusty_crew_core_config::EngineStorageConfig;
     use rusty_crew_core_persistence::{
-        ActiveVariantConflict, AgentMessageQuery, AttachmentLinkWrite, AttachmentStatus,
-        BranchHeadConflict, ChatAttachmentMutationStatus, ChatConversationSnapshotMutationStatus,
-        ChatDataBankScopeMutationStatus, CompletionPacketQuery, ConversationJumpTarget,
-        ConversationSnapshotSource, CoordinationStore, DataBankScopeStatus, DurableMessageStatus,
-        DurableMessageWrite, MessageVariantSource, MessageVariantStatus, QueryPage,
-        QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
-        RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
-        ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
+        ActiveVariantConflict, ActiveVariantExpectation, AgentMessageQuery, AttachmentLinkWrite,
+        AttachmentStatus, BranchHeadConflict, ChatAttachmentMutationStatus,
+        ChatConversationSnapshotMutationStatus, ChatDataBankScopeMutationStatus,
+        CompletionPacketQuery, ConversationJumpTarget, ConversationSnapshotSource,
+        CoordinationStore, DataBankScopeStatus, DurableMessageStatus, DurableMessageWrite,
+        MessageVariantSource, MessageVariantStatus, QueryPage, QueuedMessageFilter,
+        QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope, RuntimeMaintenancePolicy,
+        RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery, ScheduledRunStatus,
+        SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
     use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_protocol::{
@@ -6578,6 +6585,78 @@ mod tests {
 
         assert_eq!(first_result.variant.ordinal, 1);
         assert_eq!(second_result.variant.ordinal, 2);
+    }
+
+    #[test]
+    fn roleplay_alternative_creation_selection_and_branch_head_are_atomic() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "roleplay-alt-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_branch(
+            &engine,
+            "roleplay-alt-session",
+            "roleplay-alt-branch",
+            None,
+            None,
+        );
+        let mut message = test_message_write(
+            "roleplay-alt-session",
+            2,
+            "assistant",
+            "assistant",
+            "alternate",
+        );
+        message.branch_id = Some(ConversationBranchId::new("roleplay-alt-branch"));
+        let request = ApplyRoleplayAlternativeRequest {
+            session_id: SessionId::new("roleplay-alt-session"),
+            slot_id: MessageSlotId::new("roleplay-alt-session-slot-1"),
+            create_variant: Some(MessageVariantWrite {
+                variant_id: MessageVariantId::new("roleplay-alt-variant"),
+                slot_id: MessageSlotId::new("roleplay-alt-session-slot-1"),
+                source: MessageVariantSource::Alternate,
+                ordinal: 0,
+                status: MessageVariantStatus::Active,
+                message,
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:02:00Z".into(),
+                updated_at: "2026-06-19T00:02:00Z".into(),
+            }),
+            active_variant_id: Some(MessageVariantId::new("roleplay-alt-variant")),
+            expected: ActiveVariantExpectation::Any,
+            updated_at: "2026-06-19T00:02:00Z".into(),
+        };
+        let result = engine.apply_roleplay_alternative(&request).unwrap();
+        assert_eq!(result.created_variant.as_ref().unwrap().ordinal, 1);
+        assert_eq!(result.slot.active_variant_id, request.active_variant_id);
+        assert_eq!(
+            result.branch.unwrap().head_message_id,
+            Some(MessageId::new("roleplay-alt-session-message-2"))
+        );
+        let mut losing = request.clone();
+        losing.create_variant.as_mut().unwrap().variant_id =
+            MessageVariantId::new("roleplay-alt-loser");
+        losing.create_variant.as_mut().unwrap().message.message_id =
+            MessageId::new("roleplay-alt-session-message-3");
+        losing.active_variant_id = Some(MessageVariantId::new("roleplay-alt-loser"));
+        losing.expected = ActiveVariantExpectation::Primary;
+        let conflict = engine.apply_roleplay_alternative(&losing).unwrap();
+        assert!(conflict.conflict.is_some());
+        assert!(conflict.created_variant.is_none());
+        assert!(engine
+            .query_message_variants(&MessageVariantQuery {
+                slot_id: Some(request.slot_id),
+                include_deleted: false,
+                page: None
+            })
+            .unwrap()
+            .iter()
+            .all(|variant| variant.variant_id != MessageVariantId::new("roleplay-alt-loser")));
     }
 
     #[test]

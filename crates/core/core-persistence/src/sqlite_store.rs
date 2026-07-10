@@ -935,6 +935,16 @@ impl CoreCoordinationStore {
             Self::Postgres(postgres) => postgres.create_chat_message_variant(request),
         }
     }
+    pub fn apply_roleplay_alternative(
+        &self,
+        request: &ApplyRoleplayAlternativeRequest,
+    ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+        match self {
+            Self::Sqlite(store) => store.apply_roleplay_alternative(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.apply_roleplay_alternative(request),
+        }
+    }
 
     pub fn delete_chat_message_variant(
         &self,

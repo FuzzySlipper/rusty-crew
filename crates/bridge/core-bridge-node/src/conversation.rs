@@ -25,6 +25,12 @@ impl NativeBridge {
     ) -> CoreResult<CreateChatMessageVariantResult> {
         self.engine()?.create_chat_message_variant(request)
     }
+    pub fn apply_roleplay_alternative(
+        &self,
+        request: &ApplyRoleplayAlternativeRequest,
+    ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+        self.engine()?.apply_roleplay_alternative(request)
+    }
 
     pub fn query_message_slots(
         &self,

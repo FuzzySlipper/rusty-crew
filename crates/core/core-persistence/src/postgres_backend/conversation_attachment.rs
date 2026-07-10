@@ -1,6 +1,7 @@
 //! PostgreSQL conversation, message-variant, attachment, and data-bank repositories.
 
 use super::*;
+use crate::{ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult};
 
 impl PostgresBackendStore {
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
@@ -410,6 +411,88 @@ impl PostgresBackendStore {
             postgres_error("commit create PostgreSQL chat message variant", error)
         })?;
         Ok(CreateChatMessageVariantResult { variant: record })
+    }
+
+    pub fn apply_roleplay_alternative(
+        &self,
+        request: &ApplyRoleplayAlternativeRequest,
+    ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start apply PostgreSQL roleplay alternative", error)
+        })?;
+        ensure_slot_belongs_to_session_in_tx(
+            &mut tx,
+            &schema,
+            &request.session_id,
+            &request.slot_id,
+        )?;
+        let current = current_active_variant_in_tx(&mut tx, &schema, &request.slot_id)?;
+        let expected = match &request.expected {
+            ActiveVariantExpectation::Any => current.clone(),
+            ActiveVariantExpectation::Primary => None,
+            ActiveVariantExpectation::Variant(id) => Some(id.clone()),
+        };
+        if request.expected != ActiveVariantExpectation::Any && current != expected {
+            let slot = load_message_slot_in_tx(&mut tx, &schema, &request.slot_id, true)?;
+            return Ok(ApplyRoleplayAlternativeResult {
+                created_variant: None,
+                slot,
+                branch: None,
+                conflict: Some(ActiveVariantConflict {
+                    expected,
+                    actual: current,
+                }),
+            });
+        }
+        let created_variant = if let Some(write) = &request.create_variant {
+            validate_create_chat_message_variant_request(&CreateChatMessageVariantRequest {
+                session_id: request.session_id.clone(),
+                slot_id: request.slot_id.clone(),
+                variant: write.clone(),
+            })?;
+            let mut write = write.clone();
+            write.ordinal =
+                next_alternate_variant_ordinal_in_tx(&mut tx, &schema, &request.slot_id)?;
+            save_message_variant_in_tx(&mut tx, &schema, &write)?;
+            Some(load_message_variant_in_tx(
+                &mut tx,
+                &schema,
+                &write.variant_id,
+            )?)
+        } else {
+            None
+        };
+        if let Some(id) = &request.active_variant_id {
+            ensure_variant_belongs_to_slot_in_tx(&mut tx, &schema, &request.slot_id, id)?;
+        }
+        tx.execute(&format!("UPDATE {schema}.message_slots SET active_variant_id = $2, updated_at = $3, version = version + 1 WHERE slot_id = $1"), &[&request.slot_id.0, &request.active_variant_id.as_ref().map(|id| id.0.as_str()), &request.updated_at]).map_err(|error| postgres_error("select PostgreSQL roleplay alternative", error))?;
+        let slot = load_message_slot_in_tx(&mut tx, &schema, &request.slot_id, true)?;
+        let active = request
+            .active_variant_id
+            .as_ref()
+            .and_then(|id| {
+                slot.alternates
+                    .iter()
+                    .find(|variant| &variant.variant_id == id)
+            })
+            .unwrap_or(&slot.primary);
+        let branch = if let Some(branch_id) = &active.message.branch_id {
+            tx.execute(&format!("UPDATE {schema}.conversation_branches SET head_message_id = $2, updated_at = $3, version = version + 1 WHERE branch_id = $1"), &[&branch_id.0, &active.message.message_id.0, &request.updated_at]).map_err(|error| postgres_error("advance PostgreSQL roleplay alternative branch head", error))?;
+            Some(load_conversation_branch_in_tx(&mut tx, &schema, branch_id)?)
+        } else {
+            None
+        };
+        tx.commit().map_err(|error| {
+            postgres_error("commit apply PostgreSQL roleplay alternative", error)
+        })?;
+        Ok(ApplyRoleplayAlternativeResult {
+            created_variant,
+            slot,
+            branch,
+            conflict: None,
+        })
     }
 
     pub fn delete_chat_message_variant(

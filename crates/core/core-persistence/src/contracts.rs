@@ -455,6 +455,25 @@ pub struct CreateChatMessageVariantResult {
     pub variant: MessageVariantRecord,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApplyRoleplayAlternativeRequest {
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    #[serde(default)]
+    pub create_variant: Option<MessageVariantWrite>,
+    pub active_variant_id: Option<MessageVariantId>,
+    pub expected: ActiveVariantExpectation,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApplyRoleplayAlternativeResult {
+    pub created_variant: Option<MessageVariantRecord>,
+    pub slot: MessageSlotRecord,
+    pub branch: Option<ConversationBranchRecord>,
+    pub conflict: Option<ActiveVariantConflict>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeleteChatMessageVariantRequest {
     pub session_id: SessionId,

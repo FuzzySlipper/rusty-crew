@@ -46,6 +46,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn apply_roleplay_alternative_json(&self, input_json: String) -> napi::Result<String> {
+        let request = parse_json::<ApplyRoleplayAlternativeRequest>(
+            &input_json,
+            "apply roleplay alternative request",
+        )?;
+        let result = self
+            .bridge()?
+            .apply_roleplay_alternative(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "apply roleplay alternative result")
+    }
+
+    #[napi]
     pub fn query_message_slots_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MessageSlotQuery>(&input_json, "message slot query")?;

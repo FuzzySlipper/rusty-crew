@@ -18,6 +18,10 @@ pub(crate) trait ChatConversationStore {
         &self,
         request: &CreateChatMessageVariantRequest,
     ) -> CoreResult<CreateChatMessageVariantResult>;
+    fn apply_roleplay_alternative(
+        &self,
+        request: &ApplyRoleplayAlternativeRequest,
+    ) -> CoreResult<ApplyRoleplayAlternativeResult>;
     fn delete_chat_message_variant(
         &self,
         request: &DeleteChatMessageVariantRequest,
@@ -162,6 +166,12 @@ impl ChatConversationStore for CoreCoordinationStore {
         request: &CreateChatMessageVariantRequest,
     ) -> CoreResult<CreateChatMessageVariantResult> {
         self.conversation().create_chat_message_variant(request)
+    }
+    fn apply_roleplay_alternative(
+        &self,
+        request: &ApplyRoleplayAlternativeRequest,
+    ) -> CoreResult<ApplyRoleplayAlternativeResult> {
+        self.apply_roleplay_alternative(request)
     }
 
     fn delete_chat_message_variant(

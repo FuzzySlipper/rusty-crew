@@ -382,7 +382,11 @@ async function handleRoleplayCharacterRequest(
         body: recordBody(await readJsonBody(request)),
         now: state.now(),
       })) as RoleplayCharacterRecord;
-      const stored = await putRoleplayCharacter(state, character, current.revision);
+      const stored = await putRoleplayCharacter(
+        state,
+        character,
+        current.revision,
+      );
       return successRoute(requestIdValue, { character: stored });
     }
     if (method === "DELETE") {
@@ -396,7 +400,11 @@ async function handleRoleplayCharacterRequest(
         body: { status: "archived" },
         now: state.now(),
       })) as RoleplayCharacterRecord;
-      const stored = await putRoleplayCharacter(state, character, current.revision);
+      const stored = await putRoleplayCharacter(
+        state,
+        character,
+        current.revision,
+      );
       return successRoute(requestIdValue, { character: stored });
     }
     return roleplayLoreMethodNotAllowed(
@@ -479,7 +487,11 @@ async function handleRoleplayPlayerPersonaRequest(
         body: recordBody(await readJsonBody(request)),
         now: state.now(),
       })) as RoleplayPlayerPersonaRecord;
-      const stored = await putRoleplayPlayerPersona(state, persona, current.revision);
+      const stored = await putRoleplayPlayerPersona(
+        state,
+        persona,
+        current.revision,
+      );
       return successRoute(requestIdValue, { persona: stored });
     }
     if (method === "DELETE") {
@@ -493,7 +505,11 @@ async function handleRoleplayPlayerPersonaRequest(
         body: { status: "archived" },
         now: state.now(),
       })) as RoleplayPlayerPersonaRecord;
-      const stored = await putRoleplayPlayerPersona(state, persona, current.revision);
+      const stored = await putRoleplayPlayerPersona(
+        state,
+        persona,
+        current.revision,
+      );
       return successRoute(requestIdValue, { persona: stored });
     }
     return roleplayLoreMethodNotAllowed(
@@ -1164,7 +1180,7 @@ async function roleplaySessionSummary(
 ): Promise<Record<string, unknown>> {
   const metadata = await roleplaySessionMetadata(state, session);
   const playerPersona =
-    metadata.playerPersonaId === undefined
+    metadata.playerPersonaId == null
       ? undefined
       : await getRoleplayPlayerPersona(
           state,
@@ -1172,7 +1188,7 @@ async function roleplaySessionSummary(
           metadata.playerPersonaId,
         );
   const character =
-    metadata.characterId === undefined
+    metadata.characterId == null
       ? undefined
       : await getRoleplayCharacter(
           state,
@@ -1201,12 +1217,16 @@ async function roleplaySessionSummary(
     agent_id: session.agentId,
     status: session.status,
     display_name: metadata.displayName,
-    player_persona_id: metadata.playerPersonaId,
+    ...(metadata.playerPersonaId == null
+      ? {}
+      : { player_persona_id: metadata.playerPersonaId }),
     player_persona_display_name: playerPersona?.displayName ?? "Player",
     player_persona_avatar_url: playerPersona?.avatarUrl,
     player_persona_avatar_asset_ref: playerPersona?.avatarAssetRef,
     player_persona_source: playerPersona === undefined ? "fallback" : "persona",
-    character_id: metadata.characterId,
+    ...(metadata.characterId == null
+      ? {}
+      : { character_id: metadata.characterId }),
     character_name: character?.name,
     active_layer_ids: activeLayerIds,
     active_layer_count: activeLayerIds.length,
@@ -1241,7 +1261,7 @@ async function roleplayPromptContextOutputForSession(
   );
   if (metadata === undefined) return undefined;
   const playerPersona =
-    metadata.playerPersonaId === undefined
+    metadata.playerPersonaId == null
       ? undefined
       : await getRoleplayPlayerPersona(
           state,
@@ -1249,7 +1269,7 @@ async function roleplayPromptContextOutputForSession(
           metadata.playerPersonaId,
         ).catch(() => undefined);
   const character =
-    metadata.characterId === undefined
+    metadata.characterId == null
       ? undefined
       : await getRoleplayCharacter(
           state,
@@ -2143,41 +2163,38 @@ async function generateRoleplayAssistantAlternative(
       ? {}
       : { speaker_identity: speakerIdentity }),
   };
-  const variant = (await state.bridge.saveMessageVariant(
-    roleplayMessageVariantWrite({
-      sessionId,
-      slotId: write.slot_id,
-      variantId: write.variant_id,
-      messageId: write.message_id,
-      source: "alternate",
-      ordinal: write.ordinal,
-      actor: { id: "roleplay-assistant", kind: "agent" },
-      body: bodyText,
-      branchId: write.branch_id ?? undefined,
-      parentMessageId: write.parent_message_id ?? undefined,
-      previousMessageId: write.previous_message_id ?? undefined,
-      metadataJson,
-      now,
-    }),
-  )) as MessageVariantRecord;
-  const selected = (await state.bridge.selectActiveMessageVariant({
+  const variantWrite = roleplayMessageVariantWrite({
+    sessionId,
+    slotId: write.slot_id,
+    variantId: write.variant_id,
+    messageId: write.message_id,
+    source: "alternate",
+    ordinal: write.ordinal,
+    actor: { id: "roleplay-assistant", kind: "agent" },
+    body: bodyText,
+    branchId: write.branch_id ?? undefined,
+    parentMessageId: write.parent_message_id ?? undefined,
+    previousMessageId: write.previous_message_id ?? undefined,
+    metadataJson,
+    now,
+  });
+  const selected = (await state.bridge.applyRoleplayAlternative({
+    session_id: sessionId,
     slot_id: write.slot_id,
-    active_variant_id: variant.variant_id,
+    create_variant: variantWrite,
+    active_variant_id: write.variant_id,
     expected: { type: "any" },
     updated_at: state.now(),
   })) as {
+    created_variant?: MessageVariantRecord;
     slot: MessageSlotRecord;
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
-  const selectedVariant = activeVariantForSlot(selected.slot);
-  if (selectedVariant.message.branch_id) {
-    await state.bridge.updateConversationBranchHead({
-      branch_id: selectedVariant.message.branch_id,
-      head_message_id: selectedVariant.message.message_id,
-      expected: { type: "any" },
-      updated_at: state.now(),
-    });
-  }
+  const variant = selected.created_variant;
+  if (variant === undefined)
+    throw new Error(
+      "roleplay alternative transaction did not create a variant",
+    );
   return {
     status: selected.conflict ? "conflict" : "generated",
     session_id: sessionId,
@@ -2199,7 +2216,8 @@ async function selectRoleplayAssistantAlternative(
     optionalString(body.active_variant_id) ??
     optionalString(body.variantId) ??
     optionalString(body.variant_id);
-  const result = (await state.bridge.selectActiveMessageVariant({
+  const result = (await state.bridge.applyRoleplayAlternative({
+    session_id: sessionId,
     slot_id: plan.terminal_slot.slot_id,
     active_variant_id: activeVariantId ?? null,
     expected: { type: "any" },
@@ -2209,17 +2227,6 @@ async function selectRoleplayAssistantAlternative(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "selected";
-  if (status === "selected") {
-    const selected = activeVariantForSlot(result.slot);
-    if (selected?.message.branch_id) {
-      await state.bridge.updateConversationBranchHead({
-        branch_id: selected.message.branch_id,
-        head_message_id: selected.message.message_id,
-        expected: { type: "any" },
-        updated_at: state.now(),
-      });
-    }
-  }
   return {
     status,
     session_id: sessionId,
