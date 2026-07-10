@@ -65,7 +65,6 @@ export interface ResolvedBrainCatalogSelection {
   strategy: BrainStrategyMetadata;
   moduleStrategy: BrainModuleStrategyMetadata;
   requiredHostCapabilities: readonly NativeBrainHostCapability[];
-  canonicalizedFrom?: string;
 }
 
 export interface BrainHostCapabilityRegistration {
@@ -169,9 +168,6 @@ export function selectionFromNativePlan(
     },
     moduleStrategy,
     requiredHostCapabilities: plan.required_host_capabilities,
-    ...(plan.canonicalized_from === undefined
-      ? {}
-      : { canonicalizedFrom: plan.canonicalized_from }),
   };
 }
 

@@ -269,7 +269,7 @@ async function runQualitySpike(): Promise<void> {
     providerAlias: process.env.RUSTY_CREW_QUALITY_PROVIDER_ALIAS ?? undefined,
     kind: "full",
     brain: {
-      module: "pi-agent-core",
+      module: "pi-agent",
       strategy: "roleplay_narrator",
     },
     localToolProfileId: "roleplay_lore",

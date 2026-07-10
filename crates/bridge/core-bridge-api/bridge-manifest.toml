@@ -131,89 +131,43 @@ output = "()"
 errors = "core_protocol::CoreError"
 summary = "Apply provider-owned wire-state replacement or clear output for a brain wake."
 
-# Native brain modules that run inside the Rust bridge crate but are invoked by
-# the TS service host.
+# Built-in Rust brain modules share one catalog-dispatched lifecycle surface.
 
 [[operation]]
-name = "run_openai_responses_brain"
+name = "start_brain_run"
 surface = "stable"
 direction = "ts_to_rust"
-input = "openai_responses_brain::OpenAiResponsesBrainRunInput"
-output = "openai_responses_brain::OpenAiResponsesBrainRunOutput"
+input = "(module_id: String, provider_input_json: String)"
+output = "brain_runtime::BufferedBrainRunStartReceipt"
 errors = "core_protocol::CoreError"
-summary = "Run one blocking OpenAI Responses brain wake through the Rust-native brain module."
+summary = "Start one buffered built-in brain wake after Rust dispatches the canonical catalog module id."
 
 [[operation]]
-name = "start_openai_responses_brain"
+name = "drain_brain_run"
 surface = "stable"
 direction = "ts_to_rust"
-input = "openai_responses_brain::OpenAiResponsesBrainRunInput"
-output = "{ wake_id: String }"
+input = "(module_id: String, wake_id: String, max_items: Option<u32>)"
+output = "brain_runtime::BufferedBrainRunDrain"
 errors = "core_protocol::CoreError"
-summary = "Start one buffered OpenAI Responses brain wake and return the stream registry id."
+summary = "Drain buffered stream items and host requests from a Rust-dispatched built-in brain wake."
 
 [[operation]]
-name = "drain_openai_responses_brain_stream"
+name = "submit_brain_host_result"
 surface = "stable"
 direction = "ts_to_rust"
-input = "(wake_id: String, max_items: Option<u32>)"
-output = "Vec<core_protocol::BrainWakeStreamItem>"
+input = "(module_id: String, host_result_json: String)"
+output = "brain_runtime::BufferedBrainHostResultReceipt"
 errors = "core_protocol::CoreError"
-summary = "Drain buffered OpenAI Responses stream items for a running native brain wake."
+summary = "Submit one typed host tool result to the Rust-dispatched buffered brain coordinator."
 
 [[operation]]
-name = "submit_openai_responses_tool_output"
+name = "cancel_brain_run"
 surface = "stable"
 direction = "ts_to_rust"
-input = "{ wake_id, call_id, output }"
-output = "{ accepted: bool }"
+input = "(module_id: String, cancellation_json: String)"
+output = "brain_runtime::BufferedBrainRunCancellationReceipt"
 errors = "core_protocol::CoreError"
-summary = "Submit one tool result into a buffered OpenAI Responses brain wake."
-
-[[operation]]
-name = "cancel_openai_responses_brain"
-surface = "stable"
-direction = "ts_to_rust"
-input = "{ wake_id, reason_code, summary }"
-output = "{ ok, wake_id, cancelled, terminal, cancellation? }"
-errors = "core_protocol::CoreError"
-summary = "Cancel a buffered OpenAI Responses brain wake cooperatively."
-
-[[operation]]
-name = "start_pi_agent_brain"
-surface = "stable"
-direction = "ts_to_rust"
-input = "pi_agent_brain::PiAgentBrainRunInput"
-output = "{ wake_id: String }"
-errors = "core_protocol::CoreError"
-summary = "Start one buffered Rust pi-agent chat-completions brain wake and return the stream registry id."
-
-[[operation]]
-name = "drain_pi_agent_brain_stream"
-surface = "stable"
-direction = "ts_to_rust"
-input = "(wake_id: String, max_items: Option<u32>)"
-output = "Vec<core_protocol::BrainWakeStreamItem>"
-errors = "core_protocol::CoreError"
-summary = "Drain buffered Rust pi-agent stream items for a running native brain wake."
-
-[[operation]]
-name = "submit_pi_agent_tool_output"
-surface = "stable"
-direction = "ts_to_rust"
-input = "{ wake_id, call_id, output }"
-output = "{ accepted: bool }"
-errors = "core_protocol::CoreError"
-summary = "Submit one tool result into a buffered Rust pi-agent brain wake."
-
-[[operation]]
-name = "cancel_pi_agent_brain"
-surface = "stable"
-direction = "ts_to_rust"
-input = "{ wake_id, reason_code, summary }"
-output = "{ ok, wake_id, cancelled, terminal, cancellation? }"
-errors = "core_protocol::CoreError"
-summary = "Cancel a buffered Rust pi-agent brain wake cooperatively."
+summary = "Cancel one Rust-dispatched buffered brain wake cooperatively."
 
 [[operation]]
 name = "buffered_brain_run_diagnostics"

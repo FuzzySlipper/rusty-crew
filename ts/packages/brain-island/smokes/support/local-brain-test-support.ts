@@ -6,14 +6,14 @@ import type {
 } from "@rusty-crew/contracts";
 import type {
   BrainActionPlanner,
-  BrainImplementation,
+  BrainHostExecutor,
   BrainWakeInput,
   BrainWakeResult,
-} from "../../src/local-brain.js";
+} from "../../src/brain-host-runtime.js";
 
 export function createLocalBrain(
   planner: BrainActionPlanner = defaultActionPlanner,
-): BrainImplementation {
+): BrainHostExecutor {
   return {
     async wake(input): Promise<BrainWakeResult> {
       const events = [

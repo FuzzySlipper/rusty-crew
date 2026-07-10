@@ -21,7 +21,7 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   defaultBodyDeltaPolicy,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
   resolveLocalCodeTools,
   selectToolProfile,
 } from "../src/index.js";
@@ -144,7 +144,7 @@ try {
     kind: "full",
   });
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "production-local-tools" as BrainImplementationId,

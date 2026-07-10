@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { BrainStrategyMetadata, ProfileId } from "@rusty-crew/contracts";
-import type { BrainModuleStrategyMetadata } from "../src/brain-module.js";
+import type { BrainModuleStrategyMetadata } from "../src/brain-catalog.js";
 import type { LoadedProfileContext } from "../src/profile-loading.js";
 import { providerStateScopeForProfile } from "../src/provider-state-fingerprints.js";
 

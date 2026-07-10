@@ -13,15 +13,12 @@ import {
 } from "@rusty-crew/native-bridge";
 import { Type } from "typebox";
 import type { BrainTool } from "../src/brain-tool.js";
-import { openAiResponsesBrainModule } from "../src/brain-module.js";
+import { fakeOpenAiResponsesBrainHost as openAiResponsesBrainModule } from "./support/built-in-brain-host-test-support.js";
 import type { BrainWakeInput } from "../src/index.js";
 import type { LoadedProfileContext } from "../src/profile-loading.js";
 import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
 
-const previousLiveMode = process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE;
-process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE = "0";
-
-try {
+{
   const native = await loadNativeBridge();
   const observedEvents: BrainEventEnvelope[] = [];
   const toolProfile = {
@@ -49,20 +46,17 @@ try {
     }),
   };
   const bridge = {
-    runOpenAiResponsesBrain: async () => {
-      throw new Error("blocking Responses runner should not be used");
-    },
-    startOpenAiResponsesBrain: async (
-      input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
     ) => {
-      capturedInstructions = input.config.instructions;
-      capturedWakeTimeoutMs = input.config.wakeTimeoutMs;
-      return native.startOpenAiResponsesBrain(input);
+      assert.equal(input.moduleId, "openai-responses");
+      capturedInstructions = input.providerInput.config.instructions;
+      capturedWakeTimeoutMs = input.providerInput.config.wakeTimeoutMs;
+      return native.startBrainRun(input);
     },
-    drainOpenAiResponsesBrainStream:
-      native.drainOpenAiResponsesBrainStream.bind(native),
-    submitOpenAiResponsesToolOutput:
-      native.submitOpenAiResponsesToolOutput.bind(native),
+    drainBrainRun: native.drainBrainRun.bind(native),
+    submitBrainHostResult: native.submitBrainHostResult.bind(native),
+    cancelBrainRun: native.cancelBrainRun.bind(native),
     submitBrainEvent: async (event: BrainEventEnvelope) => {
       observedEvents.push(event);
       return { accepted: true, sequence: observedEvents.length };
@@ -201,12 +195,6 @@ try {
       2,
     ),
   );
-} finally {
-  if (previousLiveMode === undefined) {
-    delete process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE;
-  } else {
-    process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE = previousLiveMode;
-  }
 }
 
 async function runRepeatedFailurePolicyScenario(): Promise<{
@@ -216,28 +204,31 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
 }> {
   const observedEvents: BrainEventEnvelope[] = [];
   const submittedOutputs: Array<
-    Parameters<NativeBridgeModule["submitOpenAiResponsesToolOutput"]>[0]
+    Parameters<NativeBridgeModule["submitBrainHostResult"]>[0]
   > = [];
   const toolCallDebugStore = new MemoryToolCallDebugStore({
     now: () => "2026-07-04T00:00:00.000Z",
   });
   let drainCount = 0;
   const bridge = {
-    runOpenAiResponsesBrain: async () => {
-      throw new Error("blocking Responses runner should not be used");
-    },
-    startOpenAiResponsesBrain: async (
-      input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
-    ) => ({ wakeId: input.wakeId }),
-    drainOpenAiResponsesBrainStream: async (
-      input: Parameters<
-        NativeBridgeModule["drainOpenAiResponsesBrainStream"]
-      >[0],
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
     ) => {
+      assert.equal(input.moduleId, "openai-responses");
+      return {
+        moduleId: input.moduleId,
+        wakeId: input.providerInput.wakeId,
+      };
+    },
+    drainBrainRun: async (
+      input: Parameters<NativeBridgeModule["drainBrainRun"]>[0],
+    ) => {
+      assert.equal(input.moduleId, "openai-responses");
       drainCount += 1;
       if (drainCount <= 2) {
         const callId = `repeated-failure-call-${drainCount}`;
         return {
+          moduleId: input.moduleId,
           wakeId: input.wakeId,
           items: repeatedFailureToolEvents(input.wakeId, callId),
           toolRequests: [
@@ -252,6 +243,7 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
         };
       }
       return {
+        moduleId: input.moduleId,
         wakeId: input.wakeId,
         items: [],
         toolRequests: [],
@@ -260,13 +252,27 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
           "Stopping assistant turn after repeated memory failure (memory_client_unavailable).",
       };
     },
-    submitOpenAiResponsesToolOutput: async (
-      input: Parameters<
-        NativeBridgeModule["submitOpenAiResponsesToolOutput"]
-      >[0],
+    submitBrainHostResult: async (
+      input: Parameters<NativeBridgeModule["submitBrainHostResult"]>[0],
     ) => {
+      assert.equal(input.moduleId, "openai-responses");
       submittedOutputs.push(input);
-      return { ok: true, wakeId: input.wakeId, callId: input.callId };
+      return {
+        moduleId: input.moduleId,
+        wakeId: input.wakeId,
+        callId: input.callId,
+      };
+    },
+    cancelBrainRun: async (
+      input: Parameters<NativeBridgeModule["cancelBrainRun"]>[0],
+    ) => {
+      assert.equal(input.moduleId, "openai-responses");
+      return {
+        moduleId: input.moduleId,
+        wakeId: input.wakeId,
+        cancelled: true,
+        terminal: true,
+      };
     },
     submitBrainEvent: async (event: BrainEventEnvelope) => {
       observedEvents.push(event);
@@ -400,24 +406,27 @@ async function runSingleDeniedContinuationScenario(): Promise<{
 }> {
   const observedEvents: BrainEventEnvelope[] = [];
   const submittedOutputs: Array<
-    Parameters<NativeBridgeModule["submitOpenAiResponsesToolOutput"]>[0]
+    Parameters<NativeBridgeModule["submitBrainHostResult"]>[0]
   > = [];
   let drainCount = 0;
   const bridge = {
-    runOpenAiResponsesBrain: async () => {
-      throw new Error("blocking Responses runner should not be used");
-    },
-    startOpenAiResponsesBrain: async (
-      input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
-    ) => ({ wakeId: input.wakeId }),
-    drainOpenAiResponsesBrainStream: async (
-      input: Parameters<
-        NativeBridgeModule["drainOpenAiResponsesBrainStream"]
-      >[0],
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
     ) => {
+      assert.equal(input.moduleId, "openai-responses");
+      return {
+        moduleId: input.moduleId,
+        wakeId: input.providerInput.wakeId,
+      };
+    },
+    drainBrainRun: async (
+      input: Parameters<NativeBridgeModule["drainBrainRun"]>[0],
+    ) => {
+      assert.equal(input.moduleId, "openai-responses");
       drainCount += 1;
       if (drainCount === 1) {
         return {
+          moduleId: input.moduleId,
           wakeId: input.wakeId,
           items: toolEvents(
             input.wakeId,
@@ -437,6 +446,7 @@ async function runSingleDeniedContinuationScenario(): Promise<{
         };
       }
       return {
+        moduleId: input.moduleId,
         wakeId: input.wakeId,
         items: [
           {
@@ -455,13 +465,27 @@ async function runSingleDeniedContinuationScenario(): Promise<{
         terminal: true,
       };
     },
-    submitOpenAiResponsesToolOutput: async (
-      input: Parameters<
-        NativeBridgeModule["submitOpenAiResponsesToolOutput"]
-      >[0],
+    submitBrainHostResult: async (
+      input: Parameters<NativeBridgeModule["submitBrainHostResult"]>[0],
     ) => {
+      assert.equal(input.moduleId, "openai-responses");
       submittedOutputs.push(input);
-      return { ok: true, wakeId: input.wakeId, callId: input.callId };
+      return {
+        moduleId: input.moduleId,
+        wakeId: input.wakeId,
+        callId: input.callId,
+      };
+    },
+    cancelBrainRun: async (
+      input: Parameters<NativeBridgeModule["cancelBrainRun"]>[0],
+    ) => {
+      assert.equal(input.moduleId, "openai-responses");
+      return {
+        moduleId: input.moduleId,
+        wakeId: input.wakeId,
+        cancelled: true,
+        terminal: true,
+      };
     },
     submitBrainEvent: async (event: BrainEventEnvelope) => {
       observedEvents.push(event);

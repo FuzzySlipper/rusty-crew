@@ -1340,7 +1340,9 @@ const rawProviderStateOutputSchema = Type.Union([
 export const rawOpenAiResponsesBrainRunResultSchema = Type.Object(
   {
     stream: Type.Array(rawBrainWakeStreamItemSchema),
-    provider_state: Type.Optional(rawProviderStateOutputSchema),
+    provider_state: Type.Optional(
+      Type.Union([rawProviderStateOutputSchema, Type.Null()]),
+    ),
     transport_metrics: Type.Optional(openAiResponsesTransportMetricsSchema),
     credential_secret_update: Type.Optional(
       Type.Object(
@@ -1400,6 +1402,69 @@ export const rawPiAgentBufferedDrainResultSchema = Type.Object(
         ),
       ]),
     ),
+  },
+  { additionalProperties: true },
+);
+
+export const rawBufferedBrainRunDrainSchema = Type.Object(
+  {
+    module_id: Type.Union([
+      Type.Literal("pi-agent"),
+      Type.Literal("openai-responses"),
+    ]),
+    wake_id: Type.String(),
+    items: Type.Array(rawBrainWakeStreamItemSchema),
+    tool_requests: Type.Array(
+      Type.Object(
+        {
+          wake_id: Type.Optional(Type.String()),
+          call_id: Type.String(),
+          provider_item_id: Type.Optional(
+            Type.Union([Type.String(), Type.Null()]),
+          ),
+          name: Type.String(),
+          arguments_json: Type.String(),
+        },
+        { additionalProperties: true },
+      ),
+    ),
+    terminal: Type.Boolean(),
+    provider_state: Type.Optional(
+      Type.Union([rawProviderStateOutputSchema, Type.Null()]),
+    ),
+    transport_metrics: Type.Optional(
+      Type.Union([
+        openAiResponsesTransportMetricsSchema,
+        piAgentTransportMetricsSchema,
+        Type.Null(),
+      ]),
+    ),
+    credential_secret_update: Type.Optional(
+      Type.Union([
+        Type.Null(),
+        Type.Object(
+          {
+            provider_alias: Type.String(),
+            secret: Type.String(),
+          },
+          { additionalProperties: true },
+        ),
+      ]),
+    ),
+    cancellation: Type.Optional(
+      Type.Union([
+        Type.Null(),
+        Type.Object(
+          {
+            reason_code: Type.String(),
+            summary: Type.String(),
+            cancelled_at: Type.String(),
+          },
+          { additionalProperties: true },
+        ),
+      ]),
+    ),
+    error: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   },
   { additionalProperties: true },
 );

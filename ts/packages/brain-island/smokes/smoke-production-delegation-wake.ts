@@ -15,7 +15,7 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildDelegatedRoleAssemblyFromLifecyclePlan,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
 } from "../src/index.js";
 import { createLocalBrain } from "./support/local-brain-test-support.js";
 
@@ -45,7 +45,7 @@ try {
   });
 
   let parentConsumedChildCompletion = false;
-  const plannerBrain = await registerBrainImplementationRuntime(
+  const plannerBrain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "planner-brain" as BrainImplementationId,
@@ -101,7 +101,7 @@ try {
     }),
   );
 
-  const coderBrain = await registerBrainImplementationRuntime(
+  const coderBrain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "coder-brain" as BrainImplementationId,

@@ -1,7 +1,7 @@
 # Brain Island Package Surface
 
 `@rusty-crew/brain-island` exposes its package root from
-`ts/packages/brain-island/src/index.ts`. That root is a compatibility boundary
+`ts/packages/brain-island/src/index.ts`. That root is a public boundary
 for service-host and operator smokes, not a place for implementation bodies to
 accumulate.
 
@@ -13,10 +13,11 @@ Known local package-root consumers:
 
 Current root entrypoint shape:
 
-- `src/index.ts` re-exports `local-brain.ts` plus the explicit domain modules
+- `src/index.ts` re-exports `brain-host-runtime.ts` plus the explicit domain modules
   in `src/package-surface/`.
-- `src/local-brain.ts` owns the local/default brain implementation, bridge wake
-  executor adapter, and related core brain wake types.
+- `src/brain-host-runtime.ts` owns the neutral TypeScript host wake callback,
+  Rust registration adapter, and related wake types. It does not own brain
+  identity, selection, strategy, provider-loop policy, or deterministic brains.
 - `src/package-surface/service.ts` owns service app/config/root adapter factory
   exports.
 - `src/package-surface/observation.ts` owns activity observation and runtime
@@ -28,8 +29,8 @@ Current root entrypoint shape:
 - `src/package-surface/background.ts` owns scheduler/cron/background-control and
   delegated cleanup exports.
 - `src/package-surface/debug.ts` owns direct-debug and debug API client exports.
-- `src/package-surface/brain.ts` owns pi-agent, bridge wake, brain module,
-  tool-session, and mid-turn exports.
+- `src/package-surface/brain.ts` owns Rust brain-catalog projections, bridge
+  wake, host tool-session, and mid-turn exports.
 - `src/package-surface/tools.ts` owns local code, delegation, completion,
   coordination, web, skills, planning, patch, tool registry, and tool-profile
   exports.
@@ -56,8 +57,8 @@ facades.
 
 Root surface groups:
 
-- Core brain runtime: local brain helpers, pi-agent brain construction, bridge
-  wake helpers.
+- Core brain host: neutral host wake registration, Rust catalog projections,
+  and bridge wake helpers.
 - Service/config: service app creation, service config loading, defaults, lock
   helpers.
 - Tools: local code, delegation, completion, coordination, memory, web, skills,

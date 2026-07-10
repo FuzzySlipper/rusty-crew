@@ -13,7 +13,7 @@ import type {
   Unit,
 } from "@rusty-crew/contracts";
 import type {
-  BrainImplementation,
+  BrainHostExecutor,
   BrainRoleAssembly,
   BrainWakeOptions,
   BrainWakeResult,
@@ -26,7 +26,7 @@ export interface BridgeBufferClient {
 
 export async function wakeBrainFromBridgeRequest(
   buffers: BridgeBufferClient,
-  brain: BrainImplementation,
+  brain: BrainHostExecutor,
   request: BrainWakeRequest,
   options?: BrainWakeOptions,
 ): Promise<BrainWakeResult> {

@@ -271,6 +271,45 @@ function expectNoSourceImports(packageName, forbidden) {
 function expectBrainIslandCompositionRatchets() {
   const pkg = packagesByName.get("@rusty-crew/brain-island");
   if (!pkg) return;
+  const deletedBrainModulePath = join(pkg.dir, "src", "brain-module.ts");
+  if (existsSync(deletedBrainModulePath)) {
+    violations.push(
+      "@rusty-crew/brain-island must not restore production brain-module.ts; Rust owns the built-in brain catalog and run dispatch",
+    );
+  }
+  const deletedLocalBrainPath = join(pkg.dir, "src", "local-brain.ts");
+  if (existsSync(deletedLocalBrainPath)) {
+    violations.push(
+      "@rusty-crew/brain-island must not restore production local-brain.ts; neutral wake callbacks belong in brain-host-runtime.ts and deterministic brains belong in test support",
+    );
+  }
+  const forbiddenBrainHostAuthority = [
+    {
+      pattern: /\bBrainModule\b/,
+      description: "the legacy BrainModule abstraction",
+    },
+    {
+      pattern: /\bBrainImplementation\b/,
+      description: "the ambiguous TypeScript BrainImplementation abstraction",
+    },
+    {
+      pattern: /\bBrainModuleRegistry\b|\bdefaultBrainModules\b/,
+      description: "a TypeScript built-in brain registry",
+    },
+    {
+      pattern: /RUSTY_CREW_OPENAI_RESPONSES_LIVE|RUSTY_CREW_PI_AGENT_LIVE/,
+      description: "a production fake/live brain switch",
+    },
+    {
+      pattern: /\bmode\s*:\s*["']fake["']/,
+      description: "a production fake brain client",
+    },
+    {
+      pattern:
+        /\b(?:runOpenAiResponsesBrain|startOpenAiResponsesBrain|drainOpenAiResponsesBrainStream|submitOpenAiResponsesToolOutput|cancelOpenAiResponsesBrain|startPiAgentBrain|drainPiAgentBrainStream|submitPiAgentToolOutput|cancelPiAgentBrain)\b/,
+      description: "a provider-specific public brain bridge operation",
+    },
+  ];
   const allowedTimerFiles = new Set([
     normalizePath("ts/packages/brain-island/src/service-app.ts"),
     normalizePath("ts/packages/brain-island/src/service-adapter-lifecycle.ts"),
@@ -294,6 +333,12 @@ function expectBrainIslandCompositionRatchets() {
   for (const sourceFile of productionSourceFiles(pkg)) {
     const relativePath = normalizePath(relative(root, sourceFile));
     const source = readFileSync(sourceFile, "utf8");
+    for (const rule of forbiddenBrainHostAuthority) {
+      if (!rule.pattern.test(source)) continue;
+      violations.push(
+        `brain-island production file ${relativePath} must not own ${rule.description}`,
+      );
+    }
     if (/\bcreateServer\s*\(/.test(source)) {
       violations.push(
         `brain-island production file ${relativePath} must not create HTTP servers; service-host owns process HTTP composition`,

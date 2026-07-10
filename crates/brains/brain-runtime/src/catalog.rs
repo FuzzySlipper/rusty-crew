@@ -117,8 +117,6 @@ pub struct BrainSelectionRequest {
 pub struct BrainSelectionPlan {
     pub catalog_revision: u32,
     pub module_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canonicalized_from: Option<String>,
     pub selected_strategy_id: String,
     pub effective_strategy_id: String,
     pub provider_state_policy: BrainProviderStatePolicy,
@@ -193,7 +191,7 @@ pub fn plan_brain_selection(
     request: &BrainSelectionRequest,
 ) -> Result<BrainSelectionPlan, BrainCatalogError> {
     let catalog = brain_catalog();
-    let (module_id, canonicalized_from) = canonical_module_id(
+    let module_id = canonical_module_id(
         request.configured_module_id.as_deref(),
         request.provider_protocol,
     )?;
@@ -242,7 +240,6 @@ pub fn plan_brain_selection(
     Ok(BrainSelectionPlan {
         catalog_revision: catalog.revision,
         module_id: module.module_id.clone(),
-        canonicalized_from,
         selected_strategy_id: strategy.strategy_id.clone(),
         effective_strategy_id: strategy.diagnostics.effective_strategy_id.clone(),
         provider_state_policy: strategy.provider_state.clone(),
@@ -256,19 +253,16 @@ pub fn plan_brain_selection(
 fn canonical_module_id(
     configured: Option<&str>,
     protocol: BrainProviderProtocol,
-) -> Result<(String, Option<String>), BrainCatalogError> {
+) -> Result<String, BrainCatalogError> {
     let default = match protocol {
         BrainProviderProtocol::ChatCompletions => PI_AGENT_BRAIN_ID,
         BrainProviderProtocol::Responses => OPENAI_RESPONSES_BRAIN_ID,
     };
     let Some(configured) = configured else {
-        return Ok((default.to_string(), None));
+        return Ok(default.to_string());
     };
     match configured {
-        PI_AGENT_BRAIN_ID | OPENAI_RESPONSES_BRAIN_ID => Ok((configured.to_string(), None)),
-        "pi-agent-core" | "rust-pi-agent" => {
-            Ok((PI_AGENT_BRAIN_ID.to_string(), Some(configured.to_string())))
-        }
+        PI_AGENT_BRAIN_ID | OPENAI_RESPONSES_BRAIN_ID => Ok(configured.to_string()),
         other => Err(BrainCatalogError::UnsupportedModule {
             module_id: other.to_string(),
         }),
@@ -434,20 +428,15 @@ mod tests {
     }
 
     #[test]
-    fn transitional_pi_aliases_canonicalize_but_local_is_rejected() {
-        for alias in ["pi-agent-core", "rust-pi-agent"] {
+    fn legacy_pi_aliases_and_local_are_rejected() {
+        for rejected in ["pi-agent-core", "rust-pi-agent", "local"] {
             let mut input = request(BrainProviderProtocol::ChatCompletions);
-            input.configured_module_id = Some(alias.to_string());
-            let plan = plan_brain_selection(&input).expect("alias plan");
-            assert_eq!(plan.module_id, PI_AGENT_BRAIN_ID);
-            assert_eq!(plan.canonicalized_from.as_deref(), Some(alias));
+            input.configured_module_id = Some(rejected.to_string());
+            assert!(matches!(
+                plan_brain_selection(&input),
+                Err(BrainCatalogError::UnsupportedModule { module_id }) if module_id == rejected
+            ));
         }
-        let mut local = request(BrainProviderProtocol::ChatCompletions);
-        local.configured_module_id = Some("local".to_string());
-        assert!(matches!(
-            plan_brain_selection(&local),
-            Err(BrainCatalogError::UnsupportedModule { module_id }) if module_id == "local"
-        ));
     }
 
     #[test]

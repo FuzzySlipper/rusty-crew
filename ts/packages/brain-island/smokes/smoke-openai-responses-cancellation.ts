@@ -10,29 +10,22 @@ import {
   loadNativeBridge,
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
-import { openAiResponsesBrainModule } from "../src/brain-module.js";
+import { fakeOpenAiResponsesBrainHost as openAiResponsesBrainModule } from "./support/built-in-brain-host-test-support.js";
 import type { BrainWakeInput } from "../src/index.js";
 import type { LoadedProfileContext } from "../src/profile-loading.js";
 
-const previousLiveMode = process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE;
 const previousFakeDelay = process.env.RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS;
 
-process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE = "0";
 process.env.RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS = "200";
 
 try {
   const native = await loadNativeBridge();
   const submittedEvents: BrainEventEnvelope[] = [];
   const bridge = {
-    runOpenAiResponsesBrain: async () => {
-      throw new Error("blocking Responses runner should not be used");
-    },
-    startOpenAiResponsesBrain: native.startOpenAiResponsesBrain.bind(native),
-    drainOpenAiResponsesBrainStream:
-      native.drainOpenAiResponsesBrainStream.bind(native),
-    submitOpenAiResponsesToolOutput:
-      native.submitOpenAiResponsesToolOutput.bind(native),
-    cancelOpenAiResponsesBrain: native.cancelOpenAiResponsesBrain.bind(native),
+    startBrainRun: native.startBrainRun.bind(native),
+    drainBrainRun: native.drainBrainRun.bind(native),
+    submitBrainHostResult: native.submitBrainHostResult.bind(native),
+    cancelBrainRun: native.cancelBrainRun.bind(native),
     submitBrainEvent: async (event: BrainEventEnvelope) => {
       submittedEvents.push(event);
       return { accepted: true, sequence: submittedEvents.length };
@@ -97,7 +90,6 @@ try {
     ),
   );
 } finally {
-  restoreEnv("RUSTY_CREW_OPENAI_RESPONSES_LIVE", previousLiveMode);
   restoreEnv("RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS", previousFakeDelay);
 }
 

@@ -140,7 +140,7 @@ Deterministic gates to preserve or port:
 
 - `npm run smoke:pi-agent-brain-events -w @rusty-crew/brain-island`
 - `npm run smoke:mid-turn -w @rusty-crew/brain-island`
-- `npm run smoke:brain-module-registry -w @rusty-crew/brain-island`
+- `npm run smoke:brain-catalog -w @rusty-crew/brain-island`
 - `npm run smoke:openai-responses-tool-bridge -w @rusty-crew/brain-island`
 - `npm run smoke:rusty-view-chat-read-api -w @rusty-crew/service-host`
 - `npm run smoke:rusty-view-chat-contract -w @rusty-crew/brain-island`

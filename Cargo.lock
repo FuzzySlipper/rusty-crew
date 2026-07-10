@@ -1259,6 +1259,7 @@ name = "rusty-crew-core-bridge-codegen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rusty-crew-brain-runtime",
  "rusty-crew-core-bridge-api",
  "rusty-crew-core-config",
  "rusty-crew-core-persistence",

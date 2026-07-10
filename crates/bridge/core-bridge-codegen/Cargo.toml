@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+rusty-crew-brain-runtime = { path = "../../brains/brain-runtime" }
 rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
 rusty-crew-core-config = { path = "../../core/core-config" }
 rusty-crew-core-persistence = { path = "../../core/core-persistence" }

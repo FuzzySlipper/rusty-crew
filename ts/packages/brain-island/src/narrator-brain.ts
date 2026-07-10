@@ -9,7 +9,7 @@ import type {
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type {
   BrainActionPlanner,
-  BrainImplementation,
+  BrainHostExecutor,
   BrainWakeInput,
   BrainWakeResult,
 } from "./index.js";
@@ -55,11 +55,11 @@ export interface RoleplayNarratorPhaseBrainOptions {
 
 export type RoleplayNarratorPhaseBrainFactory = (
   options: RoleplayNarratorPhaseBrainOptions,
-) => BrainImplementation;
+) => BrainHostExecutor;
 
 export function createRoleplayNarratorBrain(
   options: RoleplayNarratorBrainOptions,
-): BrainImplementation {
+): BrainHostExecutor {
   return {
     async wake(input): Promise<BrainWakeResult> {
       const phaseEvents: BrainEventEnvelope[] = [];
@@ -186,7 +186,7 @@ function createNarratorPhaseBrain(
     submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
     planActions?: BrainActionPlanner;
   },
-): BrainImplementation {
+): BrainHostExecutor {
   const resolveTools = filteringResolver(
     options.resolveTools,
     phase.allowedTools,

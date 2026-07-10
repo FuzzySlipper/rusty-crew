@@ -18,6 +18,7 @@ import {
   eventReceiptSchema,
   openAiResponsesBrainRunInputSchema,
   rawBodyStateSchema,
+  rawBufferedBrainRunDrainSchema,
   rawContextCompactionArtifactSchema,
   rawModelProviderRefreshImpactSchema,
   rawMemoryGovernanceDecisionRecordSchema,
@@ -507,9 +508,9 @@ validateRustFixture({
 });
 
 validateRustFixture({
-  operation: "rust_fixture_run_openai_responses_brain",
-  schema: rawOpenAiResponsesBrainRunResultSchema,
-  name: "brain_wake_stream_result_v1",
+  operation: "rust_fixture_drain_brain_run",
+  schema: rawBufferedBrainRunDrainSchema,
+  name: "buffered_brain_run_drain_v1",
 });
 
 validateRustFixture({

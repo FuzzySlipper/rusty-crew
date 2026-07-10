@@ -420,9 +420,9 @@
               "revision": 1
             },
             "brain": {
-              "module": "pi-agent-core",
+              "module": "pi-agent",
               "strategy": "roleplay_narrator",
-              "backend": "pi-agent-core"
+              "backend": "pi-agent"
             },
             "context_strategy": {
               "strategy_id": "recent_window",

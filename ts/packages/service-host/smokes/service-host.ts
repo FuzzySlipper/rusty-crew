@@ -1308,7 +1308,7 @@ try {
       providerAlias?: string;
     };
     assert.equal(customChatProfileConfig.providerAlias, "custom-chat");
-    assert.equal(customChatProfileConfig.brain?.module, "pi-agent-core");
+    assert.equal(customChatProfileConfig.brain?.module, "pi-agent");
     const decommissionCustomChatProfile = await post(
       "/v1/admin/control/profiles/field-custom-chat-profile/decommission",
       undefined,

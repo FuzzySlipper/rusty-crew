@@ -67,16 +67,6 @@ fn default_responses_stream_idle_timeout_ms() -> u64 {
     30_000
 }
 
-pub struct OpenAiResponsesBrainRunTask {
-    pub(crate) input_json: String,
-}
-
-impl OpenAiResponsesBrainRunTask {
-    pub(crate) fn new(input_json: String) -> Self {
-        Self { input_json }
-    }
-}
-
 pub struct OpenAiOauthCodeExchangeTask {
     pub(crate) input_json: String,
 }
@@ -100,6 +90,7 @@ struct JsOpenAiOauthCodeExchangeInput {
 }
 
 struct OpenAiResponsesBrainRunOutput {
+    #[cfg_attr(not(test), allow(dead_code))]
     stream: Vec<BrainWakeStreamItem>,
     provider_state: Option<BrainWakeProviderStateOutput>,
     transport_metrics: ResponsesTransportMetrics,
@@ -209,19 +200,6 @@ fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
 
 fn brain_turn_error_to_napi(error: BufferedBrainTurnError) -> napi::Error {
     napi::Error::new(napi::Status::InvalidArg, error.to_string())
-}
-
-impl napi::Task for OpenAiResponsesBrainRunTask {
-    type Output = String;
-    type JsValue = String;
-
-    fn compute(&mut self) -> napi::Result<Self::Output> {
-        run_openai_responses_brain_json_blocking(std::mem::take(&mut self.input_json))
-    }
-
-    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-        Ok(output)
-    }
 }
 
 impl napi::Task for OpenAiOauthCodeExchangeTask {
@@ -448,8 +426,10 @@ fn run_openai_responses_brain_buffered(
     });
 }
 
+#[cfg(test)]
 struct EchoNeutralToolExecutor;
 
+#[cfg(test)]
 impl NeutralToolExecutor for EchoNeutralToolExecutor {
     fn execute(&self, call: &PendingResponsesFunctionCall) -> NeutralToolOutput {
         NeutralToolOutput {
@@ -553,6 +533,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn run_openai_responses_brain_json_blocking(input_json: String) -> napi::Result<String> {
     let output = run_openai_responses_brain(input_json)?;
     let output = json!({
@@ -651,6 +632,7 @@ fn openai_oauth_exchange_error_json(error: OpenAiOauthError) -> serde_json::Valu
     }
 }
 
+#[cfg(test)]
 fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponsesBrainRunOutput> {
     run_openai_responses_brain_internal(input_json, None, EchoNeutralToolExecutor)
 }

@@ -45,14 +45,14 @@ const allowed = [
     path: "crates/bridge/core-bridge-node/src/responses.rs",
     count: 1,
     reason:
-      "legacy blocking bridge fixture hook; service brain uses buffered submit-output path",
+      "cfg(test)-only blocking bridge fixture; production hosts use the generic buffered submit-result path",
   },
   {
     id: "responses-module-scaffold-success",
     path: "crates/bridge/core-bridge-node/src/responses.rs",
     count: 2,
     reason:
-      "fake Responses client used by explicit fake-mode smokes through the native bridge",
+      "fake Responses client protocol output reachable only through explicit smoke/test input; production hosts always request live mode",
   },
 ];
 
@@ -114,7 +114,7 @@ console.log(
         normalizePath(relative(root, path)),
       ),
       forbiddenRules: forbidden.map((rule) => rule.id),
-      allowedLegacySeams: allowed.map(({ id, path, count, reason }) => ({
+      allowedTestFixtures: allowed.map(({ id, path, count, reason }) => ({
         id,
         path,
         count,

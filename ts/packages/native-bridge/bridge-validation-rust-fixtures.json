@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "manifest_version": 1,
-  "operation_count": 177,
+  "operation_count": 172,
   "schema_source": "rusty-crew-core-protocol serde wire fixtures",
   "fixtures": [
     {
@@ -101,12 +101,12 @@
       ]
     },
     {
-      "name": "brain_wake_stream_result_v1",
-      "operation": "run_openai_responses_brain",
+      "name": "buffered_brain_run_drain_v1",
+      "operation": "drain_brain_run",
       "direction": "rust_to_ts",
-      "rust_type": "Vec<rusty_crew_core_protocol::BrainWakeStreamItem>",
+      "rust_type": "rusty_crew_brain_runtime::BufferedBrainRunDrain",
       "value": {
-        "stream": [
+        "items": [
           {
             "event": {
               "event": {
@@ -135,7 +135,23 @@
             },
             "type": "actions"
           }
-        ]
+        ],
+        "module_id": "openai-responses",
+        "terminal": true,
+        "tool_requests": [],
+        "transport_metrics": {
+          "continuationRoundCount": 0,
+          "effectiveStrategyId": "responses-replay-v1",
+          "effectiveTransport": "responses",
+          "providerEventCounts": {
+            "response.completed": 1
+          },
+          "providerRequestCount": 1,
+          "providerRequestPayloadBytes": 512,
+          "selectedStrategyId": "responses-replay-v1",
+          "totalTurnDurationMs": 25
+        },
+        "wake_id": "validation-wake"
       }
     },
     {

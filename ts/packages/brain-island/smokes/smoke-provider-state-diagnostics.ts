@@ -19,7 +19,7 @@ await bridge.initializeEngine({
   defaultIdleTimeoutMs: 1_000,
 });
 
-const unusedHandle = await bridge.registerBrainImplementation(
+const unusedHandle = await bridge.registerBrainHostExecutor(
   registration("unused-brain", "unused-profile", "unused"),
 );
 await bridge.createSession(session("unused-session", "unused-profile"));
@@ -126,7 +126,7 @@ assert.equal(
   "expired",
 );
 
-const changedScopeHandle = await bridge.registerBrainImplementation(
+const changedScopeHandle = await bridge.registerBrainHostExecutor(
   registration(
     "changed-scope-brain",
     "changed-scope-profile",

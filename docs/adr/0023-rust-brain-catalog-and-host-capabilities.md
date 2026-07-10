@@ -1,6 +1,6 @@
 # ADR 0023: Rust Brain Catalog And TypeScript Host Capabilities
 
-Status: Accepted for task 5370
+Status: Implemented by task 5389
 
 Date: 2026-07-09
 
@@ -19,8 +19,8 @@ contracts. `crates/brains/brain-runtime` already owns the shared buffered-run
 records and registry. The native bridge owns one registry per service instance,
 so active runs no longer depend on a process-global fallback.
 
-The remaining production brain authority is concentrated in
-`ts/packages/brain-island/src/brain-module.ts`. It currently owns:
+Before the clean-break cutover, production brain authority was concentrated in
+`ts/packages/brain-island/src/brain-module.ts`. It owned:
 
 - the built-in brain catalog and aliases;
 - module and strategy selection;
@@ -35,7 +35,7 @@ The remaining production brain authority is concentrated in
 - roleplay narrator phase execution;
 - deterministic local/fake brain behavior.
 
-This is an attractive place for future TypeScript policy to accumulate. A
+That was an attractive place for future TypeScript policy to accumulate. A
 smaller `brain-module.ts` would reduce the immediate file size but preserve the
 wrong long-term extension point.
 
@@ -68,6 +68,21 @@ TypeScript brain registry
 ```
 
 No compatibility registry or legacy fallback remains after cutover.
+
+The landed TypeScript host boundary is deliberately split by responsibility:
+
+- `brain-host-runtime.ts`: neutral wake callback and Rust registration adapter;
+- `buffered-brain-host.ts`: generic drain/submit loop over Rust directives;
+- `tool-execution-host.ts`: concrete tool lookup and execution only;
+- `provider-debug-projection.ts`: bounded non-authoritative debug projection;
+- `pi-agent-host.ts` and `openai-responses-host.ts`: provider input and client
+  adaptation without provider-loop lifecycle policy;
+- `built-in-brain-host.ts`: exhaustive dispatch of Rust-selected canonical ids
+  to those host adapters.
+
+The native bridge exposes only `start_brain_run`, `drain_brain_run`,
+`submit_brain_host_result`, and `cancel_brain_run` for production runs. Rust
+dispatches those calls to the canonical provider implementation.
 
 ## Ownership
 
@@ -112,10 +127,9 @@ The catalog lives in a focused Rust brain/runtime or config crate, not in
 | `pi-agent` | chat completions | `default`, `roleplay_narrator` | Rust |
 | `openai-responses` | Responses | `replay`, `previous-response-chain` | Rust |
 
-`pi-agent-core` and `rust-pi-agent` are transitional input spellings only until
-profile/config cutover. They are not retained as runtime fallback branches.
-The clean-break migration rewrites test/profile fixtures to the canonical id
-and removes the aliases before task 5389 closes.
+`pi-agent-core`, `rust-pi-agent`, and `local` are rejected module ids. Profile
+and test fixtures use canonical `pi-agent`; no input canonicalization or alias
+fallback remains.
 
 The deterministic `local` brain is not a production catalog entry. Fake
 provider clients and deterministic brains belong in Rust unit tests, package
@@ -260,35 +274,36 @@ The end-state native surface is provider-neutral:
 - `buffered_brain_run_diagnostics`;
 - `cleanup_buffered_brain_runs`.
 
-Provider-specific start/drain/submit/cancel methods are deleted after OpenAI
-Responses and pi-agent use the generic operations. They are not retained as
-fallbacks.
+Provider-specific start/drain/submit/cancel methods were deleted when OpenAI
+Responses and pi-agent moved to the generic operations. They are not retained
+as fallbacks.
 
 The start request contains the selected catalog module/strategy, frozen wake
 input, selected tool descriptors, provider configuration, and optional provider
-state. Rust dispatches to the selected built-in implementation. TypeScript does
-not construct a `BrainImplementation` object per profile.
+state. Rust dispatches to the selected built-in implementation. TypeScript
+registers a neutral `BrainHostExecutor` wake callback per profile; that callback
+does not define brain identity, catalog entries, strategies, or lifecycle.
 
-## Current Export And Call-Site Disposition
+## Landed Export And Call-Site Disposition
 
-| Current surface | Current consumer | Disposition |
+| Former surface | Former consumer | Landed disposition |
 | --- | --- | --- |
-| `BrainModuleId`, profile `brain.module` parser | `profile-loading.ts` | Replace with generated catalog id/string input plus Rust selection validation. |
-| `BrainModule`, `BrainModuleRegistry`, `createBrainModuleRegistry`, `defaultBrainModules` | runtime config and package surface | Delete. Rust catalog is canonical. |
-| `resolveBrainModuleSelection`, `resolveBrainModuleStrategy` | runtime registration/rebuild | Replace with `plan_brain_selection`. |
-| strategy/provider-state metadata helpers | runtime diagnostics, rebuild, fingerprints | Return in Rust selection plan; move fingerprint authority to Rust. |
-| `piAgentCoreBrainModule`, `rustPiAgentBrainModule` | runtime registration and smokes | Replace with canonical Rust `pi-agent`; remove aliases after fixture cutover. |
-| `openAiResponsesBrainModule` | runtime registration and smokes | Replace with Rust catalog dispatch. |
-| `localBrainModule` | registry smoke/dev behavior | Move to test support; never selected by production profile. |
-| provider client mode/config helpers | brain module and smokes | Move live/fake choice into explicit Rust test/live start configuration; fake is test-only. |
-| Responses/pi-agent incremental drain loops | brain module | Replace with generic host executor over Rust coordinator. |
-| tool request preparation/execution | brain module | Move mechanics to `tool-execution-host.ts`; move policy to Rust. |
-| debug-reference correlation | brain module | Move to debug projection adapter; never affects coordinator policy. |
-| roleplay narrator `createPhaseBrain` composition | brain module/narrator executor | Replace with Rust narrator-hosted phase runs in task 5388. |
-| `BrainImplementation` and local brain helpers | `local-brain.ts`, package surface | Remove from production exports; keep explicit foreign adapter types only if a real consumer exists. |
-| package `brain` exports | downstream packages/smokes | Replace with host-capability and generated catalog/readback exports; test fakes use test-support entrypoint. |
+| `BrainModuleId`, profile `brain.module` parser | `profile-loading.ts` | Profile input remains a string; Rust `plan_brain_selection` validates it against the catalog. |
+| `BrainModule`, `BrainModuleRegistry`, `createBrainModuleRegistry`, `defaultBrainModules` | runtime config and package surface | Deleted. Rust catalog is canonical. |
+| `resolveBrainModuleSelection`, `resolveBrainModuleStrategy` | runtime registration/rebuild | Deleted; `plan_brain_selection` is authoritative. |
+| strategy/provider-state metadata helpers | runtime diagnostics, rebuild, fingerprints | Rust selection plans return the metadata and own fingerprint policy. |
+| `piAgentCoreBrainModule`, `rustPiAgentBrainModule` | runtime registration and smokes | Deleted; canonical `pi-agent` is required. |
+| `openAiResponsesBrainModule` | runtime registration and smokes | Deleted; generic Rust catalog dispatch selects `openai-responses`. |
+| `localBrainModule` | registry smoke/dev behavior | Deleted from production; deterministic executors exist only in smoke support. |
+| provider client mode/config helpers | brain module and smokes | Production host adapters always request live clients; explicit fake clients are smoke support only. |
+| Responses/pi-agent incremental drain loops | brain module | One generic host loop drains Rust coordinator directives. |
+| tool request preparation/execution | brain module | Mechanics live in `tool-execution-host.ts`; policy lives in Rust. |
+| debug-reference correlation | brain module | Debug projection is isolated and cannot affect coordinator policy. |
+| roleplay narrator `createPhaseBrain` composition | brain module/narrator executor | Rust narrator receipts host phase sequencing; TS executes requested provider/tool work. |
+| `BrainImplementation` and local brain helpers | `local-brain.ts`, package surface | Deleted/renamed. `brain-host-runtime.ts` exports the neutral `BrainHostExecutor`; deterministic brains live only in smoke support. |
+| package `brain` exports | downstream packages/smokes | Host-capability and Rust catalog/readback exports remain; test fakes use smoke-support imports. |
 
-Production imports of `brain-module.ts` currently occur in:
+Before cutover, production imports of `brain-module.ts` occurred in:
 
 - `service-runtime-config.ts`;
 - `profile-loading.ts`;
@@ -296,20 +311,20 @@ Production imports of `brain-module.ts` currently occur in:
 - `runtime-diagnostics.ts`;
 - `package-surface/brain.ts`.
 
-Smoke imports are migrated to the generic host contract or test support as the
-corresponding implementation task lands.
+All production imports and exports are removed. Smokes use the generic host
+contract or explicit smoke support.
 
-## Migration Sequence
+## Completed Migration Sequence
 
-1. Task 5374 implements the coordinator transitions in Rust without changing
+1. Task 5374 implemented the coordinator transitions in Rust without changing
    provider behavior.
-2. Task 5378 moves failure counters, stop policy, and output bounds to Rust.
-3. Tasks 5382 and 5386 adapt Responses and pi-agent to generic coordinator
+2. Task 5378 moved failure counters, stop policy, and output bounds to Rust.
+3. Tasks 5382 and 5386 adapted Responses and pi-agent to generic coordinator
    operations and delete their old TypeScript drain policy.
-4. Task 5414 moves catalog, selection, diagnostics, and provider-state
+4. Task 5414 moved catalog, selection, diagnostics, and provider-state
    fingerprint policy to Rust.
-5. Task 5388 moves narrator phase hosting onto the Rust coordinator.
-6. Task 5389 deletes `brain-module.ts`, production local brain exports,
+5. Task 5388 moved narrator phase hosting onto the Rust coordinator.
+6. Task 5389 deleted `brain-module.ts`, production local brain exports,
    provider-specific bridge run operations, aliases, and fallback code.
 
 Each step deletes the superseded path in the same task. There is no dual-write,
@@ -367,6 +382,9 @@ Use the SQLite debug service and Rusty View:
 
 Run the persistence-relevant registration/rebuild subset against the PostgreSQL
 service without using live service data as disposable test state.
+
+Task 5389's deterministic and live results are recorded in
+`docs/rust-brain-catalog-live-certification-5389.md`.
 
 ## Consequences
 

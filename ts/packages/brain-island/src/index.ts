@@ -1,15 +1,15 @@
 export type {
   BrainActionPlanner,
-  BrainImplementation,
+  BrainHostExecutor,
   BrainRoleAssembly,
   BrainWakeInput,
   BrainWakeOptions,
   BrainWakeResult,
-} from "./local-brain.js";
+} from "./brain-host-runtime.js";
 export {
-  createBrainWakeExecutor,
-  registerBrainImplementationRuntime,
-} from "./local-brain.js";
+  createBrainHostWakeExecutor,
+  registerBrainHostRuntime,
+} from "./brain-host-runtime.js";
 export * from "./package-surface/service.js";
 export * from "./package-surface/observation.js";
 export * from "./package-surface/diagnostics.js";

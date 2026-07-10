@@ -4,9 +4,10 @@ import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 const native = await loadNativeBridge();
-const started = await native.startPiAgentBrain(
-  piAgentWakeInput("pi-agent-rust-bridge-wake", "primary"),
-);
+const started = await native.startBrainRun({
+  moduleId: "pi-agent",
+  providerInput: piAgentWakeInput("pi-agent-rust-bridge-wake", "primary"),
+});
 
 const firstDrain = await waitForToolRequest(native, started.wakeId);
 assert.equal(firstDrain.toolRequests.length, 1);
@@ -18,7 +19,8 @@ assert.equal(activeDiagnostics.runs[0]?.module_label, "pi-agent");
 assert.equal(activeDiagnostics.runs[0]?.wake_id, started.wakeId);
 assertNoBufferedPayloads(activeDiagnostics);
 
-await native.submitPiAgentToolOutput({
+await native.submitBrainHostResult({
+  moduleId: "pi-agent",
   wakeId: started.wakeId,
   callId: firstDrain.toolRequests[0]!.callId,
   output: "SENTINEL_PI_AGENT_TOOL_OUTPUT from TS bridge smoke",
@@ -124,11 +126,13 @@ async function runSingleDeniedContinuationScenario(): Promise<{
 }> {
   const host = await loadNativeBridge();
   const wakeId = "pi-agent-single-denied-wake";
-  await host.startPiAgentBrain(
-    piAgentWakeInput(wakeId, "single-denied", "denied_tool"),
-  );
+  await host.startBrainRun({
+    moduleId: "pi-agent",
+    providerInput: piAgentWakeInput(wakeId, "single-denied", "denied_tool"),
+  });
   const pending = await waitForToolRequest(host, wakeId);
-  await host.submitPiAgentToolOutput({
+  await host.submitBrainHostResult({
+    moduleId: "pi-agent",
     wakeId,
     callId: pending.toolRequests[0]!.callId,
     output: "manual review required",
@@ -163,12 +167,18 @@ async function runRepeatedFailureStopScenario(): Promise<{
 }> {
   const host = await loadNativeBridge();
   const wakeId = "pi-agent-repeated-failure-wake";
-  await host.startPiAgentBrain(
-    piAgentWakeInput(wakeId, "repeated-failure", "repeat_failure_tool"),
-  );
+  await host.startBrainRun({
+    moduleId: "pi-agent",
+    providerInput: piAgentWakeInput(
+      wakeId,
+      "repeated-failure",
+      "repeat_failure_tool",
+    ),
+  });
   for (let index = 1; index <= 2; index += 1) {
     const pending = await waitForToolRequest(host, wakeId);
-    await host.submitPiAgentToolOutput({
+    await host.submitBrainHostResult({
+      moduleId: "pi-agent",
       wakeId,
       callId: pending.toolRequests[0]!.callId,
       output: "memory client unavailable",
@@ -206,12 +216,14 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   const secondHost = await loadNativeBridge();
   const sharedWakeId = "pi-agent-shared-host-wake";
 
-  const firstStarted = await firstHost.startPiAgentBrain(
-    piAgentWakeInput(sharedWakeId, "host-one"),
-  );
-  const secondStarted = await secondHost.startPiAgentBrain(
-    piAgentWakeInput(sharedWakeId, "host-two"),
-  );
+  const firstStarted = await firstHost.startBrainRun({
+    moduleId: "pi-agent",
+    providerInput: piAgentWakeInput(sharedWakeId, "host-one"),
+  });
+  const secondStarted = await secondHost.startBrainRun({
+    moduleId: "pi-agent",
+    providerInput: piAgentWakeInput(sharedWakeId, "host-two"),
+  });
   assert.equal(firstStarted.wakeId, sharedWakeId);
   assert.equal(secondStarted.wakeId, sharedWakeId);
 
@@ -220,7 +232,8 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   assert.equal(firstDrain.toolRequests[0]?.callId, "fake-pi-call");
   assert.equal(secondDrain.toolRequests[0]?.callId, "fake-pi-call");
 
-  await firstHost.submitPiAgentToolOutput({
+  await firstHost.submitBrainHostResult({
+    moduleId: "pi-agent",
     wakeId: sharedWakeId,
     callId: firstDrain.toolRequests[0]!.callId,
     output: "FIRST_HOST_OUTPUT_ONLY",
@@ -229,7 +242,8 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   });
   const firstStream = await drainUntilTerminal(firstHost, sharedWakeId);
 
-  const secondAfterFirstOutput = await secondHost.drainPiAgentBrainStream({
+  const secondAfterFirstOutput = await secondHost.drainBrainRun({
+    moduleId: "pi-agent",
     wakeId: sharedWakeId,
     maxItems: 32,
   });
@@ -237,7 +251,8 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   assert.equal(secondAfterFirstOutput.items.length, 0);
   assert.equal(secondAfterFirstOutput.toolRequests.length, 0);
 
-  const cancellation = await secondHost.cancelPiAgentBrain({
+  const cancellation = await secondHost.cancelBrainRun({
+    moduleId: "pi-agent",
     wakeId: sharedWakeId,
     reasonCode: "host_isolation_smoke",
     summary: "second host cleanup after same-wake isolation smoke",
@@ -253,11 +268,13 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   );
 
   await assert.rejects(
-    () => firstHost.drainPiAgentBrainStream({ wakeId: sharedWakeId }),
+    () =>
+      firstHost.drainBrainRun({ moduleId: "pi-agent", wakeId: sharedWakeId }),
     /pi-agent buffered wake pi-agent-shared-host-wake was not found/,
   );
   await assert.rejects(
-    () => secondHost.drainPiAgentBrainStream({ wakeId: sharedWakeId }),
+    () =>
+      secondHost.drainBrainRun({ moduleId: "pi-agent", wakeId: sharedWakeId }),
     /pi-agent buffered wake pi-agent-shared-host-wake was not found/,
   );
 
@@ -282,9 +299,10 @@ async function runExplicitCleanupScenario(): Promise<{
 }> {
   const cleanupHost = await loadNativeBridge();
   const cleanupWakeId = "pi-agent-cleanup-host-wake";
-  await cleanupHost.startPiAgentBrain(
-    piAgentWakeInput(cleanupWakeId, "cleanup-host"),
-  );
+  await cleanupHost.startBrainRun({
+    moduleId: "pi-agent",
+    providerInput: piAgentWakeInput(cleanupWakeId, "cleanup-host"),
+  });
   await waitForToolRequest(cleanupHost, cleanupWakeId);
   const beforeCleanup = await cleanupHost.bufferedBrainRunDiagnostics();
   assert.equal(beforeCleanup.active_run_count, 1);
@@ -302,7 +320,11 @@ async function runExplicitCleanupScenario(): Promise<{
   const afterCleanup = await cleanupHost.bufferedBrainRunDiagnostics();
   assert.equal(afterCleanup.active_run_count, 0);
   await assert.rejects(
-    () => cleanupHost.drainPiAgentBrainStream({ wakeId: cleanupWakeId }),
+    () =>
+      cleanupHost.drainBrainRun({
+        moduleId: "pi-agent",
+        wakeId: cleanupWakeId,
+      }),
     /pi-agent buffered wake pi-agent-cleanup-host-wake was not found/,
   );
 
@@ -337,11 +359,12 @@ async function waitForToolRequest(
   wakeId: string,
 ): Promise<{
   toolRequests: Awaited<
-    ReturnType<NativeBridgeModule["drainPiAgentBrainStream"]>
+    ReturnType<NativeBridgeModule["drainBrainRun"]>
   >["toolRequests"];
 }> {
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const drained = await nativeBridge.drainPiAgentBrainStream({
+    const drained = await nativeBridge.drainBrainRun({
+      moduleId: "pi-agent",
       wakeId,
       maxItems: 32,
     });
@@ -368,7 +391,8 @@ async function drainTerminalReceipt(
 ): Promise<{ stream: BrainWakeStreamItem[]; error?: string }> {
   const stream: BrainWakeStreamItem[] = [];
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const drained = await nativeBridge.drainPiAgentBrainStream({
+    const drained = await nativeBridge.drainBrainRun({
+      moduleId: "pi-agent",
       wakeId,
       maxItems: 32,
     });

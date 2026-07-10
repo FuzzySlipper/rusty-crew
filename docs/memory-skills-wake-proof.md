@@ -30,5 +30,5 @@ The proof produces durable runtime facts:
 - tool/context diagnostics for the memory/skills surfaces.
 
 The proof avoids direct diagnostic brain helpers for wake execution. It uses the
-same native `registerBrainImplementationRuntime`, `buildBrainWakeRequest`, and
+same native `registerBrainHostRuntime`, `buildBrainWakeRequest`, and
 `wakeBrain` path used by production bridge wakes.

@@ -22,7 +22,7 @@ import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createWebToolResolver,
   defaultBodyDeltaPolicy,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
   selectToolProfile,
 } from "../src/index.js";
 import type {
@@ -178,7 +178,7 @@ try {
     kind: "full",
   });
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "production-web-tools" as BrainImplementationId,

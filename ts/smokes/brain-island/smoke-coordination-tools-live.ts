@@ -191,7 +191,7 @@ function writeProfile(
           temperature: 0,
           maxOutputTokens: 256,
         },
-        brain: { module: "pi-agent-core" },
+        brain: { module: "pi-agent" },
         toolPolicy: { requestedToolsets: ["agent_coordination"] },
         prompt: { instructions },
       },

@@ -307,7 +307,7 @@ backgroundReview:
   assert.equal(runner.profile.modelConfig.baseUrl, "http://127.0.0.1:18082/v1");
   assert.equal(runner.profile.modelConfig.apiKeyEnv, "DEN_ROUTER_API_KEY");
   assert.equal(runner.profile.modelConfig.api, "openai-completions");
-  assert.equal(runner.profile.brain?.module, "pi-agent-core");
+  assert.equal(runner.profile.brain?.module, "pi-agent");
   assert.equal(runner.profile.brain?.strategy, "default");
   assert.equal(runner.profile.modelConfig.temperatureMilli, 200);
   assert.equal(runner.profile.modelConfig.maxOutputTokens, 4096);
@@ -360,7 +360,7 @@ backgroundReview:
         profileId: "roleplay-narrator",
         providerAlias: "deepseek_flash",
         brain: {
-          module: "pi-agent-core",
+          module: "pi-agent",
           strategy: "roleplay_narrator",
         },
         toolPolicy: {

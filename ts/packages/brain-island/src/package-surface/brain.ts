@@ -32,11 +32,6 @@ export type {
   BrainToolUpdateCallback,
 } from "../brain-tool.js";
 export {
-  brainExecutorForSelection,
-  piAgentBrainModule,
-} from "../brain-module.js";
-export type { BrainModule, BrainModuleContext } from "../brain-module.js";
-export {
   BRAIN_HOST_CAPABILITY_REGISTRATION,
   resolveBrainCatalogSelection,
   selectionFromNativePlan,

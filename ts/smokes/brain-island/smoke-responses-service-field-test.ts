@@ -18,17 +18,14 @@ try {
     retries: 0,
     timeoutMs:
       Number(process.env.RUSTY_CREW_OPENAI_RESPONSES_SMOKE_TIMEOUT_MS) ||
-      (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1" ? 60_000 : 2_000),
+      60_000,
   });
 
   const initialProviderState = await providerStateDiagnostics();
   assert.equal(initialProviderState.providerState.status, "missing");
   assert.equal(initialProviderState.providerStateMode, "optional");
   assert.equal(initialProviderState.moduleId, "openai-responses");
-  assert.equal(
-    initialProviderState.modelProvider.clientMode,
-    process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1" ? "live" : "fake",
-  );
+  assert.equal(initialProviderState.modelProvider.clientMode, "live");
 
   const beforeFirstTurn = await client.diagnostics();
   const firstTurn = await client.requestDirectDebugTurn({
@@ -135,7 +132,7 @@ try {
           second: summarizedMetric(secondMetrics),
         },
         chatKinds: [...new Set(secondEvents.map((event) => event.kind))],
-        liveProvider: process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1",
+        liveProvider: true,
       },
       null,
       2,
@@ -147,18 +144,8 @@ try {
 }
 
 function expectedChatKinds(): readonly ChatEvent["kind"][] {
-  if (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1") {
-    return [
-      "assistant_turn_started",
-      "assistant_text_delta",
-      "assistant_message_completed",
-      "assistant_turn_finished",
-    ];
-  }
   return [
     "assistant_turn_started",
-    "tool_call_started",
-    "tool_call_completed",
     "assistant_text_delta",
     "assistant_message_completed",
     "assistant_turn_finished",

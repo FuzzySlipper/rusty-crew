@@ -4,7 +4,7 @@ import * as brainIsland from "@rusty-crew/brain-island";
 import type {
   AdminApiEnvelope,
   AdminControlExecutor,
-  BrainImplementation,
+  BrainHostExecutor,
   BrainTool,
   ContextStrategyPolicy,
   DebugApiClient,
@@ -18,7 +18,7 @@ import type {
 type RootTypeCompatibility = {
   adminEnvelope: AdminApiEnvelope<unknown>;
   adminExecutor: AdminControlExecutor;
-  brain: BrainImplementation;
+  brain: BrainHostExecutor;
   contextPolicy: ContextStrategyPolicy;
   debugClient: DebugApiClient;
   profile: ProfileConfig;
@@ -31,8 +31,8 @@ type RootTypeCompatibility = {
 
 const runtimeExportGroups: Record<string, string[]> = {
   coreBrain: [
-    "createBrainWakeExecutor",
-    "registerBrainImplementationRuntime",
+    "createBrainHostWakeExecutor",
+    "registerBrainHostRuntime",
     "wakeBrainFromBridgeRequest",
   ],
   serviceConfig: [

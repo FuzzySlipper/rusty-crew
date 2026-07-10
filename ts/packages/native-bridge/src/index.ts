@@ -25,6 +25,7 @@ import {
   piAgentBrainRunInputSchema,
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
+  rawBufferedBrainRunDrainSchema,
   rawChannelIngressRoutePlanInputSchema,
   rawChannelIngressRoutePlanSchema,
   rawDenProductIngressPolicyInputSchema,
@@ -216,19 +217,15 @@ interface NativeBridgeBinding {
     wakeId: string,
     outputJson: string,
   ): void;
-  runOpenaiResponsesBrainJson(inputJson: string): Promise<string>;
   exchangeOpenaiOauthCodeJson(inputJson: string): Promise<string>;
-  startOpenaiResponsesBrainJson(inputJson: string): string;
-  drainOpenaiResponsesBrainStreamJson(
+  startBrainRunJson(moduleId: string, inputJson: string): string;
+  drainBrainRunJson(
+    moduleId: string,
     wakeId: string,
     maxItems?: number,
   ): string;
-  submitOpenaiResponsesToolOutputJson(inputJson: string): string;
-  cancelOpenaiResponsesBrainJson(inputJson: string): string;
-  startPiAgentBrainJson(inputJson: string): string;
-  drainPiAgentBrainStreamJson(wakeId: string, maxItems?: number): string;
-  submitPiAgentToolOutputJson(inputJson: string): string;
-  cancelPiAgentBrainJson(inputJson: string): string;
+  submitBrainHostResultJson(moduleId: string, inputJson: string): string;
+  cancelBrainRunJson(moduleId: string, inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   planRoleplayAssistantAlternativeJson(inputJson: string): string;
   planRoleplaySessionLifecycleJson(inputJson: string): string;
@@ -603,10 +600,31 @@ export interface BrainWakeExecutionResult {
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
 }
 
+export type NativeBrainRunModuleId = "pi-agent" | "openai-responses";
+
+export interface NativeBufferedBrainRunDrain {
+  moduleId: NativeBrainRunModuleId;
+  wakeId: string;
+  items: BrainWakeStreamItem[];
+  toolRequests: Array<{
+    wakeId: string;
+    callId: string;
+    providerItemId?: string;
+    name: string;
+    argumentsJson: string;
+  }>;
+  terminal: boolean;
+  providerState?: BrainWakeProviderStateOutput;
+  transportMetrics?: OpenAiResponsesTransportMetrics | PiAgentTransportMetrics;
+  credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
+  cancellation?: OpenAiResponsesBufferedCancellation;
+  error?: string;
+}
+
 export type NativeBridgeRoundTripFixtureName =
   | "body_state_v1"
   | "list_sessions_v1"
-  | "brain_wake_stream_result_v1"
+  | "buffered_brain_run_drain_v1"
   | "profile_registry_record_v1"
   | "model_provider_record_v1"
   | "model_provider_refresh_impact_v1"
@@ -1977,7 +1995,6 @@ export interface NativeBrainSelectionRequest {
 export interface NativeBrainSelectionPlan {
   catalog_revision: number;
   module_id: string;
-  canonicalized_from?: string;
   selected_strategy_id: string;
   effective_strategy_id: string;
   provider_state_policy: NativeBrainProviderStatePolicy;
@@ -2702,30 +2719,24 @@ export interface NativeBridgeModule {
   providerStateDiagnostics(
     limit?: number,
   ): Promise<NativeProviderStateDiagnostic[]>;
-  runOpenAiResponsesBrain(
-    input: OpenAiResponsesBrainRunInput,
-  ): Promise<BrainWakeExecutionResult>;
   exchangeOpenAiOauthCode(
     input: NativeOpenAiOauthCodeExchangeInput,
   ): Promise<NativeOpenAiOauthCodeExchangeResult>;
-  startOpenAiResponsesBrain(input: OpenAiResponsesBrainRunInput): Promise<{
-    wakeId: string;
-  }>;
-  drainOpenAiResponsesBrainStream(input: {
+  startBrainRun(
+    input:
+      | { moduleId: "pi-agent"; providerInput: PiAgentBrainRunInput }
+      | {
+          moduleId: "openai-responses";
+          providerInput: OpenAiResponsesBrainRunInput;
+        },
+  ): Promise<{ moduleId: NativeBrainRunModuleId; wakeId: string }>;
+  drainBrainRun(input: {
+    moduleId: "pi-agent" | "openai-responses";
     wakeId: string;
     maxItems?: number;
-  }): Promise<{
-    wakeId: string;
-    items: BrainWakeStreamItem[];
-    toolRequests: OpenAiResponsesToolRequest[];
-    terminal: boolean;
-    providerState?: BrainWakeProviderStateOutput;
-    transportMetrics?: OpenAiResponsesTransportMetrics;
-    credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
-    cancellation?: OpenAiResponsesBufferedCancellation;
-    error?: string;
-  }>;
-  submitOpenAiResponsesToolOutput(input: {
+  }): Promise<NativeBufferedBrainRunDrain>;
+  submitBrainHostResult(input: {
+    moduleId: "pi-agent" | "openai-responses";
     wakeId: string;
     callId: string;
     output: string;
@@ -2735,50 +2746,18 @@ export interface NativeBridgeModule {
     action?: string;
     summary?: string;
     debugDetailId?: string;
-  }): Promise<{ ok: true; wakeId: string; callId: string }>;
-  cancelOpenAiResponsesBrain(input: {
-    wakeId: string;
-    reasonCode: string;
-    summary: string;
   }): Promise<{
-    ok: true;
-    wakeId: string;
-    cancelled: boolean;
-    terminal: boolean;
-    cancellation?: OpenAiResponsesBufferedCancellation;
-  }>;
-  startPiAgentBrain(input: PiAgentBrainRunInput): Promise<{
-    wakeId: string;
-  }>;
-  drainPiAgentBrainStream(input: {
-    wakeId: string;
-    maxItems?: number;
-  }): Promise<{
-    wakeId: string;
-    items: BrainWakeStreamItem[];
-    toolRequests: PiAgentToolRequest[];
-    terminal: boolean;
-    transportMetrics?: PiAgentTransportMetrics;
-    cancellation?: OpenAiResponsesBufferedCancellation;
-    error?: string;
-  }>;
-  submitPiAgentToolOutput(input: {
+    moduleId: "pi-agent" | "openai-responses";
     wakeId: string;
     callId: string;
-    output: string;
-    status: "succeeded" | "denied" | "failed";
-    reasonCode?: string;
-    retryable: boolean;
-    action?: string;
-    summary?: string;
-    debugDetailId?: string;
-  }): Promise<{ ok: true; wakeId: string; callId: string }>;
-  cancelPiAgentBrain(input: {
+  }>;
+  cancelBrainRun(input: {
+    moduleId: "pi-agent" | "openai-responses";
     wakeId: string;
     reasonCode: string;
     summary: string;
   }): Promise<{
-    ok: true;
+    moduleId: "pi-agent" | "openai-responses";
     wakeId: string;
     cancelled: boolean;
     terminal: boolean;
@@ -2845,13 +2824,11 @@ export function roundTripNativeBridgeFixture(input: {
       return (input.value as RawSessionState[])
         .map(toSessionState)
         .map(toNativeSessionState);
-    case "brain_wake_stream_result_v1":
-      return toRawOpenAiResponsesBrainRunResult(
-        toOpenAiResponsesBrainRunResult(
-          input.value as RawOpenAiResponsesBrainRunResult,
-        ) as BrainWakeExecutionResult & {
-          transportMetrics?: OpenAiResponsesTransportMetrics;
-        },
+    case "buffered_brain_run_drain_v1":
+      return toRawBufferedBrainRunDrainResult(
+        toBufferedBrainRunDrainResult(
+          input.value as RawBufferedBrainRunDrainResult,
+        ),
       );
     case "profile_registry_record_v1":
       return toRawProfileRegistryRecord(
@@ -3109,16 +3086,11 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     bufferedBrainRunDiagnostics: unavailable("buffered_brain_run_diagnostics"),
     cleanupBufferedBrainRuns: unavailable("cleanup_buffered_brain_runs"),
-    runOpenAiResponsesBrain: unavailable("wake_brain"),
     exchangeOpenAiOauthCode: unavailable("wake_brain"),
-    startOpenAiResponsesBrain: unavailable("wake_brain"),
-    drainOpenAiResponsesBrainStream: unavailable("wake_brain"),
-    submitOpenAiResponsesToolOutput: unavailable("wake_brain"),
-    cancelOpenAiResponsesBrain: unavailable("wake_brain"),
-    startPiAgentBrain: unavailable("wake_brain"),
-    drainPiAgentBrainStream: unavailable("wake_brain"),
-    submitPiAgentToolOutput: unavailable("wake_brain"),
-    cancelPiAgentBrain: unavailable("wake_brain"),
+    startBrainRun: unavailable("start_brain_run"),
+    drainBrainRun: unavailable("drain_brain_run"),
+    submitBrainHostResult: unavailable("submit_brain_host_result"),
+    cancelBrainRun: unavailable("cancel_brain_run"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -3144,6 +3116,36 @@ function unavailable<Args extends unknown[], Result>(
 ): (...args: Args) => Promise<Result> {
   return async () => {
     throw new Error(`native bridge operation ${operation} is unavailable`);
+  };
+}
+
+function assertCanonicalBrainRunModule(
+  moduleId: string,
+): "pi-agent" | "openai-responses" {
+  if (moduleId === "pi-agent" || moduleId === "openai-responses") {
+    return moduleId;
+  }
+  throw new Error(`native bridge returned unknown brain module ${moduleId}`);
+}
+
+function piAgentTransportMetricsFromRaw(
+  raw:
+    | NonNullable<RawPiAgentBufferedDrainResult["transport_metrics"]>
+    | undefined,
+): PiAgentTransportMetrics | undefined {
+  if (!raw) return undefined;
+  return {
+    effectiveTransport: "rust-pi-agent",
+    selectedStrategyId: "default",
+    effectiveStrategyId: "default",
+    fallbackReason: null,
+    providerRequestCount: raw.provider_request_count,
+    continuationRoundCount: raw.tool_round_count,
+    providerRequestPayloadBytes: 0,
+    providerEventCounts: {},
+    firstTextDeltaLatencyMs: null,
+    totalTurnDurationMs: 0,
+    toolRoundCount: raw.tool_round_count,
   };
 }
 
@@ -4535,27 +4537,6 @@ function createNativeBridgeModule(
         ]).slice(0, limit),
       });
     },
-    runOpenAiResponsesBrain: async (input) => {
-      const validatedInput = validateBridgeValue<OpenAiResponsesBrainRunInput>({
-        operation: "run_openai_responses_brain",
-        direction: "ts_to_rust",
-        schema: openAiResponsesBrainRunInputSchema,
-        value: input,
-      });
-      const raw = validateBridgeValue<RawOpenAiResponsesBrainRunResult>({
-        operation: "run_openai_responses_brain",
-        direction: "rust_to_ts",
-        schema: rawOpenAiResponsesBrainRunResultSchema,
-        value: JSON.parse(
-          await binding.runOpenaiResponsesBrainJson(
-            JSON.stringify(
-              toNativeOpenAiResponsesBrainRunInput(validatedInput),
-            ),
-          ),
-        ),
-      });
-      return toOpenAiResponsesBrainRunResult(raw);
-    },
     exchangeOpenAiOauthCode: async (input) => {
       const raw = JSON.parse(
         await binding.exchangeOpenaiOauthCodeJson(
@@ -4588,169 +4569,48 @@ function createNativeBridgeModule(
         },
       };
     },
-    startOpenAiResponsesBrain: async (input) => {
+    startBrainRun: async (input) => {
+      const providerInput =
+        input.moduleId === "pi-agent"
+          ? toNativePiAgentBrainRunInput(
+              validateBridgeValue<PiAgentBrainRunInput>({
+                operation: "start_brain_run",
+                direction: "ts_to_rust",
+                schema: piAgentBrainRunInputSchema,
+                value: input.providerInput,
+              }),
+            )
+          : toNativeOpenAiResponsesBrainRunInput(input.providerInput);
       const raw = JSON.parse(
-        binding.startOpenaiResponsesBrainJson(
-          JSON.stringify(toNativeOpenAiResponsesBrainRunInput(input)),
+        binding.startBrainRunJson(
+          input.moduleId,
+          JSON.stringify(providerInput),
         ),
-      ) as RawOpenAiResponsesBufferedStartResult;
-      return { wakeId: raw.wake_id };
-    },
-    drainOpenAiResponsesBrainStream: async (input) => {
-      const raw = JSON.parse(
-        binding.drainOpenaiResponsesBrainStreamJson(
-          input.wakeId,
-          input.maxItems,
-        ),
-      ) as RawOpenAiResponsesBufferedDrainResult;
+      ) as RawOpenAiResponsesBufferedStartResult & { module_id: string };
       return {
+        moduleId: assertCanonicalBrainRunModule(raw.module_id),
         wakeId: raw.wake_id,
-        items: raw.items.map(toBrainWakeStreamItem),
-        toolRequests: (raw.tool_requests ?? []).map((request) => ({
-          wakeId: raw.wake_id,
-          callId: request.call_id,
-          providerItemId: request.provider_item_id ?? undefined,
-          name: request.name,
-          argumentsJson: request.arguments_json,
-        })),
-        terminal: raw.terminal,
-        providerState: raw.provider_state
-          ? toBrainWakeProviderStateOutput(raw.provider_state)
-          : undefined,
-        transportMetrics: raw.transport_metrics,
-        credentialSecretUpdate: raw.credential_secret_update
-          ? {
-              providerAlias: raw.credential_secret_update.provider_alias,
-              secret: raw.credential_secret_update.secret,
-            }
-          : undefined,
-        cancellation: raw.cancellation
-          ? {
-              reasonCode: raw.cancellation.reason_code,
-              summary: raw.cancellation.summary,
-              cancelledAt: raw.cancellation.cancelled_at,
-            }
-          : undefined,
-        error: typeof raw.error === "string" ? raw.error : undefined,
       };
     },
-    submitOpenAiResponsesToolOutput: async (input) => {
-      const raw = JSON.parse(
-        binding.submitOpenaiResponsesToolOutputJson(
-          JSON.stringify({
-            wakeId: input.wakeId,
-            callId: input.callId,
-            output: input.output,
-            status: input.status,
-            retryable: input.retryable,
-            ...(input.reasonCode === undefined
-              ? {}
-              : { reasonCode: input.reasonCode }),
-            ...(input.action === undefined ? {} : { action: input.action }),
-            ...(input.summary === undefined ? {} : { summary: input.summary }),
-            ...(input.debugDetailId === undefined
-              ? {}
-              : { debugDetailId: input.debugDetailId }),
-          }),
-        ),
-      ) as {
-        ok: true;
-        wake_id: string;
-        call_id: string;
-      };
-      return {
-        ok: true,
-        wakeId: raw.wake_id,
-        callId: raw.call_id,
-      };
-    },
-    cancelOpenAiResponsesBrain: async (input) => {
-      const raw = JSON.parse(
-        binding.cancelOpenaiResponsesBrainJson(
-          JSON.stringify({
-            wakeId: input.wakeId,
-            reasonCode: input.reasonCode,
-            summary: input.summary,
-          }),
-        ),
-      ) as RawOpenAiResponsesBufferedCancelResult;
-      return {
-        ok: true,
-        wakeId: raw.wake_id,
-        cancelled: raw.cancelled,
-        terminal: raw.terminal,
-        cancellation: raw.cancellation
-          ? {
-              reasonCode: raw.cancellation.reason_code,
-              summary: raw.cancellation.summary,
-              cancelledAt: raw.cancellation.cancelled_at,
-            }
-          : undefined,
-      };
-    },
-    startPiAgentBrain: async (input) => {
-      const validatedInput = validateBridgeValue<PiAgentBrainRunInput>({
-        operation: "start_pi_agent_brain",
-        direction: "ts_to_rust",
-        schema: piAgentBrainRunInputSchema,
-        value: input,
-      });
-      const raw = JSON.parse(
-        binding.startPiAgentBrainJson(
-          JSON.stringify(toNativePiAgentBrainRunInput(validatedInput)),
-        ),
-      ) as RawPiAgentBufferedStartResult;
-      return { wakeId: raw.wake_id };
-    },
-    drainPiAgentBrainStream: async (input) => {
-      const raw = validateBridgeValue<RawPiAgentBufferedDrainResult>({
-        operation: "drain_pi_agent_brain_stream",
+    drainBrainRun: async (input) => {
+      const raw = validateBridgeValue<RawBufferedBrainRunDrainResult>({
+        operation: "drain_brain_run",
         direction: "rust_to_ts",
-        schema: rawPiAgentBufferedDrainResultSchema,
+        schema: rawBufferedBrainRunDrainSchema,
         value: JSON.parse(
-          binding.drainPiAgentBrainStreamJson(input.wakeId, input.maxItems),
+          binding.drainBrainRunJson(
+            input.moduleId,
+            input.wakeId,
+            input.maxItems,
+          ),
         ),
       });
-      return {
-        wakeId: raw.wake_id,
-        items: raw.items.map(toBrainWakeStreamItem),
-        toolRequests: (raw.tool_requests ?? []).map((request) => ({
-          wakeId: raw.wake_id,
-          callId: request.call_id,
-          providerItemId: request.provider_item_id ?? undefined,
-          name: request.name,
-          argumentsJson: request.arguments_json,
-        })),
-        terminal: raw.terminal,
-        transportMetrics: raw.transport_metrics
-          ? {
-              effectiveTransport: "rust-pi-agent",
-              selectedStrategyId: "default",
-              effectiveStrategyId: "default",
-              fallbackReason: null,
-              providerRequestCount:
-                raw.transport_metrics.provider_request_count,
-              continuationRoundCount: raw.transport_metrics.tool_round_count,
-              providerRequestPayloadBytes: 0,
-              providerEventCounts: {},
-              firstTextDeltaLatencyMs: null,
-              totalTurnDurationMs: 0,
-              toolRoundCount: raw.transport_metrics.tool_round_count,
-            }
-          : undefined,
-        cancellation: raw.cancellation
-          ? {
-              reasonCode: raw.cancellation.reason_code,
-              summary: raw.cancellation.summary,
-              cancelledAt: raw.cancellation.cancelled_at,
-            }
-          : undefined,
-        error: typeof raw.error === "string" ? raw.error : undefined,
-      };
+      return toBufferedBrainRunDrainResult(raw);
     },
-    submitPiAgentToolOutput: async (input) => {
+    submitBrainHostResult: async (input) => {
       const raw = JSON.parse(
-        binding.submitPiAgentToolOutputJson(
+        binding.submitBrainHostResultJson(
+          input.moduleId,
           JSON.stringify({
             wakeId: input.wakeId,
             callId: input.callId,
@@ -4767,29 +4627,26 @@ function createNativeBridgeModule(
               : { debugDetailId: input.debugDetailId }),
           }),
         ),
-      ) as {
-        ok: true;
-        wake_id: string;
-        call_id: string;
-      };
+      ) as { module_id: string; wake_id: string; call_id: string };
       return {
-        ok: true,
+        moduleId: assertCanonicalBrainRunModule(raw.module_id),
         wakeId: raw.wake_id,
         callId: raw.call_id,
       };
     },
-    cancelPiAgentBrain: async (input) => {
+    cancelBrainRun: async (input) => {
       const raw = JSON.parse(
-        binding.cancelPiAgentBrainJson(
+        binding.cancelBrainRunJson(
+          input.moduleId,
           JSON.stringify({
             wakeId: input.wakeId,
             reasonCode: input.reasonCode,
             summary: input.summary,
           }),
         ),
-      ) as RawOpenAiResponsesBufferedCancelResult;
+      ) as RawOpenAiResponsesBufferedCancelResult & { module_id: string };
       return {
-        ok: true,
+        moduleId: assertCanonicalBrainRunModule(raw.module_id),
         wakeId: raw.wake_id,
         cancelled: raw.cancelled,
         terminal: raw.terminal,
@@ -6703,6 +6560,120 @@ function toBrainWakeProviderStateOutput(
   }
 }
 
+function toBufferedBrainRunDrainResult(
+  raw: RawBufferedBrainRunDrainResult,
+): NativeBufferedBrainRunDrain {
+  const moduleId = assertCanonicalBrainRunModule(raw.module_id);
+  const transportMetrics =
+    raw.transport_metrics == null
+      ? undefined
+      : moduleId === "pi-agent"
+        ? piAgentTransportMetricsFromRaw(
+            raw.transport_metrics as NonNullable<
+              RawPiAgentBufferedDrainResult["transport_metrics"]
+            >,
+          )
+        : (raw.transport_metrics as OpenAiResponsesTransportMetrics);
+  return {
+    moduleId,
+    wakeId: raw.wake_id,
+    items: raw.items.map(toBrainWakeStreamItem),
+    toolRequests: raw.tool_requests.map((request) => ({
+      wakeId: request.wake_id ?? raw.wake_id,
+      callId: request.call_id,
+      ...(request.provider_item_id == null
+        ? {}
+        : { providerItemId: request.provider_item_id }),
+      name: request.name,
+      argumentsJson: request.arguments_json,
+    })),
+    terminal: raw.terminal,
+    ...(raw.provider_state == null
+      ? {}
+      : { providerState: toBrainWakeProviderStateOutput(raw.provider_state) }),
+    ...(transportMetrics === undefined ? {} : { transportMetrics }),
+    ...(raw.credential_secret_update == null
+      ? {}
+      : {
+          credentialSecretUpdate: {
+            providerAlias: raw.credential_secret_update.provider_alias,
+            secret: raw.credential_secret_update.secret,
+          },
+        }),
+    ...(raw.cancellation == null
+      ? {}
+      : {
+          cancellation: {
+            reasonCode: raw.cancellation.reason_code,
+            summary: raw.cancellation.summary,
+            cancelledAt: raw.cancellation.cancelled_at,
+          },
+        }),
+    ...(raw.error == null ? {} : { error: raw.error }),
+  };
+}
+
+function toRawBufferedBrainRunDrainResult(
+  result: NativeBufferedBrainRunDrain,
+): RawBufferedBrainRunDrainResult {
+  const transportMetrics =
+    result.transportMetrics === undefined
+      ? undefined
+      : result.moduleId === "pi-agent"
+        ? {
+            provider_request_count: (
+              result.transportMetrics as PiAgentTransportMetrics
+            ).providerRequestCount,
+            tool_round_count: (
+              result.transportMetrics as PiAgentTransportMetrics
+            ).toolRoundCount,
+          }
+        : (result.transportMetrics as OpenAiResponsesTransportMetrics);
+  return {
+    module_id: result.moduleId,
+    wake_id: result.wakeId,
+    items: result.items.map(toRawBrainWakeStreamItem),
+    tool_requests: result.toolRequests.map((request) => ({
+      wake_id: request.wakeId,
+      call_id: request.callId,
+      ...(request.providerItemId === undefined
+        ? {}
+        : { provider_item_id: request.providerItemId }),
+      name: request.name,
+      arguments_json: request.argumentsJson,
+    })),
+    terminal: result.terminal,
+    ...(result.providerState === undefined
+      ? {}
+      : {
+          provider_state: toRawBrainWakeProviderStateOutput(
+            result.providerState,
+          ),
+        }),
+    ...(transportMetrics === undefined
+      ? {}
+      : { transport_metrics: transportMetrics }),
+    ...(result.credentialSecretUpdate === undefined
+      ? {}
+      : {
+          credential_secret_update: {
+            provider_alias: result.credentialSecretUpdate.providerAlias,
+            secret: result.credentialSecretUpdate.secret,
+          },
+        }),
+    ...(result.cancellation === undefined
+      ? {}
+      : {
+          cancellation: {
+            reason_code: result.cancellation.reasonCode,
+            summary: result.cancellation.summary,
+            cancelled_at: result.cancellation.cancelledAt,
+          },
+        }),
+    ...(result.error === undefined ? {} : { error: result.error }),
+  };
+}
+
 function toNativeBrainEvent(event: BrainEvent): {
   eventType: string;
   text?: string;
@@ -7496,7 +7467,7 @@ interface RawDelegatedFanOutGroup {
 
 interface RawOpenAiResponsesBrainRunResult {
   stream: RawBrainWakeStreamItem[];
-  provider_state?: RawBrainWakeProviderStateOutput;
+  provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
 }
@@ -7567,6 +7538,28 @@ interface RawPiAgentBufferedDrainResult {
     provider_request_count: number;
     tool_round_count: number;
   };
+  error?: string | null;
+  cancellation?: RawOpenAiResponsesBufferedCancellation | null;
+}
+
+interface RawBufferedBrainRunDrainResult {
+  module_id: string;
+  wake_id: string;
+  items: RawBrainWakeStreamItem[];
+  tool_requests: Array<{
+    wake_id?: string;
+    call_id: string;
+    provider_item_id?: string | null;
+    name: string;
+    arguments_json: string;
+  }>;
+  terminal: boolean;
+  provider_state?: RawBrainWakeProviderStateOutput | null;
+  transport_metrics?:
+    | OpenAiResponsesTransportMetrics
+    | NonNullable<RawPiAgentBufferedDrainResult["transport_metrics"]>
+    | null;
+  credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate | null;
   error?: string | null;
   cancellation?: RawOpenAiResponsesBufferedCancellation | null;
 }

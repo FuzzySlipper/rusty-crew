@@ -24,7 +24,7 @@ import {
   createBrowserToolResolver,
   defaultBodyDeltaPolicy,
   MemoryBrowserScreenshotStore,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
   selectToolProfile,
 } from "../src/index.js";
 import type {
@@ -240,7 +240,7 @@ try {
     kind: "full",
   });
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "production-browser-tools" as BrainImplementationId,

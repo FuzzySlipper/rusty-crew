@@ -11,7 +11,7 @@ import type {
 import type { BrainToolExecutionMode } from "../../src/brain-tool.js";
 import type {
   BrainActionPlanner,
-  BrainImplementation,
+  BrainHostExecutor,
   BrainRoleAssembly,
   BrainWakeInput,
   BrainWakeResult,
@@ -157,7 +157,7 @@ export interface PiAgentBrainOptions {
 
 export function createPiAgentBrain(
   options: PiAgentBrainOptions,
-): BrainImplementation {
+): BrainHostExecutor {
   return {
     async wake(input: BrainWakeInput): Promise<BrainWakeResult> {
       const events: BrainWakeResult["events"] = [];

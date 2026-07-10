@@ -25,10 +25,7 @@ export type {
   SceneStateToolContext,
   SceneStateToolDetails,
 } from "../scene-state-tool.js";
-export {
-  createRoleplayNarratorBrain,
-  createRoleplayNarratorBrain as createTwoPhaseRoleplayNarratorBrain,
-} from "../narrator-brain.js";
+export { createRoleplayNarratorBrain } from "../narrator-brain.js";
 export type { RoleplayNarratorBrainOptions } from "../narrator-brain.js";
 export { createRoleplayNarratorFsmBridge } from "../roleplay-narrator-fsm.js";
 export type {

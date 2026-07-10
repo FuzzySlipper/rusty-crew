@@ -154,7 +154,7 @@ const model = buildReadOnlySlashCommandResponse("model", {
       revision: 3,
     },
     brain: {
-      module: "pi-agent-core",
+      module: "pi-agent",
       backend: "pi-agent",
     },
     context_strategy: {

@@ -44,11 +44,15 @@ historical audit context only; they are not an implementation recommendation.
    Den-owned planning/product data plus observability; and tool availability is
    profile-based rather than gated by a `WorkerPolicy` allow/deny model.
 
-1. **`adr/` (both repo-root `adr/0001-*` and `docs/adr/0002`–`0022`)** — the
+1. **`adr/` (both repo-root `adr/0001-*` and `docs/adr/0002`–`0023`)** — the
    decision trail. Notable recent decisions:
-   - `0021-first-class-brain-modules.md` — brain modules are first-class behind
-     the neutral wake contract; the Rust `openai-responses` brain is a peer of
-     the TypeScript pi-agent brain, not an experiment.
+   - `0023-rust-brain-catalog-and-host-capabilities.md` — Rust owns the
+     production built-in catalog, both provider loops, and run policy;
+     TypeScript supplies narrow tool, client, and projection host adapters.
+     Live cutover evidence is in
+     `rust-brain-catalog-live-certification-5389.md`.
+   - `0021-first-class-brain-modules.md` — historical neutral-contract decision,
+     superseded by ADR 0023 where it made TypeScript brains a permanent peer.
    - `0022-crew-owned-service-storage.md` — Rusty Crew owns Crew service data
      (coordination, profiles, providers, transcripts, memory, lore, module
      data, telemetry, diagnostics), partitioned by durable concern rather than
@@ -212,19 +216,20 @@ or live-provider requirements.
 ## LLM boundary decision
 
 The Rust coordination core does **not** call LLM provider APIs as part of
-coordination. Brain modules do call providers, and those modules may be
-TypeScript or Rust. TypeScript owns the pi-agent brain integration and many
-tool/provider surfaces; Rust brain modules are first-class only when they stay
-behind the neutral wake/stream/action/provider-state contract and do not depend
-on coordination internals, persistence, adapters, service-host code, or local
-config. The lane is guarded by `governance/ownership.toml` and
+coordination. Rust owns the production pi-agent and OpenAI Responses loops
+behind the neutral wake/stream/action/provider-state contract. TypeScript owns
+narrow provider client adaptation plus concrete tool and debug/adapter
+projection, but not brain identity or loop policy. Rust brain crates do not
+depend on coordination internals, persistence, adapters, service-host code, or
+local config. The lane is guarded by `governance/ownership.toml` and
 `npm run smoke:rust-crate-boundaries`.
 
 The old `prompt_worker` / `spawn_worker` operations are not TS-called FFI
 verbs. Rust still owns activation, body projection, worker/delegation
 lifecycle, action validation, and packet routing.
 
-The current decision is recorded in `adr/0021-first-class-brain-modules.md`.
+The current decision is recorded in
+`adr/0023-rust-brain-catalog-and-host-capabilities.md`.
 The pi package source decision is in `adr/0001-current-pi-package-source.md`
 (repo-root `adr/`) and `pi-package-source-lock.md`.
 
@@ -249,7 +254,8 @@ the real path rather than detached mock spikes. The decision trail:
   `production-wake-path-contract.md`.
 - Tool availability — profile-based, not `WorkerPolicy`;
   `adr/0014-tool-profile-enforcement.md`.
-- Rust brain modules as peers of the TS brain — `adr/0021-first-class-brain-modules.md`.
+- Rust production brain catalog with narrow TS host capabilities —
+  `adr/0023-rust-brain-catalog-and-host-capabilities.md`.
 - Crew-owned service storage partitioned by concern —
   `adr/0022-crew-owned-service-storage.md`, with the scope map in
   `storage-scope-governance.md` and `storage-repository-split-map.md` enforced

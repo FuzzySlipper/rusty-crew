@@ -13,8 +13,7 @@ The direct provider shape is:
 - credential: typed `openai_oauth` provider secret envelope
 - request base URL: `https://chatgpt.com/backend-api/codex`
 - profile brain module: `openai-responses`
-- live mode: `RUSTY_CREW_OPENAI_RESPONSES_LIVE=1`
-- native required: `RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1`
+- production host: always the live Rust `openai-responses` implementation
 
 `RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1` is not part of the direct OpenAI
 OAuth path. That flag exists only for explicitly configured API-key-compatible

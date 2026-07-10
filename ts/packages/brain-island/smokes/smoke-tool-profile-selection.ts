@@ -14,7 +14,7 @@ import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildBrainRegistrationFromToolProfile,
   createToolCatalogChangedPayload,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
   selectToolProfile,
 } from "../src/index.js";
 import { createLocalBrain } from "./support/local-brain-test-support.js";
@@ -126,7 +126,7 @@ try {
     ["read_file", "search_files", "git_status", "git_diff"],
   );
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     registration,
     createLocalBrain(),

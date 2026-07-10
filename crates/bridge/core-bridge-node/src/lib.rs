@@ -108,6 +108,7 @@ use rusty_crew_roleplay_core::{
     RoleplaySceneStateReadInput, RoleplaySceneStateUpdateInput, RoleplaySessionLifecyclePlanInput,
     RoleplaySessionMetadataPatchInput, RoleplaySpeakerIdentityInput,
 };
+mod binding_brain_runs;
 mod binding_brains;
 mod binding_config_profiles;
 mod binding_conversation;
@@ -115,7 +116,6 @@ mod binding_delegation;
 mod binding_events;
 mod binding_manifest;
 mod binding_memory;
-mod binding_pi_agent;
 mod binding_responses;
 mod binding_roleplay;
 mod binding_scheduler;
@@ -149,7 +149,7 @@ use registries::{BrainImplementationRegistry, PlatformAdapterRegistry, Subscript
 use responses::{
     cancel_openai_responses_brain_json, drain_openai_responses_brain_stream_json,
     start_openai_responses_brain_json, submit_openai_responses_tool_output_json,
-    OpenAiOauthCodeExchangeTask, OpenAiResponsesBrainRunTask, OpenAiResponsesBufferedRunRegistry,
+    OpenAiOauthCodeExchangeTask, OpenAiResponsesBufferedRunRegistry,
 };
 #[cfg(test)]
 use responses::{normalize_responses_tool_schema, run_openai_responses_brain_json_blocking};

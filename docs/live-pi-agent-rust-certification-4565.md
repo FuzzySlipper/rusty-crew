@@ -16,11 +16,11 @@ brain path after the TypeScript pi-agent internals were retired.
 - Provider route: local den-router chat completions, `deepseek-flash`
 - Local tool profile: `full_agent`
 
-The debug service required these environment values to avoid the deterministic
-fake bridge path:
+At the time of this historical certification, the debug service used a live
+toggle that no longer exists. Production hosts now always use the live Rust
+path. Only the long idle budget remains relevant:
 
 ```text
-RUSTY_CREW_PI_AGENT_LIVE=1
 RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
 ```
 

@@ -19,17 +19,17 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 177;
-const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 40;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 172;
+const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 33;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 144;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 34;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 138;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
   "chat_read_model_page",
   "create_profile_registry_record",
-  "drain_pi_agent_brain_stream",
+  "drain_brain_run",
   "get_model_provider",
   "get_profile_registry_record",
   "list_context_compaction_artifacts",
@@ -46,8 +46,9 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "query_chat_events",
   "save_context_compaction_artifact",
   "save_session_activity_digest",
-  "run_openai_responses_brain",
-  "start_pi_agent_brain",
+  "start_brain_run",
+  "submit_brain_host_result",
+  "cancel_brain_run",
   "submit_brain_actions",
   "submit_brain_event",
   "update_profile_registry_record",
@@ -60,7 +61,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
 const RUST_FIXTURE_BACKED_OPERATIONS = [
   "project_body_state",
   "list_sessions",
-  "run_openai_responses_brain",
+  "drain_brain_run",
   "list_profile_registry_records",
   "list_model_providers",
   "model_provider_refresh_impact",
@@ -77,7 +78,7 @@ const RUST_FIXTURE_FAMILY_NAMES = [
   "body_state_v1",
   "context_compaction_artifact_v1",
   "list_sessions_v1",
-  "brain_wake_stream_result_v1",
+  "buffered_brain_run_drain_v1",
   "profile_registry_record_v1",
   "model_provider_record_v1",
   "model_provider_refresh_impact_v1",
@@ -108,22 +109,10 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     ],
   },
   {
-    group: "responses_buffered_and_oauth",
+    group: "openai_oauth",
     reason:
-      "Buffered Responses stream operations are covered by Rust brain tests and fingerprinted result fixtures only for the aggregate run result; add per-operation fixtures before changing stream item envelopes.",
-    operations: [
-      "start_openai_responses_brain",
-      "drain_openai_responses_brain_stream",
-      "submit_openai_responses_tool_output",
-      "cancel_openai_responses_brain",
-      "exchange_openai_oauth_code",
-    ],
-  },
-  {
-    group: "pi_agent_buffered",
-    reason:
-      "Rust pi-agent start/drain are TypeBox validated; submit/cancel are narrow buffered-run receipts covered by Rust bridge tests until per-operation fixtures are added.",
-    operations: ["submit_pi_agent_tool_output", "cancel_pi_agent_brain"],
+      "OAuth code exchange is independently covered by the Rust OAuth client tests and service authorization flow.",
+    operations: ["exchange_openai_oauth_code"],
   },
   {
     group: "buffered_run_host_diagnostics",

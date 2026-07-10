@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 use anyhow::{bail, Context, Result};
+use rusty_crew_brain_runtime::BufferedBrainRunDrain;
 use rusty_crew_core_bridge_api::*;
 use rusty_crew_core_config::{
     BrainConfigDraft, ChannelBindingConfigDraft, ChannelWakePolicy, CreateProfileMcpBindingRequest,
@@ -468,30 +469,20 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "submit_brain_event",
         "submit_brain_actions",
         "apply_brain_provider_state_output",
-        "run_openai_responses_brain",
-        "start_openai_responses_brain",
-        "drain_openai_responses_brain_stream",
-        "submit_openai_responses_tool_output",
-        "cancel_openai_responses_brain",
-        "start_pi_agent_brain",
-        "drain_pi_agent_brain_stream",
-        "submit_pi_agent_tool_output",
-        "cancel_pi_agent_brain",
+        "start_brain_run",
+        "drain_brain_run",
+        "submit_brain_host_result",
+        "cancel_brain_run",
         "buffered_brain_run_diagnostics",
         "cleanup_buffered_brain_runs",
         "provider_state_diagnostics",
     ];
     let brain_provider_raw_methods = vec![
         "applyBrainProviderStateOutputJson",
-        "runOpenaiResponsesBrainJson",
-        "startOpenaiResponsesBrainJson",
-        "drainOpenaiResponsesBrainStreamJson",
-        "submitOpenaiResponsesToolOutputJson",
-        "cancelOpenaiResponsesBrainJson",
-        "startPiAgentBrainJson",
-        "drainPiAgentBrainStreamJson",
-        "submitPiAgentToolOutputJson",
-        "cancelPiAgentBrainJson",
+        "startBrainRunJson",
+        "drainBrainRunJson",
+        "submitBrainHostResultJson",
+        "cancelBrainRunJson",
         "providerStateDiagnostics",
         "bufferedBrainRunDiagnosticsJson",
         "cleanupBufferedBrainRunsJson",
@@ -499,15 +490,10 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
     ];
     let brain_provider_wrappers = vec![
         "clearBrainProviderState",
-        "runOpenAiResponsesBrain",
-        "startOpenAiResponsesBrain",
-        "drainOpenAiResponsesBrainStream",
-        "submitOpenAiResponsesToolOutput",
-        "cancelOpenAiResponsesBrain",
-        "startPiAgentBrain",
-        "drainPiAgentBrainStream",
-        "submitPiAgentToolOutput",
-        "cancelPiAgentBrain",
+        "startBrainRun",
+        "drainBrainRun",
+        "submitBrainHostResult",
+        "cancelBrainRun",
         "providerStateDiagnostics",
         "bufferedBrainRunDiagnostics",
         "cleanupBufferedBrainRuns",
@@ -1330,7 +1316,7 @@ fn sample_create_profile_plan_input() -> CreateProfilePlanInput {
                 max_output_tokens: Some(1024),
             }),
             brain: Some(ProfileBrainMetadata {
-                module: Some("pi-agent-core".to_owned()),
+                module: Some("pi-agent".to_owned()),
                 strategy: Some("default".to_owned()),
             }),
             mcp_bindings: vec![CreateProfileMcpBindingRequest {
@@ -1502,7 +1488,7 @@ fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
     ProfileRuntimeMetadata {
         profile_id: ProfileId::new("field-sample-profile"),
         brain: Some(ProfileBrainMetadata {
-            module: Some("pi-agent-core".to_owned()),
+            module: Some("pi-agent".to_owned()),
             strategy: Some("default".to_owned()),
         }),
         runtime: Some(ProfileRuntimeOptions {
@@ -1705,12 +1691,30 @@ fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
                 value: serde_json::to_value(vec![sample_session_state()])?,
             },
             BridgeValidationFixture {
-                name: "brain_wake_stream_result_v1".to_owned(),
-                operation: "run_openai_responses_brain".to_owned(),
+                name: "buffered_brain_run_drain_v1".to_owned(),
+                operation: "drain_brain_run".to_owned(),
                 direction: "rust_to_ts".to_owned(),
-                rust_type: "Vec<rusty_crew_core_protocol::BrainWakeStreamItem>".to_owned(),
-                value: serde_json::to_value(BrainWakeStreamResultFixture {
-                    stream: sample_brain_wake_stream(),
+                rust_type: "rusty_crew_brain_runtime::BufferedBrainRunDrain".to_owned(),
+                value: serde_json::to_value(BufferedBrainRunDrain {
+                    module_id: "openai-responses".to_owned(),
+                    wake_id: "validation-wake".to_owned(),
+                    items: sample_brain_wake_stream(),
+                    tool_requests: vec![],
+                    terminal: true,
+                    provider_state: None,
+                    transport_metrics: Some(json!({
+                        "effectiveTransport": "responses",
+                        "selectedStrategyId": "responses-replay-v1",
+                        "effectiveStrategyId": "responses-replay-v1",
+                        "providerRequestCount": 1,
+                        "continuationRoundCount": 0,
+                        "providerRequestPayloadBytes": 512,
+                        "providerEventCounts": {"response.completed": 1},
+                        "totalTurnDurationMs": 25
+                    })),
+                    credential_secret_update: None,
+                    cancellation: None,
+                    error: None,
                 })?,
             },
             BridgeValidationFixture {

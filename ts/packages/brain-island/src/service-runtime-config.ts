@@ -48,12 +48,8 @@ import {
   type CoordinationToolRuntime,
 } from "./coordination-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
-import {
-  brainExecutorForSelection,
-  openAiResponsesClientMode,
-  openAiResponsesStreamIdleTimeoutMs,
-  type BrainModule,
-} from "./brain-module.js";
+import { createBuiltInBrainHost } from "./built-in-brain-host.js";
+import { openAiResponsesStreamIdleTimeoutMs } from "./openai-responses-host.js";
 import {
   resolveBrainCatalogSelection,
   type BrainModuleSelection,
@@ -69,7 +65,7 @@ import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import { resolveDelegationTools } from "./delegation-tools.js";
 import { resolveLoreMemoryTools } from "./lore-memory-tool.js";
 import { resolveSceneStateTools } from "./scene-state-tool.js";
-import type { BrainImplementation, BrainWakeResult } from "./index.js";
+import type { BrainHostExecutor, BrainWakeResult } from "./index.js";
 import { createLocalCodeToolResolver } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
@@ -797,7 +793,6 @@ export async function applyRustyCrewRuntimeConfig(input: {
       profile.profile,
     );
     const { selection, moduleStrategy, strategy } = resolvedBrain;
-    const module = brainExecutorForSelection(selection);
     const providerStateScope = providerStateScopeForProfile({
       profile,
       strategy,
@@ -823,7 +818,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           providerStateScope,
         },
         toBridgeWakeExecutor(
-          await createConfiguredBrain(module, profile, {
+          await createConfiguredBrain(selection, profile, {
             bridge: input.bridge,
             providerStateScope,
             runtimeConfig,
@@ -1051,7 +1046,6 @@ export async function rebuildConfiguredBrainRuntime(input: {
     profile.profile,
   );
   const { selection, moduleStrategy, strategy } = resolvedBrain;
-  const module = brainExecutorForSelection(selection);
   const providerStateScope = providerStateScopeForProfile({
     profile,
     strategy,
@@ -1067,7 +1061,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
       providerStateScope,
     },
     toBridgeWakeExecutor(
-      await createConfiguredBrain(module, profile, {
+      await createConfiguredBrain(selection, profile, {
         bridge: input.bridge,
         providerStateScope,
         runtimeConfig,
@@ -1318,7 +1312,7 @@ function brainModuleDiagnostics(input: {
           ? "responses"
           : "chat_completions",
       ...(input.selection.moduleId === "openai-responses"
-        ? { clientMode: openAiResponsesClientMode() }
+        ? { clientMode: "live" }
         : {}),
       ...(input.selection.moduleId === "openai-responses"
         ? { streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs() }
@@ -1364,7 +1358,7 @@ function brainModuleDiagnostics(input: {
 }
 
 async function createConfiguredBrain(
-  module: BrainModule,
+  selection: BrainModuleSelection,
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
   options: {
     bridge?: NativeBridgeModule;
@@ -1381,8 +1375,8 @@ async function createConfiguredBrain(
     browserResources: ServiceBrowserResources;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
-): Promise<BrainImplementation> {
-  return module.createBrain({
+): Promise<BrainHostExecutor> {
+  return createBuiltInBrainHost(selection, {
     profile,
     bridge: options.bridge,
     providerStateScope: options.providerStateScope,
@@ -1664,7 +1658,7 @@ function serviceSkillManageMode(
 }
 
 function toBridgeWakeExecutor(
-  brain: BrainImplementation,
+  brain: BrainHostExecutor,
   options: {
     profileId?: ProfileId;
     onBrainWakeResult?: (

@@ -39,11 +39,10 @@ The service should be ready enough for admin/profile work. During the
 architecture remediation window, it is acceptable to restart the service or
 reset local service data before this setup.
 
-For Rust pi-agent live certification, the debug service must run the live Rust
-brain path rather than the deterministic fake bridge path:
+Production hosts always run the live Rust brain path. An optional longer idle
+timeout is useful during live certification:
 
 ```bash
-RUSTY_CREW_PI_AGENT_LIVE=1
 RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
 ```
 
@@ -123,7 +122,7 @@ Expected result:
 
 - profile id: `tester`;
 - session id: normally derived by the backend, such as `tester-session`;
-- brain module: `pi-agent-core` because `tester-chat` uses
+- brain module: `pi-agent` because `tester-chat` uses
   `chat_completions`;
 - local tool profile: `full_agent`.
 
@@ -146,9 +145,8 @@ provider with:
 - `baseUrl`: `https://chatgpt.com/backend-api/codex`;
 - a typed `openai_oauth` credential stored through the provider OAuth admin
   flow;
-- live service env:
-  `RUSTY_CREW_OPENAI_RESPONSES_LIVE=1`,
-  `RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1`.
+- optional live-certification idle budget:
+  `RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=300000`.
 
 After the OAuth provider is active, create a second profile such as
 `tester-reasoning` using the same create-profile route with

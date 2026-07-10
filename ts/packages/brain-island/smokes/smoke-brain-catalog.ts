@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  BrainImplementationHandle,
-  SessionId,
-} from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildRuntimeDiagnosticsProjection,
@@ -19,9 +15,9 @@ import {
 import { handleAdminBrainCatalogRequest } from "../src/service-brain-catalog-routes.js";
 import { resolveBrainCatalogSelection } from "../src/brain-catalog.js";
 
-const encoder = new TextEncoder();
-const root = mkdtempSync(join(tmpdir(), "rusty-crew-brain-modules-"));
+const root = mkdtempSync(join(tmpdir(), "rusty-crew-brain-catalog-"));
 const native = await loadNativeBridge();
+process.env.RUSTY_CREW_TEST_OPENAI_API_KEY = "test-only";
 
 try {
   writeRuntimeConfig(root);
@@ -212,66 +208,11 @@ try {
       "replay",
     );
 
-    const brainEvents = await native.subscribeEvents({
-      eventKinds: ["brain_event_observed"],
-    });
-    const piResult = await wakeSession(
-      applyResult.brainHandlesByProfileId["pi-profile"],
-      "pi-session" as SessionId,
-      "wake-pi-module",
-    );
-    const responsesResult = await wakeSession(
-      applyResult.brainHandlesByProfileId["responses-profile"],
-      "responses-session" as SessionId,
-      "wake-responses-module",
-    );
-    const narratorResult = await wakeSession(
-      applyResult.brainHandlesByProfileId["narrator-profile"],
-      "narrator-session" as SessionId,
-      "wake-narrator-module",
-    );
-
-    assert.deepEqual(piResult, { wakeId: "wake-pi-module", accepted: true });
-    assert.deepEqual(responsesResult, {
-      wakeId: "wake-responses-module",
-      accepted: true,
-    });
-    assert.deepEqual(narratorResult, {
-      wakeId: "wake-narrator-module",
-      accepted: true,
-    });
-    assert.equal(await native.countRows("completion_packets"), 3);
-
-    const observedEvents = await native.drainSubscriptionEvents(
-      brainEvents,
-      20,
-    );
-    await native.unsubscribeEvents(brainEvents);
-    const piText = observedEvents
-      .flatMap((event) =>
-        event.type === "brain_event_observed" &&
-        event.wakeId === "wake-pi-module" &&
-        event.event.type === "text_delta"
-          ? [event.event.text]
-          : [],
-      )
-      .join("");
-    assert.match(piText, /pi-agent Rust bridge wake completed/);
-    const narratorPhases = observedEvents.flatMap((event) =>
-      event.type === "brain_event_observed" &&
-      event.wakeId === "wake-narrator-module" &&
-      event.event.type === "phase_change"
-        ? [event.event.phase]
-        : [],
-    );
-    assert.deepEqual(narratorPhases, ["exploring", "composing", "idle"]);
-
     console.log(
       JSON.stringify(
         {
           modules: diagnostics.runtime.brainModules,
-          piText,
-          completionPackets: await native.countRows("completion_packets"),
+          rustCatalogModules: catalog.modules.map((module) => module.module_id),
         },
         null,
         2,
@@ -282,24 +223,6 @@ try {
   }
 } finally {
   rmSync(root, { recursive: true, force: true });
-}
-
-async function wakeSession(
-  brain: BrainImplementationHandle | undefined,
-  sessionId: SessionId,
-  wakeId: string,
-) {
-  assert.ok(brain, `${String(sessionId)} brain should be registered`);
-  const request = await native.buildBrainWakeRequestForSession({
-    brain,
-    sessionId,
-    systemPrompt: "Test module selection.",
-    roleAssemblyJson: encoder.encode(
-      JSON.stringify({ instructions: "Reply once." }),
-    ),
-    wakeId,
-  });
-  return native.wakeBrain(request);
 }
 
 function brainModuleDiagnostics(
@@ -403,10 +326,11 @@ function writeRuntimeConfig(dataDir: string): void {
         modelConfig: {
           provider: "den-router",
           modelName: "fake-model",
+          baseUrl: "http://127.0.0.1:1",
           maxOutputTokens: 256,
         },
         brain: {
-          module: "pi-agent-core",
+          module: "pi-agent",
           strategy: "default",
         },
         toolPolicy: {
@@ -425,6 +349,8 @@ function writeRuntimeConfig(dataDir: string): void {
         modelConfig: {
           provider: "openai",
           modelName: "gpt-5",
+          baseUrl: "http://127.0.0.1:1",
+          apiKeyEnv: "RUSTY_CREW_TEST_OPENAI_API_KEY",
           api: "responses",
         },
         brain: {
@@ -444,6 +370,8 @@ function writeRuntimeConfig(dataDir: string): void {
         modelConfig: {
           provider: "openai",
           modelName: "gpt-5",
+          baseUrl: "http://127.0.0.1:1",
+          apiKeyEnv: "RUSTY_CREW_TEST_OPENAI_API_KEY",
           api: "responses",
         },
         brain: {
@@ -463,10 +391,11 @@ function writeRuntimeConfig(dataDir: string): void {
         modelConfig: {
           provider: "den-router",
           modelName: "fake-model",
+          baseUrl: "http://127.0.0.1:1",
           maxOutputTokens: 256,
         },
         brain: {
-          module: "pi-agent-core",
+          module: "pi-agent",
           strategy: "roleplay_narrator",
         },
         toolPolicy: {

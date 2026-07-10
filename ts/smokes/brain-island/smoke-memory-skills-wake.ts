@@ -30,7 +30,7 @@ import {
   defaultBodyDeltaPolicy,
   denseProfileMemoryTool,
   loadProfileContext,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
   renderDenMemoryContext,
   renderDenseProfileMemoryContext,
   resolveDenMemoryTools,
@@ -249,7 +249,7 @@ Use Den memory for product/project facts and dense profile memory for stable pro
     sessionId,
   });
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "memory-skills-proof" as BrainImplementationId,

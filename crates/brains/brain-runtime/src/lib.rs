@@ -1,12 +1,14 @@
 mod catalog;
 mod coordinator;
+mod host_protocol;
 mod tool_policy;
 
 pub use catalog::*;
 pub use coordinator::*;
+pub use host_protocol::*;
 pub use tool_policy::*;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub type BrainRuntimeResult<T> = Result<T, BrainRuntimeError>;
@@ -64,7 +66,7 @@ impl fmt::Display for BrainRuntimeError {
 
 impl std::error::Error for BrainRuntimeError {}
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BufferedNeutralPendingToolRequest {
     pub call_id: String,
     pub provider_item_id: Option<String>,
@@ -78,7 +80,7 @@ pub struct BufferedNeutralToolOutput {
     pub is_error: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BufferedNeutralCancellation {
     pub reason_code: String,
     pub summary: String,

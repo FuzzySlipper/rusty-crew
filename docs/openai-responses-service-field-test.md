@@ -2,45 +2,31 @@
 
 Status: active smoke/field-test note for task #3329
 
-The `openai-responses` brain module uses the direct Rust Responses brain path
-through the native bridge when the service provides a native bridge. The
-deterministic fake client remains the default so local service smokes and CI do
-not require OpenAI credentials.
-
-Fake mode is smoke-only. A deployed service, field certification run, or user
-profile that is meant to talk to a real provider should use a model provider
-alias with `protocol=responses` and set live mode explicitly:
-
-```env
-RUSTY_CREW_OPENAI_RESPONSES_LIVE=1
-RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1
-```
+The `openai-responses` catalog entry always uses the direct Rust Responses
+brain through the generic native bridge run operations. Production hosts always
+construct live clients. Deterministic clients exist only in explicit smoke/test
+support, so deployed profiles cannot silently fall back to fake output.
 
 For OpenAI OAuth-backed profiles, the green path is a direct Rusty Crew provider
 alias whose credential is a typed `openai_oauth` secret envelope. That path does
 not require `OPENAI_API_KEY` and must not rely on
 `RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1`.
 
-Live mode reports a configured Responses stream idle budget, defaulting to 120
+The host reports a configured Responses stream idle budget, defaulting to 120
 seconds, so operators can see what first-token/read window the profile expects:
 
 ```env
 RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=120000
 ```
 
-Do not certify a live profile while these settings are absent; otherwise the
-service is allowed to use the deterministic fake client for smoke coverage.
-
 ## Deterministic Service Smoke
 
 ```bash
-npm run smoke:responses-service-field-test
+npm run smoke:openai-responses-tool-bridge
 ```
 
-This starts a temporary service host, runs a configured `openai-responses`
-profile through the service debug-turn path, verifies provider-state
-diagnostics, restarts the host, and verifies provider-state hydration on the
-second wake.
+This exercises explicit fake provider protocol/tool fixtures. It does not
+describe a selectable deployed-service mode.
 
 ## Optional API-Key Live Provider Field Test
 
@@ -58,11 +44,10 @@ instead of `OPENAI_API_KEY`. `modelConfig.baseUrl` defaults to
 
 For ChatGPT/Codex OAuth credentials, configure a provider through the admin API
 and complete the OpenAI login flow so the provider has a redacted
-`openai_oauth` credential. The live service then needs only:
+`openai_oauth` credential. The live service may use a longer stream idle budget
+for certification:
 
 ```bash
-RUSTY_CREW_OPENAI_RESPONSES_LIVE=1 \
-RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1 \
 RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=300000 \
 npm run service:start
 ```
@@ -83,12 +68,10 @@ OAuth-backed `gpt` route is available. This is compatibility coverage, not the
 Rusty Crew OpenAI OAuth certification path:
 
 ```bash
-RUSTY_CREW_OPENAI_RESPONSES_LIVE=1 \
-RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1 \
 RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1 \
 RUSTY_CREW_OPENAI_RESPONSES_BASE_URL=http://127.0.0.1:18082/v1 \
 RUSTY_CREW_OPENAI_RESPONSES_MODEL=gpt \
-npm run smoke:responses-service-field-test
+npm run smoke:responses-service-live-field-test
 ```
 
 Use `RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1` only when the configured
@@ -107,9 +90,7 @@ Expected behavior:
   `modelProvider.streamIdleTimeoutMs`. Provider/router transports can still
   surface lower-level idle failures before that budget when they do not open the
   SSE stream or send heartbeat/data bytes;
-- live mode is never enabled unless `RUSTY_CREW_OPENAI_RESPONSES_LIVE=1` is set
-  by the command/environment.
+- production profiles always use the live Rust host; no live/fake toggle exists.
 
-In deterministic smoke mode the same diagnostics route reports
-`modelProvider.clientMode: "fake"`. That is expected only for local tests and
-CI-style smoke runs.
+Explicit deterministic smoke support can report
+`modelProvider.clientMode: "fake"`; deployed service configuration cannot.

@@ -24,7 +24,7 @@ import {
   counterResetTool,
   defaultBodyDeltaPolicy,
   MemorySessionTodoStore,
-  registerBrainImplementationRuntime,
+  registerBrainHostRuntime,
   renderPlanningContext,
   renderSessionTodoContext,
   selectToolProfile,
@@ -224,7 +224,7 @@ try {
     "planning-phoenix-2",
   );
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "planning-runtime-proof" as BrainImplementationId,

@@ -17,7 +17,7 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
-import { registerBrainImplementationRuntime } from "../src/index.js";
+import { registerBrainHostRuntime } from "../src/index.js";
 import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
 import type {
   PiAgentFactory,
@@ -94,7 +94,7 @@ try {
     /not registered/,
   );
 
-  const brain = await registerBrainImplementationRuntime(
+  const brain = await registerBrainHostRuntime(
     native,
     {
       implementationId: "registered-local" as BrainImplementationId,

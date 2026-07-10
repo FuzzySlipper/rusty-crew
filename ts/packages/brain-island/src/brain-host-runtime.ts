@@ -49,15 +49,15 @@ export interface BrainWakeResult {
   brainStreamItemCounts?: Record<string, number>;
 }
 
-export interface BrainImplementation {
+export interface BrainHostExecutor {
   wake(
     input: BrainWakeInput,
     options?: BrainWakeOptions,
   ): Promise<BrainWakeResult>;
 }
 
-export function createBrainWakeExecutor(
-  brain: BrainImplementation,
+export function createBrainHostWakeExecutor(
+  brain: BrainHostExecutor,
 ): BrainWakeExecutor {
   return {
     wake(request, buffers, options): Promise<BrainWakeResult> {
@@ -66,14 +66,14 @@ export function createBrainWakeExecutor(
   };
 }
 
-export function registerBrainImplementationRuntime(
+export function registerBrainHostRuntime(
   bridge: NativeBridgeModule,
   registration: BrainImplementationRegistration,
-  brain: BrainImplementation,
+  brain: BrainHostExecutor,
 ): Promise<BrainImplementationHandle> {
   return bridge.registerBrainRuntime(
     registration,
-    createBrainWakeExecutor(brain),
+    createBrainHostWakeExecutor(brain),
   );
 }
 

@@ -12,7 +12,7 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { Type } from "typebox";
 import type { BrainTool } from "../src/brain-tool.js";
-import type { BrainImplementation, BrainWakeInput } from "../src/index.js";
+import type { BrainHostExecutor, BrainWakeInput } from "../src/index.js";
 import {
   createRoleplayNarratorBrain,
   type RoleplayNarratorPhaseBrainOptions,
@@ -265,7 +265,7 @@ class RecordingPhaseBrainFactory {
 
   constructor(private readonly responses: readonly string[]) {}
 
-  create(options: RoleplayNarratorPhaseBrainOptions): BrainImplementation {
+  create(options: RoleplayNarratorPhaseBrainOptions): BrainHostExecutor {
     return {
       wake: async (input) => {
         const index = this.calls.length;
