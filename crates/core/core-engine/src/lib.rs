@@ -72,10 +72,11 @@ use rusty_crew_core_persistence::{
     RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
     RoleplayLoreTombstone, RoleplayLoreWrite, RoleplayPlayerPersonaQuery,
     RoleplayPlayerPersonaRecord, RoleplayPlayerPersonaWrite, RoleplaySessionMetadataQuery,
-    RoleplaySessionMetadataRecord, RoleplaySessionMetadataWrite, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
+    RoleplaySessionMetadataRecord, RoleplaySessionMetadataWrite, RoleplaySessionProjectionRecord,
+    RoleplaySessionProjectionWrite, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
+    RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
@@ -921,6 +922,12 @@ impl CoreEngine {
         query: &RoleplaySessionMetadataQuery,
     ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>> {
         RoleplayRecordsStore::list_session_metadata(&self.store, query)
+    }
+    pub fn apply_roleplay_session_projection(
+        &self,
+        write: &RoleplaySessionProjectionWrite,
+    ) -> CoreResult<RoleplaySessionProjectionRecord> {
+        RoleplayRecordsStore::apply_session_projection(&self.store, write)
     }
     pub fn put_roleplay_import(
         &self,

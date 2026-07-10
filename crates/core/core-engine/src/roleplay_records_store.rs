@@ -26,6 +26,10 @@ pub(crate) trait RoleplayRecordsStore {
         &self,
         query: &RoleplaySessionMetadataQuery,
     ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>>;
+    fn apply_session_projection(
+        &self,
+        write: &RoleplaySessionProjectionWrite,
+    ) -> CoreResult<RoleplaySessionProjectionRecord>;
     fn put_import(&self, write: &RoleplayImportWrite) -> CoreResult<RoleplayImportRecord>;
     fn get_import(&self, id: &str) -> CoreResult<Option<RoleplayImportRecord>>;
     fn list_imports(&self, query: &RoleplayImportQuery) -> CoreResult<Vec<RoleplayImportRecord>>;
@@ -73,6 +77,12 @@ impl RoleplayRecordsStore for CoreCoordinationStore {
         query: &RoleplaySessionMetadataQuery,
     ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>> {
         self.list_roleplay_session_metadata(query)
+    }
+    fn apply_session_projection(
+        &self,
+        write: &RoleplaySessionProjectionWrite,
+    ) -> CoreResult<RoleplaySessionProjectionRecord> {
+        self.apply_roleplay_session_projection(write)
     }
     fn put_import(&self, write: &RoleplayImportWrite) -> CoreResult<RoleplayImportRecord> {
         self.put_roleplay_import(write)

@@ -275,6 +275,23 @@ impl NativeBridgeBinding {
         )
     }
     #[napi]
+    pub fn apply_roleplay_session_projection_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let write = parse_json::<RoleplaySessionProjectionWrite>(
+            &input_json,
+            "roleplay session projection write",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .apply_roleplay_session_projection(&write)
+                .map_err(to_napi_error)?,
+            "roleplay session projection",
+        )
+    }
+    #[napi]
     pub fn put_roleplay_import_json(&self, input_json: String) -> napi::Result<String> {
         let write = parse_json::<RoleplayImportWrite>(&input_json, "roleplay import write")?;
         serialize_json(

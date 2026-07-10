@@ -1679,6 +1679,7 @@ export const manifestOperationNames = [
   "put_roleplay_session_metadata",
   "get_roleplay_session_metadata",
   "list_roleplay_session_metadata",
+  "apply_roleplay_session_projection",
   "put_roleplay_import",
   "get_roleplay_import",
   "list_roleplay_imports",
@@ -1735,6 +1736,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "478aff4bc81ad8d008284a3ce64a459cad5a86a7be88067e9b1939c624e1ac8d";
+  "d55674494070b29fb14a987f99d974b5a90fc5f3cbc8f837a453503420066971";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

@@ -10645,6 +10645,79 @@ mod tests {
                 .revision,
             2
         );
+        let now = "2026-07-10T00:00:00Z".to_string();
+        store
+            .create_lore_layer(&crate::RoleplayLoreLayerWrite {
+                layer_id: "layer-pg".into(),
+                profile_id: "profile-pg".into(),
+                name: "Layer".into(),
+                description: None,
+                purpose: crate::RoleplayLoreLayerPurpose::Mixed,
+                write_policy: crate::RoleplayLoreLayerWritePolicy::Manual,
+                now: now.clone(),
+            })
+            .unwrap();
+        let metadata = crate::RoleplaySessionMetadataRecord {
+            session_id: "session-pg".into(),
+            profile_id: "profile-pg".into(),
+            display_name: Some("Original".into()),
+            player_persona_id: None,
+            character_id: None,
+            active_layer_ids: vec!["layer-pg".into()],
+            archived: false,
+            revision: 0,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let projection = store
+            .apply_roleplay_session_projection(&crate::RoleplaySessionProjectionWrite {
+                metadata: crate::RoleplaySessionMetadataWrite {
+                    record: metadata,
+                    expected_revision: None,
+                },
+                chat_layers: Some(crate::RoleplayChatLayersWrite {
+                    chat_id: "session-pg".into(),
+                    layers: vec![crate::RoleplayChatLayerLink {
+                        layer_id: "layer-pg".into(),
+                        priority: 0,
+                        enabled: true,
+                    }],
+                    now: now.clone(),
+                }),
+            })
+            .unwrap();
+        let mut invalid = projection.metadata.clone();
+        invalid.display_name = Some("Rollback".into());
+        assert_eq!(
+            store
+                .apply_roleplay_session_projection(&crate::RoleplaySessionProjectionWrite {
+                    metadata: crate::RoleplaySessionMetadataWrite {
+                        record: invalid,
+                        expected_revision: Some(1)
+                    },
+                    chat_layers: Some(crate::RoleplayChatLayersWrite {
+                        chat_id: "session-pg".into(),
+                        layers: vec![crate::RoleplayChatLayerLink {
+                            layer_id: "missing-pg".into(),
+                            priority: 0,
+                            enabled: true
+                        }],
+                        now
+                    })
+                })
+                .unwrap_err()
+                .kind,
+            CoreErrorKind::NotFound
+        );
+        assert_eq!(
+            store
+                .get_roleplay_session_metadata("session-pg")
+                .unwrap()
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("Original")
+        );
         store.drop_schema_for_test().unwrap();
     }
 

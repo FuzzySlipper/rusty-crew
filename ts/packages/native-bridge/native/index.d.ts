@@ -130,6 +130,7 @@ export declare class NativeBridgeBinding {
   putRoleplaySessionMetadataJson(inputJson: string): string
   getRoleplaySessionMetadataJson(id: string): string
   listRoleplaySessionMetadataJson(inputJson: string): string
+  applyRoleplaySessionProjectionJson(inputJson: string): string
   putRoleplayImportJson(inputJson: string): string
   getRoleplayImportJson(id: string): string
   listRoleplayImportsJson(inputJson: string): string

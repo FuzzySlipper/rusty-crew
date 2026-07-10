@@ -294,6 +294,7 @@ interface NativeBridgeBinding {
   putRoleplaySessionMetadataJson(inputJson: string): string;
   getRoleplaySessionMetadataJson(id: string): string;
   listRoleplaySessionMetadataJson(inputJson: string): string;
+  applyRoleplaySessionProjectionJson(inputJson: string): string;
   putRoleplayImportJson(inputJson: string): string;
   getRoleplayImportJson(id: string): string;
   listRoleplayImportsJson(inputJson: string): string;
@@ -2705,6 +2706,7 @@ export interface NativeBridgeModule {
   putRoleplaySessionMetadata(write: unknown): Promise<unknown>;
   getRoleplaySessionMetadata(id: string): Promise<unknown | undefined>;
   listRoleplaySessionMetadata(query: unknown): Promise<unknown[]>;
+  applyRoleplaySessionProjection(write: unknown): Promise<unknown>;
   putRoleplayImport(write: unknown): Promise<unknown>;
   getRoleplayImport(id: string): Promise<unknown | undefined>;
   listRoleplayImports(query: unknown): Promise<unknown[]>;
@@ -3103,6 +3105,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     putRoleplaySessionMetadata: unavailable("initialize_engine"),
     getRoleplaySessionMetadata: unavailable("initialize_engine"),
     listRoleplaySessionMetadata: unavailable("initialize_engine"),
+    applyRoleplaySessionProjection: unavailable("initialize_engine"),
     putRoleplayImport: unavailable("initialize_engine"),
     getRoleplayImport: unavailable("initialize_engine"),
     listRoleplayImports: unavailable("initialize_engine"),
@@ -4369,6 +4372,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.listRoleplaySessionMetadataJson(JSON.stringify(query)),
       ) as unknown[],
+    applyRoleplaySessionProjection: async (write) =>
+      JSON.parse(
+        binding.applyRoleplaySessionProjectionJson(JSON.stringify(write)),
+      ) as unknown,
     putRoleplayImport: async (write) =>
       JSON.parse(
         binding.putRoleplayImportJson(JSON.stringify(write)),

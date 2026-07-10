@@ -883,13 +883,18 @@ async function putRoleplaySessionMetadataRecord(
   state: RoleplayRouteContext,
   record: RoleplaySessionMetadata,
   expectedRevision?: number,
+  chatLayers?: { chat_id: string; layers: unknown[]; now: string },
 ): Promise<RoleplaySessionMetadata> {
-  return state.bridge.putRoleplaySessionMetadata({
-    record: { ...record, revision: expectedRevision ?? record.revision ?? 0 },
-    ...(expectedRevision === undefined
-      ? {}
-      : { expected_revision: expectedRevision }),
-  }) as Promise<RoleplaySessionMetadata>;
+  const projection = (await state.bridge.applyRoleplaySessionProjection({
+    metadata: {
+      record: { ...record, revision: expectedRevision ?? record.revision ?? 0 },
+      ...(expectedRevision === undefined
+        ? {}
+        : { expected_revision: expectedRevision }),
+    },
+    ...(chatLayers === undefined ? {} : { chat_layers: chatLayers }),
+  })) as { metadata: RoleplaySessionMetadata };
+  return projection.metadata;
 }
 
 async function listRoleplayCharacters(
@@ -1144,18 +1149,6 @@ function roleplayLifecycleChatLayerBindings(
     priority: numberValue(layer.priority),
     enabled: layer.enabled !== false,
   }));
-}
-
-async function applyRoleplayLifecycleChatLayers(
-  state: RoleplayRouteContext,
-  plan: Pick<RoleplaySessionLifecyclePlan, "chat_layer_update">,
-): Promise<void> {
-  if (plan.chat_layer_update === undefined) return;
-  await state.bridge.setChatLayers({
-    chat_id: plan.chat_layer_update.chat_id,
-    layers: plan.chat_layer_update.layers,
-    now: state.now(),
-  });
 }
 
 function roleplayLifecycleSessionKind(
@@ -1738,8 +1731,11 @@ async function createRoleplaySession(
   await putRoleplaySessionMetadataRecord(
     state,
     plan.metadata as RoleplaySessionMetadata,
+    undefined,
+    plan.chat_layer_update === undefined
+      ? undefined
+      : { ...plan.chat_layer_update, now: state.now() },
   );
-  await applyRoleplayLifecycleChatLayers(state, plan);
   return (
     (await getRoleplaySessionSummary(state, session.sessionId)) ?? {
       session_id: session.sessionId,
@@ -1764,21 +1760,21 @@ async function updateRoleplaySessionMetadata(
     session.profileId,
     body,
   );
-  if (patch.active_layer_ids_changed) {
-    await state.bridge.setChatLayers({
-      chat_id: sessionId,
-      layers: patch.metadata.activeLayerIds.map((layerId, index) => ({
-        layer_id: layerId,
-        priority: index,
-        enabled: true,
-      })),
-      now: state.now(),
-    });
-  }
   await putRoleplaySessionMetadataRecord(
     state,
     patch.metadata,
     current.revision,
+    patch.active_layer_ids_changed
+      ? {
+          chat_id: sessionId,
+          layers: patch.metadata.activeLayerIds.map((layerId, index) => ({
+            layer_id: layerId,
+            priority: index,
+            enabled: true,
+          })),
+          now: state.now(),
+        }
+      : undefined,
   );
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
@@ -1903,8 +1899,11 @@ async function forkRoleplaySessionAtMessage(
   await putRoleplaySessionMetadataRecord(
     state,
     plan.metadata as RoleplaySessionMetadata,
+    undefined,
+    plan.chat_layer_update === undefined
+      ? undefined
+      : { ...plan.chat_layer_update, now: state.now() },
   );
-  await applyRoleplayLifecycleChatLayers(state, plan);
   const branch = (await state.bridge.saveConversationBranch({
     branch_id: fork.branch_id,
     session_id: targetSession.sessionId,

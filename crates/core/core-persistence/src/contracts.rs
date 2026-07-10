@@ -1253,6 +1253,20 @@ pub struct RoleplaySessionMetadataQuery {
     pub page: Option<QueryPage>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleplaySessionProjectionWrite {
+    pub metadata: RoleplaySessionMetadataWrite,
+    #[serde(default)]
+    pub chat_layers: Option<RoleplayChatLayersWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplaySessionProjectionRecord {
+    pub metadata: RoleplaySessionMetadataRecord,
+    pub chat_layers: Vec<RoleplayChatLayerRecord>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayImportCounts {

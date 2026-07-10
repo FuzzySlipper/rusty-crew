@@ -5,7 +5,8 @@ use crate::{
     RoleplayCharacterQuery, RoleplayCharacterRecord, RoleplayCharacterWrite, RoleplayImportQuery,
     RoleplayImportRecord, RoleplayImportWrite, RoleplayPlayerPersonaQuery,
     RoleplayPlayerPersonaRecord, RoleplayPlayerPersonaWrite, RoleplaySessionMetadataQuery,
-    RoleplaySessionMetadataRecord, RoleplaySessionMetadataWrite,
+    RoleplaySessionMetadataRecord, RoleplaySessionMetadataWrite, RoleplaySessionProjectionRecord,
+    RoleplaySessionProjectionWrite,
 };
 
 impl PostgresBackendStore {
@@ -99,6 +100,38 @@ impl PostgresBackendStore {
             query.page,
             "updated_at DESC, session_id ASC",
         )
+    }
+
+    pub fn apply_roleplay_session_projection(
+        &self,
+        write: &RoleplaySessionProjectionWrite,
+    ) -> CoreResult<RoleplaySessionProjectionRecord> {
+        if let Some(layers) = &write.chat_layers {
+            validate_roleplay_chat_layers_write(layers)?;
+            if layers.chat_id != write.metadata.record.session_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "roleplay projection chat_id must match metadata session_id",
+                ));
+            }
+        }
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL roleplay session projection", error)
+        })?;
+        let metadata = put_session_with_client(&mut tx, &schema, &write.metadata)?;
+        if let Some(layers) = &write.chat_layers {
+            Self::set_chat_layers_in_tx(&mut tx, &schema, layers)?;
+        }
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL roleplay session projection", error)
+        })?;
+        let chat_layers = self.get_chat_layers(&metadata.session_id)?;
+        Ok(RoleplaySessionProjectionRecord {
+            metadata,
+            chat_layers,
+        })
     }
 
     pub fn put_roleplay_import(
@@ -222,15 +255,20 @@ fn put_session(
     store: &PostgresBackendStore,
     write: &RoleplaySessionMetadataWrite,
 ) -> CoreResult<RoleplaySessionMetadataRecord> {
-    let mut record = write.record.clone();
-    record.revision = next_revision(
-        store.get_roleplay_session_metadata(&record.session_id)?,
-        write.expected_revision,
-        &record.session_id,
-    )?;
     let schema = store.quoted_schema();
-    let json = to_json_text(&record)?;
     let mut client = store.client()?;
+    put_session_with_client(&mut *client, &schema, write)
+}
+
+fn put_session_with_client<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    write: &RoleplaySessionMetadataWrite,
+) -> CoreResult<RoleplaySessionMetadataRecord> {
+    let current = client.query_opt(&format!("SELECT record_json::text FROM {schema}.module_roleplay_session_metadata WHERE session_id = $1 FOR UPDATE"), &[&write.record.session_id]).map_err(|error| postgres_error("read PostgreSQL roleplay session metadata for update", error))?.map(|row| parse_postgres_json::<RoleplaySessionMetadataRecord>(row.get(0))).transpose()?;
+    let mut record = write.record.clone();
+    record.revision = next_revision(current, write.expected_revision, &record.session_id)?;
+    let json = to_json_text(&record)?;
     client.execute(&format!("INSERT INTO {schema}.module_roleplay_session_metadata (session_id, profile_id, archived, character_id, persona_id, revision, record_json, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7::text::jsonb,$8,$9) ON CONFLICT(session_id) DO UPDATE SET profile_id=EXCLUDED.profile_id,archived=EXCLUDED.archived,character_id=EXCLUDED.character_id,persona_id=EXCLUDED.persona_id,revision=EXCLUDED.revision,record_json=EXCLUDED.record_json,updated_at=EXCLUDED.updated_at"), &[&record.session_id,&record.profile_id,&record.archived,&record.character_id,&record.player_persona_id,&(record.revision as i64),&json,&record.created_at,&record.updated_at]).map_err(|error| postgres_error("write typed PostgreSQL roleplay session metadata", error))?;
     Ok(record)
 }

@@ -52,6 +52,12 @@ impl NativeBridge {
     ) -> CoreResult<Vec<RoleplaySessionMetadataRecord>> {
         self.engine()?.list_roleplay_session_metadata(query)
     }
+    pub fn apply_roleplay_session_projection(
+        &self,
+        write: &RoleplaySessionProjectionWrite,
+    ) -> CoreResult<RoleplaySessionProjectionRecord> {
+        self.engine()?.apply_roleplay_session_projection(write)
+    }
     pub fn put_roleplay_import(
         &self,
         write: &RoleplayImportWrite,

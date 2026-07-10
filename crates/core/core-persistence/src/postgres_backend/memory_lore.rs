@@ -1403,13 +1403,23 @@ impl PostgresBackendStore {
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start set PostgreSQL roleplay chat layers", error))?;
+        Self::set_chat_layers_in_tx(&mut tx, &schema, write)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit set PostgreSQL roleplay chat layers", error))
+    }
+
+    pub(super) fn set_chat_layers_in_tx(
+        tx: &mut Transaction<'_>,
+        schema: &str,
+        write: &RoleplayChatLayersWrite,
+    ) -> CoreResult<()> {
         tx.execute(
             &format!("DELETE FROM {schema}.module_roleplay_chat_layers WHERE chat_id = $1"),
             &[&write.chat_id],
         )
         .map_err(|error| postgres_error("clear PostgreSQL roleplay chat layers", error))?;
         for layer in &write.layers {
-            if get_lore_layer(&mut tx, &schema, &layer.layer_id)?.is_none() {
+            if get_lore_layer(tx, schema, &layer.layer_id)?.is_none() {
                 return Err(CoreError::new(
                     CoreErrorKind::NotFound,
                     format!("roleplay lore layer {} not found", layer.layer_id),
@@ -1435,8 +1445,7 @@ impl PostgresBackendStore {
             )
             .map_err(|error| postgres_error("insert PostgreSQL roleplay chat layer", error))?;
         }
-        tx.commit()
-            .map_err(|error| postgres_error("commit set PostgreSQL roleplay chat layers", error))
+        Ok(())
     }
 
     pub fn get_chat_layers(&self, chat_id: &str) -> CoreResult<Vec<RoleplayChatLayerRecord>> {

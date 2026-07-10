@@ -152,6 +152,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "put_roleplay_session_metadata",
     "get_roleplay_session_metadata",
     "list_roleplay_session_metadata",
+    "apply_roleplay_session_projection",
     "put_roleplay_import",
     "get_roleplay_import",
     "list_roleplay_imports",

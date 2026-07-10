@@ -250,45 +250,42 @@ impl CoordinationStore {
         let tx = conn.transaction().map_err(|error| {
             persistence_error("start typed roleplay session metadata write", error)
         })?;
-        let current = get_session_metadata_in_tx(&tx, &write.record.session_id)?;
-        let revision = next_revision(
-            "roleplay session metadata",
-            &write.record.session_id,
-            current.as_ref().map(|record| record.revision),
-            write.expected_revision,
-        )?;
-        let mut record = write.record.clone();
-        record.revision = revision;
-        tx.execute(
-            "INSERT INTO module_roleplay_session_metadata (
-                session_id, profile_id, archived, character_id, persona_id, revision,
-                record_json, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(session_id) DO UPDATE SET
-                profile_id = excluded.profile_id,
-                archived = excluded.archived,
-                character_id = excluded.character_id,
-                persona_id = excluded.persona_id,
-                revision = excluded.revision,
-                record_json = excluded.record_json,
-                updated_at = excluded.updated_at",
-            params![
-                record.session_id,
-                record.profile_id,
-                i64::from(record.archived),
-                record.character_id,
-                record.player_persona_id,
-                record.revision as i64,
-                to_json_text(&record)?,
-                record.created_at,
-                record.updated_at,
-            ],
-        )
-        .map_err(|error| persistence_error("write typed roleplay session metadata", error))?;
+        let record = put_session_metadata_in_tx(&tx, write)?;
         tx.commit().map_err(|error| {
             persistence_error("commit typed roleplay session metadata write", error)
         })?;
         Ok(record)
+    }
+
+    pub fn apply_roleplay_session_projection(
+        &self,
+        write: &RoleplaySessionProjectionWrite,
+    ) -> CoreResult<RoleplaySessionProjectionRecord> {
+        validate_session_metadata_write(&write.metadata)?;
+        if let Some(layers) = &write.chat_layers {
+            super::roleplay_lore::validate_roleplay_chat_layers_write(layers)?;
+            if layers.chat_id != write.metadata.record.session_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "roleplay projection chat_id must match metadata session_id",
+                ));
+            }
+        }
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start roleplay session projection", error))?;
+        let metadata = put_session_metadata_in_tx(&tx, &write.metadata)?;
+        if let Some(layers) = &write.chat_layers {
+            CoordinationStore::set_chat_layers_in_tx(&tx, layers)?;
+        }
+        let chat_layers = super::roleplay_lore::get_chat_layers_in_tx(&tx, &metadata.session_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit roleplay session projection", error))?;
+        Ok(RoleplaySessionProjectionRecord {
+            metadata,
+            chat_layers,
+        })
     }
 
     pub fn get_roleplay_session_metadata(
@@ -433,6 +430,23 @@ fn get_session_metadata_in_tx(
     id: &str,
 ) -> CoreResult<Option<RoleplaySessionMetadataRecord>> {
     load_json_record(conn, "module_roleplay_session_metadata", "session_id", id)
+}
+
+fn put_session_metadata_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &RoleplaySessionMetadataWrite,
+) -> CoreResult<RoleplaySessionMetadataRecord> {
+    let current = get_session_metadata_in_tx(tx, &write.record.session_id)?;
+    let revision = next_revision(
+        "roleplay session metadata",
+        &write.record.session_id,
+        current.as_ref().map(|record| record.revision),
+        write.expected_revision,
+    )?;
+    let mut record = write.record.clone();
+    record.revision = revision;
+    tx.execute("INSERT INTO module_roleplay_session_metadata (session_id, profile_id, archived, character_id, persona_id, revision, record_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(session_id) DO UPDATE SET profile_id=excluded.profile_id,archived=excluded.archived,character_id=excluded.character_id,persona_id=excluded.persona_id,revision=excluded.revision,record_json=excluded.record_json,updated_at=excluded.updated_at", params![record.session_id,record.profile_id,i64::from(record.archived),record.character_id,record.player_persona_id,record.revision as i64,to_json_text(&record)?,record.created_at,record.updated_at]).map_err(|error| persistence_error("write typed roleplay session metadata", error))?;
+    Ok(record)
 }
 
 fn get_import_in_tx(conn: &Connection, id: &str) -> CoreResult<Option<RoleplayImportRecord>> {
@@ -708,6 +722,123 @@ mod tests {
             .get_roleplay_import(&import.import_id)
             .unwrap()
             .is_none());
+        drop(store);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn roleplay_session_projection_rolls_back_metadata_when_layers_fail() {
+        let db_path = std::env::temp_dir().join(format!(
+            "rusty-crew-roleplay-projection-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let now = "2026-07-10T00:00:00Z".to_string();
+        store
+            .create_lore_layer(&RoleplayLoreLayerWrite {
+                layer_id: "layer-one".into(),
+                profile_id: "profile-one".into(),
+                name: "Layer".into(),
+                description: None,
+                purpose: RoleplayLoreLayerPurpose::Mixed,
+                write_policy: RoleplayLoreLayerWritePolicy::Manual,
+                now: now.clone(),
+            })
+            .unwrap();
+        let record = RoleplaySessionMetadataRecord {
+            session_id: "session-one".into(),
+            profile_id: "profile-one".into(),
+            display_name: Some("Original".into()),
+            player_persona_id: None,
+            character_id: None,
+            active_layer_ids: vec!["layer-one".into()],
+            archived: false,
+            revision: 0,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let created = store
+            .apply_roleplay_session_projection(&RoleplaySessionProjectionWrite {
+                metadata: RoleplaySessionMetadataWrite {
+                    record,
+                    expected_revision: None,
+                },
+                chat_layers: Some(RoleplayChatLayersWrite {
+                    chat_id: "session-one".into(),
+                    layers: vec![RoleplayChatLayerLink {
+                        layer_id: "layer-one".into(),
+                        priority: 0,
+                        enabled: true,
+                    }],
+                    now: now.clone(),
+                }),
+            })
+            .unwrap();
+        assert_eq!(created.metadata.revision, 1);
+        let mut changed = created.metadata.clone();
+        changed.display_name = Some("Must roll back".into());
+        changed.active_layer_ids = vec!["missing-layer".into()];
+        let error = store
+            .apply_roleplay_session_projection(&RoleplaySessionProjectionWrite {
+                metadata: RoleplaySessionMetadataWrite {
+                    record: changed,
+                    expected_revision: Some(1),
+                },
+                chat_layers: Some(RoleplayChatLayersWrite {
+                    chat_id: "session-one".into(),
+                    layers: vec![RoleplayChatLayerLink {
+                        layer_id: "missing-layer".into(),
+                        priority: 0,
+                        enabled: true,
+                    }],
+                    now: now.clone(),
+                }),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+        let persisted = store
+            .get_roleplay_session_metadata("session-one")
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.revision, 1);
+        assert_eq!(persisted.display_name.as_deref(), Some("Original"));
+        assert_eq!(
+            store.get_chat_layers("session-one").unwrap()[0].layer_id,
+            "layer-one"
+        );
+        let mut winner = persisted.clone();
+        winner.display_name = Some("Winner".into());
+        assert_eq!(
+            store
+                .apply_roleplay_session_projection(&RoleplaySessionProjectionWrite {
+                    metadata: RoleplaySessionMetadataWrite {
+                        record: winner.clone(),
+                        expected_revision: Some(1)
+                    },
+                    chat_layers: None
+                })
+                .unwrap()
+                .metadata
+                .revision,
+            2
+        );
+        assert_eq!(
+            store
+                .apply_roleplay_session_projection(&RoleplaySessionProjectionWrite {
+                    metadata: RoleplaySessionMetadataWrite {
+                        record: winner,
+                        expected_revision: Some(1)
+                    },
+                    chat_layers: None
+                })
+                .unwrap_err()
+                .kind,
+            CoreErrorKind::ActionRejected
+        );
         drop(store);
         let _ = std::fs::remove_file(db_path);
     }

@@ -778,6 +778,19 @@ impl CoordinationStore {
         let tx = conn
             .transaction()
             .map_err(|error| persistence_error("start set roleplay chat layers", error))?;
+        Self::set_chat_layers_in_tx(&tx, write)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit set roleplay chat layers", error))
+    }
+    pub fn get_chat_layers(&self, chat_id: &str) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
+        validate_roleplay_lore_identifier("roleplay chat_id", chat_id)?;
+        let conn = self.conn()?;
+        get_chat_layers(&conn, chat_id)
+    }
+    pub(crate) fn set_chat_layers_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        write: &RoleplayChatLayersWrite,
+    ) -> CoreResult<()> {
         tx.execute(
             "DELETE FROM module_roleplay_chat_layers WHERE chat_id = ?1",
             params![write.chat_id.as_str()],
@@ -808,13 +821,7 @@ impl CoordinationStore {
             )
             .map_err(|error| persistence_error("insert roleplay chat layer", error))?;
         }
-        tx.commit()
-            .map_err(|error| persistence_error("commit set roleplay chat layers", error))
-    }
-    pub fn get_chat_layers(&self, chat_id: &str) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
-        validate_roleplay_lore_identifier("roleplay chat_id", chat_id)?;
-        let conn = self.conn()?;
-        get_chat_layers(&conn, chat_id)
+        Ok(())
     }
     pub fn toggle_chat_layer(
         &self,
@@ -1969,7 +1976,7 @@ fn get_chat_layers(conn: &Connection, chat_id: &str) -> CoreResult<Vec<RoleplayC
         .map_err(|error| persistence_error("load roleplay chat layers", error))
 }
 
-fn get_chat_layers_in_tx(
+pub(crate) fn get_chat_layers_in_tx(
     tx: &rusqlite::Transaction<'_>,
     chat_id: &str,
 ) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
