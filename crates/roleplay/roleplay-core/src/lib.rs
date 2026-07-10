@@ -4,6 +4,7 @@
 //! glue. It intentionally accepts transport/storage-shaped DTOs so callers can
 //! keep HTTP and persistence wiring outside the domain module.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
@@ -28,7 +29,7 @@ impl RoleplayDomainError {
 
 pub type RoleplayDomainResult<T> = Result<T, RoleplayDomainError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayPromptContextInput {
     pub metadata: RoleplaySessionMetadata,
     #[serde(default)]
@@ -47,7 +48,7 @@ pub struct RoleplayPromptContextInput {
     pub imported_prompt_blocks: Vec<RoleplayPromptStackRawBlock>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayPromptContextOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_context: Option<String>,
@@ -55,7 +56,7 @@ pub struct RoleplayPromptContextOutput {
     pub stack: Option<RoleplayPromptStackOutput>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptStackSourceText {
     pub source_kind: String,
@@ -68,7 +69,7 @@ pub struct RoleplayPromptStackSourceText {
     pub derived: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptStackRawBlock {
     pub source_kind: String,
@@ -80,7 +81,7 @@ pub struct RoleplayPromptStackRawBlock {
     pub metadata_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptStackOutput {
     pub version: u32,
@@ -94,7 +95,7 @@ pub struct RoleplayPromptStackOutput {
     pub imported_prompt_blocks: Vec<RoleplayPromptStackRawBlock>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptStackMessage {
     pub role: String,
@@ -103,7 +104,7 @@ pub struct RoleplayPromptStackMessage {
     pub section_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptStackSection {
     pub id: String,
@@ -117,7 +118,7 @@ pub struct RoleplayPromptStackSection {
     pub derived: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptStackTraceEntry {
     pub section_id: String,
@@ -129,7 +130,7 @@ pub struct RoleplayPromptStackTraceEntry {
     pub derived: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RoleplayPromptMacroResolution {
     pub macro_name: String,
@@ -137,7 +138,7 @@ pub struct RoleplayPromptMacroResolution {
     pub occurrences: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySpeakerIdentityInput {
     pub actor: RoleplayChatActor,
     pub now: String,
@@ -149,7 +150,7 @@ pub struct RoleplaySpeakerIdentityInput {
     pub character: Option<RoleplayCharacter>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySpeakerIdentitySnapshot {
     pub speaker_kind: String,
     pub role: String,
@@ -162,7 +163,7 @@ pub struct RoleplaySpeakerIdentitySnapshot {
     pub snapshot_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatActor {
     pub id: String,
     pub kind: String,
@@ -170,7 +171,7 @@ pub struct RoleplayChatActor {
     pub display_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplaySessionMetadata {
     #[serde(alias = "session_id")]
@@ -205,7 +206,7 @@ pub struct RoleplaySessionMetadata {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayPlayerPersona {
     pub id: String,
@@ -233,7 +234,7 @@ pub struct RoleplayPlayerPersona {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayCharacter {
     pub id: String,
@@ -264,7 +265,7 @@ pub struct RoleplayCharacter {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayCharacterWriteInput {
     pub profile_id: String,
     pub now: String,
@@ -272,14 +273,14 @@ pub struct RoleplayCharacterWriteInput {
     pub body: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayCharacterMergeInput {
     pub current: RoleplayCharacter,
     pub now: String,
     pub body: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayPlayerPersonaWriteInput {
     pub profile_id: String,
     pub now: String,
@@ -287,14 +288,14 @@ pub struct RoleplayPlayerPersonaWriteInput {
     pub body: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayPlayerPersonaMergeInput {
     pub current: RoleplayPlayerPersona,
     pub now: String,
     pub body: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionMetadataPatchInput {
     pub current: RoleplaySessionMetadata,
     pub session_id: String,
@@ -309,13 +310,13 @@ pub struct RoleplaySessionMetadataPatchInput {
     pub available_layer_ids: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionMetadataPatchOutput {
     pub metadata: RoleplaySessionMetadata,
     pub active_layer_ids_changed: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionLifecyclePlanInput {
     pub action: String,
     pub now: String,
@@ -339,7 +340,7 @@ pub struct RoleplaySessionLifecyclePlanInput {
     pub source_chat_layers: Vec<RoleplayChatLayerBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionLifecycleSession {
     pub session_id: String,
     pub agent_id: String,
@@ -350,27 +351,27 @@ pub struct RoleplaySessionLifecycleSession {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayerBinding {
     pub layer_id: String,
     pub priority: i64,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayerUpdatePlan {
     pub chat_id: String,
     pub layers: Vec<RoleplayChatLayerBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayRuntimeSessionPlan {
     pub create_session: bool,
     pub archive_session: bool,
     pub ensure_configured_session: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionForkPlan {
     pub source_session_id: String,
     pub source_message_id: String,
@@ -380,7 +381,7 @@ pub struct RoleplaySessionForkPlan {
     pub branch_metadata_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionLifecyclePlan {
     pub action: String,
     pub session_id: String,
@@ -395,7 +396,7 @@ pub struct RoleplaySessionLifecyclePlan {
     pub fork: Option<RoleplaySessionForkPlan>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayerBindingPlanInput {
     pub now: String,
     #[serde(default)]
@@ -408,20 +409,20 @@ pub struct RoleplayChatLayerBindingPlanInput {
     pub available_layer_ids: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayersWritePlan {
     pub chat_id: String,
     pub layers: Vec<RoleplayChatLayerBinding>,
     pub now: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplaySessionActiveLayerPatch {
     pub active_layer_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayerBindingPlan {
     pub chat_layers_write: RoleplayChatLayersWritePlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -432,25 +433,25 @@ pub struct RoleplayChatLayerBindingPlan {
     pub no_op: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreSearchControlsInput {
     #[serde(default)]
     pub params: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreSearchPagePlan {
     pub limit: u32,
     pub offset: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreSearchControls {
     pub explicit_layer_ids: Vec<String>,
     pub page: RoleplayLoreSearchPagePlan,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplaySceneState {
     #[serde(alias = "session_id")]
@@ -467,7 +468,7 @@ pub struct RoleplaySceneState {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySceneStateReadInput {
     pub session_id: String,
     #[serde(default)]
@@ -478,14 +479,14 @@ pub struct RoleplaySceneStateReadInput {
     pub revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySceneStateReadOutput {
     pub state: RoleplaySceneState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySceneStateUpdateInput {
     pub session_id: String,
     #[serde(default)]
@@ -495,14 +496,14 @@ pub struct RoleplaySceneStateUpdateInput {
     pub body: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySceneStateUpdatePlan {
     pub state: RoleplaySceneState,
     pub value_json: String,
     pub now: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorConfig {
     pub tone: String,
@@ -516,14 +517,14 @@ pub struct RoleplayNarratorConfig {
     pub review: RoleplayNarratorReviewConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorReviewConfig {
     pub enabled: bool,
     pub max_review_cycles: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayNarratorPhaseKind {
     PreludeExplore,
@@ -535,7 +536,7 @@ pub enum RoleplayNarratorPhaseKind {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorToolRequest {
     pub tool_name: String,
@@ -543,7 +544,7 @@ pub struct RoleplayNarratorToolRequest {
     pub params_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorToolObservation {
     pub tool_name: String,
@@ -553,7 +554,7 @@ pub struct RoleplayNarratorToolObservation {
     pub details_json: Option<JsonValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorStartInput {
     pub wake_id: String,
@@ -568,7 +569,7 @@ pub struct RoleplayNarratorStartInput {
     pub max_review_cycles: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorTurnState {
     pub profile_id: String,
@@ -591,14 +592,14 @@ pub struct RoleplayNarratorTurnState {
     pub completed_phases: Vec<RoleplayNarratorPhaseKind>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayNarratorOutputMode {
     Internal,
     Final,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayNarratorActivityPhase {
     Exploring,
@@ -607,14 +608,14 @@ pub enum RoleplayNarratorActivityPhase {
     Idle,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorActivity {
     pub phase: RoleplayNarratorActivityPhase,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -633,7 +634,7 @@ pub enum RoleplayNarratorDirective {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorTurnReceipt {
     pub receipt_id: String,
@@ -648,7 +649,7 @@ pub struct RoleplayNarratorTurnReceipt {
     pub terminal: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -664,14 +665,14 @@ pub enum RoleplayNarratorPhaseOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorAdvanceInput {
     pub receipt: RoleplayNarratorTurnReceipt,
     pub outcome: RoleplayNarratorPhaseOutcome,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayAssistantAlternativePlanInput {
     pub session_id: String,
     #[serde(default)]
@@ -688,7 +689,7 @@ pub struct RoleplayAssistantAlternativePlanInput {
     pub branches: Vec<RoleplayConversationBranch>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayAssistantAlternativePlan {
     pub session_id: String,
     pub terminal_slot: RoleplayMessageSlot,
@@ -704,13 +705,13 @@ pub struct RoleplayAssistantAlternativePlan {
     pub variant_write: Option<RoleplayAssistantAlternativeVariantWritePlan>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayBranchHeadUpdatePlan {
     pub branch_id: String,
     pub head_message_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayAssistantAlternativeVariantWritePlan {
     pub slot_id: String,
     pub variant_id: String,
@@ -725,7 +726,7 @@ pub struct RoleplayAssistantAlternativeVariantWritePlan {
     pub previous_message_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayAlternativeSlotProjection {
     pub slot_id: String,
     pub active_variant_id: Option<String>,
@@ -736,7 +737,7 @@ pub struct RoleplayAlternativeSlotProjection {
     pub variants: Vec<RoleplayMessageVariant>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayMessageSlot {
     pub slot_id: String,
     pub session_id: String,
@@ -755,7 +756,7 @@ pub struct RoleplayMessageSlot {
     pub alternates: Vec<RoleplayMessageVariant>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayMessageVariant {
     pub variant_id: String,
     pub slot_id: String,
@@ -770,7 +771,7 @@ pub struct RoleplayMessageVariant {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayDurableMessage {
     pub message_id: String,
     pub session_id: String,
@@ -791,7 +792,7 @@ pub struct RoleplayDurableMessage {
     pub blocks: Vec<JsonValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayConversationBranch {
     pub branch_id: String,
     pub session_id: String,

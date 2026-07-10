@@ -4,6 +4,7 @@ import {
 } from "@rusty-crew/contracts";
 
 import * as bridgeSchemas from "./bridge-validation-schemas.js";
+import { bridgeWireSchemaArtifact } from "./generated/bridge-wire-schemas.js";
 
 export interface RustBridgeValidationFixtureSummary {
   operation_count: number;
@@ -22,8 +23,9 @@ interface OperationExemptionGroup {
 const EXPECTED_MANIFEST_OPERATION_COUNT = 200;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 34;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 166;
+const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 94;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 125;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 75;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -173,57 +175,8 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
     group: "conversation_tree",
     reason:
-      "Conversation tree/message variant operations are high-value UI records but not yet fixture-backed; keep exact exemptions until their family receives TypeBox fixtures.",
-    operations: [
-      "save_message_slot",
-      "save_message_variant",
-      "create_chat_message_slot",
-      "create_chat_message_variant",
-      "query_message_slots",
-      "query_message_slots_page",
-      "query_message_variants",
-      "query_message_variants_page",
-      "read_chat_session",
-      "query_chat_session_summaries",
-      "select_active_message_variant",
-      "select_active_chat_message_variant",
-      "delete_chat_message_variant",
-      "reorder_chat_message_variants",
-      "delete_message_variant",
-      "reorder_message_variants",
-      "save_conversation_branch",
-      "create_chat_conversation_branch",
-      "ensure_active_chat_conversation_branch",
-      "query_conversation_branches",
-      "get_conversation_branch_state",
-      "select_active_conversation_branch",
-      "update_conversation_branch_head",
-      "save_conversation_snapshot",
-      "create_chat_conversation_snapshot",
-      "query_conversation_snapshots",
-      "read_conversation_tree",
-      "search_chat_transcript",
-      "resolve_conversation_jump",
-      "create_chat_attachment",
-      "remove_chat_attachment",
-      "create_chat_data_bank_scope",
-      "remove_chat_data_bank_scope",
-    ],
-  },
-  {
-    group: "attachments_data_bank",
-    reason:
-      "Attachment and data-bank records are covered by repository/API smokes today; add bridge fixtures before changing browser-facing shapes.",
-    operations: [
-      "save_attachment",
-      "query_attachments",
-      "query_attachments_page",
-      "remove_attachment",
-      "save_data_bank_scope",
-      "query_data_bank_scopes",
-      "query_data_bank_scopes_page",
-      "remove_data_bank_scope",
-    ],
+      "save_message_slot returns unit; its Rust-owned input contract is covered by transaction tests while every value-returning chat operation uses generated output validation.",
+    operations: ["save_message_slot"],
   },
   {
     group: "storage_diagnostics",
@@ -243,81 +196,16 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     operations: ["get_model_provider_secret"],
   },
   {
-    group: "roleplay_narrator",
-    reason:
-      "Roleplay/narrator bridge operations are being decomposed separately; exact exemptions keep future shape changes visible until Rust-owned roleplay fixtures land.",
-    operations: [
-      "plan_roleplay_assistant_alternative",
-      "plan_roleplay_session_lifecycle",
-      "plan_roleplay_chat_layer_binding",
-      "normalize_roleplay_lore_search_controls",
-      "read_roleplay_scene_state",
-      "plan_roleplay_scene_state_update",
-      "build_roleplay_prompt_context",
-      "roleplay_speaker_identity",
-      "write_roleplay_character",
-      "merge_roleplay_character",
-      "write_roleplay_player_persona",
-      "merge_roleplay_player_persona",
-      "patch_roleplay_session_metadata",
-      "normalize_roleplay_narrator_config",
-      "start_roleplay_narrator_turn",
-      "advance_roleplay_narrator_turn",
-    ],
-  },
-  {
-    group: "roleplay_records",
-    reason:
-      "Typed roleplay records and atomic persistence receipts are covered by Rust backend conformance, route smokes, and live certification; add TypeBox fixtures before changing their browser-facing wire shapes.",
-    operations: [
-      "put_roleplay_character",
-      "get_roleplay_character",
-      "list_roleplay_characters",
-      "put_roleplay_player_persona",
-      "get_roleplay_player_persona",
-      "list_roleplay_player_personas",
-      "put_roleplay_session_metadata",
-      "get_roleplay_session_metadata",
-      "list_roleplay_session_metadata",
-      "apply_roleplay_session_projection",
-      "put_roleplay_import",
-      "get_roleplay_import",
-      "list_roleplay_imports",
-      "apply_roleplay_alternative",
-    ],
-  },
-  {
     group: "roleplay_lore",
     reason:
-      "Lore records and recall traces are active roleplay storage surfaces; fixture coverage should be added as part of the roleplay Rust-boundary migration.",
+      "These roleplay lore operations return unit. Their Rust input contracts are covered by repository tests; every value-returning lore operation uses generated output validation.",
     operations: [
-      "create_lore_layer",
-      "get_lore_layer",
-      "list_lore_layers",
-      "update_lore_layer",
-      "archive_lore_layer",
       "set_chat_layers",
-      "get_chat_layers",
       "toggle_chat_layer",
       "reorder_chat_layers",
-      "add_lore_entry",
-      "replace_lore_entry",
-      "supersede_lore_entry",
-      "tombstone_lore_entry",
-      "query_lore_entries",
-      "get_lore_entry",
-      "lore_entry_provenance_events",
       "add_entry_to_layer",
       "remove_entry_from_layer",
       "set_entry_constant",
-      "list_entries_by_layer",
-      "recall_lore",
-      "capture_lore_fact",
-      "promote_lore_entry",
-      "get_lore_layer_config",
-      "set_lore_layer_config",
-      "list_recall_traces",
-      "get_recall_trace",
     ],
   },
   {
@@ -410,7 +298,15 @@ export function assertBridgeValidationCoverageRatchet(
   const coverage = sortedUnique([
     ...RUNTIME_VALIDATED_MANIFEST_OPERATIONS,
     ...RUST_FIXTURE_BACKED_OPERATIONS,
+    ...(Object.keys(
+      bridgeWireSchemaArtifact.operationSchemaKeys,
+    ) as ManifestOperationName[]),
   ]);
+  assertEqual(
+    "generated Rust bridge output schema count",
+    Object.keys(bridgeWireSchemaArtifact.operationSchemaKeys).length,
+    EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT,
+  );
   assertEqual(
     "manifest operations with TypeBox validation or Rust fixtures",
     coverage.length,

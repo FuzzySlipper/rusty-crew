@@ -342,6 +342,28 @@ Acceptance:
 - fixture drift and fingerprint checks fail on Rust wire-shape changes;
 - covered operation exemptions are removed when fixtures land.
 
+Task 5400 chose Rust-derived JSON Schema for the broad active chat/roleplay
+surface rather than multiplying one sample fixture per operation. Persistence
+and roleplay DTOs derive `schemars::JsonSchema`; codegen emits each unique Rust
+output type once and maps 94 value-returning manifest operations to those
+schemas. Nine Rust-authored samples exercise representative nested records,
+optional/null outputs, enums, and tagged unions.
+
+In validation-enabled runs, `withGeneratedBridgeOutputValidation` wraps the raw
+napi binding and validates returned JSON text before ergonomic wrappers parse
+it. Production's default disabled-validation path returns the unwrapped binding
+and pays no proxy cost. The coverage ratchet is now:
+
+- generated Rust output schemas: 94 operations;
+- runtime-validated, fixture-backed, or generated-schema operations: 125;
+- explicit exemptions: 75, down from 166;
+- remaining chat/roleplay exemptions: only unit-return operations whose Rust
+  input contracts are covered by repository/domain tests.
+
+The focused gate is `npm run check:bridge-wire-schemas`. It checks generated
+artifact drift, validates all Rust samples, rejects invalid nested/enum/tag
+fixtures, and proves rejection occurs at the raw binding chokepoint.
+
 ### 3. Generate Or Check TypeScript Validation Schemas
 
 For fixture-backed families, reduce hand-written TypeBox drift by generating

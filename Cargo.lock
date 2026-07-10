@@ -1357,6 +1357,7 @@ dependencies = [
  "rusqlite",
  "rusty-crew-core-config",
  "rusty-crew-core-protocol",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -1414,6 +1415,7 @@ dependencies = [
 name = "rusty-crew-roleplay-core"
 version = "0.1.0"
 dependencies = [
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",

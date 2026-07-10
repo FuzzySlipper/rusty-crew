@@ -5,6 +5,7 @@
 //! callers consume through `core-persistence` re-exports.
 
 use super::*;
+use schemars::JsonSchema;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CoordinationRepositorySet<'a> {
@@ -65,7 +66,7 @@ pub struct PersistedEvent {
     pub event: CoreEvent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryPage {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -80,7 +81,7 @@ impl QueryPage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ExactPage<T> {
     pub items: Vec<T>,
     pub total: u64,
@@ -139,7 +140,7 @@ pub struct AgentMessageQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageVariantSource {
     Primary,
@@ -166,7 +167,7 @@ impl MessageVariantSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageVariantStatus {
     Active,
@@ -193,7 +194,7 @@ impl MessageVariantStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DurableMessageStatus {
     Created,
@@ -229,7 +230,7 @@ impl DurableMessageStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageBlockRecord {
     pub block_id: MessageBlockId,
     pub message_id: MessageId,
@@ -240,7 +241,7 @@ pub struct MessageBlockRecord {
     pub metadata_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DurableMessageRecord {
     pub message_id: MessageId,
     pub session_id: SessionId,
@@ -256,7 +257,7 @@ pub struct DurableMessageRecord {
     pub blocks: Vec<MessageBlockRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageVariantRecord {
     pub variant_id: MessageVariantId,
     pub slot_id: MessageSlotId,
@@ -269,7 +270,7 @@ pub struct MessageVariantRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageSlotRecord {
     pub slot_id: MessageSlotId,
     pub session_id: SessionId,
@@ -283,7 +284,7 @@ pub struct MessageSlotRecord {
     pub alternates: Vec<MessageVariantRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageBlockWrite {
     pub block_id: MessageBlockId,
     pub ordinal: u32,
@@ -293,7 +294,7 @@ pub struct MessageBlockWrite {
     pub metadata_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DurableMessageWrite {
     pub message_id: MessageId,
     pub session_id: SessionId,
@@ -309,7 +310,7 @@ pub struct DurableMessageWrite {
     pub blocks: Vec<MessageBlockWrite>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageVariantWrite {
     pub variant_id: MessageVariantId,
     pub slot_id: MessageSlotId,
@@ -322,7 +323,7 @@ pub struct MessageVariantWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageSlotWrite {
     pub slot_id: MessageSlotId,
     pub session_id: SessionId,
@@ -333,14 +334,14 @@ pub struct MessageSlotWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct MessageSlotQuery {
     pub session_id: Option<SessionId>,
     pub include_alternates: bool,
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatReadModelQuery {
     pub session_id: SessionId,
     pub agent_id: String,
@@ -348,7 +349,7 @@ pub struct ChatReadModelQuery {
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatReadModelPage {
     pub items: Vec<ChatReadModelEvent>,
     pub latest_cursor: String,
@@ -357,7 +358,7 @@ pub struct ChatReadModelPage {
     pub source: ChatReadModelSource,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatReadModelSource {
     EventLog,
@@ -366,7 +367,7 @@ pub enum ChatReadModelSource {
     Empty,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatReadModelEvent {
     pub event_id: String,
     pub session_id: SessionId,
@@ -377,13 +378,13 @@ pub struct ChatReadModelEvent {
     pub payload_json: JsonValue,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatReadModelEventKind {
     MessageCreated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventLogAppend {
     pub session_id: SessionId,
     pub created_at: IsoTimestamp,
@@ -392,14 +393,14 @@ pub struct ChatEventLogAppend {
     pub payload_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventLogQuery {
     pub session_id: SessionId,
     pub cursor: Option<String>,
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventLogPage {
     pub items: Vec<ChatEventLogEvent>,
     pub latest_cursor: String,
@@ -409,7 +410,7 @@ pub struct ChatEventLogPage {
     pub has_more_before: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventLogEvent {
     pub event_id: String,
     pub session_id: SessionId,
@@ -420,14 +421,14 @@ pub struct ChatEventLogEvent {
     pub payload_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct MessageVariantQuery {
     pub slot_id: Option<MessageSlotId>,
     pub include_deleted: bool,
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMessageVariantPageQuery {
     pub session_id: SessionId,
     pub slot_id: MessageSlotId,
@@ -435,7 +436,7 @@ pub struct SessionMessageVariantPageQuery {
     pub page: QueryPage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationTreeReadQuery {
     pub session_id: SessionId,
     pub include_snapshots: bool,
@@ -443,7 +444,7 @@ pub struct ConversationTreeReadQuery {
     pub default_updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationTreeReadResult {
     pub branches: ExactPage<ConversationBranchRecord>,
     pub snapshots: ExactPage<ConversationSnapshotRecord>,
@@ -451,14 +452,14 @@ pub struct ConversationTreeReadResult {
     pub active_branch_id: Option<ConversationBranchId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatTranscriptSearchScope {
     CurrentSession,
     AllConversations,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatTranscriptSearchQuery {
     pub scope: ChatTranscriptSearchScope,
     pub session_id: Option<SessionId>,
@@ -470,13 +471,13 @@ pub struct ChatTranscriptSearchQuery {
     pub page: QueryPage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatTranscriptHighlight {
     pub start: u32,
     pub end: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatTranscriptSearchResult {
     pub result_id: String,
     pub scope: ChatTranscriptSearchScope,
@@ -493,7 +494,7 @@ pub struct ChatTranscriptSearchResult {
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatTranscriptSearchPage {
     pub page: ExactPage<ChatTranscriptSearchResult>,
     pub query: String,
@@ -501,14 +502,14 @@ pub struct ChatTranscriptSearchPage {
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionSummaryPageQuery {
     pub profile_id: Option<ProfileId>,
     pub status: Option<String>,
     pub page: QueryPage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionReadFacts {
     pub session: SessionState,
     pub message_count: u64,
@@ -516,12 +517,12 @@ pub struct ChatSessionReadFacts {
     pub source: ChatReadModelSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionSummaryPage {
     pub page: ExactPage<ChatSessionReadFacts>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionReadQuery {
     pub session_id: SessionId,
     pub cursor: Option<String>,
@@ -529,7 +530,7 @@ pub struct ChatSessionReadQuery {
     pub include_alternates: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionReadResult {
     pub session: SessionState,
     pub events: Vec<ChatEventLogEvent>,
@@ -542,7 +543,7 @@ pub struct ChatSessionReadResult {
     pub message_slots: ExactPage<MessageSlotRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "variant_id", rename_all = "snake_case")]
 pub enum ActiveVariantExpectation {
     Any,
@@ -550,7 +551,7 @@ pub enum ActiveVariantExpectation {
     Variant(MessageVariantId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectActiveVariantRequest {
     pub slot_id: MessageSlotId,
     pub active_variant_id: Option<MessageVariantId>,
@@ -558,13 +559,13 @@ pub struct SelectActiveVariantRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectActiveVariantResult {
     pub slot: MessageSlotRecord,
     pub conflict: Option<ActiveVariantConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectActiveChatMessageVariantRequest {
     pub session_id: SessionId,
     pub slot_id: MessageSlotId,
@@ -573,13 +574,13 @@ pub struct SelectActiveChatMessageVariantRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectActiveChatMessageVariantResult {
     pub slot: MessageSlotRecord,
     pub conflict: Option<ActiveVariantConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatMessageSlotRequest {
     pub slot: MessageSlotWrite,
     pub primary_variant: MessageVariantWrite,
@@ -594,7 +595,7 @@ pub struct CreateChatMessageSlotRequest {
     pub idempotency_key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatMessageSlotResult {
     pub slot: Option<MessageSlotRecord>,
     pub branch: ConversationBranchRecord,
@@ -603,19 +604,19 @@ pub struct CreateChatMessageSlotResult {
     pub duplicate: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatMessageVariantRequest {
     pub session_id: SessionId,
     pub slot_id: MessageSlotId,
     pub variant: MessageVariantWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatMessageVariantResult {
     pub variant: MessageVariantRecord,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApplyRoleplayAlternativeRequest {
     pub session_id: SessionId,
     pub slot_id: MessageSlotId,
@@ -626,7 +627,7 @@ pub struct ApplyRoleplayAlternativeRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApplyRoleplayAlternativeResult {
     pub created_variant: Option<MessageVariantRecord>,
     pub slot: MessageSlotRecord,
@@ -634,7 +635,7 @@ pub struct ApplyRoleplayAlternativeResult {
     pub conflict: Option<ActiveVariantConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteChatMessageVariantRequest {
     pub session_id: SessionId,
     pub slot_id: MessageSlotId,
@@ -642,7 +643,7 @@ pub struct DeleteChatMessageVariantRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReorderChatMessageVariantsRequest {
     pub session_id: SessionId,
     pub slot_id: MessageSlotId,
@@ -650,13 +651,13 @@ pub struct ReorderChatMessageVariantsRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ActiveVariantConflict {
     pub expected: Option<MessageVariantId>,
     pub actual: Option<MessageVariantId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationBranchRecord {
     pub branch_id: ConversationBranchId,
     pub session_id: SessionId,
@@ -671,7 +672,7 @@ pub struct ConversationBranchRecord {
     pub version: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationBranchWrite {
     pub branch_id: ConversationBranchId,
     pub session_id: SessionId,
@@ -685,12 +686,12 @@ pub struct ConversationBranchWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatConversationBranchRequest {
     pub branch: ConversationBranchWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EnsureActiveChatConversationBranchRequest {
     pub session_id: SessionId,
     pub branch_id: ConversationBranchId,
@@ -700,21 +701,21 @@ pub struct EnsureActiveChatConversationBranchRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EnsureActiveChatConversationBranchResult {
     pub branch: ConversationBranchRecord,
     pub state: ConversationBranchStateRecord,
     pub conflict: Option<ActiveBranchConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationBranchQuery {
     pub session_id: Option<SessionId>,
     pub parent_branch_id: Option<ConversationBranchId>,
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationBranchStateRecord {
     pub session_id: SessionId,
     pub active_branch_id: Option<ConversationBranchId>,
@@ -722,7 +723,7 @@ pub struct ConversationBranchStateRecord {
     pub version: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "branch_id", rename_all = "snake_case")]
 pub enum ActiveBranchExpectation {
     Any,
@@ -730,7 +731,7 @@ pub enum ActiveBranchExpectation {
     Branch(ConversationBranchId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectActiveBranchRequest {
     pub session_id: SessionId,
     pub active_branch_id: Option<ConversationBranchId>,
@@ -738,19 +739,19 @@ pub struct SelectActiveBranchRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectActiveBranchResult {
     pub state: ConversationBranchStateRecord,
     pub conflict: Option<ActiveBranchConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ActiveBranchConflict {
     pub expected: Option<ConversationBranchId>,
     pub actual: Option<ConversationBranchId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "message_id", rename_all = "snake_case")]
 pub enum BranchHeadExpectation {
     Any,
@@ -758,7 +759,7 @@ pub enum BranchHeadExpectation {
     Message(MessageId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateBranchHeadRequest {
     pub branch_id: ConversationBranchId,
     pub head_message_id: Option<MessageId>,
@@ -766,19 +767,19 @@ pub struct UpdateBranchHeadRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateBranchHeadResult {
     pub branch: ConversationBranchRecord,
     pub conflict: Option<BranchHeadConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BranchHeadConflict {
     pub expected: Option<MessageId>,
     pub actual: Option<MessageId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationSnapshotSource {
     User,
@@ -808,7 +809,7 @@ impl ConversationSnapshotSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationSnapshotRecord {
     pub snapshot_id: ConversationSnapshotId,
     pub session_id: SessionId,
@@ -823,7 +824,7 @@ pub struct ConversationSnapshotRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationSnapshotWrite {
     pub snapshot_id: ConversationSnapshotId,
     pub session_id: SessionId,
@@ -838,25 +839,25 @@ pub struct ConversationSnapshotWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatConversationSnapshotMutationStatus {
     Created,
     Updated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatConversationSnapshotRequest {
     pub snapshot: ConversationSnapshotWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatConversationSnapshotResult {
     pub status: ChatConversationSnapshotMutationStatus,
     pub snapshot: ConversationSnapshotRecord,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationSnapshotQuery {
     pub session_id: Option<SessionId>,
     pub branch_id: Option<ConversationBranchId>,
@@ -864,7 +865,7 @@ pub struct ConversationSnapshotQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConversationJumpTarget {
     Message { message_id: MessageId },
@@ -873,13 +874,13 @@ pub enum ConversationJumpTarget {
     Cursor { cursor: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationJumpRequest {
     pub session_id: SessionId,
     pub target: ConversationJumpTarget,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConversationJumpResult {
     pub session_id: SessionId,
     pub target: ConversationJumpTarget,
@@ -889,7 +890,7 @@ pub struct ConversationJumpResult {
     pub snapshot_id: Option<ConversationSnapshotId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentStatus {
     Active,
@@ -916,7 +917,7 @@ impl AttachmentStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentLinkRecord {
     pub link_id: AttachmentLinkId,
     pub attachment_id: AttachmentId,
@@ -928,7 +929,7 @@ pub struct AttachmentLinkRecord {
     pub created_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentRecord {
     pub attachment_id: AttachmentId,
     pub session_id: SessionId,
@@ -948,7 +949,7 @@ pub struct AttachmentRecord {
     pub links: Vec<AttachmentLinkRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentWrite {
     pub attachment_id: AttachmentId,
     pub session_id: SessionId,
@@ -968,7 +969,7 @@ pub struct AttachmentWrite {
     pub link: Option<AttachmentLinkWrite>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatAttachmentMutationStatus {
     Created,
@@ -976,25 +977,25 @@ pub enum ChatAttachmentMutationStatus {
     Linked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatAttachmentRequest {
     pub attachment: AttachmentWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatAttachmentResult {
     pub status: ChatAttachmentMutationStatus,
     pub attachment: AttachmentRecord,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveChatAttachmentRequest {
     pub session_id: SessionId,
     pub attachment_id: AttachmentId,
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentLinkWrite {
     pub link_id: AttachmentLinkId,
     pub attachment_id: AttachmentId,
@@ -1006,7 +1007,7 @@ pub struct AttachmentLinkWrite {
     pub created_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentQuery {
     pub session_id: Option<SessionId>,
     pub message_id: Option<MessageId>,
@@ -1020,7 +1021,7 @@ pub struct AttachmentQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DataBankScopeStatus {
     Active,
@@ -1047,7 +1048,7 @@ impl DataBankScopeStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DataBankScopeRecord {
     pub scope_id: DataBankScopeId,
     pub session_id: SessionId,
@@ -1059,7 +1060,7 @@ pub struct DataBankScopeRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DataBankScopeWrite {
     pub scope_id: DataBankScopeId,
     pub session_id: SessionId,
@@ -1071,32 +1072,32 @@ pub struct DataBankScopeWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatDataBankScopeMutationStatus {
     Created,
     Updated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatDataBankScopeRequest {
     pub scope: DataBankScopeWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateChatDataBankScopeResult {
     pub status: ChatDataBankScopeMutationStatus,
     pub scope: DataBankScopeRecord,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveChatDataBankScopeRequest {
     pub session_id: SessionId,
     pub scope_id: DataBankScopeId,
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct DataBankScopeQuery {
     pub session_id: Option<SessionId>,
     pub status: Option<DataBankScopeStatus>,
@@ -1201,7 +1202,7 @@ pub struct ProfileMemoryQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMemoryRecordStatus {
     Active,
@@ -1209,7 +1210,7 @@ pub enum SessionMemoryRecordStatus {
     Archived,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryRecord {
     pub record_id: String,
     pub session_id: SessionId,
@@ -1231,7 +1232,7 @@ pub struct SessionMemoryRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryRecordWrite {
     pub record_id: String,
     pub session_id: SessionId,
@@ -1247,7 +1248,7 @@ pub struct SessionMemoryRecordWrite {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryReplace {
     pub record_id: String,
     pub expected_revision: u64,
@@ -1259,14 +1260,14 @@ pub struct SessionMemoryReplace {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemorySupersede {
     pub record_id: String,
     pub expected_revision: u64,
     pub replacement: SessionMemoryRecordWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryArchive {
     pub record_id: String,
     pub expected_revision: u64,
@@ -1274,7 +1275,7 @@ pub struct SessionMemoryArchive {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SessionMemoryQuery {
     pub session_id: Option<SessionId>,
     pub branch_id: Option<ConversationBranchId>,
@@ -1285,7 +1286,7 @@ pub struct SessionMemoryQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BranchAwareSessionMemoryQuery {
     pub session_id: SessionId,
     pub active_branch_id: Option<ConversationBranchId>,
@@ -1296,13 +1297,13 @@ pub struct BranchAwareSessionMemoryQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryPromptContext {
     pub records: Vec<SessionMemoryRecord>,
     pub diagnostics: SessionMemoryPromptDiagnostics,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryPromptDiagnostics {
     pub descriptor_id: String,
     pub descriptor_schema_version: u32,
@@ -1315,7 +1316,7 @@ pub struct SessionMemoryPromptDiagnostics {
     pub context_policy: SessionMemoryPromptContextPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayCharacterRecord {
     pub id: String,
@@ -1343,14 +1344,14 @@ pub struct RoleplayCharacterRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayCharacterWrite {
     pub record: RoleplayCharacterRecord,
     #[serde(default)]
     pub expected_revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RoleplayCharacterQuery {
     pub profile_id: String,
     #[serde(default)]
@@ -1359,7 +1360,7 @@ pub struct RoleplayCharacterQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayPlayerPersonaRecord {
     pub id: String,
@@ -1379,14 +1380,14 @@ pub struct RoleplayPlayerPersonaRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayPlayerPersonaWrite {
     pub record: RoleplayPlayerPersonaRecord,
     #[serde(default)]
     pub expected_revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RoleplayPlayerPersonaQuery {
     pub profile_id: String,
     #[serde(default)]
@@ -1395,7 +1396,7 @@ pub struct RoleplayPlayerPersonaQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplaySessionMetadataRecord {
     pub session_id: String,
@@ -1415,14 +1416,14 @@ pub struct RoleplaySessionMetadataRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionMetadataWrite {
     pub record: RoleplaySessionMetadataRecord,
     #[serde(default)]
     pub expected_revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RoleplaySessionMetadataQuery {
     #[serde(default)]
     pub profile_id: Option<String>,
@@ -1432,21 +1433,21 @@ pub struct RoleplaySessionMetadataQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplaySessionProjectionWrite {
     pub metadata: RoleplaySessionMetadataWrite,
     #[serde(default)]
     pub chat_layers: Option<RoleplayChatLayersWrite>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplaySessionProjectionRecord {
     pub metadata: RoleplaySessionMetadataRecord,
     pub chat_layers: Vec<RoleplayChatLayerRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayImportCounts {
     pub characters: u64,
@@ -1458,7 +1459,7 @@ pub struct RoleplayImportCounts {
     pub variants: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayImportRecord {
     pub import_id: String,
@@ -1484,14 +1485,14 @@ pub struct RoleplayImportRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayImportWrite {
     pub record: RoleplayImportRecord,
     #[serde(default)]
     pub expected_revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RoleplayImportQuery {
     pub profile_id: String,
     #[serde(default)]
@@ -1500,13 +1501,13 @@ pub struct RoleplayImportQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemorySelectedRecordDiagnostic {
     pub record_id: String,
     pub shape_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SessionMemoryPromptExcludedCounts {
     pub wrong_branch: u64,
     pub sibling_branch: u64,
@@ -1517,14 +1518,14 @@ pub struct SessionMemoryPromptExcludedCounts {
     pub policy_disabled: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMemoryPromptContextPolicy {
     SummaryContext,
     ToolOnly,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayLoreRecordStatus {
     Active,
@@ -1532,7 +1533,7 @@ pub enum RoleplayLoreRecordStatus {
     Tombstoned,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayLoreCanonStatus {
     Canon,
@@ -1541,7 +1542,7 @@ pub enum RoleplayLoreCanonStatus {
     Deprecated,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayLoreVisibility {
     Public,
@@ -1550,7 +1551,7 @@ pub enum RoleplayLoreVisibility {
     ToolOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreRecord {
     pub record_id: String,
     pub world_id: String,
@@ -1577,7 +1578,7 @@ pub struct RoleplayLoreRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreWrite {
     pub record_id: String,
     pub world_id: String,
@@ -1598,20 +1599,20 @@ pub struct RoleplayLoreWrite {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreReplace {
     pub write: RoleplayLoreWrite,
     pub expected_revision: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreSupersede {
     pub record_id: String,
     pub expected_revision: u64,
     pub replacement: RoleplayLoreWrite,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreTombstone {
     pub record_id: String,
     pub expected_revision: u64,
@@ -1619,7 +1620,7 @@ pub struct RoleplayLoreTombstone {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RoleplayLoreQuery {
     pub world_id: Option<String>,
     pub entity_id: Option<String>,
@@ -1633,7 +1634,7 @@ pub struct RoleplayLoreQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreProvenanceEvent {
     pub event_id: String,
     pub record_id: String,
@@ -1645,7 +1646,7 @@ pub struct RoleplayLoreProvenanceEvent {
     pub created_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayLoreLayerPurpose {
     World,
@@ -1655,7 +1656,7 @@ pub enum RoleplayLoreLayerPurpose {
     Mixed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayLoreLayerWritePolicy {
     Manual,
@@ -1663,7 +1664,7 @@ pub enum RoleplayLoreLayerWritePolicy {
     Readonly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerRecord {
     pub layer_id: String,
     pub profile_id: String,
@@ -1676,7 +1677,7 @@ pub struct RoleplayLoreLayerRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerWrite {
     pub layer_id: String,
     pub profile_id: String,
@@ -1687,7 +1688,7 @@ pub struct RoleplayLoreLayerWrite {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerUpdate {
     pub layer_id: String,
     pub name: Option<String>,
@@ -1697,13 +1698,13 @@ pub struct RoleplayLoreLayerUpdate {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerArchive {
     pub layer_id: String,
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerConfigRecord {
     pub config_id: String,
     pub layer_id: String,
@@ -1720,7 +1721,7 @@ pub struct RoleplayLoreLayerConfigRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerConfigWrite {
     pub config_id: String,
     pub layer_id: String,
@@ -1736,7 +1737,7 @@ pub struct RoleplayLoreLayerConfigWrite {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerEntryLink {
     pub layer_id: String,
     pub record_id: String,
@@ -1745,7 +1746,7 @@ pub struct RoleplayLoreLayerEntryLink {
     pub added_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreLayerEntryJoin {
     pub layer_id: String,
     pub record_id: String,
@@ -1755,7 +1756,7 @@ pub struct RoleplayLoreLayerEntryJoin {
     pub record: RoleplayLoreRecord,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreFactCapture {
     pub layer_id: String,
     pub write: RoleplayLoreWrite,
@@ -1764,7 +1765,7 @@ pub struct RoleplayLoreFactCapture {
     pub capture_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayLoreEntryPromotion {
     pub source_layer_id: String,
     pub source_record_id: String,
@@ -1775,21 +1776,21 @@ pub struct RoleplayLoreEntryPromotion {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayerLink {
     pub layer_id: String,
     pub priority: i64,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayersWrite {
     pub chat_id: String,
     pub layers: Vec<RoleplayChatLayerLink>,
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RoleplayChatLayerRecord {
     pub chat_id: String,
     pub layer_id: String,
@@ -1799,7 +1800,7 @@ pub struct RoleplayChatLayerRecord {
     pub layer: RoleplayLoreLayerRecord,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoreRecallQuery {
     pub chat_id: String,
     pub session_id: Option<SessionId>,
@@ -1812,7 +1813,7 @@ pub struct LoreRecallQuery {
     pub now: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoreRecallEntry {
     pub record: RoleplayLoreRecord,
     pub layer_id: String,
@@ -1821,7 +1822,7 @@ pub struct LoreRecallEntry {
     pub is_constant: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoreRecallTraceRecord {
     pub trace_id: String,
     pub session_id: Option<SessionId>,
@@ -1837,14 +1838,14 @@ pub struct LoreRecallTraceRecord {
     pub created_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct LoreRecallTraceQuery {
     pub session_id: Option<SessionId>,
     pub chat_id: Option<String>,
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoreRecallResult {
     pub chat_id: String,
     pub entries: Vec<LoreRecallEntry>,
@@ -1973,7 +1974,7 @@ pub struct RuntimeSearchResult {
     pub body: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueuedMessageState {
     Pending,
@@ -2283,7 +2284,7 @@ pub struct RuntimeImportBatchRecord {
     pub imported_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeObjectKind {
     Agent,
@@ -2298,7 +2299,7 @@ pub enum RuntimeObjectKind {
     ExternalArtifact,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, serde::Deserialize, JsonSchema)]
 pub struct RuntimeImportProvenance {
     pub profile_id: Option<ProfileId>,
     pub session_id: Option<SessionId>,
@@ -2328,7 +2329,7 @@ pub struct LegacyIdMappingQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageExportBundle {
     pub bundle_version: u32,
     pub export_id: String,
@@ -2343,7 +2344,7 @@ pub struct LogicalStorageExportBundle {
     pub profile_asset_refs: Vec<LogicalStorageProfileAssetRef>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageExportSource {
     pub backend: String,
     pub backend_label: String,
@@ -2351,21 +2352,21 @@ pub struct LogicalStorageExportSource {
     pub snapshot_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageModuleVersion {
     pub module_id: String,
     pub schema_version: u32,
     pub descriptor_fingerprint: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageCapabilitySnapshot {
     pub name: String,
     pub supported: bool,
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageRepositoryBundle {
     pub repository_id: String,
     pub schema_version: u32,
@@ -2375,7 +2376,7 @@ pub struct LogicalStorageRepositoryBundle {
     pub records: Vec<LogicalStorageRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageRecord {
     pub stable_id: String,
     pub record_version: u32,
@@ -2383,7 +2384,7 @@ pub struct LogicalStorageRecord {
     pub payload: LogicalStorageRecordPayload,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
 pub enum LogicalStorageRecordPayload {
     QueueMessage(Box<LogicalQueuedMessageExportRecord>),
@@ -2393,7 +2394,7 @@ pub enum LogicalStorageRecordPayload {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalQueuedMessageExportRecord {
     pub message_id: String,
     pub owner_session_id: Option<SessionId>,
@@ -2409,7 +2410,7 @@ pub struct LogicalQueuedMessageExportRecord {
     pub state_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageLegacyIdMapping {
     pub source_system: String,
     pub legacy_kind: RuntimeObjectKind,
@@ -2419,7 +2420,7 @@ pub struct LogicalStorageLegacyIdMapping {
     pub provenance: RuntimeImportProvenance,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LogicalStorageProfileAssetRef {
     pub profile_id: ProfileId,
     pub asset_kind: String,
@@ -2500,7 +2501,7 @@ impl ExternalBindingStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ExternalBindingProvenance {
     pub source_system: Option<String>,
     pub source_ref: Option<String>,
@@ -2544,7 +2545,7 @@ pub struct ChannelBindingQuery {
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct McpBindingDiagnostics {
     pub last_error: Option<String>,
     pub last_checked_at: Option<IsoTimestamp>,
