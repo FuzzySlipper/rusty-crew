@@ -398,7 +398,7 @@ mod tests {
         assert!(!generated.contains(": any"));
         assert!(generated.contains("export type BrainWakeRequest"));
         assert!(generated.contains("export type MemorySpaceDescriptor"));
-        assert!(generated.contains("sessionId: string"));
+        assert!(generated.contains("sessionId: SessionId"));
     }
 
     #[test]
