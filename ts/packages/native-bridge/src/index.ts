@@ -244,11 +244,8 @@ interface NativeBridgeBinding {
   mergeRoleplayPlayerPersonaJson(inputJson: string): string;
   patchRoleplaySessionMetadataJson(inputJson: string): string;
   normalizeRoleplayNarratorConfigJson(inputJson: string): string;
-  roleplayNarratorMandatoryExploreRequestsJson(inputJson: string): string;
-  roleplayNarratorAutoCaptureRequestJson(inputJson: string): string;
   startRoleplayNarratorTurnJson(inputJson: string): string;
-  nextRoleplayNarratorPhaseJson(inputJson: string): string;
-  roleplayNarratorReviewRequestsRevision(feedback: string): boolean;
+  advanceRoleplayNarratorTurnJson(inputJson: string): string;
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
   createChatMessageSlotJson(inputJson: string): string;
@@ -2664,13 +2661,8 @@ export interface NativeBridgeModule {
   mergeRoleplayPlayerPersona(input: unknown): Promise<unknown>;
   patchRoleplaySessionMetadata(input: unknown): Promise<unknown>;
   normalizeRoleplayNarratorConfig(input: unknown): Promise<unknown>;
-  roleplayNarratorMandatoryExploreRequests(input: unknown): Promise<unknown[]>;
-  roleplayNarratorAutoCaptureRequest(
-    input: unknown,
-  ): Promise<unknown | undefined>;
   startRoleplayNarratorTurn(input: unknown): Promise<unknown>;
-  nextRoleplayNarratorPhase(input: unknown): Promise<unknown>;
-  roleplayNarratorReviewRequestsRevision(feedback: string): Promise<boolean>;
+  advanceRoleplayNarratorTurn(input: unknown): Promise<unknown>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   createChatMessageSlot(input: unknown): Promise<unknown>;
@@ -3064,17 +3056,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     normalizeRoleplayNarratorConfig: unavailable(
       "normalize_roleplay_narrator_config",
     ),
-    roleplayNarratorMandatoryExploreRequests: unavailable(
-      "roleplay_narrator_mandatory_explore_requests",
-    ),
-    roleplayNarratorAutoCaptureRequest: unavailable(
-      "roleplay_narrator_auto_capture_request",
-    ),
     startRoleplayNarratorTurn: unavailable("start_roleplay_narrator_turn"),
-    nextRoleplayNarratorPhase: unavailable("next_roleplay_narrator_phase"),
-    roleplayNarratorReviewRequestsRevision: unavailable(
-      "roleplay_narrator_review_requests_revision",
-    ),
+    advanceRoleplayNarratorTurn: unavailable("advance_roleplay_narrator_turn"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
     createChatMessageSlot: unavailable("create_chat_message_slot"),
@@ -4375,26 +4358,14 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.normalizeRoleplayNarratorConfigJson(JSON.stringify(input)),
       ) as unknown,
-    roleplayNarratorMandatoryExploreRequests: async (input) =>
-      JSON.parse(
-        binding.roleplayNarratorMandatoryExploreRequestsJson(
-          JSON.stringify(input),
-        ),
-      ) as unknown[],
-    roleplayNarratorAutoCaptureRequest: async (input) =>
-      JSON.parse(
-        binding.roleplayNarratorAutoCaptureRequestJson(JSON.stringify(input)),
-      ) as unknown | undefined,
     startRoleplayNarratorTurn: async (input) =>
       JSON.parse(
         binding.startRoleplayNarratorTurnJson(JSON.stringify(input)),
       ) as unknown,
-    nextRoleplayNarratorPhase: async (input) =>
+    advanceRoleplayNarratorTurn: async (input) =>
       JSON.parse(
-        binding.nextRoleplayNarratorPhaseJson(JSON.stringify(input)),
+        binding.advanceRoleplayNarratorTurnJson(JSON.stringify(input)),
       ) as unknown,
-    roleplayNarratorReviewRequestsRevision: async (feedback) =>
-      binding.roleplayNarratorReviewRequestsRevision(feedback),
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),
     saveMessageVariant: async (input) =>

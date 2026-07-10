@@ -538,11 +538,8 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "merge_roleplay_player_persona",
         "patch_roleplay_session_metadata",
         "normalize_roleplay_narrator_config",
-        "roleplay_narrator_mandatory_explore_requests",
-        "roleplay_narrator_auto_capture_request",
         "start_roleplay_narrator_turn",
-        "next_roleplay_narrator_phase",
-        "roleplay_narrator_review_requests_revision",
+        "advance_roleplay_narrator_turn",
         "create_lore_layer",
         "get_lore_layer",
         "list_lore_layers",
@@ -586,10 +583,8 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "merge_roleplay_player_persona",
         "patch_roleplay_session_metadata",
         "normalize_roleplay_narrator_config",
-        "roleplay_narrator_mandatory_explore_requests",
-        "roleplay_narrator_auto_capture_request",
         "start_roleplay_narrator_turn",
-        "next_roleplay_narrator_phase",
+        "advance_roleplay_narrator_turn",
         "create_lore_layer",
         "update_lore_layer",
         "archive_lore_layer",
@@ -847,14 +842,12 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         serde_json::to_value(sample_roleplay_narrator_tool_request())?;
     let roleplay_narrator_tool_observation =
         serde_json::to_value(sample_roleplay_narrator_tool_observation())?;
-    let roleplay_narrator_mandatory_input =
-        serde_json::to_value(sample_roleplay_narrator_mandatory_explore_input())?;
-    let roleplay_narrator_auto_capture_input =
-        serde_json::to_value(sample_roleplay_narrator_auto_capture_input())?;
     let roleplay_narrator_start_input =
         serde_json::to_value(sample_roleplay_narrator_start_input())?;
-    let roleplay_narrator_next_input = serde_json::to_value(sample_roleplay_narrator_next_input())?;
-    let roleplay_narrator_phase_plan = serde_json::to_value(sample_roleplay_narrator_phase_plan())?;
+    let roleplay_narrator_advance_input =
+        serde_json::to_value(sample_roleplay_narrator_advance_input())?;
+    let roleplay_narrator_turn_receipt =
+        serde_json::to_value(sample_roleplay_narrator_turn_receipt())?;
     let roleplay_assistant_alternative_input =
         serde_json::to_value(sample_roleplay_assistant_alternative_plan_input())?;
     let roleplay_assistant_alternative_plan =
@@ -1102,11 +1095,9 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
                     "RoleplayNarratorConfig": object_keys(&roleplay_narrator_config)?,
                     "RoleplayNarratorToolRequest": object_keys(&roleplay_narrator_tool_request)?,
                     "RoleplayNarratorToolObservation": object_keys(&roleplay_narrator_tool_observation)?,
-                    "RoleplayNarratorMandatoryExploreInput": object_keys(&roleplay_narrator_mandatory_input)?,
-                    "RoleplayNarratorAutoCaptureInput": object_keys(&roleplay_narrator_auto_capture_input)?,
                     "RoleplayNarratorStartInput": object_keys(&roleplay_narrator_start_input)?,
-                    "RoleplayNarratorNextInput": object_keys(&roleplay_narrator_next_input)?,
-                    "RoleplayNarratorPhasePlan": object_keys(&roleplay_narrator_phase_plan)?,
+                    "RoleplayNarratorAdvanceInput": object_keys(&roleplay_narrator_advance_input)?,
+                    "RoleplayNarratorTurnReceipt": object_keys(&roleplay_narrator_turn_receipt)?,
                     "RoleplayAssistantAlternativePlanInput": object_keys(&roleplay_assistant_alternative_input)?,
                     "RoleplayAssistantAlternativePlan": object_keys(&roleplay_assistant_alternative_plan)?,
                 }
@@ -2043,12 +2034,7 @@ fn operation_name_to_camel_json_method(operation_name: &str) -> String {
 }
 
 fn operation_name_to_native_method(operation_name: &str) -> String {
-    match operation_name {
-        "roleplay_narrator_review_requests_revision" => {
-            "roleplayNarratorReviewRequestsRevision".to_owned()
-        }
-        _ => operation_name_to_camel_json_method(operation_name),
-    }
+    operation_name_to_camel_json_method(operation_name)
 }
 
 fn operation_name_to_camel_wrapper(operation_name: &str) -> String {
@@ -3834,60 +3820,61 @@ fn sample_roleplay_narrator_tool_observation() -> roleplay::RoleplayNarratorTool
     }
 }
 
-fn sample_roleplay_narrator_mandatory_explore_input(
-) -> roleplay::RoleplayNarratorMandatoryExploreInput {
-    roleplay::RoleplayNarratorMandatoryExploreInput {
-        session_id: sample_session_id().to_string(),
-        profile_id: sample_profile_id().to_string(),
-        pending_text: "Validation pending text.".to_owned(),
-    }
-}
-
-fn sample_roleplay_narrator_auto_capture_input() -> roleplay::RoleplayNarratorAutoCaptureInput {
-    roleplay::RoleplayNarratorAutoCaptureInput {
-        session_id: sample_session_id().to_string(),
-        profile_id: sample_profile_id().to_string(),
-        wake_id: "validation-wake".to_owned(),
-        pending_text: "Validation pending text.".to_owned(),
-        layer_details_json: json!({"layerId": "validation-layer"}),
-    }
-}
-
 fn sample_roleplay_narrator_turn_state() -> roleplay::RoleplayNarratorTurnState {
     roleplay::RoleplayNarratorTurnState {
+        profile_id: sample_profile_id().to_string(),
+        session_id: sample_session_id().to_string(),
+        pending_text: "Validation pending text.".to_owned(),
         narrator_config: Some(sample_roleplay_narrator_config()),
         review_enabled: true,
         max_review_cycles: 2,
         review_cycle: 1,
+        prelude_observations: vec![sample_roleplay_narrator_tool_observation()],
         relevant_lore: vec![sample_roleplay_prompt_source_text()],
         scene_brief: Some("Validation scene brief.".to_owned()),
         review_feedback: Some("Revise validation pacing.".to_owned()),
+        completed_phases: vec![roleplay::RoleplayNarratorPhaseKind::PreludeExplore],
     }
 }
 
 fn sample_roleplay_narrator_start_input() -> roleplay::RoleplayNarratorStartInput {
     roleplay::RoleplayNarratorStartInput {
+        wake_id: "validation-wake".to_owned(),
+        session_id: sample_session_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        pending_text: "Validation pending text.".to_owned(),
         narrator_config: Some(sample_roleplay_narrator_config()),
         review_enabled: true,
         max_review_cycles: Some(2),
-        prelude_observations: vec![sample_roleplay_narrator_tool_observation()],
     }
 }
 
-fn sample_roleplay_narrator_next_input() -> roleplay::RoleplayNarratorNextInput {
-    roleplay::RoleplayNarratorNextInput {
-        state: sample_roleplay_narrator_turn_state(),
-        completed_phase: roleplay::RoleplayNarratorPhaseKind::Explore,
-        output_text: "Validation explore output.".to_owned(),
+fn sample_roleplay_narrator_advance_input() -> roleplay::RoleplayNarratorAdvanceInput {
+    roleplay::RoleplayNarratorAdvanceInput {
+        receipt: sample_roleplay_narrator_turn_receipt(),
+        outcome: roleplay::RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted {
+            output_text: "Validation explore output.".to_owned(),
+        },
     }
 }
 
-fn sample_roleplay_narrator_phase_plan() -> roleplay::RoleplayNarratorPhasePlan {
-    roleplay::RoleplayNarratorPhasePlan {
+fn sample_roleplay_narrator_turn_receipt() -> roleplay::RoleplayNarratorTurnReceipt {
+    roleplay::RoleplayNarratorTurnReceipt {
+        receipt_id: "narrator-validation".to_owned(),
+        wake_id: "validation-wake".to_owned(),
+        session_id: sample_session_id().to_string(),
+        sequence: 3,
         phase: roleplay::RoleplayNarratorPhaseKind::Compose,
-        instructions: "Compose validation response.".to_owned(),
-        allowed_tools: vec!["recall_lore".to_owned()],
-        mandatory_tool_requests: vec![sample_roleplay_narrator_tool_request()],
+        activity: Some(roleplay::RoleplayNarratorActivity {
+            phase: roleplay::RoleplayNarratorActivityPhase::Composing,
+            message: "Writing final narrative response.".to_owned(),
+        }),
+        directive: roleplay::RoleplayNarratorDirective::ProviderPhase {
+            phase: roleplay::RoleplayNarratorPhaseKind::Compose,
+            instructions: "Compose validation response.".to_owned(),
+            allowed_tools: vec!["recall_lore".to_owned()],
+            output_mode: roleplay::RoleplayNarratorOutputMode::Final,
+        },
         state: sample_roleplay_narrator_turn_state(),
         terminal: false,
     }

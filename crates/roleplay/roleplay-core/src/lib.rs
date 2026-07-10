@@ -526,6 +526,8 @@ pub struct RoleplayNarratorReviewConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleplayNarratorPhaseKind {
+    PreludeExplore,
+    PreludeCapture,
     Explore,
     Compose,
     ComposeDraft,
@@ -553,74 +555,120 @@ pub struct RoleplayNarratorToolObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RoleplayNarratorMandatoryExploreInput {
-    pub session_id: String,
-    pub profile_id: String,
-    #[serde(default)]
-    pub pending_text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoleplayNarratorAutoCaptureInput {
-    pub session_id: String,
-    pub profile_id: String,
+pub struct RoleplayNarratorStartInput {
     pub wake_id: String,
+    pub session_id: String,
+    pub profile_id: String,
     #[serde(default)]
     pub pending_text: String,
-    #[serde(default)]
-    pub layer_details_json: JsonValue,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoleplayNarratorPhasePlan {
-    pub phase: RoleplayNarratorPhaseKind,
-    #[serde(default)]
-    pub instructions: String,
-    #[serde(default)]
-    pub allowed_tools: Vec<String>,
-    #[serde(default)]
-    pub mandatory_tool_requests: Vec<RoleplayNarratorToolRequest>,
-    pub state: RoleplayNarratorTurnState,
-    pub terminal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrator_config: Option<RoleplayNarratorConfig>,
+    pub review_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_review_cycles: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorTurnState {
+    pub profile_id: String,
+    pub session_id: String,
+    pub pending_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narrator_config: Option<RoleplayNarratorConfig>,
     pub review_enabled: bool,
     pub max_review_cycles: u32,
     pub review_cycle: u32,
+    #[serde(default)]
+    pub prelude_observations: Vec<RoleplayNarratorToolObservation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relevant_lore: Vec<RoleplayPromptStackSourceText>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_brief: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_feedback: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoleplayNarratorStartInput {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub narrator_config: Option<RoleplayNarratorConfig>,
-    pub review_enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_review_cycles: Option<u32>,
     #[serde(default)]
-    pub prelude_observations: Vec<RoleplayNarratorToolObservation>,
+    pub completed_phases: Vec<RoleplayNarratorPhaseKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayNarratorOutputMode {
+    Internal,
+    Final,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayNarratorActivityPhase {
+    Exploring,
+    Composing,
+    Reviewing,
+    Idle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayNarratorActivity {
+    pub phase: RoleplayNarratorActivityPhase,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RoleplayNarratorDirective {
+    ToolBatch {
+        requests: Vec<RoleplayNarratorToolRequest>,
+    },
+    ProviderPhase {
+        phase: RoleplayNarratorPhaseKind,
+        instructions: String,
+        allowed_tools: Vec<String>,
+        output_mode: RoleplayNarratorOutputMode,
+    },
+    Done,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RoleplayNarratorNextInput {
+pub struct RoleplayNarratorTurnReceipt {
+    pub receipt_id: String,
+    pub wake_id: String,
+    pub session_id: String,
+    pub sequence: u32,
+    pub phase: RoleplayNarratorPhaseKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<RoleplayNarratorActivity>,
+    pub directive: RoleplayNarratorDirective,
     pub state: RoleplayNarratorTurnState,
-    pub completed_phase: RoleplayNarratorPhaseKind,
-    #[serde(default)]
-    pub output_text: String,
+    pub terminal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RoleplayNarratorPhaseOutcome {
+    ToolBatchCompleted {
+        observations: Vec<RoleplayNarratorToolObservation>,
+    },
+    ProviderPhaseCompleted {
+        #[serde(default)]
+        output_text: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayNarratorAdvanceInput {
+    pub receipt: RoleplayNarratorTurnReceipt,
+    pub outcome: RoleplayNarratorPhaseOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1811,43 +1859,259 @@ pub fn normalize_narrator_config(input: JsonValue) -> RoleplayDomainResult<Rolep
     })
 }
 
-pub fn narrator_mandatory_explore_requests(
-    input: RoleplayNarratorMandatoryExploreInput,
+pub fn start_narrator_turn(
+    input: RoleplayNarratorStartInput,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    for (field, value) in [
+        ("wakeId", input.wake_id.as_str()),
+        ("sessionId", input.session_id.as_str()),
+        ("profileId", input.profile_id.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_narrator_identity_required",
+                format!("{field} must not be empty"),
+            ));
+        }
+    }
+    let max_review_cycles = std::cmp::max(
+        1,
+        input
+            .max_review_cycles
+            .or_else(|| {
+                input
+                    .narrator_config
+                    .as_ref()
+                    .map(|config| config.review.max_review_cycles)
+            })
+            .unwrap_or(1),
+    )
+    .min(8);
+    let review_enabled = input.review_enabled
+        || input
+            .narrator_config
+            .as_ref()
+            .map(|config| config.review.enabled)
+            .unwrap_or(false);
+    let state = RoleplayNarratorTurnState {
+        profile_id: input.profile_id,
+        session_id: input.session_id.clone(),
+        pending_text: input.pending_text,
+        narrator_config: input.narrator_config,
+        review_enabled,
+        max_review_cycles,
+        review_cycle: 0,
+        prelude_observations: Vec::new(),
+        relevant_lore: Vec::new(),
+        scene_brief: None,
+        review_feedback: None,
+        completed_phases: Vec::new(),
+    };
+    narrator_receipt(
+        input.wake_id,
+        input.session_id,
+        1,
+        RoleplayNarratorPhaseKind::PreludeExplore,
+        Some(narrator_activity(
+            RoleplayNarratorActivityPhase::Exploring,
+            "Gathering lore and scene context.",
+        )),
+        RoleplayNarratorDirective::ToolBatch {
+            requests: narrator_mandatory_explore_requests(&state),
+        },
+        state,
+        false,
+    )
+}
+
+pub fn advance_narrator_turn(
+    input: RoleplayNarratorAdvanceInput,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    let receipt = input.receipt;
+    validate_narrator_receipt(&receipt)?;
+    if receipt.terminal {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_narrator_already_done",
+            "narrator turn is already terminal",
+        ));
+    }
+
+    let mut state = receipt.state;
+    state.completed_phases.push(receipt.phase.clone());
+    let next_sequence = receipt.sequence.saturating_add(1);
+    match (receipt.phase, receipt.directive, input.outcome) {
+        (
+            RoleplayNarratorPhaseKind::PreludeExplore,
+            RoleplayNarratorDirective::ToolBatch { .. },
+            RoleplayNarratorPhaseOutcome::ToolBatchCompleted { observations },
+        ) => {
+            state.prelude_observations.extend(observations);
+            if let Some(request) =
+                narrator_auto_capture_request(&receipt.wake_id, &receipt.session_id, &state)
+            {
+                narrator_receipt(
+                    receipt.wake_id,
+                    receipt.session_id,
+                    next_sequence,
+                    RoleplayNarratorPhaseKind::PreludeCapture,
+                    None,
+                    RoleplayNarratorDirective::ToolBatch {
+                        requests: vec![request],
+                    },
+                    state,
+                    false,
+                )
+            } else {
+                narrator_explore_receipt(
+                    receipt.wake_id,
+                    receipt.session_id,
+                    next_sequence,
+                    state,
+                )
+            }
+        }
+        (
+            RoleplayNarratorPhaseKind::PreludeCapture,
+            RoleplayNarratorDirective::ToolBatch { .. },
+            RoleplayNarratorPhaseOutcome::ToolBatchCompleted { observations },
+        ) => {
+            state.prelude_observations.extend(observations);
+            narrator_explore_receipt(
+                receipt.wake_id,
+                receipt.session_id,
+                next_sequence,
+                state,
+            )
+        }
+        (
+            RoleplayNarratorPhaseKind::Explore,
+            RoleplayNarratorDirective::ProviderPhase { .. },
+            RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted { output_text },
+        ) => {
+            state.scene_brief = Some(narrator_scene_brief(&output_text));
+            if state.review_enabled {
+                narrator_compose_draft_receipt(
+                    receipt.wake_id,
+                    receipt.session_id,
+                    next_sequence,
+                    state,
+                )
+            } else {
+                narrator_compose_receipt(
+                    receipt.wake_id,
+                    receipt.session_id,
+                    next_sequence,
+                    state,
+                )
+            }
+        }
+        (
+            RoleplayNarratorPhaseKind::ComposeDraft,
+            RoleplayNarratorDirective::ProviderPhase { .. },
+            RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted { output_text },
+        ) => narrator_review_receipt(
+            receipt.wake_id,
+            receipt.session_id,
+            next_sequence,
+            state,
+            output_text,
+        ),
+        (
+            RoleplayNarratorPhaseKind::Review,
+            RoleplayNarratorDirective::ProviderPhase { .. },
+            RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted { output_text },
+        ) => {
+            state.review_cycle = state.review_cycle.saturating_add(1);
+            state.review_feedback = Some(output_text.trim().to_string());
+            if state.review_cycle < state.max_review_cycles
+                && narrator_review_requests_revision(&output_text)
+            {
+                narrator_compose_draft_receipt(
+                    receipt.wake_id,
+                    receipt.session_id,
+                    next_sequence,
+                    state,
+                )
+            } else {
+                narrator_compose_receipt(
+                    receipt.wake_id,
+                    receipt.session_id,
+                    next_sequence,
+                    state,
+                )
+            }
+        }
+        (
+            RoleplayNarratorPhaseKind::Compose,
+            RoleplayNarratorDirective::ProviderPhase { .. },
+            RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted { .. },
+        ) => narrator_receipt(
+            receipt.wake_id,
+            receipt.session_id,
+            next_sequence,
+            RoleplayNarratorPhaseKind::Done,
+            Some(narrator_activity(
+                RoleplayNarratorActivityPhase::Idle,
+                "Narrator turn complete.",
+            )),
+            RoleplayNarratorDirective::Done,
+            state,
+            true,
+        ),
+        (phase, directive, outcome) => Err(RoleplayDomainError::invalid(
+            "roleplay_narrator_outcome_mismatch",
+            format!(
+                "outcome {outcome:?} cannot complete narrator phase {phase:?} with directive {directive:?}"
+            ),
+        )),
+    }
+}
+
+fn narrator_mandatory_explore_requests(
+    state: &RoleplayNarratorTurnState,
 ) -> Vec<RoleplayNarratorToolRequest> {
-    let query_text = narrator_pending_text(&input.pending_text);
+    let query_text = narrator_pending_text(&state.pending_text);
     let mut requests = vec![
         RoleplayNarratorToolRequest {
             tool_name: "get_scene_state".to_string(),
-            params_json: serde_json::json!({ "sessionId": input.session_id }),
+            params_json: serde_json::json!({ "sessionId": state.session_id }),
         },
         RoleplayNarratorToolRequest {
             tool_name: "recall_lore".to_string(),
             params_json: serde_json::json!({
-                "chatId": input.session_id,
-                "sessionId": input.session_id,
+                "chatId": state.session_id,
+                "sessionId": state.session_id,
                 "queryText": query_text,
                 "tokenBudget": 1600,
                 "recordTrace": true
             }),
         },
     ];
-    if narrator_should_auto_capture_lore_fact(&input.pending_text) {
+    if narrator_should_auto_capture_lore_fact(&state.pending_text) {
         requests.push(RoleplayNarratorToolRequest {
             tool_name: "list_lore_layers".to_string(),
-            params_json: serde_json::json!({ "profileId": input.profile_id }),
+            params_json: serde_json::json!({ "profileId": state.profile_id }),
         });
     }
     requests
 }
 
-pub fn narrator_auto_capture_request(
-    input: RoleplayNarratorAutoCaptureInput,
+fn narrator_auto_capture_request(
+    wake_id: &str,
+    session_id: &str,
+    state: &RoleplayNarratorTurnState,
 ) -> Option<RoleplayNarratorToolRequest> {
-    if !narrator_should_auto_capture_lore_fact(&input.pending_text) {
+    if !narrator_should_auto_capture_lore_fact(&state.pending_text) {
         return None;
     }
-    let layer_id = narrator_auto_capture_layer_id(&input.layer_details_json)?;
-    let normalized_text = input
+    let layer_details = state
+        .prelude_observations
+        .iter()
+        .find(|observation| observation.ok && observation.tool_name == "list_lore_layers")?
+        .details_json
+        .as_ref()?;
+    let layer_id = narrator_auto_capture_layer_id(layer_details)?;
+    let normalized_text = state
         .pending_text
         .trim()
         .chars()
@@ -1860,9 +2124,9 @@ pub fn narrator_auto_capture_request(
         tool_name: "capture_lore_fact".to_string(),
         params_json: serde_json::json!({
             "layerId": layer_id,
-            "recordId": narrator_auto_capture_record_id(&input.session_id, &input.wake_id, &normalized_text),
-            "worldId": input.profile_id,
-            "sessionId": input.session_id,
+            "recordId": narrator_auto_capture_record_id(session_id, wake_id, &normalized_text),
+            "worldId": state.profile_id,
+            "sessionId": session_id,
             "shapeId": "lore_entry",
             "shapeVersion": 1,
             "canonStatus": "draft",
@@ -1870,7 +2134,7 @@ pub fn narrator_auto_capture_request(
             "title": title,
             "body": body,
             "content": {
-                "world_id": input.profile_id,
+                "world_id": state.profile_id,
                 "title": title,
                 "body": body,
                 "canon_status": "draft",
@@ -1882,7 +2146,7 @@ pub fn narrator_auto_capture_request(
             },
             "evidenceRefs": [{
                 "evidenceType": "wake",
-                "refId": input.wake_id,
+                "refId": wake_id,
                 "label": "roleplay narrator turn"
             }],
             "confidence": 0.82,
@@ -1894,92 +2158,7 @@ pub fn narrator_auto_capture_request(
     })
 }
 
-pub fn start_narrator_turn(input: RoleplayNarratorStartInput) -> RoleplayNarratorPhasePlan {
-    let max_review_cycles = std::cmp::max(
-        1,
-        input
-            .max_review_cycles
-            .or_else(|| {
-                input
-                    .narrator_config
-                    .as_ref()
-                    .map(|config| config.review.max_review_cycles)
-            })
-            .unwrap_or(1),
-    );
-    let review_enabled = input.review_enabled
-        || input
-            .narrator_config
-            .as_ref()
-            .map(|config| config.review.enabled)
-            .unwrap_or(false);
-    let state = RoleplayNarratorTurnState {
-        narrator_config: input.narrator_config,
-        review_enabled,
-        max_review_cycles,
-        review_cycle: 0,
-        relevant_lore: narrator_relevant_lore_from_observations(&input.prelude_observations),
-        scene_brief: None,
-        review_feedback: None,
-    };
-    RoleplayNarratorPhasePlan {
-        phase: RoleplayNarratorPhaseKind::Explore,
-        instructions: narrator_explore_instructions(&input.prelude_observations),
-        allowed_tools: narrator_explore_tools(),
-        mandatory_tool_requests: Vec::new(),
-        state,
-        terminal: false,
-    }
-}
-
-pub fn next_narrator_phase(
-    input: RoleplayNarratorNextInput,
-) -> RoleplayDomainResult<RoleplayNarratorPhasePlan> {
-    let mut state = input.state;
-    match input.completed_phase {
-        RoleplayNarratorPhaseKind::Explore => {
-            state.scene_brief = Some(narrator_scene_brief(&input.output_text));
-            Ok(narrator_compose_or_draft_plan(state))
-        }
-        RoleplayNarratorPhaseKind::ComposeDraft => Ok(RoleplayNarratorPhasePlan {
-            phase: RoleplayNarratorPhaseKind::Review,
-            instructions: narrator_review_instructions(
-                state.scene_brief.as_deref().unwrap_or("{}"),
-                &input.output_text,
-                &state.relevant_lore,
-            ),
-            allowed_tools: narrator_compose_tools(),
-            mandatory_tool_requests: Vec::new(),
-            state,
-            terminal: false,
-        }),
-        RoleplayNarratorPhaseKind::Review => {
-            state.review_cycle = state.review_cycle.saturating_add(1);
-            state.review_feedback = Some(input.output_text.trim().to_string());
-            if state.review_cycle < state.max_review_cycles
-                && narrator_review_requests_revision(&input.output_text)
-            {
-                Ok(narrator_compose_draft_plan(state))
-            } else {
-                Ok(narrator_compose_plan(state))
-            }
-        }
-        RoleplayNarratorPhaseKind::Compose => Ok(RoleplayNarratorPhasePlan {
-            phase: RoleplayNarratorPhaseKind::Done,
-            instructions: String::new(),
-            allowed_tools: Vec::new(),
-            mandatory_tool_requests: Vec::new(),
-            state,
-            terminal: true,
-        }),
-        RoleplayNarratorPhaseKind::Done => Err(RoleplayDomainError::invalid(
-            "roleplay_narrator_already_done",
-            "narrator turn is already terminal",
-        )),
-    }
-}
-
-pub fn narrator_review_requests_revision(feedback: &str) -> bool {
+fn narrator_review_requests_revision(feedback: &str) -> bool {
     let normalized = feedback.to_lowercase();
     if normalized.contains("all clear")
         || normalized.contains("approved")
@@ -1993,43 +2172,203 @@ pub fn narrator_review_requests_revision(feedback: &str) -> bool {
         || normalized.contains("voice inconsistency")
 }
 
-fn narrator_compose_or_draft_plan(state: RoleplayNarratorTurnState) -> RoleplayNarratorPhasePlan {
-    if state.review_enabled {
-        narrator_compose_draft_plan(state)
-    } else {
-        narrator_compose_plan(state)
-    }
+fn narrator_explore_receipt(
+    wake_id: String,
+    session_id: String,
+    sequence: u32,
+    mut state: RoleplayNarratorTurnState,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    state.relevant_lore = narrator_relevant_lore_from_observations(&state.prelude_observations);
+    let instructions = narrator_explore_instructions(&state.prelude_observations);
+    narrator_receipt(
+        wake_id,
+        session_id,
+        sequence,
+        RoleplayNarratorPhaseKind::Explore,
+        None,
+        RoleplayNarratorDirective::ProviderPhase {
+            phase: RoleplayNarratorPhaseKind::Explore,
+            instructions,
+            allowed_tools: narrator_explore_tools(),
+            output_mode: RoleplayNarratorOutputMode::Internal,
+        },
+        state,
+        false,
+    )
 }
 
-fn narrator_compose_draft_plan(state: RoleplayNarratorTurnState) -> RoleplayNarratorPhasePlan {
-    RoleplayNarratorPhasePlan {
-        phase: RoleplayNarratorPhaseKind::ComposeDraft,
-        instructions: narrator_compose_instructions(
-            state.scene_brief.as_deref().unwrap_or("{}"),
-            state.review_feedback.as_deref(),
-            state.narrator_config.as_ref(),
-            &state.relevant_lore,
-        ),
-        allowed_tools: narrator_compose_tools(),
-        mandatory_tool_requests: Vec::new(),
+fn narrator_compose_draft_receipt(
+    wake_id: String,
+    session_id: String,
+    sequence: u32,
+    state: RoleplayNarratorTurnState,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    let instructions = narrator_compose_instructions(
+        state.scene_brief.as_deref().unwrap_or("{}"),
+        state.review_feedback.as_deref(),
+        state.narrator_config.as_ref(),
+        &state.relevant_lore,
+    );
+    narrator_receipt(
+        wake_id,
+        session_id,
+        sequence,
+        RoleplayNarratorPhaseKind::ComposeDraft,
+        Some(narrator_activity(
+            RoleplayNarratorActivityPhase::Composing,
+            "Writing narrative response.",
+        )),
+        RoleplayNarratorDirective::ProviderPhase {
+            phase: RoleplayNarratorPhaseKind::ComposeDraft,
+            instructions,
+            allowed_tools: narrator_compose_tools(),
+            output_mode: RoleplayNarratorOutputMode::Internal,
+        },
         state,
-        terminal: false,
-    }
+        false,
+    )
 }
 
-fn narrator_compose_plan(state: RoleplayNarratorTurnState) -> RoleplayNarratorPhasePlan {
-    RoleplayNarratorPhasePlan {
-        phase: RoleplayNarratorPhaseKind::Compose,
-        instructions: narrator_compose_instructions(
-            state.scene_brief.as_deref().unwrap_or("{}"),
-            state.review_feedback.as_deref(),
-            state.narrator_config.as_ref(),
-            &state.relevant_lore,
-        ),
-        allowed_tools: narrator_compose_tools(),
-        mandatory_tool_requests: Vec::new(),
+fn narrator_review_receipt(
+    wake_id: String,
+    session_id: String,
+    sequence: u32,
+    state: RoleplayNarratorTurnState,
+    draft: String,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    let instructions = narrator_review_instructions(
+        state.scene_brief.as_deref().unwrap_or("{}"),
+        &draft,
+        &state.relevant_lore,
+    );
+    narrator_receipt(
+        wake_id,
+        session_id,
+        sequence,
+        RoleplayNarratorPhaseKind::Review,
+        Some(narrator_activity(
+            RoleplayNarratorActivityPhase::Reviewing,
+            "Checking continuity and voice.",
+        )),
+        RoleplayNarratorDirective::ProviderPhase {
+            phase: RoleplayNarratorPhaseKind::Review,
+            instructions,
+            allowed_tools: narrator_compose_tools(),
+            output_mode: RoleplayNarratorOutputMode::Internal,
+        },
         state,
-        terminal: false,
+        false,
+    )
+}
+
+fn narrator_compose_receipt(
+    wake_id: String,
+    session_id: String,
+    sequence: u32,
+    state: RoleplayNarratorTurnState,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    let instructions = narrator_compose_instructions(
+        state.scene_brief.as_deref().unwrap_or("{}"),
+        state.review_feedback.as_deref(),
+        state.narrator_config.as_ref(),
+        &state.relevant_lore,
+    );
+    narrator_receipt(
+        wake_id,
+        session_id,
+        sequence,
+        RoleplayNarratorPhaseKind::Compose,
+        Some(narrator_activity(
+            RoleplayNarratorActivityPhase::Composing,
+            "Writing final narrative response.",
+        )),
+        RoleplayNarratorDirective::ProviderPhase {
+            phase: RoleplayNarratorPhaseKind::Compose,
+            instructions,
+            allowed_tools: narrator_compose_tools(),
+            output_mode: RoleplayNarratorOutputMode::Final,
+        },
+        state,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn narrator_receipt(
+    wake_id: String,
+    session_id: String,
+    sequence: u32,
+    phase: RoleplayNarratorPhaseKind,
+    activity: Option<RoleplayNarratorActivity>,
+    directive: RoleplayNarratorDirective,
+    state: RoleplayNarratorTurnState,
+    terminal: bool,
+) -> RoleplayDomainResult<RoleplayNarratorTurnReceipt> {
+    let mut receipt = RoleplayNarratorTurnReceipt {
+        receipt_id: String::new(),
+        wake_id,
+        session_id,
+        sequence,
+        phase,
+        activity,
+        directive,
+        state,
+        terminal,
+    };
+    receipt.receipt_id = narrator_receipt_id(&receipt)?;
+    Ok(receipt)
+}
+
+fn validate_narrator_receipt(receipt: &RoleplayNarratorTurnReceipt) -> RoleplayDomainResult<()> {
+    if receipt.state.session_id != receipt.session_id
+        || receipt.state.completed_phases.len().saturating_add(1) != receipt.sequence as usize
+    {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_narrator_receipt_invalid",
+            "narrator receipt sequence or session does not match its state",
+        ));
+    }
+    let expected = narrator_receipt_id(receipt)?;
+    if receipt.receipt_id != expected {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_narrator_receipt_invalid",
+            "narrator receipt identity does not match its state",
+        ));
+    }
+    Ok(())
+}
+
+fn narrator_receipt_id(receipt: &RoleplayNarratorTurnReceipt) -> RoleplayDomainResult<String> {
+    let bound_payload = serde_json::to_vec(&(
+        &receipt.phase,
+        &receipt.activity,
+        &receipt.directive,
+        &receipt.state,
+        receipt.terminal,
+    ))
+    .map_err(|error| {
+        RoleplayDomainError::invalid(
+            "roleplay_narrator_receipt_serialization_failed",
+            format!("could not serialize narrator receipt payload: {error}"),
+        )
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update(receipt.wake_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(receipt.session_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(receipt.sequence.to_le_bytes());
+    hasher.update(bound_payload);
+    Ok(format!("narrator-{digest:x}", digest = hasher.finalize()))
+}
+
+fn narrator_activity(
+    phase: RoleplayNarratorActivityPhase,
+    message: &str,
+) -> RoleplayNarratorActivity {
+    RoleplayNarratorActivity {
+        phase,
+        message: message.to_string(),
     }
 }
 
@@ -4467,13 +4806,15 @@ mod tests {
     }
 
     #[test]
-    fn plans_mandatory_explore_requests_and_auto_capture_request() {
-        let requests = narrator_mandatory_explore_requests(RoleplayNarratorMandatoryExploreInput {
-            session_id: "session-rp".to_string(),
-            profile_id: "profile-rp".to_string(),
-            pending_text: "She reveals a silver locket engraved with a serpent-and-rose crest."
-                .to_string(),
-        });
+    fn host_plans_mandatory_explore_and_capture_without_ts_decisions() {
+        let start = narrator_start(
+            "She reveals a silver locket engraved with a serpent-and-rose crest.",
+            false,
+            None,
+        );
+        let RoleplayNarratorDirective::ToolBatch { requests } = &start.directive else {
+            panic!("start must issue the mandatory explore tool batch");
+        };
 
         assert_eq!(
             requests
@@ -4488,35 +4829,43 @@ mod tests {
             "She reveals a silver locket engraved with a serpent-and-rose crest."
         );
 
-        let capture = narrator_auto_capture_request(RoleplayNarratorAutoCaptureInput {
-            session_id: "session-rp".to_string(),
-            profile_id: "profile-rp".to_string(),
-            wake_id: "wake-rp".to_string(),
-            pending_text: "She reveals a silver locket engraved with a serpent-and-rose crest."
-                .to_string(),
-            layer_details_json: serde_json::json!({
-                "result": [
-                    {
-                        "layer_id": "archived-story",
-                        "purpose": "story",
-                        "write_policy": "auto_capture",
-                        "is_archived": true
-                    },
-                    {
-                        "layer_id": "world-details",
-                        "purpose": "world",
-                        "write_policy": "manual"
-                    },
-                    {
-                        "layer_id": "story-facts",
-                        "purpose": "story",
-                        "write_policy": "auto_capture",
-                        "is_archived": false
-                    }
-                ]
-            }),
-        })
-        .expect("auto capture request");
+        let capture_receipt = advance_tools(
+            start,
+            vec![RoleplayNarratorToolObservation {
+                tool_name: "list_lore_layers".to_string(),
+                ok: true,
+                summary: "layers".to_string(),
+                details_json: Some(serde_json::json!({
+                    "result": [
+                        {
+                            "layer_id": "archived-story",
+                            "purpose": "story",
+                            "write_policy": "auto_capture",
+                            "is_archived": true
+                        },
+                        {
+                            "layer_id": "world-details",
+                            "purpose": "world",
+                            "write_policy": "manual"
+                        },
+                        {
+                            "layer_id": "story-facts",
+                            "purpose": "story",
+                            "write_policy": "auto_capture",
+                            "is_archived": false
+                        }
+                    ]
+                })),
+            }],
+        );
+        assert_eq!(
+            capture_receipt.phase,
+            RoleplayNarratorPhaseKind::PreludeCapture
+        );
+        let RoleplayNarratorDirective::ToolBatch { requests } = &capture_receipt.directive else {
+            panic!("capture phase must issue a tool batch");
+        };
+        let capture = &requests[0];
 
         assert_eq!(capture.tool_name, "capture_lore_fact");
         assert_eq!(capture.params_json["layerId"], "story-facts");
@@ -4535,12 +4884,19 @@ mod tests {
     }
 
     #[test]
-    fn starts_without_review_and_finishes_after_compose() {
-        let plan = start_narrator_turn(RoleplayNarratorStartInput {
-            narrator_config: None,
-            review_enabled: false,
-            max_review_cycles: None,
-            prelude_observations: vec![
+    fn host_receipts_restart_cleanly_and_finish_after_final_compose() {
+        let start = narrator_start("Continue the moonlit library scene.", false, None);
+        assert_eq!(start.phase, RoleplayNarratorPhaseKind::PreludeExplore);
+        assert_eq!(
+            start.activity.as_ref().map(|activity| &activity.phase),
+            Some(&RoleplayNarratorActivityPhase::Exploring)
+        );
+        let serialized = serde_json::to_string(&start).expect("serialize receipt");
+        let restored: RoleplayNarratorTurnReceipt =
+            serde_json::from_str(&serialized).expect("restore receipt");
+        let explore = advance_tools(
+            restored,
+            vec![
                 RoleplayNarratorToolObservation {
                     tool_name: "recall_lore".to_string(),
                     ok: true,
@@ -4582,55 +4938,68 @@ mod tests {
                     })),
                 },
             ],
-        });
+        );
 
-        assert_eq!(plan.phase, RoleplayNarratorPhaseKind::Explore);
-        assert!(plan.instructions.contains("Mandatory explore tool results"));
-        assert!(plan.allowed_tools.contains(&"recall_lore".to_string()));
-        assert_eq!(plan.state.relevant_lore.len(), 2);
-        assert_eq!(plan.state.relevant_lore[0].source_id, "moonlit-garden");
+        assert_eq!(explore.phase, RoleplayNarratorPhaseKind::Explore);
+        let RoleplayNarratorDirective::ProviderPhase {
+            instructions,
+            allowed_tools,
+            output_mode,
+            ..
+        } = &explore.directive
+        else {
+            panic!("explore must issue a provider directive");
+        };
+        assert!(instructions.contains("Mandatory explore tool results"));
+        assert!(allowed_tools.contains(&"recall_lore".to_string()));
+        assert_eq!(*output_mode, RoleplayNarratorOutputMode::Internal);
+        assert_eq!(explore.state.relevant_lore.len(), 2);
+        assert_eq!(explore.state.relevant_lore[0].source_id, "moonlit-garden");
         assert_eq!(
-            plan.state.relevant_lore[0].source_kind,
+            explore.state.relevant_lore[0].source_kind,
             "roleplay_lore_recall"
         );
-        assert_eq!(plan.state.relevant_lore[1].source_id, "silver-locket");
+        assert_eq!(explore.state.relevant_lore[1].source_id, "silver-locket");
         assert_eq!(
-            plan.state.relevant_lore[1].source_kind,
+            explore.state.relevant_lore[1].source_kind,
             "roleplay_lore_search"
         );
 
-        let compose = next_narrator_phase(RoleplayNarratorNextInput {
-            state: plan.state,
-            completed_phase: RoleplayNarratorPhaseKind::Explore,
-            output_text: "{\"location\":\"moonlit library\"}".to_string(),
-        })
-        .expect("compose phase");
+        let compose = advance_provider(explore, "{\"location\":\"moonlit library\"}");
         assert_eq!(compose.phase, RoleplayNarratorPhaseKind::Compose);
-        assert!(compose.instructions.contains("Scene brief:"));
-        assert!(compose.instructions.contains("moonlit library"));
-        assert!(compose
-            .instructions
-            .contains("Relevant lore gathered during explore:"));
-        assert!(compose.instructions.contains("Moonlit Garden"));
-        assert!(compose.instructions.contains("Night-blooming orchids glow"));
-        assert!(compose.instructions.contains("Silver Locket"));
-        assert!(compose.instructions.contains("old city wardens"));
+        let RoleplayNarratorDirective::ProviderPhase {
+            instructions,
+            allowed_tools,
+            output_mode,
+            ..
+        } = &compose.directive
+        else {
+            panic!("compose must issue a provider directive");
+        };
+        assert!(instructions.contains("Scene brief:"));
+        assert!(instructions.contains("moonlit library"));
+        assert!(instructions.contains("Relevant lore gathered during explore:"));
+        assert!(instructions.contains("Moonlit Garden"));
+        assert!(instructions.contains("Night-blooming orchids glow"));
+        assert!(instructions.contains("Silver Locket"));
+        assert!(instructions.contains("old city wardens"));
+        assert_eq!(*output_mode, RoleplayNarratorOutputMode::Final);
         assert_eq!(
-            compose.allowed_tools,
+            allowed_tools.as_slice(),
             vec![
                 "get_scene_state".to_string(),
                 "update_scene_state".to_string()
             ]
         );
 
-        let done = next_narrator_phase(RoleplayNarratorNextInput {
-            state: compose.state,
-            completed_phase: RoleplayNarratorPhaseKind::Compose,
-            output_text: "Final prose.".to_string(),
-        })
-        .expect("done phase");
+        let done = advance_provider(compose, "Final prose.");
         assert_eq!(done.phase, RoleplayNarratorPhaseKind::Done);
         assert!(done.terminal);
+        assert!(matches!(done.directive, RoleplayNarratorDirective::Done));
+        assert_eq!(
+            done.activity.as_ref().map(|activity| &activity.phase),
+            Some(&RoleplayNarratorActivityPhase::Idle)
+        );
     }
 
     #[test]
@@ -4648,60 +5017,30 @@ mod tests {
             }
         }))
         .expect("config");
-        let start = start_narrator_turn(RoleplayNarratorStartInput {
-            narrator_config: Some(config),
-            review_enabled: false,
-            max_review_cycles: None,
-            prelude_observations: vec![],
-        });
-        let draft = next_narrator_phase(RoleplayNarratorNextInput {
-            state: start.state,
-            completed_phase: RoleplayNarratorPhaseKind::Explore,
-            output_text: "scene brief".to_string(),
-        })
-        .expect("draft phase");
+        let start = narrator_start("Continue the scene.", false, Some(config));
+        let explore = advance_tools(start, vec![]);
+        let draft = advance_provider(explore, "scene brief");
         assert_eq!(draft.phase, RoleplayNarratorPhaseKind::ComposeDraft);
-        assert!(draft.instructions.contains("- tone: wry"));
-        assert!(draft.instructions.contains("Keep images tactile."));
-        assert!(draft.instructions.contains("A crisp reference line."));
+        let draft_instructions = provider_instructions(&draft);
+        assert!(draft_instructions.contains("- tone: wry"));
+        assert!(draft_instructions.contains("Keep images tactile."));
+        assert!(draft_instructions.contains("A crisp reference line."));
 
-        let review = next_narrator_phase(RoleplayNarratorNextInput {
-            state: draft.state,
-            completed_phase: RoleplayNarratorPhaseKind::ComposeDraft,
-            output_text: "draft one".to_string(),
-        })
-        .expect("review phase");
+        let review = advance_provider(draft, "draft one");
         assert_eq!(review.phase, RoleplayNarratorPhaseKind::Review);
-        assert!(review.instructions.contains("Draft:"));
-        assert!(review.instructions.contains("draft one"));
+        assert!(provider_instructions(&review).contains("Draft:"));
+        assert!(provider_instructions(&review).contains("draft one"));
 
-        let revised_draft = next_narrator_phase(RoleplayNarratorNextInput {
-            state: review.state,
-            completed_phase: RoleplayNarratorPhaseKind::Review,
-            output_text: "revise for continuity error".to_string(),
-        })
-        .expect("revised draft phase");
+        let revised_draft = advance_provider(review, "revise for continuity error");
         assert_eq!(revised_draft.phase, RoleplayNarratorPhaseKind::ComposeDraft);
         assert_eq!(revised_draft.state.review_cycle, 1);
-        assert!(revised_draft
-            .instructions
-            .contains("revise for continuity error"));
+        assert!(provider_instructions(&revised_draft).contains("revise for continuity error"));
 
-        let second_review = next_narrator_phase(RoleplayNarratorNextInput {
-            state: revised_draft.state,
-            completed_phase: RoleplayNarratorPhaseKind::ComposeDraft,
-            output_text: "draft two".to_string(),
-        })
-        .expect("second review phase");
-        let final_compose = next_narrator_phase(RoleplayNarratorNextInput {
-            state: second_review.state,
-            completed_phase: RoleplayNarratorPhaseKind::Review,
-            output_text: "revise one more thing".to_string(),
-        })
-        .expect("final compose phase");
+        let second_review = advance_provider(revised_draft, "draft two");
+        let final_compose = advance_provider(second_review, "revise one more thing");
         assert_eq!(final_compose.phase, RoleplayNarratorPhaseKind::Compose);
         assert_eq!(final_compose.state.review_cycle, 2);
-        assert!(final_compose.instructions.contains("revise one more thing"));
+        assert!(provider_instructions(&final_compose).contains("revise one more thing"));
     }
 
     #[test]
@@ -4713,53 +5052,106 @@ mod tests {
             "revise the character voice"
         ));
 
-        let start = start_narrator_turn(RoleplayNarratorStartInput {
-            narrator_config: None,
-            review_enabled: true,
-            max_review_cycles: Some(4),
-            prelude_observations: vec![],
-        });
-        let draft = next_narrator_phase(RoleplayNarratorNextInput {
-            state: start.state,
-            completed_phase: RoleplayNarratorPhaseKind::Explore,
-            output_text: "brief".to_string(),
-        })
-        .expect("draft");
-        let review = next_narrator_phase(RoleplayNarratorNextInput {
-            state: draft.state,
-            completed_phase: RoleplayNarratorPhaseKind::ComposeDraft,
-            output_text: "draft".to_string(),
-        })
-        .expect("review");
-        let final_compose = next_narrator_phase(RoleplayNarratorNextInput {
-            state: review.state,
-            completed_phase: RoleplayNarratorPhaseKind::Review,
-            output_text: "all clear".to_string(),
-        })
-        .expect("final compose");
+        let mut start = narrator_start("Continue.", true, None);
+        start.state.max_review_cycles = 4;
+        start.receipt_id = narrator_receipt_id(&start).expect("receipt id");
+        let draft = advance_provider(advance_tools(start, vec![]), "brief");
+        let review = advance_provider(draft, "draft");
+        let final_compose = advance_provider(review, "all clear");
 
         assert_eq!(final_compose.phase, RoleplayNarratorPhaseKind::Compose);
         assert_eq!(final_compose.state.review_cycle, 1);
     }
 
     #[test]
-    fn terminal_narrator_phase_rejects_next_transition() {
-        let error = next_narrator_phase(RoleplayNarratorNextInput {
-            state: RoleplayNarratorTurnState {
-                narrator_config: None,
-                review_enabled: false,
-                max_review_cycles: 1,
-                review_cycle: 0,
-                relevant_lore: Vec::new(),
-                scene_brief: None,
-                review_feedback: None,
+    fn host_rejects_stale_receipts_and_mismatched_outcomes() {
+        let start = narrator_start("Continue.", false, None);
+        let mismatch = advance_narrator_turn(RoleplayNarratorAdvanceInput {
+            receipt: start.clone(),
+            outcome: RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted {
+                output_text: "not a tool result".to_string(),
             },
-            completed_phase: RoleplayNarratorPhaseKind::Done,
-            output_text: String::new(),
         })
-        .expect_err("done cannot advance");
+        .expect_err("tool phase rejects provider outcome");
+        assert_eq!(mismatch.reason_code, "roleplay_narrator_outcome_mismatch");
 
-        assert_eq!(error.reason_code, "roleplay_narrator_already_done");
+        let mut visibility_tampered = advance_tools(start.clone(), vec![]);
+        if let RoleplayNarratorDirective::ProviderPhase { output_mode, .. } =
+            &mut visibility_tampered.directive
+        {
+            *output_mode = RoleplayNarratorOutputMode::Final;
+        }
+        let invalid_visibility = advance_narrator_turn(RoleplayNarratorAdvanceInput {
+            receipt: visibility_tampered,
+            outcome: RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted {
+                output_text: "brief".to_string(),
+            },
+        })
+        .expect_err("tampered output visibility");
+        assert_eq!(
+            invalid_visibility.reason_code,
+            "roleplay_narrator_receipt_invalid"
+        );
+
+        let mut tampered = start;
+        tampered.state.pending_text.push_str(" altered");
+        let invalid = advance_narrator_turn(RoleplayNarratorAdvanceInput {
+            receipt: tampered,
+            outcome: RoleplayNarratorPhaseOutcome::ToolBatchCompleted {
+                observations: vec![],
+            },
+        })
+        .expect_err("tampered receipt");
+        assert_eq!(invalid.reason_code, "roleplay_narrator_receipt_invalid");
+    }
+
+    fn narrator_start(
+        pending_text: &str,
+        review_enabled: bool,
+        narrator_config: Option<RoleplayNarratorConfig>,
+    ) -> RoleplayNarratorTurnReceipt {
+        start_narrator_turn(RoleplayNarratorStartInput {
+            wake_id: "wake-rp".to_string(),
+            session_id: "session-rp".to_string(),
+            profile_id: "profile-rp".to_string(),
+            pending_text: pending_text.to_string(),
+            narrator_config,
+            review_enabled,
+            max_review_cycles: None,
+        })
+        .expect("start narrator")
+    }
+
+    fn advance_tools(
+        receipt: RoleplayNarratorTurnReceipt,
+        observations: Vec<RoleplayNarratorToolObservation>,
+    ) -> RoleplayNarratorTurnReceipt {
+        advance_narrator_turn(RoleplayNarratorAdvanceInput {
+            receipt,
+            outcome: RoleplayNarratorPhaseOutcome::ToolBatchCompleted { observations },
+        })
+        .expect("advance tool batch")
+    }
+
+    fn advance_provider(
+        receipt: RoleplayNarratorTurnReceipt,
+        output_text: &str,
+    ) -> RoleplayNarratorTurnReceipt {
+        advance_narrator_turn(RoleplayNarratorAdvanceInput {
+            receipt,
+            outcome: RoleplayNarratorPhaseOutcome::ProviderPhaseCompleted {
+                output_text: output_text.to_string(),
+            },
+        })
+        .expect("advance provider phase")
+    }
+
+    fn provider_instructions(receipt: &RoleplayNarratorTurnReceipt) -> &str {
+        let RoleplayNarratorDirective::ProviderPhase { instructions, .. } = &receipt.directive
+        else {
+            panic!("expected provider directive");
+        };
+        instructions
     }
 
     fn branch(branch_id: &str, head_message_id: Option<&str>) -> RoleplayConversationBranch {

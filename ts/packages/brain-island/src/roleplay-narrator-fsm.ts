@@ -1,11 +1,20 @@
+import type { BrainPhase } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 export type RoleplayNarratorPhaseKind =
+  | "prelude_explore"
+  | "prelude_capture"
   | "explore"
   | "compose"
   | "compose_draft"
   | "review"
   | "done";
+
+export type RoleplayNarratorProviderPhase =
+  | "explore"
+  | "compose"
+  | "compose_draft"
+  | "review";
 
 export type RoleplayNarratorJsonValue =
   | null
@@ -42,16 +51,6 @@ export interface RoleplayNarratorToolObservation {
   detailsJson?: RoleplayNarratorJsonValue;
 }
 
-export interface RoleplayNarratorTurnState {
-  narratorConfig?: RoleplayNarratorConfig;
-  reviewEnabled: boolean;
-  maxReviewCycles: number;
-  reviewCycle: number;
-  relevantLore: RoleplayNarratorPromptSourceText[];
-  sceneBrief?: string;
-  reviewFeedback?: string;
-}
-
 export interface RoleplayNarratorPromptSourceText {
   source_kind: string;
   source_id: string;
@@ -61,86 +60,102 @@ export interface RoleplayNarratorPromptSourceText {
   derived: boolean;
 }
 
-export interface RoleplayNarratorPhasePlan {
+export interface RoleplayNarratorTurnState {
+  profileId: string;
+  sessionId: string;
+  pendingText: string;
+  narratorConfig?: RoleplayNarratorConfig;
+  reviewEnabled: boolean;
+  maxReviewCycles: number;
+  reviewCycle: number;
+  preludeObservations: RoleplayNarratorToolObservation[];
+  relevantLore: RoleplayNarratorPromptSourceText[];
+  sceneBrief?: string;
+  reviewFeedback?: string;
+  completedPhases: RoleplayNarratorPhaseKind[];
+}
+
+export interface RoleplayNarratorActivity {
+  phase: Extract<BrainPhase, "exploring" | "composing" | "reviewing" | "idle">;
+  message: string;
+}
+
+export type RoleplayNarratorDirective =
+  | {
+      kind: "tool_batch";
+      requests: RoleplayNarratorToolRequest[];
+    }
+  | {
+      kind: "provider_phase";
+      phase: RoleplayNarratorProviderPhase;
+      instructions: string;
+      allowedTools: string[];
+      outputMode: "internal" | "final";
+    }
+  | {
+      kind: "done";
+    };
+
+export interface RoleplayNarratorTurnReceipt {
+  receiptId: string;
+  wakeId: string;
+  sessionId: string;
+  sequence: number;
   phase: RoleplayNarratorPhaseKind;
-  instructions: string;
-  allowedTools: string[];
-  mandatoryToolRequests: RoleplayNarratorToolRequest[];
+  activity?: RoleplayNarratorActivity;
+  directive: RoleplayNarratorDirective;
   state: RoleplayNarratorTurnState;
   terminal: boolean;
 }
 
-export interface RoleplayNarratorMandatoryExploreInput {
-  sessionId: string;
-  profileId: string;
-  pendingText?: string;
-}
-
-export interface RoleplayNarratorAutoCaptureInput {
-  sessionId: string;
-  profileId: string;
-  wakeId: string;
-  pendingText?: string;
-  layerDetailsJson?: RoleplayNarratorJsonValue;
-}
-
 export interface RoleplayNarratorStartInput {
+  wakeId: string;
+  sessionId: string;
+  profileId: string;
+  pendingText?: string;
   narratorConfig?: RoleplayNarratorConfig;
   reviewEnabled: boolean;
   maxReviewCycles?: number;
-  preludeObservations?: RoleplayNarratorToolObservation[];
 }
 
-export interface RoleplayNarratorNextInput {
-  state: RoleplayNarratorTurnState;
-  completedPhase: RoleplayNarratorPhaseKind;
-  outputText?: string;
+export type RoleplayNarratorPhaseOutcome =
+  | {
+      kind: "tool_batch_completed";
+      observations: RoleplayNarratorToolObservation[];
+    }
+  | {
+      kind: "provider_phase_completed";
+      outputText?: string;
+    };
+
+export interface RoleplayNarratorAdvanceInput {
+  receipt: RoleplayNarratorTurnReceipt;
+  outcome: RoleplayNarratorPhaseOutcome;
 }
 
 export interface RoleplayNarratorFsmBridge {
-  mandatoryExploreRequests(
-    input: RoleplayNarratorMandatoryExploreInput,
-  ): Promise<RoleplayNarratorToolRequest[]>;
-  autoCaptureRequest(
-    input: RoleplayNarratorAutoCaptureInput,
-  ): Promise<RoleplayNarratorToolRequest | undefined>;
   startTurn(
     input: RoleplayNarratorStartInput,
-  ): Promise<RoleplayNarratorPhasePlan>;
-  nextPhase(
-    input: RoleplayNarratorNextInput,
-  ): Promise<RoleplayNarratorPhasePlan>;
-  reviewRequestsRevision(feedback: string): Promise<boolean>;
+  ): Promise<RoleplayNarratorTurnReceipt>;
+  advanceTurn(
+    input: RoleplayNarratorAdvanceInput,
+  ): Promise<RoleplayNarratorTurnReceipt>;
 }
 
 export function createRoleplayNarratorFsmBridge(
   bridge: Pick<
     NativeBridgeModule,
-    | "roleplayNarratorMandatoryExploreRequests"
-    | "roleplayNarratorAutoCaptureRequest"
-    | "startRoleplayNarratorTurn"
-    | "nextRoleplayNarratorPhase"
-    | "roleplayNarratorReviewRequestsRevision"
+    "startRoleplayNarratorTurn" | "advanceRoleplayNarratorTurn"
   >,
 ): RoleplayNarratorFsmBridge {
   return {
-    mandatoryExploreRequests: async (input) =>
-      (await bridge.roleplayNarratorMandatoryExploreRequests(
-        input,
-      )) as RoleplayNarratorToolRequest[],
-    autoCaptureRequest: async (input) =>
-      (await bridge.roleplayNarratorAutoCaptureRequest(input)) as
-        | RoleplayNarratorToolRequest
-        | undefined,
     startTurn: async (input) =>
       (await bridge.startRoleplayNarratorTurn(
         input,
-      )) as RoleplayNarratorPhasePlan,
-    nextPhase: async (input) =>
-      (await bridge.nextRoleplayNarratorPhase(
+      )) as RoleplayNarratorTurnReceipt,
+    advanceTurn: async (input) =>
+      (await bridge.advanceRoleplayNarratorTurn(
         input,
-      )) as RoleplayNarratorPhasePlan,
-    reviewRequestsRevision: async (feedback) =>
-      bridge.roleplayNarratorReviewRequestsRevision(feedback),
+      )) as RoleplayNarratorTurnReceipt,
   };
 }

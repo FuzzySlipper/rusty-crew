@@ -342,7 +342,8 @@ This is an extension seam, not a legacy TS path.
 - cancellation and timeout races;
 - bounded stream/tool/output storage;
 - provider-state rebuild/fingerprint behavior;
-- narrator phase-state persistence and restart behavior.
+- narrator receipt JSON round trips, identity validation, phase/outcome
+  matching, bounded review cycles, and restart behavior;
 
 ### Bridge And TypeScript
 
@@ -379,4 +380,3 @@ service without using live service data as disposable test state.
 - ADR 0021 remains historical context for why the neutral contract supports
   multiple implementation languages, but no longer defines the production
   ownership direction.
-

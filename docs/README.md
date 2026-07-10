@@ -79,12 +79,12 @@ historical audit context only; they are not an implementation recommendation.
    - `crates/brains/openai-responses` — Rust brain for the OpenAI Responses
      API. Wired into production wake handling through the native bridge.
    - `crates/brains/pi-agent` — Rust brain for OpenAI-compatible
-     chat-completions style agent loops. Wired into the compatibility
-     `pi-agent-core` module id through the native bridge.
+     chat-completions style agent loops. Wired through the canonical
+     `pi-agent` catalog id and native bridge.
    - `ts/packages/brain-island` — TypeScript service/brain island. Owns
      model-callable tool implementations and adaptation, profile/role assembly,
-     MCP clients, platform adapters, and roleplay narrator phase/tool execution
-     over Rust-owned narrator FSM plans.
+     MCP clients, platform adapters, and execution of Rust-issued roleplay
+     narrator tool/provider directives.
 
 3. **Historical audit context (read-only, not binding).** The `pi-crew-*` and
    `pi-agent-rust-port-inspiration.md` / `rust-llm-ecosystem-research.md` docs

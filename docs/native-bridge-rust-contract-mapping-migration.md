@@ -164,8 +164,7 @@ The artifact currently covers these bridge families:
   Rust's persistence-contract JSON as the bridge authority instead of adding
   TypeScript mapper code;
 - passthrough wrapper names plus JSON-body wrapper subsets for roleplay
-  operations, including the non-JSON scalar
-  `roleplayNarratorReviewRequestsRevision` native method exception;
+  operations;
 - passthrough wrapper names plus JSON-body wrapper subsets for memory methods,
   and direct native method names for the profile-memory napi surface that is
   not represented as manifest JSON operations;

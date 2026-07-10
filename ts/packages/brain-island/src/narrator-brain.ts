@@ -2,7 +2,6 @@ import type {
   BrainAction,
   BrainEvent,
   BrainEventEnvelope,
-  BrainPhase,
   BodyState,
   ToolDescriptor,
   ToolProfile,
@@ -20,8 +19,8 @@ import type {
   RoleplayNarratorFsmBridge,
   RoleplayNarratorJsonValue,
   RoleplayNarratorConfig,
-  RoleplayNarratorPhaseKind,
-  RoleplayNarratorPhasePlan,
+  RoleplayNarratorProviderPhase,
+  RoleplayNarratorTurnReceipt,
   RoleplayNarratorToolObservation,
   RoleplayNarratorToolRequest,
 } from "./roleplay-narrator-fsm.js";
@@ -44,11 +43,7 @@ export interface RoleplayNarratorBrainOptions {
   providerRequestDebugStore?: ProviderRequestDebugStore;
 }
 
-export type RoleplayNarratorPhase =
-  | "explore"
-  | "compose"
-  | "compose_draft"
-  | "review";
+export type RoleplayNarratorPhase = RoleplayNarratorProviderPhase;
 
 export interface RoleplayNarratorPhaseBrainOptions {
   phase: RoleplayNarratorPhase;
@@ -73,72 +68,74 @@ export function createRoleplayNarratorBrain(
         phaseEvents.push(envelope);
         await options.submitEvent?.(envelope);
       };
-      const emitPhase = async (phase: BrainPhase, message?: string) => {
-        await emitEvent({
-          type: "phase_change",
-          phase,
-          message,
-        });
-      };
-
-      await emitPhase("exploring", "Gathering lore and scene context.");
-      const preludeObservations = await runMandatoryExplorePrelude(
-        input,
-        options.narratorFsm,
-        options.resolveTools,
-        options.toolProfile,
-        emitEvent,
-      );
-      let reviewFeedback: string | undefined;
       let composeResult: BrainWakeResult | undefined;
-      let plan = await options.narratorFsm.startTurn({
+      let receipt = await options.narratorFsm.startTurn({
+        wakeId: input.wakeId,
+        sessionId: input.sessionId,
+        profileId: input.state.session.profileId,
+        pendingText: pendingMessageText(input),
         narratorConfig: options.narratorConfig,
         reviewEnabled: options.reviewEnabled === true,
         maxReviewCycles: options.maxReviewCycles,
-        preludeObservations,
       });
 
-      while (plan.phase !== "done") {
-        if (plan.phase !== "explore") {
-          await emitNarratorPhase(plan.phase, emitPhase);
+      while (!receipt.terminal) {
+        if (receipt.activity) {
+          await emitEvent({
+            type: "phase_change",
+            phase: receipt.activity.phase,
+            message: receipt.activity.message,
+          });
         }
-        const result = await runNarratorPhasePlan(input, options, plan);
-        const outputText = textFromEvents(result.events).trim();
-        if (plan.phase === "review") {
-          reviewFeedback = outputText;
+        if (receipt.directive.kind === "tool_batch") {
+          const observations = await runNarratorToolBatch(
+            input,
+            receipt.directive.requests,
+            options.resolveTools,
+            options.toolProfile,
+            emitEvent,
+          );
+          receipt = await options.narratorFsm.advanceTurn({
+            receipt,
+            outcome: { kind: "tool_batch_completed", observations },
+          });
+          continue;
         }
-        if (plan.phase === "compose") {
+        if (receipt.directive.kind !== "provider_phase") {
+          throw new Error(
+            `non-terminal narrator receipt ${receipt.receiptId} has no executable directive`,
+          );
+        }
+        const result = await runNarratorProviderPhase(input, options, receipt);
+        if (receipt.directive.outputMode === "final") {
+          if (!options.submitEvent) {
+            phaseEvents.push(...result.events);
+          }
           composeResult = result;
         }
-        plan = await options.narratorFsm.nextPhase({
-          state: plan.state,
-          completedPhase: plan.phase,
-          outputText,
+        receipt = await options.narratorFsm.advanceTurn({
+          receipt,
+          outcome: {
+            kind: "provider_phase_completed",
+            outputText: textFromEvents(result.events).trim(),
+          },
         });
       }
 
+      if (receipt.activity) {
+        await emitEvent({
+          type: "phase_change",
+          phase: receipt.activity.phase,
+          message: receipt.activity.message,
+        });
+      }
       if (!composeResult) {
         throw new Error(
           "roleplay narrator FSM completed without compose phase",
         );
       }
 
-      const reviewEvents: BrainEventEnvelope[] = [];
-      if (reviewFeedback) {
-        reviewEvents.push(
-          brainEventEnvelope(input, {
-            type: "provider_status",
-            level: "info",
-            message: "Narrator review completed.",
-            metadataJson: JSON.stringify({ reviewFeedback }),
-          }),
-        );
-      }
-
-      await emitPhase("idle", "Narrator turn complete.");
-      const visibleEvents = options.submitEvent
-        ? []
-        : [...phaseEvents, ...composeResult.events, ...reviewEvents];
+      const visibleEvents = options.submitEvent ? [] : phaseEvents;
       return {
         events: visibleEvents,
         actions: composeResult.actions,
@@ -147,56 +144,38 @@ export function createRoleplayNarratorBrain(
   };
 }
 
-async function runNarratorPhasePlan(
+async function runNarratorProviderPhase(
   input: BrainWakeInput,
   options: RoleplayNarratorBrainOptions,
-  plan: RoleplayNarratorPhasePlan,
+  receipt: RoleplayNarratorTurnReceipt,
 ): Promise<BrainWakeResult> {
-  const phase = narratorPhase(plan.phase);
-  const allowedTools = new Set(plan.allowedTools);
+  if (receipt.directive.kind !== "provider_phase") {
+    throw new Error(
+      `narrator receipt ${receipt.receiptId} is not a provider phase`,
+    );
+  }
+  const phase = receipt.directive.phase;
+  const allowedTools = new Set(receipt.directive.allowedTools);
   const brain = createNarratorPhaseBrain(options, {
     phase,
     allowedTools,
-    submitEvent: phase === "compose" ? options.submitEvent : undefined,
-    planActions: phase === "compose" ? options.planActions : undefined,
+    submitEvent:
+      receipt.directive.outputMode === "final"
+        ? options.submitEvent
+        : undefined,
+    planActions:
+      receipt.directive.outputMode === "final"
+        ? options.planActions
+        : undefined,
   });
   return brain.wake(
     withFilteredTools(
       withNarratorInstructions(input, {
-        instructions: plan.instructions,
+        instructions: receipt.directive.instructions,
       }),
       allowedTools,
     ),
   );
-}
-
-function narratorPhase(
-  phase: RoleplayNarratorPhaseKind,
-): RoleplayNarratorPhase {
-  if (
-    phase === "explore" ||
-    phase === "compose" ||
-    phase === "compose_draft" ||
-    phase === "review"
-  ) {
-    return phase;
-  }
-  throw new Error(`roleplay narrator phase ${phase} cannot run as a wake`);
-}
-
-async function emitNarratorPhase(
-  phase: RoleplayNarratorPhase,
-  emitPhase: (phase: BrainPhase, message?: string) => Promise<void>,
-): Promise<void> {
-  if (phase === "review") {
-    await emitPhase("reviewing", "Checking continuity and voice.");
-    return;
-  }
-  if (phase === "compose_draft") {
-    await emitPhase("composing", "Writing narrative response.");
-    return;
-  }
-  await emitPhase("composing", "Writing final narrative response.");
 }
 
 function createNarratorPhaseBrain(
@@ -225,21 +204,16 @@ function createNarratorPhaseBrain(
   });
 }
 
-async function runMandatoryExplorePrelude(
+async function runNarratorToolBatch(
   input: BrainWakeInput,
-  narratorFsm: RoleplayNarratorFsmBridge,
+  requests: readonly RoleplayNarratorToolRequest[],
   resolver: BrainToolResolver | undefined,
   toolProfile: ToolProfile | undefined,
   emitEvent: (event: BrainEvent) => Promise<void>,
 ): Promise<RoleplayNarratorToolObservation[]> {
   const tools = resolveMandatoryExploreTools(input, resolver, toolProfile);
-  const pendingText = pendingMessageText(input);
   const observations: RoleplayNarratorToolObservation[] = [];
-  for (const request of await narratorFsm.mandatoryExploreRequests({
-    sessionId: input.sessionId,
-    profileId: input.state.session.profileId,
-    pendingText,
-  })) {
+  for (const request of requests) {
     const tool = tools.get(request.toolName);
     if (!tool) {
       observations.push({
@@ -252,35 +226,6 @@ async function runMandatoryExplorePrelude(
     observations.push(
       await runMandatoryExploreTool(input, tool, request, emitEvent),
     );
-  }
-  const layerObservation = observations.find(
-    (observation) => observation.toolName === "list_lore_layers",
-  );
-  const autoCaptureRequest = await narratorFsm.autoCaptureRequest({
-    sessionId: input.sessionId,
-    profileId: input.state.session.profileId,
-    wakeId: input.wakeId,
-    pendingText,
-    layerDetailsJson: layerObservation?.detailsJson ?? null,
-  });
-  if (autoCaptureRequest) {
-    const tool = tools.get(autoCaptureRequest.toolName);
-    if (!tool) {
-      observations.push({
-        toolName: autoCaptureRequest.toolName,
-        ok: false,
-        summary: "tool was not available to the narrator explore phase",
-      });
-    } else {
-      observations.push(
-        await runMandatoryExploreTool(
-          input,
-          tool,
-          autoCaptureRequest,
-          emitEvent,
-        ),
-      );
-    }
   }
   return observations;
 }

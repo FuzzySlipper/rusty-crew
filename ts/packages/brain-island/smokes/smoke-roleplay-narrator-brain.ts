@@ -164,6 +164,24 @@ async function runSmoke(): Promise<void> {
     false,
   );
 
+  const bufferedFactory = new RecordingPhaseBrainFactory([
+    '{"sceneBrief":{"location":"Moonlit Garden"}}',
+    "Buffered final response.",
+  ]);
+  const bufferedResult = await createRoleplayNarratorBrain({
+    narratorFsm,
+    createPhaseBrain: (options) => bufferedFactory.create(options),
+    resolveTools: () => ALL_TOOLS,
+  }).wake(wakeInput("roleplay-narrator-buffered-wake"));
+  const bufferedEventTypes = bufferedResult.events.map(
+    (event) => event.event.type,
+  );
+  assert.ok(
+    bufferedEventTypes.indexOf("text_delta") <
+      bufferedEventTypes.lastIndexOf("phase_change"),
+    "the final text must precede Rust's terminal idle activity",
+  );
+
   console.log(
     JSON.stringify(
       {

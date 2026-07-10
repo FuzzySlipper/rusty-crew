@@ -1499,12 +1499,9 @@ export const nativeMappingInventory = {
           "visibility",
           "world_id"
         ],
-        "RoleplayNarratorAutoCaptureInput": [
-          "layerDetailsJson",
-          "pendingText",
-          "profileId",
-          "sessionId",
-          "wakeId"
+        "RoleplayNarratorAdvanceInput": [
+          "outcome",
+          "receipt"
         ],
         "RoleplayNarratorConfig": [
           "exemplar",
@@ -1515,29 +1512,14 @@ export const nativeMappingInventory = {
           "stylePrompt",
           "tone"
         ],
-        "RoleplayNarratorMandatoryExploreInput": [
-          "pendingText",
-          "profileId",
-          "sessionId"
-        ],
-        "RoleplayNarratorNextInput": [
-          "completedPhase",
-          "outputText",
-          "state"
-        ],
-        "RoleplayNarratorPhasePlan": [
-          "allowedTools",
-          "instructions",
-          "mandatoryToolRequests",
-          "phase",
-          "state",
-          "terminal"
-        ],
         "RoleplayNarratorStartInput": [
           "maxReviewCycles",
           "narratorConfig",
-          "preludeObservations",
-          "reviewEnabled"
+          "pendingText",
+          "profileId",
+          "reviewEnabled",
+          "sessionId",
+          "wakeId"
         ],
         "RoleplayNarratorToolObservation": [
           "detailsJson",
@@ -1548,6 +1530,17 @@ export const nativeMappingInventory = {
         "RoleplayNarratorToolRequest": [
           "paramsJson",
           "toolName"
+        ],
+        "RoleplayNarratorTurnReceipt": [
+          "activity",
+          "directive",
+          "phase",
+          "receiptId",
+          "sequence",
+          "sessionId",
+          "state",
+          "terminal",
+          "wakeId"
         ],
         "RoleplayPlayerPersona": [
           "avatarAssetRef",
@@ -1696,10 +1689,8 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersonaJson",
         "patchRoleplaySessionMetadataJson",
         "normalizeRoleplayNarratorConfigJson",
-        "roleplayNarratorMandatoryExploreRequestsJson",
-        "roleplayNarratorAutoCaptureRequestJson",
         "startRoleplayNarratorTurnJson",
-        "nextRoleplayNarratorPhaseJson",
+        "advanceRoleplayNarratorTurnJson",
         "createLoreLayerJson",
         "updateLoreLayerJson",
         "archiveLoreLayerJson",
@@ -1735,10 +1726,8 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersona",
         "patchRoleplaySessionMetadata",
         "normalizeRoleplayNarratorConfig",
-        "roleplayNarratorMandatoryExploreRequests",
-        "roleplayNarratorAutoCaptureRequest",
         "startRoleplayNarratorTurn",
-        "nextRoleplayNarratorPhase",
+        "advanceRoleplayNarratorTurn",
         "createLoreLayer",
         "updateLoreLayer",
         "archiveLoreLayer",
@@ -1774,11 +1763,8 @@ export const nativeMappingInventory = {
         "merge_roleplay_player_persona",
         "patch_roleplay_session_metadata",
         "normalize_roleplay_narrator_config",
-        "roleplay_narrator_mandatory_explore_requests",
-        "roleplay_narrator_auto_capture_request",
         "start_roleplay_narrator_turn",
-        "next_roleplay_narrator_phase",
-        "roleplay_narrator_review_requests_revision",
+        "advance_roleplay_narrator_turn",
         "create_lore_layer",
         "get_lore_layer",
         "list_lore_layers",
@@ -1822,11 +1808,8 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersona",
         "patchRoleplaySessionMetadata",
         "normalizeRoleplayNarratorConfig",
-        "roleplayNarratorMandatoryExploreRequests",
-        "roleplayNarratorAutoCaptureRequest",
         "startRoleplayNarratorTurn",
-        "nextRoleplayNarratorPhase",
-        "roleplayNarratorReviewRequestsRevision",
+        "advanceRoleplayNarratorTurn",
         "createLoreLayer",
         "getLoreLayer",
         "listLoreLayers",
@@ -1870,11 +1853,8 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersonaJson",
         "patchRoleplaySessionMetadataJson",
         "normalizeRoleplayNarratorConfigJson",
-        "roleplayNarratorMandatoryExploreRequestsJson",
-        "roleplayNarratorAutoCaptureRequestJson",
         "startRoleplayNarratorTurnJson",
-        "nextRoleplayNarratorPhaseJson",
-        "roleplayNarratorReviewRequestsRevision",
+        "advanceRoleplayNarratorTurnJson",
         "createLoreLayerJson",
         "getLoreLayerJson",
         "listLoreLayersJson",

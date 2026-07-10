@@ -31,7 +31,7 @@ Rust owns:
 
 TypeScript owns:
 
-- phase-change event emission;
+- projection of Rust-issued phase-change activity;
 - local/MCP tool resolution and execution for Rust-planned tool requests;
 - Rust pi-agent phase wake invocation;
 - chat/Rusty View event projection and completion action plumbing.
@@ -51,15 +51,18 @@ Rust owns:
 - auto-capture request planning;
 - instruction construction for explore, compose, draft, and review phases;
 - review feedback classification and max-cycle guard;
-- typed state/result DTOs used by the bridge.
+- wake/session-bound, sequence-numbered receipts whose state survives a JSON
+  round trip;
+- typed tool-batch/provider-phase directives, output visibility, stable
+  activity transitions, and terminality.
 
 TypeScript owns:
 
 - loading profile/config/tool context;
 - resolving and executing local/MCP tools;
 - invoking Rust pi-agent phase wakes;
-- submitting `phase_change`, tool, reasoning, text, and final message events to
-  existing chat/Rusty View surfaces;
+- projecting Rust-issued `phase_change` directives plus tool, reasoning, text,
+  and final message events to existing chat/Rusty View surfaces;
 - HTTP/admin/roleplay route envelopes.
 
 No hidden TypeScript fallback should remain after the cutover. If the Rust FSM
@@ -71,18 +74,20 @@ than silently switching to legacy TS sequencing.
 The FSM should be pure and serializable across napi:
 
 ```text
-start
-  -> mandatory_prelude_requests
-  -> explore_phase(instructions, allowed_tools)
-  -> compose_phase(instructions, allowed_tools)
+start -> prelude_explore(tool_batch)
+  -> [prelude_capture(tool_batch)]
+  -> explore(provider_phase, internal output)
+  -> compose(provider_phase, final output)
+  -> done
 ```
 
 When review is enabled:
 
 ```text
 start
-  -> mandatory_prelude_requests
-  -> explore_phase
+  -> prelude_explore
+  -> [prelude_capture]
+  -> explore
   -> compose_draft_phase
   -> review_phase
   -> compose_draft_phase ... while review requests revision and cycles remain
@@ -90,23 +95,25 @@ start
   -> done
 ```
 
-The TypeScript executor should pass phase outputs back as plain text and tool
-observation summaries. Rust should return the next phase plan.
+The TypeScript executor passes typed tool observations or provider output text
+back with the current receipt. Rust returns the next receipt and rejects a
+mismatched outcome, terminal replay, or receipt whose identity no longer
+matches its serialized state.
 
 ## DTO Guidelines
 
 Bridge DTOs should stay boring:
 
-- `phase`: `explore | compose | compose_draft | review | done`;
-- `instructions`: full instruction text for the phase;
-- `allowedTools`: string array;
-- `mandatoryToolRequests`: array of `{ toolName, paramsJson }`;
-- `preludeObservations`: array of `{ toolName, ok, summary, detailsJson? }`;
-- `sceneBrief`: text extracted from explore output;
-- `reviewFeedback`: text extracted from review output;
-- `reviewCycle`: integer;
-- `maxReviewCycles`: integer;
-- `terminal`: boolean.
+- receipt identity: `receiptId`, `wakeId`, `sessionId`, and monotonic
+  `sequence`;
+- phase: prelude, provider, review, compose, or terminal state;
+- directive: tagged `tool_batch`, `provider_phase`, or `done`;
+- provider directive: full `instructions`, `allowedTools`, and Rust-owned
+  `outputMode`;
+- outcome: tagged `tool_batch_completed` or `provider_phase_completed`;
+- state: prelude observations, scene brief, review feedback/cycle, relevant
+  lore, and completed phases;
+- optional Rust-issued activity plus terminality.
 
 Tool request parameters should be emitted by Rust as data. Agents/providers
 should not be asked to emit JSON handoff shapes for this path.

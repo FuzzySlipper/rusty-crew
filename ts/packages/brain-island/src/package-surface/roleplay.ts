@@ -32,16 +32,18 @@ export {
 export type { RoleplayNarratorBrainOptions } from "../narrator-brain.js";
 export { createRoleplayNarratorFsmBridge } from "../roleplay-narrator-fsm.js";
 export type {
-  RoleplayNarratorAutoCaptureInput,
+  RoleplayNarratorActivity,
+  RoleplayNarratorAdvanceInput,
   RoleplayNarratorConfig,
+  RoleplayNarratorDirective,
   RoleplayNarratorFsmBridge,
-  RoleplayNarratorMandatoryExploreInput,
-  RoleplayNarratorNextInput,
+  RoleplayNarratorPhaseOutcome,
   RoleplayNarratorPhaseKind,
-  RoleplayNarratorPhasePlan,
+  RoleplayNarratorProviderPhase,
   RoleplayNarratorReviewConfig,
   RoleplayNarratorStartInput,
   RoleplayNarratorToolObservation,
   RoleplayNarratorToolRequest,
+  RoleplayNarratorTurnReceipt,
   RoleplayNarratorTurnState,
 } from "../roleplay-narrator-fsm.js";

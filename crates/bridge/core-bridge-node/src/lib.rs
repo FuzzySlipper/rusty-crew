@@ -97,15 +97,13 @@ use rusty_crew_openai_responses_brain::{
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
 use rusty_crew_roleplay_core::{
-    build_prompt_context, merge_character, merge_player_persona, narrator_auto_capture_request,
-    narrator_mandatory_explore_requests, narrator_review_requests_revision, next_narrator_phase,
+    advance_narrator_turn, build_prompt_context, merge_character, merge_player_persona,
     normalize_lore_search_controls, normalize_narrator_config, patch_session_metadata,
     plan_assistant_alternative, plan_chat_layer_binding, plan_scene_state_update,
     plan_session_lifecycle, read_scene_state, speaker_identity_snapshot, start_narrator_turn,
     write_character, write_player_persona, RoleplayAssistantAlternativePlanInput,
     RoleplayCharacterMergeInput, RoleplayCharacterWriteInput, RoleplayChatLayerBindingPlanInput,
-    RoleplayLoreSearchControlsInput, RoleplayNarratorAutoCaptureInput,
-    RoleplayNarratorMandatoryExploreInput, RoleplayNarratorNextInput, RoleplayNarratorStartInput,
+    RoleplayLoreSearchControlsInput, RoleplayNarratorAdvanceInput, RoleplayNarratorStartInput,
     RoleplayPlayerPersonaMergeInput, RoleplayPlayerPersonaWriteInput, RoleplayPromptContextInput,
     RoleplaySceneStateReadInput, RoleplaySceneStateUpdateInput, RoleplaySessionLifecyclePlanInput,
     RoleplaySessionMetadataPatchInput, RoleplaySpeakerIdentityInput,

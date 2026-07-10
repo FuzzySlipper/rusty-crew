@@ -44,7 +44,7 @@ Current roleplay route surface after the first extraction:
 | Prompt context and speaker identity snapshots | `crates/roleplay/roleplay-core` via `build_roleplay_prompt_context` and `roleplay_speaker_identity` | Rust deterministic assembly, with TS record fetching/brain glue |
 | Assistant alternative persistence and selection routes | `service-roleplay-routes.ts` | TS route adapter over Rust domain planning and persistence bridge operations |
 | Narrator config API | `crates/roleplay/roleplay-core` via `normalize_roleplay_narrator_config` | Rust deterministic validation/defaulting, with TS route adapter and profile-file persistence |
-| Narrator brain execution | `narrator-brain.ts` over `crates/roleplay/roleplay-core` FSM bridge operations | TS executor for phase/tool wake plumbing; Rust owns deterministic narrator sequencing, instruction construction, allowed tool sets, mandatory prelude planning, auto-capture planning, and review decisions |
+| Narrator brain execution | `narrator-brain.ts` executing restart-safe receipts from `crates/roleplay/roleplay-core` | TS executes Rust-issued tool batches and provider phases; Rust owns phase sequencing, activity transitions, output visibility, instructions, allowed tools, mandatory prelude/capture planning, review bounds, and terminality |
 
 ## First Extraction
 

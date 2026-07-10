@@ -7,141 +7,158 @@ import { createRoleplayNarratorFsmBridge } from "../src/roleplay-narrator-fsm.js
 const native = await loadNativeBridge();
 const fsm = createRoleplayNarratorFsmBridge(native);
 
-const mandatoryRequests = await fsm.mandatoryExploreRequests({
+const start = await fsm.startTurn({
+  wakeId: "narrator-fsm-wake",
   sessionId: "narrator-fsm-session",
   profileId: "narrator-fsm-profile",
   pendingText:
     "The player finds a silver locket engraved with a serpent-and-rose crest.",
+  reviewEnabled: true,
+  maxReviewCycles: 2,
 });
+assert.equal(start.phase, "prelude_explore");
+assert.equal(start.activity?.phase, "exploring");
+assert.equal(start.directive.kind, "tool_batch");
 assert.deepEqual(
-  mandatoryRequests.map((request) => request.toolName),
+  start.directive.kind === "tool_batch"
+    ? start.directive.requests.map((request) => request.toolName)
+    : [],
   ["get_scene_state", "recall_lore", "list_lore_layers"],
 );
-assert.equal(
-  mandatoryRequests[1]?.paramsJson &&
-    typeof mandatoryRequests[1].paramsJson === "object" &&
-    !Array.isArray(mandatoryRequests[1].paramsJson)
-    ? mandatoryRequests[1].paramsJson["recordTrace"]
-    : undefined,
-  true,
-);
 
-const autoCapture = await fsm.autoCaptureRequest({
-  sessionId: "narrator-fsm-session",
-  profileId: "narrator-fsm-profile",
-  wakeId: "narrator-fsm-wake",
-  pendingText:
-    "The player finds a silver locket engraved with a serpent-and-rose crest.",
-  layerDetailsJson: {
-    result: [
+const capture = await fsm.advanceTurn({
+  receipt: start,
+  outcome: {
+    kind: "tool_batch_completed",
+    observations: [
       {
-        layer_id: "story-auto",
-        write_policy: "auto_capture",
-        purpose: "story",
+        toolName: "list_lore_layers",
+        ok: true,
+        summary: "one writable layer",
+        detailsJson: {
+          result: [
+            {
+              layer_id: "story-auto",
+              write_policy: "auto_capture",
+              purpose: "story",
+            },
+          ],
+        },
       },
     ],
   },
 });
-assert.equal(autoCapture?.toolName, "capture_lore_fact");
+assert.equal(capture.phase, "prelude_capture");
+assert.equal(capture.directive.kind, "tool_batch");
 assert.equal(
-  autoCapture?.paramsJson &&
-    typeof autoCapture.paramsJson === "object" &&
-    !Array.isArray(autoCapture.paramsJson)
-    ? autoCapture.paramsJson["layerId"]
+  capture.directive.kind === "tool_batch"
+    ? capture.directive.requests[0]?.toolName
     : undefined,
-  "story-auto",
+  "capture_lore_fact",
 );
 
-const start = await fsm.startTurn({
-  reviewEnabled: false,
-  preludeObservations: [
-    {
-      toolName: "get_scene_state",
-      ok: true,
-      summary: "Scene state is present.",
-    },
-  ],
+const explore = await fsm.advanceTurn({
+  receipt: capture,
+  outcome: {
+    kind: "tool_batch_completed",
+    observations: [
+      {
+        toolName: "capture_lore_fact",
+        ok: true,
+        summary: "captured",
+      },
+    ],
+  },
 });
-assert.equal(start.phase, "explore");
-assert.equal(start.terminal, false);
-assert.ok(start.instructions.includes("Mandatory explore tool results"));
-assert.ok(start.allowedTools.includes("recall_lore"));
-
-const compose = await fsm.nextPhase({
-  state: start.state,
-  completedPhase: "explore",
-  outputText: '{"location":"archive","charactersPresent":["Ada"]}',
-});
-assert.equal(compose.phase, "compose");
-assert.equal(compose.terminal, false);
-assert.ok(compose.instructions.includes("Roleplay narrator phase: compose"));
+assert.equal(explore.phase, "explore");
+assert.equal(explore.directive.kind, "provider_phase");
 assert.equal(
-  compose.state.sceneBrief,
-  '{"location":"archive","charactersPresent":["Ada"]}',
+  explore.directive.kind === "provider_phase"
+    ? explore.directive.outputMode
+    : undefined,
+  "internal",
 );
 
-const done = await fsm.nextPhase({
-  state: compose.state,
-  completedPhase: "compose",
-  outputText: "Ada opened the archive door.",
-});
-assert.equal(done.phase, "done");
-assert.equal(done.terminal, true);
-
-const reviewedStart = await fsm.startTurn({
-  reviewEnabled: true,
-  maxReviewCycles: 2,
-});
-const draft = await fsm.nextPhase({
-  state: reviewedStart.state,
-  completedPhase: "explore",
-  outputText: "Scene brief",
+const draft = await fsm.advanceTurn({
+  receipt: explore,
+  outcome: {
+    kind: "provider_phase_completed",
+    outputText: '{"location":"archive","charactersPresent":["Ada"]}',
+  },
 });
 assert.equal(draft.phase, "compose_draft");
+assert.equal(draft.activity?.phase, "composing");
 
-const review = await fsm.nextPhase({
-  state: draft.state,
-  completedPhase: "compose_draft",
-  outputText: "First draft",
+const review = await fsm.advanceTurn({
+  receipt: draft,
+  outcome: {
+    kind: "provider_phase_completed",
+    outputText: "First draft",
+  },
 });
 assert.equal(review.phase, "review");
-assert.ok(await fsm.reviewRequestsRevision("revise for continuity"));
-assert.equal(await fsm.reviewRequestsRevision("all clear"), false);
+assert.equal(review.activity?.phase, "reviewing");
 
-const revisedDraft = await fsm.nextPhase({
-  state: review.state,
-  completedPhase: "review",
-  outputText: "revise for continuity",
+const revisedDraft = await fsm.advanceTurn({
+  receipt: review,
+  outcome: {
+    kind: "provider_phase_completed",
+    outputText: "revise for continuity",
+  },
 });
 assert.equal(revisedDraft.phase, "compose_draft");
 
-const secondReview = await fsm.nextPhase({
-  state: revisedDraft.state,
-  completedPhase: "compose_draft",
-  outputText: "Second draft",
+const secondReview = await fsm.advanceTurn({
+  receipt: revisedDraft,
+  outcome: {
+    kind: "provider_phase_completed",
+    outputText: "Second draft",
+  },
 });
-const finalCompose = await fsm.nextPhase({
-  state: secondReview.state,
-  completedPhase: "review",
-  outputText: "revise again",
+const finalCompose = await fsm.advanceTurn({
+  receipt: secondReview,
+  outcome: {
+    kind: "provider_phase_completed",
+    outputText: "revise again",
+  },
 });
 assert.equal(finalCompose.phase, "compose");
 assert.equal(finalCompose.state.reviewCycle, 2);
+assert.equal(finalCompose.directive.kind, "provider_phase");
+assert.equal(
+  finalCompose.directive.kind === "provider_phase"
+    ? finalCompose.directive.outputMode
+    : undefined,
+  "final",
+);
+
+const done = await fsm.advanceTurn({
+  receipt: finalCompose,
+  outcome: {
+    kind: "provider_phase_completed",
+    outputText: "Ada opened the archive door.",
+  },
+});
+assert.equal(done.phase, "done");
+assert.equal(done.terminal, true);
+assert.equal(done.activity?.phase, "idle");
 
 console.log(
   JSON.stringify(
     {
-      mandatoryTools: mandatoryRequests.map((request) => request.toolName),
-      autoCaptureTool: autoCapture?.toolName,
-      noReviewPath: [start.phase, compose.phase, done.phase],
-      reviewPath: [
-        reviewedStart.phase,
-        draft.phase,
-        review.phase,
-        revisedDraft.phase,
-        secondReview.phase,
-        finalCompose.phase,
+      receiptSequences: [
+        start.sequence,
+        capture.sequence,
+        explore.sequence,
+        draft.sequence,
+        review.sequence,
+        revisedDraft.sequence,
+        secondReview.sequence,
+        finalCompose.sequence,
+        done.sequence,
       ],
+      completedPhases: done.state.completedPhases,
+      terminalActivity: done.activity,
     },
     null,
     2,
