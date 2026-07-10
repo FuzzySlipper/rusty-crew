@@ -2701,7 +2701,12 @@ export interface NativeBridgeModule {
     wakeId: string;
     callId: string;
     output: string;
-    isError: boolean;
+    status: "succeeded" | "denied" | "failed";
+    reasonCode?: string;
+    retryable: boolean;
+    action?: string;
+    summary?: string;
+    debugDetailId?: string;
   }): Promise<{ ok: true; wakeId: string; callId: string }>;
   cancelPiAgentBrain(input: {
     wakeId: string;
@@ -4686,7 +4691,16 @@ function createNativeBridgeModule(
             wakeId: input.wakeId,
             callId: input.callId,
             output: input.output,
-            isError: input.isError,
+            status: input.status,
+            retryable: input.retryable,
+            ...(input.reasonCode === undefined
+              ? {}
+              : { reasonCode: input.reasonCode }),
+            ...(input.action === undefined ? {} : { action: input.action }),
+            ...(input.summary === undefined ? {} : { summary: input.summary }),
+            ...(input.debugDetailId === undefined
+              ? {}
+              : { debugDetailId: input.debugDetailId }),
           }),
         ),
       ) as {

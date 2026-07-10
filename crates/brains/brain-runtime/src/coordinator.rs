@@ -1,8 +1,8 @@
 use crate::{
     BrainRuntimeError, BrainRuntimeResult, BufferedBrainHostToolResult,
-    BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision, BufferedNeutralCancellation,
-    BufferedNeutralPendingToolRequest, BufferedNeutralRunCleanupReport,
-    BufferedNeutralRunDiagnostic, BufferedNeutralToolOutput,
+    BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision,
+    BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic, BufferedNeutralCancellation,
+    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput,
 };
 use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId};
 use serde::Serialize;
@@ -872,14 +872,14 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
         Ok(self.lock_runs()?.remove(wake_id))
     }
 
-    pub fn diagnostics(&self) -> BrainRuntimeResult<Vec<BufferedNeutralRunDiagnostic>> {
+    pub fn diagnostics(&self) -> BrainRuntimeResult<Vec<BufferedBrainTurnDiagnostic>> {
         let now = OffsetDateTime::now_utc();
         let runs = self.lock_runs()?;
         let mut diagnostics = runs
             .values()
             .map(|run| {
                 let coordinator = &run.coordinator;
-                BufferedNeutralRunDiagnostic {
+                BufferedBrainTurnDiagnostic {
                     module_label: self.module_label.to_string(),
                     wake_id: coordinator.wake_id().to_string(),
                     queued_stream_item_count: coordinator.queued_stream_item_count(),
@@ -905,7 +905,7 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
         &self,
         reason_code: &str,
         summary: &str,
-    ) -> BrainRuntimeResult<BufferedNeutralRunCleanupReport> {
+    ) -> BrainRuntimeResult<BufferedBrainTurnCleanupReport> {
         let mut runs = self.lock_runs()?;
         let active_runs = runs.len();
         let terminal_runs = runs
@@ -920,7 +920,7 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
             }
         }
         runs.clear();
-        Ok(BufferedNeutralRunCleanupReport {
+        Ok(BufferedBrainTurnCleanupReport {
             module_label: self.module_label.to_string(),
             active_runs,
             terminal_runs,

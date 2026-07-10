@@ -80,7 +80,11 @@ fn openai_responses_bridge_uses_oauth_bearer_and_headers_without_secret_update()
         access_token: test_jwt(4_102_444_800, serde_json::json!({})),
         refresh_token: "refresh-secret".to_string(),
         exchanged_api_token: None,
-        last_refresh_at: Some("2026-07-02T00:00:00Z".to_string()),
+        last_refresh_at: Some(
+            time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
+        ),
         account_id: Some("account-1".to_string()),
         email: None,
         plan_type: None,
@@ -683,12 +687,21 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
         })
         .unwrap();
 
+    let mut coordinator = rusty_crew_brain_runtime::BufferedBrainTurnCoordinator::new(
+        "pi-agent",
+        "shutdown-buffered-wake",
+        SessionId::new("shutdown-buffered-session"),
+        Some(10_000),
+        rusty_crew_brain_runtime::BufferedBrainTurnLimits::default(),
+    )
+    .unwrap();
+    coordinator.start().unwrap();
     bridge
         .pi_agent_buffered_runs()
-        .insert(
-            "shutdown-buffered-wake".to_string(),
-            rusty_crew_brain_runtime::BufferedNeutralRun::new(10_000),
-        )
+        .insert(rusty_crew_brain_runtime::BufferedBrainTurnRun::new(
+            coordinator,
+            crate::pi_agent::PiAgentBufferedRunPayload::default(),
+        ))
         .unwrap();
     let active = bridge.buffered_brain_run_diagnostics().unwrap();
     assert_eq!(active.active_run_count, 1);

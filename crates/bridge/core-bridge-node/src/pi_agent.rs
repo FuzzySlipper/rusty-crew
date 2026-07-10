@@ -1,7 +1,8 @@
 use super::*;
 use rusty_crew_brain_runtime::{
-    BrainRuntimeError, BufferedNeutralPendingToolRequest, BufferedNeutralRun,
-    BufferedNeutralRunRegistry, BufferedNeutralToolOutput,
+    BrainRuntimeError, BufferedBrainHostToolResult, BufferedBrainHostToolStatus,
+    BufferedBrainTurnCoordinator, BufferedBrainTurnError, BufferedBrainTurnLimits,
+    BufferedBrainTurnRegistry, BufferedBrainTurnRun, BufferedNeutralPendingToolRequest,
 };
 use rusty_crew_pi_agent_brain::{
     ChatCompletionMessage, ChatCompletionsEvent, FakeChatCompletionsClient,
@@ -72,7 +73,16 @@ struct JsPiAgentToolOutputInput {
     wake_id: String,
     call_id: String,
     output: String,
-    is_error: bool,
+    status: BufferedBrainHostToolStatus,
+    #[serde(default)]
+    reason_code: Option<String>,
+    retryable: bool,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    debug_detail_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,9 +99,13 @@ pub(crate) struct PiAgentTransportMetrics {
     tool_round_count: usize,
 }
 
-type PiAgentBufferedRun = BufferedNeutralRun<PiAgentTransportMetrics, ()>;
-pub(crate) type PiAgentBufferedRunRegistry =
-    BufferedNeutralRunRegistry<PiAgentTransportMetrics, ()>;
+#[derive(Debug, Default)]
+pub(crate) struct PiAgentBufferedRunPayload {
+    transport_metrics: Option<PiAgentTransportMetrics>,
+    provider_finished: bool,
+}
+
+pub(crate) type PiAgentBufferedRunRegistry = BufferedBrainTurnRegistry<PiAgentBufferedRunPayload>;
 
 fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
     let status = if error.is_invalid_argument() {
@@ -100,6 +114,10 @@ fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
         napi::Status::GenericFailure
     };
     napi::Error::new(status, error.to_string())
+}
+
+fn brain_turn_error_to_napi(error: BufferedBrainTurnError) -> napi::Error {
+    napi::Error::new(napi::Status::InvalidArg, error.to_string())
 }
 
 pub(crate) fn start_pi_agent_brain_json(
@@ -112,10 +130,21 @@ pub(crate) fn start_pi_agent_brain_json(
             format!("invalid pi-agent brain input JSON: {error}"),
         )
     })?;
-    let wake_id = input.wake_id;
-    let wake_timeout_ms = input.config.wake_timeout_ms.unwrap_or(300_000);
+    let wake_id = input.wake_id.clone();
+    let mut coordinator = BufferedBrainTurnCoordinator::new(
+        "pi-agent",
+        wake_id.clone(),
+        SessionId::new(input.session_id),
+        input.config.wake_timeout_ms,
+        BufferedBrainTurnLimits::default(),
+    )
+    .map_err(brain_turn_error_to_napi)?;
+    coordinator.start().map_err(brain_turn_error_to_napi)?;
     buffered_runs
-        .insert(wake_id.clone(), PiAgentBufferedRun::new(wake_timeout_ms))
+        .insert(BufferedBrainTurnRun::new(
+            coordinator,
+            PiAgentBufferedRunPayload::default(),
+        ))
         .map_err(brain_runtime_error_to_napi)?;
     let thread_wake_id = wake_id.clone();
     std::thread::spawn(move || {
@@ -137,47 +166,23 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
     let max_items = max_items.unwrap_or(64).max(1) as usize;
     let terminal = buffered_runs
         .with_run_mut(&wake_id, |run| {
-            if !run.terminal && run.is_timed_out() {
-                run.terminal = true;
-                run.error = Some(format!(
-                    "pi-agent buffered wake {wake_id} exceeded {}ms timeout",
-                    run.wake_timeout_ms
-                ));
-                run.record_transition();
-            }
-            let mut items = Vec::new();
-            for _ in 0..max_items {
-                if run.terminal
-                    && !items.is_empty()
-                    && run
-                        .items
-                        .front()
-                        .is_some_and(BrainWakeStreamItem::is_terminal)
-                {
-                    break;
-                }
-                let Some(item) = run.items.pop_front() else {
-                    break;
-                };
-                let is_terminal = item.is_terminal();
-                items.push(item);
-                if is_terminal {
-                    break;
-                }
-            }
-            if !items.is_empty() {
-                run.record_transition();
-            }
-            let tool_requests = run.drain_pending_tool_requests();
-            let terminal = run.terminal && run.items.is_empty();
+            run.coordinator.timeout_if_due();
+            let drain = run.coordinator.drain_stream(max_items);
+            let tool_requests = run.coordinator.drain_host_tool_requests(128);
+            let terminal = drain.terminal && run.payload.provider_finished;
+            let error = terminal
+                .then(|| run.coordinator.terminal())
+                .flatten()
+                .filter(|_| run.coordinator.has_error())
+                .map(|terminal| terminal.summary.clone());
             let output = json!({
                 "wake_id": wake_id,
-                "items": items,
+                "items": drain.items.into_iter().map(|item| item.item).collect::<Vec<_>>(),
                 "tool_requests": tool_requests,
                 "terminal": terminal,
-                "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
-                "error": terminal.then(|| run.error.clone()).flatten(),
-                "cancellation": terminal.then(|| run.cancellation.clone()).flatten(),
+                "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
+                "error": error,
+                "cancellation": terminal.then(|| run.coordinator.cancellation()).flatten(),
             });
             (terminal, output)
         })
@@ -206,21 +211,29 @@ pub(crate) fn submit_pi_agent_tool_output_json(
             format!("invalid pi-agent tool output JSON: {error}"),
         )
     })?;
-    buffered_runs
+    let submission = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
-            run.submit_tool_output(
-                input.call_id.clone(),
-                BufferedNeutralToolOutput {
-                    output: input.output,
-                    is_error: input.is_error,
+            run.coordinator.submit_host_tool_result(
+                &input.call_id,
+                BufferedBrainHostToolResult {
+                    status: input.status,
+                    output_text: input.output,
+                    reason_code: input.reason_code,
+                    retryable: input.retryable,
+                    action: input.action,
+                    summary: input.summary,
+                    debug_detail_id: input.debug_detail_id,
                 },
-            );
+            )
         })
-        .map_err(brain_runtime_error_to_napi)?;
+        .map_err(brain_runtime_error_to_napi)?
+        .map_err(brain_turn_error_to_napi)?;
     serde_json::to_string(&json!({
         "ok": true,
         "wake_id": input.wake_id,
         "call_id": input.call_id,
+        "receipt": submission.receipt,
+        "decision": submission.decision,
     }))
     .map_err(|error| {
         napi::Error::new(
@@ -242,16 +255,20 @@ pub(crate) fn cancel_pi_agent_brain_json(
     })?;
     let output = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
-            run.cancel(input.reason_code, input.summary);
-            json!({
-                "ok": true,
-                "wake_id": input.wake_id,
-                "cancelled": true,
-                "terminal": run.terminal,
-                "cancellation": run.cancellation.clone(),
-            })
+            run.coordinator
+                .cancel(input.reason_code, input.summary)
+                .map(|()| {
+                    json!({
+                        "ok": true,
+                        "wake_id": input.wake_id,
+                        "cancelled": true,
+                        "terminal": run.coordinator.phase().is_terminal(),
+                        "cancellation": run.coordinator.cancellation(),
+                    })
+                })
         })
-        .map_err(brain_runtime_error_to_napi)?;
+        .map_err(brain_runtime_error_to_napi)?
+        .map_err(brain_turn_error_to_napi)?;
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::new(
             napi::Status::GenericFailure,
@@ -271,23 +288,36 @@ fn run_pi_agent_brain_buffered(
         input_json,
     );
     let _ = buffered_runs.with_run_mut(&wake_id, |run| {
-        if run.is_cancelled() {
-            return;
-        }
-        match result {
-            Ok(output) => {
-                run.items.extend(output.stream);
-                run.transport_metrics = Some(PiAgentTransportMetrics {
-                    provider_request_count: output.provider_request_count,
-                    tool_round_count: output.tool_round_count,
-                });
+        if !run.coordinator.is_cancelled() {
+            match result {
+                Ok(output) => {
+                    for item in output.stream {
+                        if run.coordinator.phase().is_terminal() {
+                            break;
+                        }
+                        if run.coordinator.enqueue_stream_item(item).is_err() {
+                            break;
+                        }
+                    }
+                    run.payload.transport_metrics = Some(PiAgentTransportMetrics {
+                        provider_request_count: output.provider_request_count,
+                        tool_round_count: output.tool_round_count,
+                    });
+                    if !run.coordinator.phase().is_terminal() {
+                        let _ = run.coordinator.fail(
+                            "provider_stream_missing_terminal",
+                            "pi-agent provider loop ended without a terminal stream item",
+                        );
+                    }
+                }
+                Err(error) => {
+                    if !run.coordinator.phase().is_terminal() {
+                        let _ = run.coordinator.fail("provider_error", error.to_string());
+                    }
+                }
             }
-            Err(error) => {
-                run.error = Some(error.to_string());
-            }
         }
-        run.terminal = true;
-        run.record_transition();
+        run.payload.provider_finished = true;
     });
 }
 
@@ -335,7 +365,11 @@ fn run_pi_agent_brain_with_buffered_tools(
     };
     match input.client {
         JsPiAgentClientConfig::Fake => {
-            let client = fake_pi_agent_client(!descriptors.is_empty());
+            let client = fake_pi_agent_client(
+                descriptors
+                    .first()
+                    .map(|descriptor| descriptor.name.as_str()),
+            );
             let mut brain = PiAgentBrainLoop::new(
                 client,
                 BufferedPiAgentToolExecutor {
@@ -393,33 +427,60 @@ fn normalize_pi_agent_tool_schema(schema: &Value) -> Value {
     }
 }
 
-fn fake_pi_agent_client(with_tool: bool) -> FakeChatCompletionsClient {
-    if !with_tool {
+fn fake_pi_agent_client(tool_name: Option<&str>) -> FakeChatCompletionsClient {
+    let Some(tool_name) = tool_name else {
         return FakeChatCompletionsClient::new([Ok(vec![
-            ChatCompletionsEvent::ContentDelta("pi-agent Rust bridge wake completed".to_string()),
+            ChatCompletionsEvent::ContentDelta(
+                "<think>pi-agent Rust reasoning</think>pi-agent Rust bridge wake completed"
+                    .to_string(),
+            ),
             ChatCompletionsEvent::Finished {
                 finish_reason: Some("stop".to_string()),
             },
         ])]);
+    };
+    if tool_name == "repeat_failure_tool" {
+        return FakeChatCompletionsClient::new([
+            fake_pi_agent_tool_call_script(tool_name, "fake-pi-call-1"),
+            fake_pi_agent_tool_call_script(tool_name, "fake-pi-call-2"),
+            Ok(vec![
+                ChatCompletionsEvent::ContentDelta(
+                    "pi-agent should not reach post-policy completion".to_string(),
+                ),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ]),
+        ]);
     }
     FakeChatCompletionsClient::new([
+        fake_pi_agent_tool_call_script(tool_name, "fake-pi-call"),
         Ok(vec![
-            ChatCompletionsEvent::ToolCallFinished(PendingChatFunctionCall {
-                index: 0,
-                id: Some("fake-pi-call".to_string()),
-                name: "echo_tool".to_string(),
-                arguments_json: "{}".to_string(),
-            }),
-            ChatCompletionsEvent::Finished {
-                finish_reason: Some("tool_calls".to_string()),
-            },
-        ]),
-        Ok(vec![
-            ChatCompletionsEvent::ContentDelta("pi-agent Rust bridge wake completed".to_string()),
+            ChatCompletionsEvent::ContentDelta(
+                "<think>pi-agent Rust reasoning</think>pi-agent Rust bridge wake completed"
+                    .to_string(),
+            ),
             ChatCompletionsEvent::Finished {
                 finish_reason: Some("stop".to_string()),
             },
         ]),
+    ])
+}
+
+fn fake_pi_agent_tool_call_script(
+    tool_name: &str,
+    call_id: &str,
+) -> Result<Vec<ChatCompletionsEvent>, rusty_crew_pi_agent_brain::ChatCompletionsStreamError> {
+    Ok(vec![
+        ChatCompletionsEvent::ToolCallFinished(PendingChatFunctionCall {
+            index: 0,
+            id: Some(call_id.to_string()),
+            name: tool_name.to_string(),
+            arguments_json: "{}".to_string(),
+        }),
+        ChatCompletionsEvent::Finished {
+            finish_reason: Some("tool_calls".to_string()),
+        },
     ])
 }
 
@@ -442,9 +503,9 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
         };
         {
             let queued = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
-                run.queue_pending_tool_request(request);
+                run.coordinator.queue_tool_request(request)
             });
-            if queued.is_err() {
+            if !matches!(queued, Ok(Ok(()))) {
                 return PiAgentToolOutput::error(format!(
                     "pi-agent buffered wake {} disappeared before tool request {}",
                     self.wake_id, call_id
@@ -454,35 +515,35 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
 
         loop {
             let result = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
-                if let Some(cancellation) = run.cancellation.clone() {
+                if let Some(cancellation) = run.coordinator.cancellation() {
                     return PiAgentToolOutput::cancelled(format!(
                         "pi-agent buffered wake {} cancelled before tool output {}: {}",
                         self.wake_id, call_id, cancellation.summary
                     ));
                 }
-                if let Some(output) = run.take_submitted_tool_output(&call_id) {
+                if let Some(output) = run.coordinator.take_submitted_tool_output(&call_id) {
                     return if output.is_error {
                         PiAgentToolOutput::error(output.output)
                     } else {
                         PiAgentToolOutput::ok(output.output)
                     };
                 }
-                if run.terminal {
+                if run.coordinator.phase().is_terminal() {
+                    let summary = run
+                        .coordinator
+                        .terminal()
+                        .map(|terminal| terminal.summary.as_str())
+                        .unwrap_or("turn ended");
                     return PiAgentToolOutput::error(format!(
-                        "pi-agent buffered wake {} ended before tool output {}",
-                        self.wake_id, call_id
+                        "pi-agent buffered wake {} ended before tool output {}: {}",
+                        self.wake_id, call_id, summary
                     ));
                 }
-                if run.is_timed_out() {
-                    run.terminal = true;
-                    run.error = Some(format!(
-                        "pi-agent buffered wake {} exceeded {}ms timeout while waiting for tool output {}",
-                        self.wake_id, run.wake_timeout_ms, call_id
-                    ));
-                    run.record_transition();
+                if run.coordinator.timeout_if_due() {
                     return PiAgentToolOutput::timed_out(
-                        run.error
-                            .clone()
+                        run.coordinator
+                            .terminal()
+                            .map(|terminal| terminal.summary.clone())
                             .unwrap_or_else(|| "pi-agent buffered wake timed out".to_string()),
                     );
                 }

@@ -22,7 +22,8 @@ await native.submitPiAgentToolOutput({
   wakeId: started.wakeId,
   callId: firstDrain.toolRequests[0]!.callId,
   output: "SENTINEL_PI_AGENT_TOOL_OUTPUT from TS bridge smoke",
-  isError: false,
+  status: "succeeded",
+  retryable: false,
 });
 
 const stream = await drainUntilTerminal(native, started.wakeId);
@@ -51,11 +52,20 @@ assert.ok(
       event.text.includes("pi-agent Rust bridge wake completed"),
   ),
 );
+assert.ok(
+  events.some(
+    (event) =>
+      event.type === "reasoning_delta" &&
+      event.text.includes("pi-agent Rust reasoning"),
+  ),
+);
 assert.ok(events.some((event) => event.type === "finished"));
 assert.equal(stream.at(-1)?.type, "actions");
 
 const hostIsolation = await runSameWakeHostIsolationScenario();
 const cleanup = await runExplicitCleanupScenario();
+const singleDeniedContinuation = await runSingleDeniedContinuationScenario();
+const repeatedFailureStop = await runRepeatedFailureStopScenario();
 
 console.log(
   JSON.stringify(
@@ -66,13 +76,19 @@ console.log(
       terminal: stream.at(-1)?.type,
       hostIsolation,
       cleanup,
+      singleDeniedContinuation,
+      repeatedFailureStop,
     },
     null,
     2,
   ),
 );
 
-function piAgentWakeInput(wakeId: string, sessionLabel: string) {
+function piAgentWakeInput(
+  wakeId: string,
+  sessionLabel: string,
+  toolName = "echo_tool",
+) {
   return {
     wakeId,
     sessionId: `pi-agent-rust-bridge-${sessionLabel}-session` as SessionId,
@@ -88,7 +104,7 @@ function piAgentWakeInput(wakeId: string, sessionLabel: string) {
     ],
     tools: [
       {
-        name: "echo_tool",
+        name: toolName,
         description: "Echoes a deterministic bridge smoke result",
         inputSchema: { type: "object", properties: {} },
       },
@@ -99,6 +115,83 @@ function piAgentWakeInput(wakeId: string, sessionLabel: string) {
       streamIdleTimeoutMs: 10_000,
     },
     client: { mode: "fake" as const },
+  };
+}
+
+async function runSingleDeniedContinuationScenario(): Promise<{
+  providerContinued: boolean;
+  toolResultWasError: boolean;
+}> {
+  const host = await loadNativeBridge();
+  const wakeId = "pi-agent-single-denied-wake";
+  await host.startPiAgentBrain(
+    piAgentWakeInput(wakeId, "single-denied", "denied_tool"),
+  );
+  const pending = await waitForToolRequest(host, wakeId);
+  await host.submitPiAgentToolOutput({
+    wakeId,
+    callId: pending.toolRequests[0]!.callId,
+    output: "manual review required",
+    status: "denied",
+    reasonCode: "memory_manual_review_required",
+    retryable: false,
+    action: "denied",
+  });
+  const stream = await drainUntilTerminal(host, wakeId);
+  const events = stream.flatMap((item) =>
+    item.type === "event" ? [item.event.event] : [],
+  );
+  const toolResultWasError = events.some(
+    (event) => event.type === "tool_call_finished" && event.isError === true,
+  );
+  const providerContinued =
+    stream.at(-1)?.type === "actions" &&
+    events.some(
+      (event) =>
+        event.type === "text_delta" &&
+        event.text.includes("pi-agent Rust bridge wake completed"),
+    );
+  assert.equal(toolResultWasError, true);
+  assert.equal(providerContinued, true);
+  return { providerContinued, toolResultWasError };
+}
+
+async function runRepeatedFailureStopScenario(): Promise<{
+  submittedFailureCount: number;
+  stoppedByRustPolicy: boolean;
+  completionSuppressed: boolean;
+}> {
+  const host = await loadNativeBridge();
+  const wakeId = "pi-agent-repeated-failure-wake";
+  await host.startPiAgentBrain(
+    piAgentWakeInput(wakeId, "repeated-failure", "repeat_failure_tool"),
+  );
+  for (let index = 1; index <= 2; index += 1) {
+    const pending = await waitForToolRequest(host, wakeId);
+    await host.submitPiAgentToolOutput({
+      wakeId,
+      callId: pending.toolRequests[0]!.callId,
+      output: "memory client unavailable",
+      status: "failed",
+      reasonCode: "memory_client_unavailable",
+      retryable: true,
+      action: "failed",
+    });
+  }
+  const terminal = await drainTerminalReceipt(host, wakeId, {
+    allowTerminalError: true,
+  });
+  const stoppedByRustPolicy =
+    terminal.error?.includes("repeated repeat_failure_tool failure") === true;
+  const completionSuppressed = !terminal.stream.some(
+    (item) => item.type === "actions",
+  );
+  assert.equal(stoppedByRustPolicy, true);
+  assert.equal(completionSuppressed, true);
+  return {
+    submittedFailureCount: 2,
+    stoppedByRustPolicy,
+    completionSuppressed,
   };
 }
 
@@ -131,7 +224,8 @@ async function runSameWakeHostIsolationScenario(): Promise<{
     wakeId: sharedWakeId,
     callId: firstDrain.toolRequests[0]!.callId,
     output: "FIRST_HOST_OUTPUT_ONLY",
-    isError: false,
+    status: "succeeded",
+    retryable: false,
   });
   const firstStream = await drainUntilTerminal(firstHost, sharedWakeId);
 
@@ -194,7 +288,7 @@ async function runExplicitCleanupScenario(): Promise<{
   await waitForToolRequest(cleanupHost, cleanupWakeId);
   const beforeCleanup = await cleanupHost.bufferedBrainRunDiagnostics();
   assert.equal(beforeCleanup.active_run_count, 1);
-  assert.equal(beforeCleanup.runs[0]?.pending_tool_request_count, 0);
+  assert.equal(beforeCleanup.runs[0]?.pending_tool_request_count, 1);
   assertNoBufferedPayloads(beforeCleanup);
 
   const cleanup = await cleanupHost.cleanupBufferedBrainRuns({
@@ -264,6 +358,14 @@ async function drainUntilTerminal(
   wakeId: string,
   options: { allowTerminalError?: boolean } = {},
 ): Promise<BrainWakeStreamItem[]> {
+  return (await drainTerminalReceipt(nativeBridge, wakeId, options)).stream;
+}
+
+async function drainTerminalReceipt(
+  nativeBridge: NativeBridgeModule,
+  wakeId: string,
+  options: { allowTerminalError?: boolean } = {},
+): Promise<{ stream: BrainWakeStreamItem[]; error?: string }> {
   const stream: BrainWakeStreamItem[] = [];
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const drained = await nativeBridge.drainPiAgentBrainStream({
@@ -275,7 +377,10 @@ async function drainUntilTerminal(
       throw new Error(drained.error);
     }
     if (drained.terminal) {
-      return stream;
+      return {
+        stream,
+        ...(drained.error === undefined ? {} : { error: drained.error }),
+      };
     }
     await delay(25);
   }

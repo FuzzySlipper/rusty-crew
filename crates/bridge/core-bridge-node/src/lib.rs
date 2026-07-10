@@ -5,7 +5,7 @@
 //! transport dependencies into core crates.
 
 use rusty_crew_brain_runtime::{
-    BrainRuntimeError, BufferedNeutralRunCleanupReport, BufferedNeutralRunDiagnostic,
+    BrainRuntimeError, BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic,
 };
 use rusty_crew_core_bridge_api::{
     manifest_summary, wire_shape_fingerprint, ActionBatchReceipt, BrainActionBatch,
@@ -178,7 +178,7 @@ pub struct NativeBridge {
 struct BufferedBrainRunDiagnostics {
     active_run_count: usize,
     modules: Vec<BufferedBrainRunModuleDiagnostics>,
-    runs: Vec<BufferedNeutralRunDiagnostic>,
+    runs: Vec<BufferedBrainTurnDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,7 +193,7 @@ struct BufferedBrainRunCleanupSummary {
     terminal_runs: usize,
     cancelled_nonterminal_runs: usize,
     removed_runs: usize,
-    modules: Vec<BufferedNeutralRunCleanupReport>,
+    modules: Vec<BufferedBrainTurnCleanupReport>,
 }
 
 impl NativeBridge {
