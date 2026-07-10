@@ -8,6 +8,7 @@ import {
   SERVICE_API_ROUTE_TABLE,
   SLASH_COMMAND_REGISTRY,
   apiCapabilityRegistry,
+  apiCapabilityCoverageInventory,
   buildRuntimeDiagnosticsProjection,
   chatApiCapabilityPaths,
   chatCommandAutocomplete,
@@ -15,9 +16,9 @@ import {
   handleAdminDiagnosticsRequest,
   matchServiceApiRoute,
   routeSlashCommand,
+  slashCommandHandlerNames,
   slashCommandNames,
   type RuntimeCounterSummary,
-  type ServiceApiRouteId,
   type SlashCommandRouteResult,
   type SlashCommandSession,
 } from "../src/index.js";
@@ -32,6 +33,11 @@ const primeSession: SlashCommandSession = {
 const registry = apiCapabilityRegistry();
 const commandNames = SLASH_COMMAND_REGISTRY.map((command) => command.name);
 assert.deepEqual(slashCommandNames(), commandNames);
+assert.deepEqual(
+  slashCommandHandlerNames().sort(),
+  [...commandNames].sort(),
+  "slash command declarations and execution handlers must match in both directions",
+);
 assert.deepEqual(
   chatCommandRegistry().commands.map((command) => command.name),
   commandNames,
@@ -106,7 +112,12 @@ assertUnique(
   SERVICE_API_ROUTE_TABLE.map((route) => route.id),
   "service route id",
 );
-assertServiceRouteFamilyCoverage();
+const routeCoverage = apiCapabilityCoverageInventory();
+assert.equal(
+  routeCoverage.capability_routes.length,
+  API_CAPABILITIES.filter((capability) => capability.public).length,
+  "every public capability must resolve to one service route family",
+);
 assert.deepEqual(
   SERVICE_API_ROUTE_TABLE.map((route) => route.order),
   [...SERVICE_API_ROUTE_TABLE.map((route) => route.order)].sort(
@@ -114,15 +125,6 @@ assert.deepEqual(
   ),
   "service route table must stay in dispatch order",
 );
-for (const capability of API_CAPABILITIES.filter(
-  (candidate) => candidate.public,
-)) {
-  const samplePath = samplePathTemplate(capability.path_template);
-  assert.ok(
-    matchServiceApiRoute(samplePath),
-    `missing service route table match for API capability ${capability.id}: ${samplePath}`,
-  );
-}
 assert.equal(matchServiceApiRoute("/v1/unknown-route"), undefined);
 assert.ok(
   API_CAPABILITIES.some(
@@ -292,39 +294,6 @@ function assertUnique(values: readonly (string | undefined)[], label: string) {
   }
 }
 
-function assertServiceRouteFamilyCoverage(): void {
-  const coveredOrExemptIds = new Set<ServiceApiRouteId>([
-    ...serviceRouteFamilyCoverage().map((item) => item.routeId),
-    ...serviceRouteCatalogExemptions().map((item) => item.routeId),
-  ]);
-  for (const route of SERVICE_API_ROUTE_TABLE) {
-    assert.equal(
-      coveredOrExemptIds.has(route.id),
-      true,
-      `service route family ${route.id} must have catalog coverage or an explicit exemption`,
-    );
-  }
-  for (const requirement of serviceRouteFamilyCoverage()) {
-    const capability = API_CAPABILITIES.find(
-      (candidate) =>
-        candidate.method === requirement.method &&
-        candidate.path_template === requirement.pathTemplate,
-    );
-    assert.ok(
-      capability,
-      `missing API capability for service route family ${requirement.routeId}: ${requirement.method} ${requirement.pathTemplate}`,
-    );
-    assert.equal(
-      matchServiceApiRoute(
-        samplePathTemplate(requirement.pathTemplate),
-        requirement.authPhase,
-      )?.id,
-      requirement.routeId,
-      `service route family ${requirement.routeId} does not own representative catalog path ${requirement.pathTemplate}`,
-    );
-  }
-}
-
 function assertRustPlanOperationsInManifest(
   operations: readonly string[],
   label: string,
@@ -356,10 +325,6 @@ function rustPlanOperation(capability: unknown): string | undefined {
   return typeof operation === "string" ? operation : undefined;
 }
 
-function samplePathTemplate(pathTemplate: string): string {
-  return pathTemplate.replace(/\{[^}]+\}/g, "sample");
-}
-
 function emptyRuntimeCounters(): RuntimeCounterSummary {
   return {
     brainTurns: 0,
@@ -375,125 +340,4 @@ function emptyRuntimeCounters(): RuntimeCounterSummary {
     completions: 0,
     queueExpirations: 0,
   };
-}
-
-function serviceRouteFamilyCoverage(): readonly {
-  routeId: ServiceApiRouteId;
-  authPhase: "before_auth" | "after_auth";
-  method: "DELETE" | "GET" | "PATCH" | "POST";
-  pathTemplate: string;
-}[] {
-  return [
-    {
-      routeId: "admin.healthz",
-      authPhase: "before_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/healthz",
-    },
-    {
-      routeId: "admin.control",
-      authPhase: "after_auth",
-      method: "POST",
-      pathTemplate: "/v1/admin/control/sessions/{session_id}/new",
-    },
-    {
-      routeId: "chat",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/chat/sessions",
-    },
-    {
-      routeId: "admin.scheduler",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/scheduler/jobs",
-    },
-    {
-      routeId: "admin.mcp.servers",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/mcp/servers",
-    },
-    {
-      routeId: "admin.tools.catalog",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/tools/catalog",
-    },
-    {
-      routeId: "admin.brain_catalog",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/brains/catalog",
-    },
-    {
-      routeId: "admin.context_strategies",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/context-strategies",
-    },
-    {
-      routeId: "admin.local_tool_profiles",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/local-tool-profiles",
-    },
-    {
-      routeId: "admin.storage",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/storage/schema",
-    },
-    {
-      routeId: "admin.profile_registry.write",
-      authPhase: "after_auth",
-      method: "POST",
-      pathTemplate: "/v1/admin/profiles/registry/{profile_id}/update/plan",
-    },
-    {
-      routeId: "admin.memory",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/memory/spaces",
-    },
-    {
-      routeId: "admin.diagnostics",
-      authPhase: "after_auth",
-      method: "GET",
-      pathTemplate: "/v1/admin/diagnostics",
-    },
-  ];
-}
-
-function serviceRouteCatalogExemptions(): readonly {
-  routeId: ServiceApiRouteId;
-  reason: string;
-}[] {
-  return [
-    {
-      routeId: "browser.cors",
-      reason:
-        "preflight route only; cataloging each CORS path would duplicate browser routes",
-    },
-    {
-      routeId: "debug",
-      reason:
-        "debug routes are intentionally omitted from public capability discovery",
-    },
-    {
-      routeId: "admin.mcp.catalog",
-      reason:
-        "legacy MCP catalog route is route-table visible but not a Rusty View capability surface",
-    },
-    {
-      routeId: "roleplay",
-      reason:
-        "roleplay browser/admin API catalog is being tracked separately while roleplay is migrated toward Rust crates",
-    },
-    {
-      routeId: "admin.model_providers",
-      reason:
-        "model provider admin API still needs a dedicated catalog follow-up; keep the exemption visible until that lands",
-    },
-  ];
 }

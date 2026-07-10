@@ -1,0 +1,2623 @@
+{
+  "schema_version": 1,
+  "source": "ts/packages/brain-island/src/api-command-registry.ts",
+  "registry": {
+    "schema_version": 1,
+    "slash_commands": [
+      {
+        "name": "help",
+        "aliases": ["/help"],
+        "description": "Show available slash commands.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend",
+        "read_only": true,
+        "mutating": false,
+        "scope": "session",
+        "allowed_session_kinds": ["full", "worker", "delegated"],
+        "requires_control_auth": false
+      },
+      {
+        "name": "status",
+        "aliases": ["/status"],
+        "description": "Show runtime status for this service.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend",
+        "read_only": true,
+        "mutating": false,
+        "scope": "session",
+        "allowed_session_kinds": ["full", "worker", "delegated"],
+        "requires_control_auth": false
+      },
+      {
+        "name": "session",
+        "aliases": ["/session"],
+        "description": "Show details for the current session.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend",
+        "read_only": true,
+        "mutating": false,
+        "scope": "session",
+        "allowed_session_kinds": ["full", "worker", "delegated"],
+        "requires_control_auth": false
+      },
+      {
+        "name": "model",
+        "aliases": ["/model"],
+        "description": "Show the active model provider, brain backend, and context estimate.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend",
+        "read_only": true,
+        "mutating": false,
+        "scope": "session",
+        "allowed_session_kinds": ["full", "worker", "delegated"],
+        "requires_control_auth": false
+      },
+      {
+        "name": "new",
+        "aliases": ["/new"],
+        "description": "Archive the current session and create a fresh replacement session.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [
+          {
+            "name": "reason",
+            "description": "Optional operator-facing reason text.",
+            "type": "string",
+            "required": false,
+            "placeholder": "reason"
+          }
+        ],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend-control",
+        "read_only": false,
+        "mutating": true,
+        "scope": "session",
+        "allowed_session_kinds": ["full"],
+        "requires_control_auth": true,
+        "backing_control_command": "new_session",
+        "rust_plan_operation": "plan_new_session_control"
+      },
+      {
+        "name": "reload-mcp",
+        "aliases": ["/reload-mcp"],
+        "description": "Reload MCP tools for the current session profile surface.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend-control",
+        "read_only": false,
+        "mutating": true,
+        "scope": "session",
+        "allowed_session_kinds": ["full"],
+        "requires_control_auth": true,
+        "backing_control_command": "reload_mcp",
+        "rust_plan_operation": "plan_reload_mcp_control"
+      }
+    ],
+    "capabilities": [
+      {
+        "id": "admin.storage.schema",
+        "method": "GET",
+        "path_template": "/v1/admin/storage/schema",
+        "description": "Read backend-neutral module schema registry diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions",
+        "description": "List Rusty View chat sessions.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.open",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}",
+        "description": "Open a chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.events",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/events",
+        "description": "List chat events for a session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.stream",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/stream",
+        "description": "Stream chat events for a session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.tool_calls.debug.get",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}",
+        "description": "Read bounded redacted raw tool-call debug detail for a session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "diagnostics", "tool"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.provider_requests.debug.get",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}",
+        "description": "Read bounded redacted provider request debug detail for a session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.messages.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/messages",
+        "description": "Send a message to a chat session.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/slots",
+        "description": "List primary message slots for a chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots",
+        "description": "Create a primary message slot and primary variant.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.variants.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
+        "description": "Lazy-load non-deleted variants for one message slot.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.variants.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
+        "description": "Create an alternate variant for one message slot.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.variants.delete",
+        "method": "DELETE",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}",
+        "description": "Delete an alternate message variant.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.variants.reorder",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder",
+        "description": "Reorder alternate variants for one message slot.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.slots.active_variant.select",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant",
+        "description": "Select the active variant for one message slot with conflict detection.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.tree.open",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/tree",
+        "description": "Read the conversation branch and snapshot projection for a session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.jump.resolve",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/jump",
+        "description": "Resolve a message, branch, snapshot, or cursor jump target.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.search",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/search",
+        "description": "Search persisted transcript messages for one chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation", "search"],
+        "public": true
+      },
+      {
+        "id": "chat.search",
+        "method": "GET",
+        "path_template": "/v1/chat/search",
+        "description": "Search persisted transcript messages across chat sessions.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "conversation", "search"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.branches.upsert",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/branches",
+        "description": "Create or update a conversation branch.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.branches.active.select",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/branches/active",
+        "description": "Select the active conversation branch with conflict detection.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.branches.head.update",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
+        "description": "Update a branch head message with conflict detection.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.snapshots.upsert",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/snapshots",
+        "description": "Create or update a conversation snapshot.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "conversation"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.attachments.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments",
+        "description": "List generic attachments for a chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.attachments.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments",
+        "description": "Register uploaded attachment metadata and optional message, block, or scope links.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.attachments.remove",
+        "method": "DELETE",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+        "description": "Mark a chat attachment removed.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.data_bank.scopes.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes",
+        "description": "List reusable file scopes for a chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.data_bank.scopes.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes",
+        "description": "Create or update a reusable file scope.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.data_bank.scopes.remove",
+        "method": "DELETE",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
+        "description": "Mark a reusable file scope removed.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.data_bank.scopes.attachments.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
+        "description": "List attachments linked to one reusable file scope.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
+        "id": "chat.commands.list",
+        "method": "GET",
+        "path_template": "/v1/chat/commands",
+        "description": "List browser-safe chat slash commands.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat"],
+        "public": true
+      },
+      {
+        "id": "chat.commands.autocomplete",
+        "method": "GET",
+        "path_template": "/v1/chat/commands/{command_name}/autocomplete",
+        "description": "Resolve backend-provided autocomplete values for a chat slash command argument.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.context",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/context",
+        "description": "Read browser-safe model/provider/brain and approximate context usage diagnostics for a chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "chat.commands.execute",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/commands",
+        "description": "Execute a chat slash command.",
+        "auth": "chat",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.capabilities",
+        "method": "GET",
+        "path_template": "/v1/admin/capabilities",
+        "description": "List public admin, chat, and control capabilities.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "service"],
+        "public": true
+      },
+      {
+        "id": "admin.mcp.servers",
+        "method": "GET",
+        "path_template": "/v1/admin/mcp/servers",
+        "description": "List configured MCP servers, tool profiles, and runtime bindings.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["mcp", "config", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.mcp.servers.create",
+        "method": "POST",
+        "path_template": "/v1/admin/mcp/servers",
+        "description": "Create or update a runtime-managed MCP server registry entry.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["mcp", "config", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.mcp.servers.update",
+        "method": "PATCH",
+        "path_template": "/v1/admin/mcp/servers/{server_id}",
+        "description": "Update a runtime-managed MCP server registry entry.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["mcp", "config", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.mcp.servers.delete",
+        "method": "DELETE",
+        "path_template": "/v1/admin/mcp/servers/{server_id}",
+        "description": "Delete a runtime-managed MCP server registry entry.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["mcp", "config", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.tools.catalog",
+        "method": "GET",
+        "path_template": "/v1/admin/tools/catalog",
+        "description": "List built-in non-MCP tool policy sets and tool metadata.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["tool", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.brain_catalog.read",
+        "method": "GET",
+        "path_template": "/v1/admin/brains/catalog",
+        "description": "List canonical Rust-owned brain modules, strategies, protocols, and host capability requirements.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.context_strategies.catalog",
+        "method": "GET",
+        "path_template": "/v1/admin/context-strategies",
+        "description": "List model context strategy ids, policy defaults, and UI validation metadata.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "config", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.local_tool_profiles.list",
+        "method": "GET",
+        "path_template": "/v1/admin/local-tool-profiles",
+        "description": "List DB-backed local built-in tool profiles.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["tool", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.local_tool_profiles.create",
+        "method": "POST",
+        "path_template": "/v1/admin/local-tool-profiles",
+        "description": "Create a DB-backed local built-in tool profile.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["tool", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.local_tool_profiles.read",
+        "method": "GET",
+        "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
+        "description": "Read one DB-backed local built-in tool profile.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["tool", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.local_tool_profiles.update",
+        "method": "PATCH",
+        "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
+        "description": "Update one DB-backed local built-in tool profile.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["tool", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.local_tool_profiles.delete",
+        "method": "DELETE",
+        "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
+        "description": "Delete one custom DB-backed local built-in tool profile.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["tool", "profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.healthz",
+        "method": "GET",
+        "path_template": "/v1/admin/healthz",
+        "description": "Read service liveness.",
+        "auth": "none",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.readyz",
+        "method": "GET",
+        "path_template": "/v1/admin/readyz",
+        "description": "Read service readiness.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics",
+        "description": "Read full diagnostics projection.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.overview",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/overview",
+        "description": "Read diagnostics overview.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.sessions",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/sessions",
+        "description": "List session diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.agents",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/agents",
+        "description": "List agent diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.delegations",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/delegations",
+        "description": "List delegation diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "delegation"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.queues",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/queues",
+        "description": "Read queue diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.tools",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/tools",
+        "description": "List tool diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.mcp",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/mcp",
+        "description": "List MCP diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "mcp"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.channels",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/channels",
+        "description": "List channel binding diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.persistence",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/persistence",
+        "description": "Read persistence diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.storage",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/storage",
+        "description": "Read backend storage diagnostics and capability projection.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "storage"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.profiles",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/profiles",
+        "description": "Read DB-backed profile registry and asset drift diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.list",
+        "method": "GET",
+        "path_template": "/v1/admin/profiles/registry",
+        "description": "List DB-backed profile registry records.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.read",
+        "method": "GET",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}",
+        "description": "Read one DB-backed profile registry record.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.export_plan",
+        "method": "GET",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/export-plan",
+        "description": "Plan a profile bundle export from registry state and file-backed assets without embedding raw prompt file contents.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "profile"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.update_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/update/plan",
+        "description": "Plan DB-backed profile registry field changes without editing profile files or service.json.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.update_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/update/apply",
+        "description": "Apply DB-backed profile registry field changes with revision checking.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.lifecycle_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/lifecycle/plan",
+        "description": "Plan a DB-backed profile lifecycle transition.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.lifecycle_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/lifecycle/apply",
+        "description": "Apply a DB-backed profile lifecycle transition and run safe runtime effects.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.prompt_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/prompt/plan",
+        "description": "Plan DB-backed profile soul and memory prompt text changes.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config", "prompt"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.prompt_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/prompt/apply",
+        "description": "Apply DB-backed profile soul and memory prompt text changes with revision checking.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config", "prompt"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.runtime_config_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/runtime-config/plan",
+        "description": "Plan DB-backed profile provider, built-in tool policy, and MCP binding changes without applying them.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config", "tool", "mcp"],
+        "public": true
+      },
+      {
+        "id": "admin.profiles.registry.runtime_config_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply",
+        "description": "Apply DB-backed profile provider, built-in tool policy, and MCP binding changes with revision checking and runtime reload.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config", "tool", "mcp"],
+        "public": true
+      },
+      {
+        "id": "admin.storage.query_catalog",
+        "method": "GET",
+        "path_template": "/v1/admin/storage/query-catalog",
+        "description": "List curated read-only storage queries.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["storage"],
+        "public": true
+      },
+      {
+        "id": "admin.storage.query.execute",
+        "method": "POST",
+        "path_template": "/v1/admin/storage/query/{query_id}",
+        "description": "Execute one curated read-only storage query by id. Raw SQL is not supported.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.spaces.list",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces",
+        "description": "List Rusty Crew runtime-owned memory-space descriptors.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["memory", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.spaces.read",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces/{space_id}",
+        "description": "Read one Rusty Crew memory-space descriptor.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["memory", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.spaces.records.list",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces/{space_id}/records",
+        "description": "List bounded records for a supported Rusty Crew memory space.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["memory"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.spaces.records.read",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces/{space_id}/records/{key}",
+        "description": "Read one record for a supported Rusty Crew memory space.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["memory"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.proposals.list",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/proposals",
+        "description": "List typed Rusty Crew memory proposals for review surfaces.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["memory", "governance"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.proposals.create",
+        "method": "POST",
+        "path_template": "/v1/admin/memory/proposals",
+        "description": "Create a typed Rusty Crew memory proposal without directly mutating memory records.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["memory", "governance"],
+        "public": true
+      },
+      {
+        "id": "admin.memory.proposals.decide",
+        "method": "POST",
+        "path_template": "/v1/admin/memory/proposals/{proposal_id}/decisions",
+        "description": "Record a typed Rusty Crew memory governance decision.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["memory", "governance"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.provider_state",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/provider-state",
+        "description": "Read provider wire-state diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.buffered_brain_runs",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/buffered-brain-runs",
+        "description": "Read metadata-only diagnostics for active Rust brain buffered runs.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.observation",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/observation",
+        "description": "Read observation diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.background",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/background",
+        "description": "Read background service diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.config",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/config",
+        "description": "Read config validation diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.diagnostics.metrics",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/metrics",
+        "description": "Read service metrics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.events.recent",
+        "method": "GET",
+        "path_template": "/v1/admin/events/recent",
+        "description": "List recent service events.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.scheduler.jobs",
+        "method": "GET",
+        "path_template": "/v1/admin/scheduler/jobs",
+        "description": "List scheduler jobs.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["scheduler"],
+        "public": true
+      },
+      {
+        "id": "admin.scheduler.runs",
+        "method": "GET",
+        "path_template": "/v1/admin/scheduler/runs",
+        "description": "List scheduler runs.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["scheduler"],
+        "public": true
+      },
+      {
+        "id": "admin.control.profiles.create",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles",
+        "description": "Create a profile and related service plumbing.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile"],
+        "public": true,
+        "command_name": "create_profile"
+      },
+      {
+        "id": "admin.control.profiles.read",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/read",
+        "description": "Read backend-owned editable profile configuration for a profile.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile"],
+        "public": true,
+        "command_name": "read_profile_config"
+      },
+      {
+        "id": "admin.control.profiles.update.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/update/plan",
+        "description": "Validate and plan a profile file update without writing it.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config"],
+        "public": true,
+        "command_name": "plan_profile_update"
+      },
+      {
+        "id": "admin.control.profiles.update.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/update/apply",
+        "description": "Apply a validated profile file update and reload service configuration.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "config"],
+        "public": true,
+        "command_name": "apply_profile_update"
+      },
+      {
+        "id": "admin.control.profiles.decommission",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/decommission",
+        "description": "Decommission a profile by removing service plumbing and archiving active sessions while preserving profile files.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "session", "config"],
+        "public": true,
+        "command_name": "decommission_profile"
+      },
+      {
+        "id": "admin.control.profiles.delete",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/delete",
+        "description": "Hard-delete a profile by removing service plumbing, profile files, registry state, sessions, and profile-owned persisted data. Requires confirmProfileId in the request body.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "session", "config", "storage"],
+        "public": true,
+        "command_name": "delete_profile"
+      },
+      {
+        "id": "admin.control.sessions.create",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions",
+        "description": "Create a runtime session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true,
+        "command_name": "create_session"
+      },
+      {
+        "id": "admin.control.sessions.archive",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/archive",
+        "description": "Archive a runtime session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true,
+        "command_name": "archive_session"
+      },
+      {
+        "id": "admin.control.sessions.new",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/new",
+        "description": "Archive a session and create a fresh replacement.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true,
+        "command_name": "new_session",
+        "rust_plan_operation": "plan_new_session_control"
+      },
+      {
+        "id": "admin.control.sessions.runtime.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/runtime/pause",
+        "description": "Pause runtime work for one session without archiving its durable records.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session", "service"],
+        "public": true,
+        "command_name": "pause_runtime"
+      },
+      {
+        "id": "admin.control.sessions.runtime.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/runtime/resume",
+        "description": "Resume runtime work for one paused session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session", "service"],
+        "public": true,
+        "command_name": "resume_runtime"
+      },
+      {
+        "id": "admin.control.profiles.runtime.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/runtime/pause",
+        "description": "Pause runtime work for all sessions using one profile.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "session", "service"],
+        "public": true,
+        "command_name": "pause_runtime"
+      },
+      {
+        "id": "admin.control.profiles.runtime.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/runtime/resume",
+        "description": "Resume runtime work for a paused profile.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "session", "service"],
+        "public": true,
+        "command_name": "resume_runtime"
+      },
+      {
+        "id": "admin.control.agents.runtime.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/agents/{agent_id}/runtime/pause",
+        "description": "Pause runtime work for all sessions belonging to one agent id.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session", "service"],
+        "public": true,
+        "command_name": "pause_runtime"
+      },
+      {
+        "id": "admin.control.agents.runtime.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/agents/{agent_id}/runtime/resume",
+        "description": "Resume runtime work for a paused agent id.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session", "service"],
+        "public": true,
+        "command_name": "resume_runtime"
+      },
+      {
+        "id": "admin.control.sessions.rebuild_runtime.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/rebuild-runtime/plan",
+        "description": "Plan the runtime impact of rebuilding a session brain from current profile config.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session", "profile"],
+        "public": true,
+        "command_name": "plan_runtime_rebuild"
+      },
+      {
+        "id": "admin.control.sessions.rebuild_runtime.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/rebuild-runtime/apply",
+        "description": "Apply a guarded runtime rebuild for a session when the backend can preserve state safely.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session", "profile"],
+        "public": true,
+        "command_name": "apply_runtime_rebuild"
+      },
+      {
+        "id": "admin.control.profiles.rebuild_brain.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/rebuild-brain/plan",
+        "description": "Plan the runtime impact of rebuilding all active sessions for a profile brain.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "session"],
+        "public": true,
+        "command_name": "plan_runtime_rebuild"
+      },
+      {
+        "id": "admin.control.profiles.rebuild_brain.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/rebuild-brain/apply",
+        "description": "Apply a guarded profile brain rebuild when the backend can preserve sessions safely.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["profile", "session"],
+        "public": true,
+        "command_name": "apply_runtime_rebuild"
+      },
+      {
+        "id": "admin.control.delegations.cancel",
+        "method": "POST",
+        "path_template": "/v1/admin/control/delegations/{session_id}/cancel",
+        "description": "Cancel a delegated session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["delegation"],
+        "public": true,
+        "command_name": "cancel_delegation"
+      },
+      {
+        "id": "admin.control.delegations.checkpoint",
+        "method": "POST",
+        "path_template": "/v1/admin/control/delegations/{session_id}/checkpoint",
+        "description": "Request a checkpoint from a delegated session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["delegation"],
+        "public": true,
+        "command_name": "request_delegated_checkpoint"
+      },
+      {
+        "id": "admin.control.config.reload",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/reload",
+        "description": "Reload service configuration.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["config"],
+        "public": true,
+        "command_name": "reload_config"
+      },
+      {
+        "id": "admin.control.config.draft.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/draft/plan",
+        "description": "Validate and plan a service runtime config draft without writing it.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["config"],
+        "public": true,
+        "command_name": "plan_runtime_config_update"
+      },
+      {
+        "id": "admin.control.config.draft.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/draft/apply",
+        "description": "Apply a validated service runtime config draft and reload runtime config.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["config"],
+        "public": true,
+        "command_name": "apply_runtime_config_update"
+      },
+      {
+        "id": "admin.control.config.wake_timeout.patch",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/wake-timeout",
+        "description": "Patch only the service wake-timeout policy while preserving unrelated runtime config sections.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["config", "service"],
+        "public": true,
+        "command_name": "patch_wake_timeout"
+      },
+      {
+        "id": "admin.control.mcp.reload",
+        "method": "POST",
+        "path_template": "/v1/admin/control/mcp/{session_id}/reload",
+        "description": "Reload MCP surfaces for a session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["mcp", "session"],
+        "public": true,
+        "command_name": "reload_mcp",
+        "rust_plan_operation": "plan_reload_mcp_control"
+      },
+      {
+        "id": "admin.control.maintenance.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/maintenance",
+        "description": "Run service maintenance.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["maintenance"],
+        "public": true,
+        "command_name": "run_maintenance"
+      },
+      {
+        "id": "admin.control.scheduler.tick",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/tick",
+        "description": "Run one scheduler tick.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["scheduler"],
+        "public": true,
+        "command_name": "scheduler_tick"
+      },
+      {
+        "id": "admin.control.scheduler.jobs.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/jobs/{job_id}/run",
+        "description": "Run a scheduler job.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["scheduler"],
+        "public": true,
+        "command_name": "scheduler_run_job"
+      },
+      {
+        "id": "admin.control.scheduler.jobs.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/jobs/{job_id}/pause",
+        "description": "Pause a scheduler job.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["scheduler"],
+        "public": true,
+        "command_name": "scheduler_pause_job"
+      },
+      {
+        "id": "admin.control.scheduler.jobs.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/jobs/{job_id}/resume",
+        "description": "Resume a scheduler job.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["scheduler"],
+        "public": true,
+        "command_name": "scheduler_resume_job"
+      },
+      {
+        "id": "admin.control.cleanup.delegated.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/cleanup/delegated/run",
+        "description": "Clean up expired delegated resources.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["maintenance", "delegation"],
+        "public": true,
+        "command_name": "cleanup_delegated_resources"
+      },
+      {
+        "id": "admin.control.curator.status",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/status",
+        "description": "Read curator status through the audited control path.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_status"
+      },
+      {
+        "id": "admin.control.curator.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/run",
+        "description": "Run a curator scan.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_run_scan"
+      },
+      {
+        "id": "admin.control.curator.pinned.list",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/pinned/list",
+        "description": "List pinned curator skills.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_list_pinned_skills"
+      },
+      {
+        "id": "admin.control.curator.archives.list",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/archives/list",
+        "description": "List archived curator skills.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_list_archived_skills"
+      },
+      {
+        "id": "admin.control.curator.skills.pin",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/skills/{slug}/pin",
+        "description": "Pin a curator skill.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_pin_skill"
+      },
+      {
+        "id": "admin.control.curator.skills.unpin",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/skills/{slug}/unpin",
+        "description": "Unpin a curator skill.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_unpin_skill"
+      },
+      {
+        "id": "admin.control.curator.skills.restore",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/skills/{slug}/restore",
+        "description": "Restore an archived curator skill.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_restore_skill"
+      },
+      {
+        "id": "admin.control.curator.candidates.preview",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/candidates/{candidate_id}/preview",
+        "description": "Preview a curator candidate.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_preview_candidate"
+      },
+      {
+        "id": "admin.control.curator.candidates.approve",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/candidates/{candidate_id}/approve",
+        "description": "Approve a curator candidate.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_approve_candidate"
+      },
+      {
+        "id": "admin.control.curator.candidates.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/candidates/{candidate_id}/apply",
+        "description": "Apply a curator candidate.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_apply_candidate"
+      },
+      {
+        "id": "admin.control.curator.mutations.rollback",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/mutations/{mutation_id}/rollback",
+        "description": "Roll back a curator mutation.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["curator"],
+        "public": true,
+        "command_name": "curator_rollback_mutation"
+      },
+      {
+        "id": "admin.control.shutdown",
+        "method": "POST",
+        "path_template": "/v1/admin/control/shutdown",
+        "description": "Request service shutdown.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service"],
+        "public": true,
+        "command_name": "shutdown"
+      }
+    ]
+  },
+  "route_coverage": {
+    "capability_routes": [
+      {
+        "capability_id": "admin.storage.schema",
+        "method": "GET",
+        "path_template": "/v1/admin/storage/schema",
+        "route_id": "admin.storage",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.open",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.events",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/events",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.stream",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/stream",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.tool_calls.debug.get",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.provider_requests.debug.get",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.messages.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/messages",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/slots",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.variants.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.variants.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.variants.delete",
+        "method": "DELETE",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.variants.reorder",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.slots.active_variant.select",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.tree.open",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/tree",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.jump.resolve",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/jump",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.search",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/search",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.search",
+        "method": "GET",
+        "path_template": "/v1/chat/search",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.branches.upsert",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/branches",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.branches.active.select",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/branches/active",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.branches.head.update",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.snapshots.upsert",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/snapshots",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.attachments.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.attachments.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.attachments.remove",
+        "method": "DELETE",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.data_bank.scopes.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.data_bank.scopes.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.data_bank.scopes.remove",
+        "method": "DELETE",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.data_bank.scopes.attachments.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.commands.list",
+        "method": "GET",
+        "path_template": "/v1/chat/commands",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.commands.autocomplete",
+        "method": "GET",
+        "path_template": "/v1/chat/commands/{command_name}/autocomplete",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.context",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/context",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.commands.execute",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/commands",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.capabilities",
+        "method": "GET",
+        "path_template": "/v1/admin/capabilities",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.mcp.servers",
+        "method": "GET",
+        "path_template": "/v1/admin/mcp/servers",
+        "route_id": "admin.mcp.servers",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.mcp.servers.create",
+        "method": "POST",
+        "path_template": "/v1/admin/mcp/servers",
+        "route_id": "admin.mcp.servers",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.mcp.servers.update",
+        "method": "PATCH",
+        "path_template": "/v1/admin/mcp/servers/{server_id}",
+        "route_id": "admin.mcp.servers",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.mcp.servers.delete",
+        "method": "DELETE",
+        "path_template": "/v1/admin/mcp/servers/{server_id}",
+        "route_id": "admin.mcp.servers",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.tools.catalog",
+        "method": "GET",
+        "path_template": "/v1/admin/tools/catalog",
+        "route_id": "admin.tools.catalog",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.brain_catalog.read",
+        "method": "GET",
+        "path_template": "/v1/admin/brains/catalog",
+        "route_id": "admin.brain_catalog",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.context_strategies.catalog",
+        "method": "GET",
+        "path_template": "/v1/admin/context-strategies",
+        "route_id": "admin.context_strategies",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.local_tool_profiles.list",
+        "method": "GET",
+        "path_template": "/v1/admin/local-tool-profiles",
+        "route_id": "admin.local_tool_profiles",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.local_tool_profiles.create",
+        "method": "POST",
+        "path_template": "/v1/admin/local-tool-profiles",
+        "route_id": "admin.local_tool_profiles",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.local_tool_profiles.read",
+        "method": "GET",
+        "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
+        "route_id": "admin.local_tool_profiles",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.local_tool_profiles.update",
+        "method": "PATCH",
+        "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
+        "route_id": "admin.local_tool_profiles",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.local_tool_profiles.delete",
+        "method": "DELETE",
+        "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
+        "route_id": "admin.local_tool_profiles",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.healthz",
+        "method": "GET",
+        "path_template": "/v1/admin/healthz",
+        "route_id": "admin.healthz",
+        "auth_phase": "before_auth"
+      },
+      {
+        "capability_id": "admin.readyz",
+        "method": "GET",
+        "path_template": "/v1/admin/readyz",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.overview",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/overview",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.sessions",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/sessions",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.agents",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/agents",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.delegations",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/delegations",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.queues",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/queues",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.tools",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/tools",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.mcp",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/mcp",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.channels",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/channels",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.persistence",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/persistence",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.storage",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/storage",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.profiles",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/profiles",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.list",
+        "method": "GET",
+        "path_template": "/v1/admin/profiles/registry",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.read",
+        "method": "GET",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.export_plan",
+        "method": "GET",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/export-plan",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.update_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/update/plan",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.update_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/update/apply",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.lifecycle_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/lifecycle/plan",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.lifecycle_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/lifecycle/apply",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.prompt_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/prompt/plan",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.prompt_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/prompt/apply",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.runtime_config_plan",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/runtime-config/plan",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.profiles.registry.runtime_config_apply",
+        "method": "POST",
+        "path_template": "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply",
+        "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.storage.query_catalog",
+        "method": "GET",
+        "path_template": "/v1/admin/storage/query-catalog",
+        "route_id": "admin.storage",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.storage.query.execute",
+        "method": "POST",
+        "path_template": "/v1/admin/storage/query/{query_id}",
+        "route_id": "admin.storage",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.spaces.list",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.spaces.read",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces/{space_id}",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.spaces.records.list",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces/{space_id}/records",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.spaces.records.read",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/spaces/{space_id}/records/{key}",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.proposals.list",
+        "method": "GET",
+        "path_template": "/v1/admin/memory/proposals",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.proposals.create",
+        "method": "POST",
+        "path_template": "/v1/admin/memory/proposals",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.memory.proposals.decide",
+        "method": "POST",
+        "path_template": "/v1/admin/memory/proposals/{proposal_id}/decisions",
+        "route_id": "admin.memory",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.provider_state",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/provider-state",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.buffered_brain_runs",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/buffered-brain-runs",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.observation",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/observation",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.background",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/background",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.config",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/config",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.metrics",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/metrics",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.events.recent",
+        "method": "GET",
+        "path_template": "/v1/admin/events/recent",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.scheduler.jobs",
+        "method": "GET",
+        "path_template": "/v1/admin/scheduler/jobs",
+        "route_id": "admin.scheduler",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.scheduler.runs",
+        "method": "GET",
+        "path_template": "/v1/admin/scheduler/runs",
+        "route_id": "admin.scheduler",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.create",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.read",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/read",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.update.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/update/plan",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.update.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/update/apply",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.decommission",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/decommission",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.delete",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/delete",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.create",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.archive",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/archive",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.new",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/new",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.runtime.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/runtime/pause",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.runtime.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/runtime/resume",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.runtime.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/runtime/pause",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.runtime.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/runtime/resume",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.agents.runtime.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/agents/{agent_id}/runtime/pause",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.agents.runtime.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/agents/{agent_id}/runtime/resume",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.rebuild_runtime.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/rebuild-runtime/plan",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.rebuild_runtime.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/rebuild-runtime/apply",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.rebuild_brain.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/rebuild-brain/plan",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.profiles.rebuild_brain.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/profiles/{profile_id}/rebuild-brain/apply",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.delegations.cancel",
+        "method": "POST",
+        "path_template": "/v1/admin/control/delegations/{session_id}/cancel",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.delegations.checkpoint",
+        "method": "POST",
+        "path_template": "/v1/admin/control/delegations/{session_id}/checkpoint",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.config.reload",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/reload",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.config.draft.plan",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/draft/plan",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.config.draft.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/draft/apply",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.config.wake_timeout.patch",
+        "method": "POST",
+        "path_template": "/v1/admin/control/config/wake-timeout",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.mcp.reload",
+        "method": "POST",
+        "path_template": "/v1/admin/control/mcp/{session_id}/reload",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.maintenance.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/maintenance",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.scheduler.tick",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/tick",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.scheduler.jobs.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/jobs/{job_id}/run",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.scheduler.jobs.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/jobs/{job_id}/pause",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.scheduler.jobs.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/control/scheduler/jobs/{job_id}/resume",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.cleanup.delegated.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/cleanup/delegated/run",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.status",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/status",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.run",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/run",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.pinned.list",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/pinned/list",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.archives.list",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/archives/list",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.skills.pin",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/skills/{slug}/pin",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.skills.unpin",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/skills/{slug}/unpin",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.skills.restore",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/skills/{slug}/restore",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.candidates.preview",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/candidates/{candidate_id}/preview",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.candidates.approve",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/candidates/{candidate_id}/approve",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.candidates.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/candidates/{candidate_id}/apply",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.curator.mutations.rollback",
+        "method": "POST",
+        "path_template": "/v1/admin/control/curator/mutations/{mutation_id}/rollback",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.shutdown",
+        "method": "POST",
+        "path_template": "/v1/admin/control/shutdown",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      }
+    ],
+    "route_exemptions": [
+      {
+        "route_id": "browser.cors",
+        "reason": "preflight route only; cataloging each CORS path would duplicate browser routes"
+      },
+      {
+        "route_id": "debug",
+        "reason": "debug routes are intentionally omitted from public capability discovery"
+      },
+      {
+        "route_id": "admin.mcp.catalog",
+        "reason": "legacy MCP catalog route is route-table visible but not a Rusty View capability surface"
+      },
+      {
+        "route_id": "roleplay",
+        "reason": "roleplay browser/admin capability metadata remains in its dedicated contract during the Rust domain migration"
+      },
+      {
+        "route_id": "admin.model_providers",
+        "reason": "model-provider admin capability metadata remains in its dedicated contract until it joins the shared catalog"
+      }
+    ]
+  },
+  "slash_command_handlers": [
+    "help",
+    "status",
+    "session",
+    "model",
+    "new",
+    "reload-mcp"
+  ]
+}

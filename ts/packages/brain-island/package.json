@@ -103,6 +103,8 @@
     "smoke:slash-command-router": "tsx smokes/smoke-slash-command-router.ts",
     "smoke:slash-command-e2e": "tsx ../../smokes/brain-island/smoke-slash-command-e2e.ts",
     "smoke:api-command-registry": "tsx smokes/smoke-api-command-registry.ts",
+    "codegen:api-capabilities": "tsx src/generate-api-capability-artifact.ts",
+    "check:api-capabilities": "tsx src/generate-api-capability-artifact.ts --check",
     "smoke:new-session-lifecycle": "tsx smokes/smoke-new-session-lifecycle.ts",
     "smoke:reload-mcp-control": "tsx ../../smokes/brain-island/smoke-reload-mcp-control.ts",
     "smoke:mcp-server-registry-routes": "tsx smokes/mcp-server-registry-routes.ts",

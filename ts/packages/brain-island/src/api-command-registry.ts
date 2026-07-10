@@ -2,14 +2,6 @@ import type { AdminControlCommandName } from "./admin-control-api.js";
 import { PROFILE_REGISTRY_ADMIN_PATHS } from "./profile-registry-admin-contract.js";
 import { RUSTY_VIEW_CHAT_PATHS } from "./rusty-view-chat-contract.js";
 
-export type SlashCommandName =
-  | "help"
-  | "status"
-  | "session"
-  | "model"
-  | "new"
-  | "reload-mcp";
-
 export type ApiCapabilityAuth = "none" | "chat" | "admin";
 export type ApiCapabilityMutation = "read" | "write" | "control";
 export type ApiCapabilityStability = "stable" | "experimental";
@@ -47,8 +39,8 @@ export type ApiCapabilityScope =
   | "tool"
   | "service";
 
-export interface SlashCommandDescriptor {
-  name: SlashCommandName;
+export interface SlashCommandDefinition<Name extends string = string> {
+  name: Name;
   aliases: readonly string[];
   description: string;
   argsSchema: Record<string, unknown>;
@@ -68,6 +60,8 @@ export interface SlashCommandDescriptor {
     rustPlanOperation?: string;
   };
 }
+
+export type SlashCommandDescriptor = SlashCommandDefinition<SlashCommandName>;
 
 export interface ChatCommandRegistry {
   commands: ChatCommandDescriptor[];
@@ -196,7 +190,9 @@ export const SLASH_COMMAND_REGISTRY = [
       rustPlanOperation: "plan_reload_mcp_control",
     },
   }),
-] as const satisfies readonly SlashCommandDescriptor[];
+] as const;
+
+export type SlashCommandName = (typeof SLASH_COMMAND_REGISTRY)[number]["name"];
 
 export const ADMIN_CONTROL_CAPABILITIES = [
   controlCapability(
@@ -1421,15 +1417,15 @@ export function chatApiCapabilityPaths(): string[] {
   ];
 }
 
-function slashCommand(input: {
-  name: SlashCommandName;
+function slashCommand<const Name extends string>(input: {
+  name: Name;
   description: string;
   readOnly: boolean;
   positionalArgs?: readonly ChatCommandArgumentDescriptor[];
   namedArgs?: readonly ChatCommandArgumentDescriptor[];
   surfaces?: readonly ChatCommandSurface[];
-  control?: SlashCommandDescriptor["control"];
-}): SlashCommandDescriptor {
+  control?: SlashCommandDefinition["control"];
+}): SlashCommandDefinition<Name> {
   const mutating = !input.readOnly;
   return {
     name: input.name,

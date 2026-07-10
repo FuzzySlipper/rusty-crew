@@ -40,6 +40,10 @@ export {
   findSlashCommandDescriptor,
   slashCommandNames,
 } from "../api-command-registry.js";
+export {
+  SERVICE_ROUTE_CATALOG_EXEMPTIONS,
+  apiCapabilityCoverageInventory,
+} from "../api-capability-coverage.js";
 export type {
   ApiCapabilityAuth,
   ApiCapabilityDescriptor,
@@ -55,9 +59,18 @@ export type {
   ChatCommandRegistry,
   ChatCommandSource,
   ChatCommandSurface,
+  SlashCommandDefinition,
   SlashCommandDescriptor,
 } from "../api-command-registry.js";
-export { routeSlashCommand } from "../slash-command-router.js";
+export type {
+  ApiCapabilityCoverageInventory,
+  ApiCapabilityRouteCoverage,
+  ServiceRouteCatalogExemption,
+} from "../api-capability-coverage.js";
+export {
+  routeSlashCommand,
+  slashCommandHandlerNames,
+} from "../slash-command-router.js";
 export type {
   SlashCommandActor,
   SlashCommandControlRequest,

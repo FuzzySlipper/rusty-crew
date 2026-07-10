@@ -108,67 +108,80 @@ export function routeSlashCommand(
     });
   }
 
-  switch (commandName) {
-    case "help":
-      return intercepted("help", "ok", helpResponse(input.options));
-    case "status":
-      return intercepted("status", "ok", {
-        title: "Status",
-        summary: "Diagnostics status requested.",
-        fields: sessionFields(input.session),
-      });
-    case "session":
-      return intercepted("session", "ok", {
-        title: "Session",
-        summary: "Session summary requested.",
-        fields: sessionFields(input.session),
-      });
-    case "model":
-      return intercepted("model", "ok", {
-        title: "Model",
-        summary: "Model and brain diagnostics requested.",
-        fields: sessionFields(input.session),
-      });
-    case "new":
-      return intercepted(
-        "new",
-        "ok",
-        {
-          title: "New Session",
-          summary: "Archive current session and create a fresh session.",
-          fields: sessionFields(input.session),
-        },
-        {
-          commandName: "new_session",
-          target: { sessionId: input.session.sessionId },
-          reason: parsed.args || "slash command /new",
-          reasonCode: "slash_new_session",
-          body: controlBody(input, parsed.args),
-        },
-      );
-    case "reload-mcp":
-      return intercepted(
-        "reload-mcp",
-        "ok",
-        {
-          title: "Reload MCP",
-          summary: "Reload MCP for the current session.",
-          fields: sessionFields(input.session),
-        },
-        {
-          commandName: "reload_mcp",
-          target: { sessionId: input.session.sessionId },
-          reason: parsed.args || "slash command /reload-mcp",
-          reasonCode: "slash_reload_mcp",
-          body: controlBody(input, parsed.args),
-        },
-      );
-  }
+  return SLASH_COMMAND_HANDLERS[commandName](input, parsed);
 }
 
-function parseSlashCommand(
-  text: string,
-): { name: string; args: string } | undefined {
+interface ParsedSlashCommand {
+  name: string;
+  args: string;
+}
+
+type SlashCommandHandler = (
+  input: SlashCommandInput,
+  parsed: ParsedSlashCommand,
+) => SlashCommandRouteResult;
+
+const SLASH_COMMAND_HANDLERS = {
+  help: (input) => intercepted("help", "ok", helpResponse(input.options)),
+  status: (input) =>
+    intercepted("status", "ok", {
+      title: "Status",
+      summary: "Diagnostics status requested.",
+      fields: sessionFields(input.session),
+    }),
+  session: (input) =>
+    intercepted("session", "ok", {
+      title: "Session",
+      summary: "Session summary requested.",
+      fields: sessionFields(input.session),
+    }),
+  model: (input) =>
+    intercepted("model", "ok", {
+      title: "Model",
+      summary: "Model and brain diagnostics requested.",
+      fields: sessionFields(input.session),
+    }),
+  new: (input, parsed) =>
+    intercepted(
+      "new",
+      "ok",
+      {
+        title: "New Session",
+        summary: "Archive current session and create a fresh session.",
+        fields: sessionFields(input.session),
+      },
+      {
+        commandName: "new_session",
+        target: { sessionId: input.session.sessionId },
+        reason: parsed.args || "slash command /new",
+        reasonCode: "slash_new_session",
+        body: controlBody(input, parsed.args),
+      },
+    ),
+  "reload-mcp": (input, parsed) =>
+    intercepted(
+      "reload-mcp",
+      "ok",
+      {
+        title: "Reload MCP",
+        summary: "Reload MCP for the current session.",
+        fields: sessionFields(input.session),
+      },
+      {
+        commandName: "reload_mcp",
+        target: { sessionId: input.session.sessionId },
+        reason: parsed.args || "slash command /reload-mcp",
+        reasonCode: "slash_reload_mcp",
+        body: controlBody(input, parsed.args),
+      },
+    ),
+} satisfies Record<SlashCommandName, SlashCommandHandler>;
+
+export function slashCommandHandlerNames(): SlashCommandName[] {
+  return Object.keys(SLASH_COMMAND_HANDLERS) as SlashCommandName[];
+}
+
+function parseSlashCommand(text: string): ParsedSlashCommand | undefined {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return undefined;
   const withoutSlash = trimmed.slice(1);
