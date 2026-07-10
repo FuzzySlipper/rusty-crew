@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { API_CAPABILITY_OPENAPI_PATH } from "../src/api-capability-openapi.js";
 import { apiCapabilityRegistry } from "../src/api-command-registry.js";
 import {
   RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
@@ -17,6 +18,12 @@ const contractPath = resolve(
   RUSTY_VIEW_CHAT_OPENAPI_PATH,
 );
 const contract = JSON.parse(readFileSync(contractPath, "utf8")) as OpenApiDoc;
+const capabilityContract = JSON.parse(
+  readFileSync(
+    resolve(process.cwd(), "../../../", API_CAPABILITY_OPENAPI_PATH),
+    "utf8",
+  ),
+) as OpenApiDoc;
 
 for (const path of Object.values(RUSTY_VIEW_CHAT_PATHS)) {
   assert.ok(contract.paths[path], `missing path ${path}`);
@@ -156,6 +163,17 @@ console.log(
 function schema(name: string): JsonSchema {
   const value = contract.components.schemas[name];
   assert.ok(value, `missing schema ${name}`);
+  if (
+    value.$ref?.startsWith(
+      "./rusty-crew-api-capabilities.openapi.json#/components/schemas/",
+    )
+  ) {
+    const generatedName = value.$ref.split("/").at(-1);
+    assert.ok(generatedName, `invalid generated schema ref for ${name}`);
+    const generated = capabilityContract.components.schemas[generatedName];
+    assert.ok(generated, `missing generated schema ${generatedName}`);
+    return generated;
+  }
   return value;
 }
 
@@ -185,6 +203,7 @@ interface Operation {
 }
 
 interface JsonSchema {
+  $ref?: string;
   type?: string;
   enum?: string[];
   required?: string[];

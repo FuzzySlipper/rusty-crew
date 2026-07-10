@@ -1,0 +1,3544 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rusty Crew API Capability Contract",
+    "version": "0.1.0",
+    "description": "Generated public capability inventory. Discovery operations carry detailed wire schemas; other operations intentionally describe capability metadata only."
+  },
+  "tags": [
+    { "name": "attachment" },
+    { "name": "chat" },
+    { "name": "config" },
+    { "name": "conversation" },
+    { "name": "curator" },
+    { "name": "delegation" },
+    { "name": "diagnostics" },
+    { "name": "governance" },
+    { "name": "maintenance" },
+    { "name": "mcp" },
+    { "name": "memory" },
+    { "name": "profile" },
+    { "name": "prompt" },
+    { "name": "scheduler" },
+    { "name": "search" },
+    { "name": "service" },
+    { "name": "session" },
+    { "name": "storage" },
+    { "name": "tool" }
+  ],
+  "paths": {
+    "/v1/admin/brains/catalog": {
+      "get": {
+        "operationId": "adminBrainCatalogRead",
+        "summary": "List canonical Rust-owned brain modules, strategies, protocols, and host capability requirements.",
+        "tags": ["service", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.brain_catalog.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/capabilities": {
+      "get": {
+        "operationId": "listApiCapabilities",
+        "summary": "List public admin, chat, and control capabilities.",
+        "tags": ["diagnostics", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "200": {
+            "description": "Successful typed discovery response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "type": "boolean", "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ApiCapabilityRegistry"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.capabilities",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/context-strategies": {
+      "get": {
+        "operationId": "adminContextStrategiesCatalog",
+        "summary": "List model context strategy ids, policy defaults, and UI validation metadata.",
+        "tags": ["service", "config", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.context_strategies.catalog",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/control/agents/{agent_id}/runtime/pause": {
+      "post": {
+        "operationId": "adminControlAgentsRuntimePause",
+        "summary": "Pause runtime work for all sessions belonging to one agent id.",
+        "tags": ["session", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.agents.runtime.pause",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "pause_runtime"
+      }
+    },
+    "/v1/admin/control/agents/{agent_id}/runtime/resume": {
+      "post": {
+        "operationId": "adminControlAgentsRuntimeResume",
+        "summary": "Resume runtime work for a paused agent id.",
+        "tags": ["session", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.agents.runtime.resume",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "resume_runtime"
+      }
+    },
+    "/v1/admin/control/cleanup/delegated/run": {
+      "post": {
+        "operationId": "adminControlCleanupDelegatedRun",
+        "summary": "Clean up expired delegated resources.",
+        "tags": ["maintenance", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.cleanup.delegated.run",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "cleanup_delegated_resources"
+      }
+    },
+    "/v1/admin/control/config/draft/apply": {
+      "post": {
+        "operationId": "adminControlConfigDraftApply",
+        "summary": "Apply a validated service runtime config draft and reload runtime config.",
+        "tags": ["config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.config.draft.apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "apply_runtime_config_update"
+      }
+    },
+    "/v1/admin/control/config/draft/plan": {
+      "post": {
+        "operationId": "adminControlConfigDraftPlan",
+        "summary": "Validate and plan a service runtime config draft without writing it.",
+        "tags": ["config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.config.draft.plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "plan_runtime_config_update"
+      }
+    },
+    "/v1/admin/control/config/reload": {
+      "post": {
+        "operationId": "adminControlConfigReload",
+        "summary": "Reload service configuration.",
+        "tags": ["config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.config.reload",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "reload_config"
+      }
+    },
+    "/v1/admin/control/config/wake-timeout": {
+      "post": {
+        "operationId": "adminControlConfigWakeTimeoutPatch",
+        "summary": "Patch only the service wake-timeout policy while preserving unrelated runtime config sections.",
+        "tags": ["config", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.config.wake_timeout.patch",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "patch_wake_timeout"
+      }
+    },
+    "/v1/admin/control/curator/archives/list": {
+      "post": {
+        "operationId": "adminControlCuratorArchivesList",
+        "summary": "List archived curator skills.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.archives.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_list_archived_skills"
+      }
+    },
+    "/v1/admin/control/curator/candidates/{candidate_id}/apply": {
+      "post": {
+        "operationId": "adminControlCuratorCandidatesApply",
+        "summary": "Apply a curator candidate.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.candidates.apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_apply_candidate"
+      }
+    },
+    "/v1/admin/control/curator/candidates/{candidate_id}/approve": {
+      "post": {
+        "operationId": "adminControlCuratorCandidatesApprove",
+        "summary": "Approve a curator candidate.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.candidates.approve",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_approve_candidate"
+      }
+    },
+    "/v1/admin/control/curator/candidates/{candidate_id}/preview": {
+      "post": {
+        "operationId": "adminControlCuratorCandidatesPreview",
+        "summary": "Preview a curator candidate.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.candidates.preview",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_preview_candidate"
+      }
+    },
+    "/v1/admin/control/curator/mutations/{mutation_id}/rollback": {
+      "post": {
+        "operationId": "adminControlCuratorMutationsRollback",
+        "summary": "Roll back a curator mutation.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "mutation_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.mutations.rollback",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_rollback_mutation"
+      }
+    },
+    "/v1/admin/control/curator/pinned/list": {
+      "post": {
+        "operationId": "adminControlCuratorPinnedList",
+        "summary": "List pinned curator skills.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.pinned.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_list_pinned_skills"
+      }
+    },
+    "/v1/admin/control/curator/run": {
+      "post": {
+        "operationId": "adminControlCuratorRun",
+        "summary": "Run a curator scan.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.run",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_run_scan"
+      }
+    },
+    "/v1/admin/control/curator/skills/{slug}/pin": {
+      "post": {
+        "operationId": "adminControlCuratorSkillsPin",
+        "summary": "Pin a curator skill.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.skills.pin",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_pin_skill"
+      }
+    },
+    "/v1/admin/control/curator/skills/{slug}/restore": {
+      "post": {
+        "operationId": "adminControlCuratorSkillsRestore",
+        "summary": "Restore an archived curator skill.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.skills.restore",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_restore_skill"
+      }
+    },
+    "/v1/admin/control/curator/skills/{slug}/unpin": {
+      "post": {
+        "operationId": "adminControlCuratorSkillsUnpin",
+        "summary": "Unpin a curator skill.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.skills.unpin",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_unpin_skill"
+      }
+    },
+    "/v1/admin/control/curator/status": {
+      "post": {
+        "operationId": "adminControlCuratorStatus",
+        "summary": "Read curator status through the audited control path.",
+        "tags": ["curator"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.curator.status",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "curator_status"
+      }
+    },
+    "/v1/admin/control/delegations/{session_id}/cancel": {
+      "post": {
+        "operationId": "adminControlDelegationsCancel",
+        "summary": "Cancel a delegated session.",
+        "tags": ["delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.delegations.cancel",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "cancel_delegation"
+      }
+    },
+    "/v1/admin/control/delegations/{session_id}/checkpoint": {
+      "post": {
+        "operationId": "adminControlDelegationsCheckpoint",
+        "summary": "Request a checkpoint from a delegated session.",
+        "tags": ["delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.delegations.checkpoint",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "request_delegated_checkpoint"
+      }
+    },
+    "/v1/admin/control/maintenance": {
+      "post": {
+        "operationId": "adminControlMaintenanceRun",
+        "summary": "Run service maintenance.",
+        "tags": ["maintenance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.maintenance.run",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "run_maintenance"
+      }
+    },
+    "/v1/admin/control/mcp/{session_id}/reload": {
+      "post": {
+        "operationId": "adminControlMcpReload",
+        "summary": "Reload MCP surfaces for a session.",
+        "tags": ["mcp", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.mcp.reload",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "reload_mcp",
+        "x-rusty-crew-rust-plan-operation": "plan_reload_mcp_control"
+      }
+    },
+    "/v1/admin/control/profiles": {
+      "post": {
+        "operationId": "adminControlProfilesCreate",
+        "summary": "Create a profile and related service plumbing.",
+        "tags": ["profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "create_profile"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/decommission": {
+      "post": {
+        "operationId": "adminControlProfilesDecommission",
+        "summary": "Decommission a profile by removing service plumbing and archiving active sessions while preserving profile files.",
+        "tags": ["profile", "session", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.decommission",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "decommission_profile"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/delete": {
+      "post": {
+        "operationId": "adminControlProfilesDelete",
+        "summary": "Hard-delete a profile by removing service plumbing, profile files, registry state, sessions, and profile-owned persisted data. Requires confirmProfileId in the request body.",
+        "tags": ["profile", "session", "config", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.delete",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "delete_profile"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/read": {
+      "post": {
+        "operationId": "adminControlProfilesRead",
+        "summary": "Read backend-owned editable profile configuration for a profile.",
+        "tags": ["profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "read_profile_config"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/rebuild-brain/apply": {
+      "post": {
+        "operationId": "adminControlProfilesRebuildBrainApply",
+        "summary": "Apply a guarded profile brain rebuild when the backend can preserve sessions safely.",
+        "tags": ["profile", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.rebuild_brain.apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "apply_runtime_rebuild"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/rebuild-brain/plan": {
+      "post": {
+        "operationId": "adminControlProfilesRebuildBrainPlan",
+        "summary": "Plan the runtime impact of rebuilding all active sessions for a profile brain.",
+        "tags": ["profile", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.rebuild_brain.plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "plan_runtime_rebuild"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/runtime/pause": {
+      "post": {
+        "operationId": "adminControlProfilesRuntimePause",
+        "summary": "Pause runtime work for all sessions using one profile.",
+        "tags": ["profile", "session", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.runtime.pause",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "pause_runtime"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/runtime/resume": {
+      "post": {
+        "operationId": "adminControlProfilesRuntimeResume",
+        "summary": "Resume runtime work for a paused profile.",
+        "tags": ["profile", "session", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.runtime.resume",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "resume_runtime"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/update/apply": {
+      "post": {
+        "operationId": "adminControlProfilesUpdateApply",
+        "summary": "Apply a validated profile file update and reload service configuration.",
+        "tags": ["profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.update.apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "apply_profile_update"
+      }
+    },
+    "/v1/admin/control/profiles/{profile_id}/update/plan": {
+      "post": {
+        "operationId": "adminControlProfilesUpdatePlan",
+        "summary": "Validate and plan a profile file update without writing it.",
+        "tags": ["profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.profiles.update.plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "plan_profile_update"
+      }
+    },
+    "/v1/admin/control/scheduler/jobs/{job_id}/pause": {
+      "post": {
+        "operationId": "adminControlSchedulerJobsPause",
+        "summary": "Pause a scheduler job.",
+        "tags": ["scheduler"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.scheduler.jobs.pause",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "scheduler_pause_job"
+      }
+    },
+    "/v1/admin/control/scheduler/jobs/{job_id}/resume": {
+      "post": {
+        "operationId": "adminControlSchedulerJobsResume",
+        "summary": "Resume a scheduler job.",
+        "tags": ["scheduler"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.scheduler.jobs.resume",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "scheduler_resume_job"
+      }
+    },
+    "/v1/admin/control/scheduler/jobs/{job_id}/run": {
+      "post": {
+        "operationId": "adminControlSchedulerJobsRun",
+        "summary": "Run a scheduler job.",
+        "tags": ["scheduler"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.scheduler.jobs.run",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "scheduler_run_job"
+      }
+    },
+    "/v1/admin/control/scheduler/tick": {
+      "post": {
+        "operationId": "adminControlSchedulerTick",
+        "summary": "Run one scheduler tick.",
+        "tags": ["scheduler"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.scheduler.tick",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "scheduler_tick"
+      }
+    },
+    "/v1/admin/control/sessions": {
+      "post": {
+        "operationId": "adminControlSessionsCreate",
+        "summary": "Create a runtime session.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "create_session"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/archive": {
+      "post": {
+        "operationId": "adminControlSessionsArchive",
+        "summary": "Archive a runtime session.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.archive",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "archive_session"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/new": {
+      "post": {
+        "operationId": "adminControlSessionsNew",
+        "summary": "Archive a session and create a fresh replacement.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.new",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "new_session",
+        "x-rusty-crew-rust-plan-operation": "plan_new_session_control"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/rebuild-runtime/apply": {
+      "post": {
+        "operationId": "adminControlSessionsRebuildRuntimeApply",
+        "summary": "Apply a guarded runtime rebuild for a session when the backend can preserve state safely.",
+        "tags": ["session", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.rebuild_runtime.apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "apply_runtime_rebuild"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/rebuild-runtime/plan": {
+      "post": {
+        "operationId": "adminControlSessionsRebuildRuntimePlan",
+        "summary": "Plan the runtime impact of rebuilding a session brain from current profile config.",
+        "tags": ["session", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.rebuild_runtime.plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "plan_runtime_rebuild"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/runtime/pause": {
+      "post": {
+        "operationId": "adminControlSessionsRuntimePause",
+        "summary": "Pause runtime work for one session without archiving its durable records.",
+        "tags": ["session", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.runtime.pause",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "pause_runtime"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/runtime/resume": {
+      "post": {
+        "operationId": "adminControlSessionsRuntimeResume",
+        "summary": "Resume runtime work for one paused session.",
+        "tags": ["session", "service"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.runtime.resume",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "resume_runtime"
+      }
+    },
+    "/v1/admin/control/shutdown": {
+      "post": {
+        "operationId": "adminControlShutdown",
+        "summary": "Request service shutdown.",
+        "tags": ["service"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.shutdown",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "shutdown"
+      }
+    },
+    "/v1/admin/diagnostics": {
+      "get": {
+        "operationId": "adminDiagnostics",
+        "summary": "Read full diagnostics projection.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/agents": {
+      "get": {
+        "operationId": "adminDiagnosticsAgents",
+        "summary": "List agent diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.agents",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/background": {
+      "get": {
+        "operationId": "adminDiagnosticsBackground",
+        "summary": "Read background service diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.background",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/buffered-brain-runs": {
+      "get": {
+        "operationId": "adminDiagnosticsBufferedBrainRuns",
+        "summary": "Read metadata-only diagnostics for active Rust brain buffered runs.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.buffered_brain_runs",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/channels": {
+      "get": {
+        "operationId": "adminDiagnosticsChannels",
+        "summary": "List channel binding diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.channels",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/config": {
+      "get": {
+        "operationId": "adminDiagnosticsConfig",
+        "summary": "Read config validation diagnostics.",
+        "tags": ["diagnostics", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.config",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/delegations": {
+      "get": {
+        "operationId": "adminDiagnosticsDelegations",
+        "summary": "List delegation diagnostics.",
+        "tags": ["diagnostics", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.delegations",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/mcp": {
+      "get": {
+        "operationId": "adminDiagnosticsMcp",
+        "summary": "List MCP diagnostics.",
+        "tags": ["diagnostics", "mcp"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.mcp",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/metrics": {
+      "get": {
+        "operationId": "adminDiagnosticsMetrics",
+        "summary": "Read service metrics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.metrics",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/observation": {
+      "get": {
+        "operationId": "adminDiagnosticsObservation",
+        "summary": "Read observation diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.observation",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/overview": {
+      "get": {
+        "operationId": "adminDiagnosticsOverview",
+        "summary": "Read diagnostics overview.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.overview",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/persistence": {
+      "get": {
+        "operationId": "adminDiagnosticsPersistence",
+        "summary": "Read persistence diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.persistence",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/profiles": {
+      "get": {
+        "operationId": "adminDiagnosticsProfiles",
+        "summary": "Read DB-backed profile registry and asset drift diagnostics.",
+        "tags": ["diagnostics", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.profiles",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/provider-state": {
+      "get": {
+        "operationId": "adminDiagnosticsProviderState",
+        "summary": "Read provider wire-state diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.provider_state",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/queues": {
+      "get": {
+        "operationId": "adminDiagnosticsQueues",
+        "summary": "Read queue diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.queues",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/sessions": {
+      "get": {
+        "operationId": "adminDiagnosticsSessions",
+        "summary": "List session diagnostics.",
+        "tags": ["diagnostics", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.sessions",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/storage": {
+      "get": {
+        "operationId": "adminDiagnosticsStorage",
+        "summary": "Read backend storage diagnostics and capability projection.",
+        "tags": ["diagnostics", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.storage",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/diagnostics/tools": {
+      "get": {
+        "operationId": "adminDiagnosticsTools",
+        "summary": "List tool diagnostics.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.tools",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/events/recent": {
+      "get": {
+        "operationId": "adminEventsRecent",
+        "summary": "List recent service events.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.events.recent",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/healthz": {
+      "get": {
+        "operationId": "adminHealthz",
+        "summary": "Read service liveness.",
+        "tags": ["diagnostics"],
+        "security": [],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.healthz",
+        "x-rusty-crew-auth": "none",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/local-tool-profiles": {
+      "get": {
+        "operationId": "adminLocalToolProfilesList",
+        "summary": "List DB-backed local built-in tool profiles.",
+        "tags": ["tool", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.local_tool_profiles.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "adminLocalToolProfilesCreate",
+        "summary": "Create a DB-backed local built-in tool profile.",
+        "tags": ["tool", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.local_tool_profiles.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/local-tool-profiles/{profile_id}": {
+      "delete": {
+        "operationId": "adminLocalToolProfilesDelete",
+        "summary": "Delete one custom DB-backed local built-in tool profile.",
+        "tags": ["tool", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.local_tool_profiles.delete",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "get": {
+        "operationId": "adminLocalToolProfilesRead",
+        "summary": "Read one DB-backed local built-in tool profile.",
+        "tags": ["tool", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.local_tool_profiles.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "patch": {
+        "operationId": "adminLocalToolProfilesUpdate",
+        "summary": "Update one DB-backed local built-in tool profile.",
+        "tags": ["tool", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.local_tool_profiles.update",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/mcp/servers": {
+      "get": {
+        "operationId": "adminMcpServers",
+        "summary": "List configured MCP servers, tool profiles, and runtime bindings.",
+        "tags": ["mcp", "config", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.mcp.servers",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "adminMcpServersCreate",
+        "summary": "Create or update a runtime-managed MCP server registry entry.",
+        "tags": ["mcp", "config", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.mcp.servers.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/mcp/servers/{server_id}": {
+      "delete": {
+        "operationId": "adminMcpServersDelete",
+        "summary": "Delete a runtime-managed MCP server registry entry.",
+        "tags": ["mcp", "config", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.mcp.servers.delete",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "patch": {
+        "operationId": "adminMcpServersUpdate",
+        "summary": "Update a runtime-managed MCP server registry entry.",
+        "tags": ["mcp", "config", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.mcp.servers.update",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/memory/proposals": {
+      "get": {
+        "operationId": "adminMemoryProposalsList",
+        "summary": "List typed Rusty Crew memory proposals for review surfaces.",
+        "tags": ["memory", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.proposals.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "adminMemoryProposalsCreate",
+        "summary": "Create a typed Rusty Crew memory proposal without directly mutating memory records.",
+        "tags": ["memory", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.proposals.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/memory/proposals/{proposal_id}/decisions": {
+      "post": {
+        "operationId": "adminMemoryProposalsDecide",
+        "summary": "Record a typed Rusty Crew memory governance decision.",
+        "tags": ["memory", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.proposals.decide",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/memory/spaces": {
+      "get": {
+        "operationId": "adminMemorySpacesList",
+        "summary": "List Rusty Crew runtime-owned memory-space descriptors.",
+        "tags": ["memory", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.spaces.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/memory/spaces/{space_id}": {
+      "get": {
+        "operationId": "adminMemorySpacesRead",
+        "summary": "Read one Rusty Crew memory-space descriptor.",
+        "tags": ["memory", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.spaces.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/memory/spaces/{space_id}/records": {
+      "get": {
+        "operationId": "adminMemorySpacesRecordsList",
+        "summary": "List bounded records for a supported Rusty Crew memory space.",
+        "tags": ["memory"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.spaces.records.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/memory/spaces/{space_id}/records/{key}": {
+      "get": {
+        "operationId": "adminMemorySpacesRecordsRead",
+        "summary": "Read one record for a supported Rusty Crew memory space.",
+        "tags": ["memory"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.memory.spaces.records.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry": {
+      "get": {
+        "operationId": "adminProfilesRegistryList",
+        "summary": "List DB-backed profile registry records.",
+        "tags": ["diagnostics", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}": {
+      "get": {
+        "operationId": "adminProfilesRegistryRead",
+        "summary": "Read one DB-backed profile registry record.",
+        "tags": ["diagnostics", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/export-plan": {
+      "get": {
+        "operationId": "adminProfilesRegistryExportPlan",
+        "summary": "Plan a profile bundle export from registry state and file-backed assets without embedding raw prompt file contents.",
+        "tags": ["diagnostics", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.export_plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/lifecycle/apply": {
+      "post": {
+        "operationId": "adminProfilesRegistryLifecycleApply",
+        "summary": "Apply a DB-backed profile lifecycle transition and run safe runtime effects.",
+        "tags": ["profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.lifecycle_apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/lifecycle/plan": {
+      "post": {
+        "operationId": "adminProfilesRegistryLifecyclePlan",
+        "summary": "Plan a DB-backed profile lifecycle transition.",
+        "tags": ["profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.lifecycle_plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/prompt/apply": {
+      "post": {
+        "operationId": "adminProfilesRegistryPromptApply",
+        "summary": "Apply DB-backed profile soul and memory prompt text changes with revision checking.",
+        "tags": ["profile", "config", "prompt"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.prompt_apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/prompt/plan": {
+      "post": {
+        "operationId": "adminProfilesRegistryPromptPlan",
+        "summary": "Plan DB-backed profile soul and memory prompt text changes.",
+        "tags": ["profile", "config", "prompt"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.prompt_plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply": {
+      "post": {
+        "operationId": "adminProfilesRegistryRuntimeConfigApply",
+        "summary": "Apply DB-backed profile provider, built-in tool policy, and MCP binding changes with revision checking and runtime reload.",
+        "tags": ["profile", "config", "tool", "mcp"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.runtime_config_apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/runtime-config/plan": {
+      "post": {
+        "operationId": "adminProfilesRegistryRuntimeConfigPlan",
+        "summary": "Plan DB-backed profile provider, built-in tool policy, and MCP binding changes without applying them.",
+        "tags": ["profile", "config", "tool", "mcp"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.runtime_config_plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/update/apply": {
+      "post": {
+        "operationId": "adminProfilesRegistryUpdateApply",
+        "summary": "Apply DB-backed profile registry field changes with revision checking.",
+        "tags": ["profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.update_apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/update/plan": {
+      "post": {
+        "operationId": "adminProfilesRegistryUpdatePlan",
+        "summary": "Plan DB-backed profile registry field changes without editing profile files or service.json.",
+        "tags": ["profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.profiles.registry.update_plan",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/readyz": {
+      "get": {
+        "operationId": "adminReadyz",
+        "summary": "Read service readiness.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.readyz",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/scheduler/jobs": {
+      "get": {
+        "operationId": "adminSchedulerJobs",
+        "summary": "List scheduler jobs.",
+        "tags": ["scheduler"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.scheduler.jobs",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/scheduler/runs": {
+      "get": {
+        "operationId": "adminSchedulerRuns",
+        "summary": "List scheduler runs.",
+        "tags": ["scheduler"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.scheduler.runs",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/storage/query-catalog": {
+      "get": {
+        "operationId": "adminStorageQueryCatalog",
+        "summary": "List curated read-only storage queries.",
+        "tags": ["storage"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.storage.query_catalog",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/storage/query/{query_id}": {
+      "post": {
+        "operationId": "adminStorageQueryExecute",
+        "summary": "Execute one curated read-only storage query by id. Raw SQL is not supported.",
+        "tags": ["storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "query_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.storage.query.execute",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/storage/schema": {
+      "get": {
+        "operationId": "adminStorageSchema",
+        "summary": "Read backend-neutral module schema registry diagnostics.",
+        "tags": ["storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.storage.schema",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/tools/catalog": {
+      "get": {
+        "operationId": "adminToolsCatalog",
+        "summary": "List built-in non-MCP tool policy sets and tool metadata.",
+        "tags": ["tool", "profile", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.tools.catalog",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/commands": {
+      "get": {
+        "operationId": "listChatCommands",
+        "summary": "List browser-safe chat slash commands.",
+        "tags": ["chat"],
+        "security": [{ "ChatBearer": [] }],
+        "responses": {
+          "200": {
+            "description": "Successful typed discovery response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "type": "boolean", "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ChatCommandRegistry"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.commands.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/chat/commands/{command_name}/autocomplete": {
+      "get": {
+        "operationId": "autocompleteChatCommandArgument",
+        "summary": "Resolve backend-provided autocomplete values for a chat slash command argument.",
+        "tags": ["chat"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "command_name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "argument",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed discovery response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "type": "boolean", "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ChatCommandAutocompleteResult"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.commands.autocomplete",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/chat/search": {
+      "get": {
+        "operationId": "chatSearch",
+        "summary": "Search persisted transcript messages across chat sessions.",
+        "tags": ["chat", "conversation", "search"],
+        "security": [{ "ChatBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.search",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions": {
+      "get": {
+        "operationId": "chatSessionsList",
+        "summary": "List Rusty View chat sessions.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}": {
+      "get": {
+        "operationId": "chatSessionsOpen",
+        "summary": "Open a chat session.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.open",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/attachments": {
+      "get": {
+        "operationId": "chatSessionsAttachmentsList",
+        "summary": "List generic attachments for a chat session.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.attachments.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "chatSessionsAttachmentsCreate",
+        "summary": "Register uploaded attachment metadata and optional message, block, or scope links.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.attachments.create",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/attachments/{attachment_id}": {
+      "delete": {
+        "operationId": "chatSessionsAttachmentsRemove",
+        "summary": "Mark a chat attachment removed.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.attachments.remove",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/branches": {
+      "post": {
+        "operationId": "chatSessionsBranchesUpsert",
+        "summary": "Create or update a conversation branch.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.branches.upsert",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/branches/{branch_id}/head": {
+      "post": {
+        "operationId": "chatSessionsBranchesHeadUpdate",
+        "summary": "Update a branch head message with conflict detection.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "branch_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.branches.head.update",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/branches/active": {
+      "post": {
+        "operationId": "chatSessionsBranchesActiveSelect",
+        "summary": "Select the active conversation branch with conflict detection.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.branches.active.select",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/commands": {
+      "post": {
+        "operationId": "chatCommandsExecute",
+        "summary": "Execute a chat slash command.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.commands.execute",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/context": {
+      "get": {
+        "operationId": "chatSessionsContext",
+        "summary": "Read browser-safe model/provider/brain and approximate context usage diagnostics for a chat session.",
+        "tags": ["chat", "session", "diagnostics"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.context",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/data-bank/scopes": {
+      "get": {
+        "operationId": "chatSessionsDataBankScopesList",
+        "summary": "List reusable file scopes for a chat session.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.data_bank.scopes.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "chatSessionsDataBankScopesCreate",
+        "summary": "Create or update a reusable file scope.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.data_bank.scopes.create",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}": {
+      "delete": {
+        "operationId": "chatSessionsDataBankScopesRemove",
+        "summary": "Mark a reusable file scope removed.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.data_bank.scopes.remove",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments": {
+      "get": {
+        "operationId": "chatSessionsDataBankScopesAttachmentsList",
+        "summary": "List attachments linked to one reusable file scope.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.data_bank.scopes.attachments.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/events": {
+      "get": {
+        "operationId": "chatSessionsEvents",
+        "summary": "List chat events for a session.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.events",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/jump": {
+      "get": {
+        "operationId": "chatSessionsJumpResolve",
+        "summary": "Resolve a message, branch, snapshot, or cursor jump target.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.jump.resolve",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/messages": {
+      "post": {
+        "operationId": "chatSessionsMessagesCreate",
+        "summary": "Send a message to a chat session.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.messages.create",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}": {
+      "get": {
+        "operationId": "chatSessionsProviderRequestsDebugGet",
+        "summary": "Read bounded redacted provider request debug detail for a session.",
+        "tags": ["chat", "session", "diagnostics"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "debug_detail_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.provider_requests.debug.get",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/search": {
+      "get": {
+        "operationId": "chatSessionsSearch",
+        "summary": "Search persisted transcript messages for one chat session.",
+        "tags": ["chat", "session", "conversation", "search"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.search",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots": {
+      "get": {
+        "operationId": "chatSessionsSlotsList",
+        "summary": "List primary message slots for a chat session.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "chatSessionsSlotsCreate",
+        "summary": "Create a primary message slot and primary variant.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.create",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant": {
+      "post": {
+        "operationId": "chatSessionsSlotsActiveVariantSelect",
+        "summary": "Select the active variant for one message slot with conflict detection.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.active_variant.select",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants": {
+      "get": {
+        "operationId": "chatSessionsSlotsVariantsList",
+        "summary": "Lazy-load non-deleted variants for one message slot.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.variants.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "chatSessionsSlotsVariantsCreate",
+        "summary": "Create an alternate variant for one message slot.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.variants.create",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}": {
+      "delete": {
+        "operationId": "chatSessionsSlotsVariantsDelete",
+        "summary": "Delete an alternate message variant.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "variant_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.variants.delete",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder": {
+      "post": {
+        "operationId": "chatSessionsSlotsVariantsReorder",
+        "summary": "Reorder alternate variants for one message slot.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.slots.variants.reorder",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/snapshots": {
+      "post": {
+        "operationId": "chatSessionsSnapshotsUpsert",
+        "summary": "Create or update a conversation snapshot.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.snapshots.upsert",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/stream": {
+      "get": {
+        "operationId": "chatSessionsStream",
+        "summary": "Stream chat events for a session.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.stream",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}": {
+      "get": {
+        "operationId": "chatSessionsToolCallsDebugGet",
+        "summary": "Read bounded redacted raw tool-call debug detail for a session.",
+        "tags": ["chat", "session", "diagnostics", "tool"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "debug_detail_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.tool_calls.debug.get",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/tree": {
+      "get": {
+        "operationId": "chatSessionsTreeOpen",
+        "summary": "Read the conversation branch and snapshot projection for a session.",
+        "tags": ["chat", "session", "conversation"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.tree.open",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "AdminBearer": { "type": "http", "scheme": "bearer" },
+      "ChatBearer": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "ApiMeta": {
+        "type": "object",
+        "required": ["request_id", "schema_version"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "schema_version": { "type": "integer", "const": 1 }
+        },
+        "additionalProperties": false
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["code", "reason_code", "message", "retryable"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "invalid_input",
+              "failed_precondition",
+              "conflict",
+              "internal_error"
+            ]
+          },
+          "reason_code": { "type": "string" },
+          "message": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ApiEnvelope": {
+        "type": "object",
+        "required": ["ok", "meta"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "data": true,
+          "error": { "$ref": "#/components/schemas/ApiError" },
+          "meta": { "$ref": "#/components/schemas/ApiMeta" }
+        },
+        "additionalProperties": false
+      },
+      "ApiCapabilityDescriptor": {
+        "type": "object",
+        "required": [
+          "id",
+          "method",
+          "path_template",
+          "description",
+          "auth",
+          "mutation",
+          "stability",
+          "tags",
+          "public"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "method": {
+            "type": "string",
+            "enum": ["DELETE", "GET", "PATCH", "POST"]
+          },
+          "path_template": { "type": "string" },
+          "description": { "type": "string" },
+          "auth": { "type": "string", "enum": ["none", "chat", "admin"] },
+          "mutation": {
+            "type": "string",
+            "enum": ["read", "write", "control"]
+          },
+          "stability": { "type": "string", "enum": ["stable", "experimental"] },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "attachment",
+                "chat",
+                "config",
+                "conversation",
+                "curator",
+                "delegation",
+                "diagnostics",
+                "governance",
+                "maintenance",
+                "mcp",
+                "memory",
+                "profile",
+                "prompt",
+                "scheduler",
+                "search",
+                "service",
+                "session",
+                "storage",
+                "tool"
+              ]
+            }
+          },
+          "public": { "type": "boolean" },
+          "command_name": { "type": "string" },
+          "rust_plan_operation": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ApiCapabilityRegistry": {
+        "type": "object",
+        "required": ["schema_version", "slash_commands", "capabilities"],
+        "properties": {
+          "schema_version": { "type": "integer", "const": 1 },
+          "slash_commands": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandDescriptor" }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ApiCapabilityDescriptor" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandRegistry": {
+        "type": "object",
+        "required": ["commands"],
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandDescriptor" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandDescriptor": {
+        "type": "object",
+        "required": [
+          "name",
+          "aliases",
+          "description",
+          "args_schema",
+          "positional_args",
+          "named_args",
+          "surfaces",
+          "source",
+          "read_only",
+          "mutating",
+          "scope",
+          "allowed_session_kinds",
+          "requires_control_auth"
+        ],
+        "properties": {
+          "name": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "description": { "type": "string" },
+          "args_schema": { "type": "object", "additionalProperties": true },
+          "positional_args": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatCommandArgumentDescriptor"
+            }
+          },
+          "named_args": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatCommandArgumentDescriptor"
+            }
+          },
+          "surfaces": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandSurface" }
+          },
+          "source": { "$ref": "#/components/schemas/ChatCommandSource" },
+          "read_only": { "type": "boolean" },
+          "mutating": { "type": "boolean" },
+          "scope": {
+            "type": "string",
+            "enum": ["session", "profile", "service"]
+          },
+          "allowed_session_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["full", "worker", "delegated"]
+            }
+          },
+          "requires_control_auth": { "type": "boolean" },
+          "backing_control_command": { "type": "string" },
+          "rust_plan_operation": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandArgumentDescriptor": {
+        "type": "object",
+        "required": ["name", "type", "required"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "type": { "$ref": "#/components/schemas/ChatCommandArgumentType" },
+          "required": { "type": "boolean" },
+          "default_value": true,
+          "enum_values": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandEnumValue" }
+          },
+          "enum_provider": { "type": "string" },
+          "repeated": { "type": "boolean" },
+          "placeholder": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandArgumentType": {
+        "type": "string",
+        "enum": ["string", "number", "boolean", "enum", "json", "file"]
+      },
+      "ChatCommandEnumValue": {
+        "type": "object",
+        "required": ["value"],
+        "properties": {
+          "value": { "type": "string" },
+          "label": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandSurface": {
+        "type": "string",
+        "enum": ["chat-input", "global", "message-context"]
+      },
+      "ChatCommandSource": {
+        "type": "string",
+        "enum": ["backend", "backend-control", "frontend-local", "plugin"]
+      },
+      "ChatCommandAutocompleteResult": {
+        "type": "object",
+        "required": ["command_name", "argument_name", "items", "has_more"],
+        "properties": {
+          "command_name": { "type": "string" },
+          "argument_name": { "type": "string" },
+          "provider": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandEnumValue" }
+          },
+          "has_more": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "x-rusty-crew-generated": {
+    "source": "ts/packages/brain-island/src/api-command-registry.ts",
+    "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
+    "regeneration_command": "npm run codegen:api-capabilities",
+    "capability_count": 134,
+    "detailed_operation_ids": [
+      "admin.capabilities",
+      "chat.commands.autocomplete",
+      "chat.commands.list"
+    ]
+  }
+}

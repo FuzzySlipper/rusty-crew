@@ -3,15 +3,16 @@
 Status: active generated-contract guidance
 
 Rusty Crew exposes browser/admin discovery through `GET /v1/admin/capabilities`
-and chat command discovery through `GET /v1/chat/commands`. Those catalogs are
-TypeScript declarations remain the source because handlers and browser
-projection live at that boundary, but readbacks and coverage are no longer
-maintained as separate inventories.
+and chat command discovery through `GET /v1/chat/commands`. TypeScript
+declarations remain the source because handlers and browser projection live at
+that boundary, but readbacks, route coverage, command metadata, and OpenAPI
+operation metadata are no longer maintained as separate inventories.
 
-The committed review artifact is:
+The committed review artifacts are:
 
 ```text
 fixtures/api-capabilities/api-command-capabilities.json
+docs/rusty-crew-api-capabilities.openapi.json
 ```
 
 Generate and check it with:
@@ -21,9 +22,16 @@ npm run codegen:api-capabilities
 npm run check:api-capabilities
 ```
 
-`verify:offline` runs the check. The artifact contains the exact browser
-registry projection, route-family coverage, explicit exemptions, and the slash
-command execution-handler inventory.
+`verify:offline` runs the check. The JSON fixture contains the exact browser
+registry projection, route-family coverage, explicit exemptions, and slash
+command execution-handler inventory. The OpenAPI 3.1 artifact contains every
+public capability operation and precise wire schemas for capability and command
+discovery.
+
+Operations marked `x-rusty-crew-contract-detail: capability` intentionally do
+not claim an operation-specific request or response shape. Their detailed wire
+contracts remain in their owning domain documents. The three discovery
+operations are marked `wire` and are suitable for type generation.
 
 ## Validation Sources
 
@@ -39,6 +47,8 @@ these boundaries:
 - any `rust_plan_operation` declared by a slash command or API capability must
   exist in the generated `manifestOperationNames` list from
   `@rusty-crew/contracts`.
+- generated OpenAPI method/path pairs must exactly match public capability
+  declarations and operation ids must be unique.
 
 The `/new` command and `admin.control.sessions.new` capability declare
 `plan_new_session_control`, which is the Rust-owned planner for archive/create
@@ -55,6 +65,22 @@ When adding a new route family to `SERVICE_API_ROUTE_TABLE`:
 - regenerate the capability artifact.
 
 This makes exemptions visible in CI instead of hiding them in stale docs.
+
+## Rusty View Consumption
+
+Rusty View should keep an explicit `fetch`/SSE transport and generate types with
+`openapi-typescript`; it should not generate an HTTP client. The existing chat
+OpenAPI references the generated command and capability discovery operations,
+so one type-generation input remains sufficient:
+
+```bash
+pnpm exec openapi-typescript \
+  /home/dev/rusty-crew/docs/rusty-view-chat-api-v0.openapi.json \
+  -o libs/protocol/src/generated/openapi.ts
+```
+
+See `docs/rusty-view-openapi-consumption.md` for stable operation ids, drift
+checks, and the live browser certification scenario.
 
 ## Adding Commands
 

@@ -7,18 +7,25 @@ The existing admin diagnostics and direct-debug endpoints are useful references,
 but they are not the stable chat contract. This document defines the intended
 Rusty-owned surface before the implementation tasks wire it to runtime state.
 
-The machine-readable source artifact is
+The machine-readable chat artifact is
 [`rusty-view-chat-api-v0.openapi.json`](rusty-view-chat-api-v0.openapi.json).
 Frontend protocol types should be generated from that artifact or from a later
 Rust-derived replacement. Rusty View should not hand-copy backend shapes.
 
+Command and capability discovery operations inside that document reference the
+generated
+[`rusty-crew-api-capabilities.openapi.json`](rusty-crew-api-capabilities.openapi.json)
+artifact. `api-command-registry.ts` is canonical for that metadata; the chat
+artifact does not maintain a second command catalog.
+
 ## Contract Source And Ratchets
 
 For browser-facing chat HTTP/SSE envelopes, the current source of truth is the
-OpenAPI artifact:
+chat OpenAPI artifact plus its generated capability reference:
 
 ```bash
 docs/rusty-view-chat-api-v0.openapi.json
+docs/rusty-crew-api-capabilities.openapi.json
 ```
 
 The TypeScript constants in
@@ -39,6 +46,7 @@ Run these chat contract checks whenever routes, event kinds, cursor fields,
 debug-detail references, or public chat mutation envelopes change:
 
 ```bash
+npm run check:api-capabilities
 npm run smoke:rusty-view-chat-contract
 npm run smoke:rusty-view-chat-read-api
 npm run smoke -- bridge-validation
@@ -72,6 +80,10 @@ schemas, or chat mutation conflict envelopes drift.
 - `POST /v1/chat/sessions/{session_id}/messages`: append a user message and
   request an agent wake.
 - `GET /v1/chat/commands`: discover slash/debug commands.
+- `GET /v1/admin/capabilities`: discover the broader public API capability
+  catalog. This admin route is included in the type-generation graph through
+  the generated capability OpenAPI; it is not part of the `/v1/chat/*` route
+  family.
 - `POST /v1/chat/sessions/{session_id}/commands`: execute a chat command using
   the same guarded control paths as admin/slash surfaces.
 

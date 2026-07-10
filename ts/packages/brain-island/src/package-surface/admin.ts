@@ -44,6 +44,10 @@ export {
   SERVICE_ROUTE_CATALOG_EXEMPTIONS,
   apiCapabilityCoverageInventory,
 } from "../api-capability-coverage.js";
+export {
+  API_CAPABILITY_OPENAPI_PATH,
+  apiCapabilityOpenApiDocument,
+} from "../api-capability-openapi.js";
 export type {
   ApiCapabilityAuth,
   ApiCapabilityDescriptor,

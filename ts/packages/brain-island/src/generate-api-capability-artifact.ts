@@ -1,17 +1,31 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { format } from "prettier";
 
 import { apiCapabilityCoverageInventory } from "./api-capability-coverage.js";
+import {
+  API_CAPABILITY_OPENAPI_PATH,
+  apiCapabilityOpenApiDocument,
+} from "./api-capability-openapi.js";
 import { apiCapabilityRegistry } from "./api-command-registry.js";
 import { slashCommandHandlerNames } from "./slash-command-router.js";
 
-const outputUrl = new URL(
+const capabilityOutputUrl = new URL(
   "../../../../fixtures/api-capabilities/api-command-capabilities.json",
   import.meta.url,
 );
-const outputPath = fileURLToPath(outputUrl);
-const artifact = await format(
+const openApiOutputUrl = new URL(
+  `../../../../${API_CAPABILITY_OPENAPI_PATH}`,
+  import.meta.url,
+);
+const capabilityArtifact = await format(
   JSON.stringify({
     schema_version: 1,
     source: "ts/packages/brain-island/src/api-command-registry.ts",
@@ -21,17 +35,44 @@ const artifact = await format(
   }),
   { parser: "json" },
 );
+const openApiArtifact = await format(
+  JSON.stringify(apiCapabilityOpenApiDocument()),
+  { parser: "json" },
+);
+const artifacts = [
+  {
+    path: fileURLToPath(capabilityOutputUrl),
+    content: capabilityArtifact,
+  },
+  { path: fileURLToPath(openApiOutputUrl), content: openApiArtifact },
+];
 
 if (process.argv.includes("--check")) {
-  const current = readFileSync(outputPath, "utf8");
-  if (current !== artifact) {
-    throw new Error(
-      `generated API capability artifact is stale: ${outputPath}; run npm run codegen:api-capabilities`,
-    );
+  for (const artifact of artifacts) {
+    const current = readFileSync(artifact.path, "utf8");
+    if (current !== artifact.content) {
+      throw new Error(
+        `generated API capability artifact is stale: ${artifact.path}; run npm run codegen:api-capabilities`,
+      );
+    }
   }
-  console.log("API capability generated artifact drift check passed");
+  console.log("API capability and OpenAPI artifact drift check passed");
 } else {
-  mkdirSync(fileURLToPath(new URL("./", outputUrl)), { recursive: true });
-  writeFileSync(outputPath, artifact);
-  console.log(`wrote ${outputPath}`);
+  const temporaryPaths: string[] = [];
+  try {
+    for (const artifact of artifacts) {
+      mkdirSync(dirname(artifact.path), { recursive: true });
+      const temporaryPath = `${artifact.path}.tmp`;
+      writeFileSync(temporaryPath, artifact.content);
+      temporaryPaths.push(temporaryPath);
+    }
+    for (const [index, artifact] of artifacts.entries()) {
+      renameSync(temporaryPaths[index]!, artifact.path);
+      console.log(`wrote ${artifact.path}`);
+    }
+  } finally {
+    for (const temporaryPath of temporaryPaths) {
+      rmSync(temporaryPath, { force: true });
+    }
+  }
 }

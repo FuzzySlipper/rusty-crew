@@ -4,11 +4,13 @@ import { resolve } from "node:path";
 import { manifestOperationNames } from "@rusty-crew/contracts";
 import {
   ADMIN_CONTROL_CAPABILITIES,
+  API_CAPABILITY_OPENAPI_PATH,
   API_CAPABILITIES,
   SERVICE_API_ROUTE_TABLE,
   SLASH_COMMAND_REGISTRY,
   apiCapabilityRegistry,
   apiCapabilityCoverageInventory,
+  apiCapabilityOpenApiDocument,
   buildRuntimeDiagnosticsProjection,
   chatApiCapabilityPaths,
   chatCommandAutocomplete,
@@ -234,13 +236,55 @@ const contractPath = resolve(
   "../../../docs/rusty-view-chat-api-v0.openapi.json",
 );
 const contract = JSON.parse(readFileSync(contractPath, "utf8")) as {
-  paths: Record<string, unknown>;
+  paths: Record<string, { $ref?: string }>;
+  components: { schemas: Record<string, { $ref?: string }> };
 };
 assert.deepEqual(
-  Object.keys(contract.paths).sort(),
+  Object.keys(contract.paths)
+    .filter((path) => path.startsWith("/v1/chat/"))
+    .sort(),
   chatApiCapabilityPaths().sort(),
   "chat OpenAPI paths must match registered chat API capabilities",
 );
+assert.equal(
+  contract.paths["/v1/chat/commands"]?.$ref,
+  "./rusty-crew-api-capabilities.openapi.json#/paths/~1v1~1chat~1commands",
+  "chat command discovery must reference the generated capability OpenAPI",
+);
+assert.equal(
+  contract.components.schemas.ChatCommandRegistry?.$ref,
+  "./rusty-crew-api-capabilities.openapi.json#/components/schemas/ChatCommandRegistry",
+  "chat command schemas must reference the generated capability OpenAPI",
+);
+
+const generatedOpenApiPath = resolve(
+  process.cwd(),
+  `../../../${API_CAPABILITY_OPENAPI_PATH}`,
+);
+const generatedOpenApi = JSON.parse(
+  readFileSync(generatedOpenApiPath, "utf8"),
+) as {
+  openapi: string;
+  paths: Record<string, Record<string, { operationId?: string }>>;
+  components: { schemas: Record<string, unknown> };
+};
+assert.equal(generatedOpenApi.openapi, "3.1.0");
+assert.deepEqual(
+  openApiCapabilityRoutes(generatedOpenApi.paths),
+  API_CAPABILITIES.filter((capability) => capability.public)
+    .map((capability) => `${capability.method} ${capability.path_template}`)
+    .sort(),
+  "generated OpenAPI operations must match public API capabilities",
+);
+assert.equal(
+  generatedOpenApi.paths["/v1/admin/capabilities"]?.get?.operationId,
+  "listApiCapabilities",
+);
+assert.equal(
+  generatedOpenApi.paths["/v1/chat/commands"]?.get?.operationId,
+  "listChatCommands",
+);
+assert.deepEqual(generatedOpenApi, apiCapabilityOpenApiDocument());
 
 const capabilitiesResponse = handleAdminDiagnosticsRequest(
   {
@@ -292,6 +336,19 @@ function assertUnique(values: readonly (string | undefined)[], label: string) {
     assert.equal(seen.has(value), false, `duplicate ${label}: ${value}`);
     seen.add(value);
   }
+}
+
+function openApiCapabilityRoutes(
+  paths: Record<string, Record<string, unknown>>,
+): string[] {
+  const methods = new Set(["delete", "get", "patch", "post"]);
+  return Object.entries(paths)
+    .flatMap(([path, pathItem]) =>
+      Object.keys(pathItem)
+        .filter((method) => methods.has(method))
+        .map((method) => `${method.toUpperCase()} ${path}`),
+    )
+    .sort();
 }
 
 function assertRustPlanOperationsInManifest(
