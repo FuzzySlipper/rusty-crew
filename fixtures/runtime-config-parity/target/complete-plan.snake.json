@@ -1,0 +1,138 @@
+{
+  "accepted": true,
+  "source_revision": "fixture-runtime-graph-v1",
+  "runtime_config": {
+    "profiles_dir": "__FIXTURE_ROOT__/profiles",
+    "skills_dir": "__FIXTURE_ROOT__/skills",
+    "storage": {
+      "backend": "sqlite",
+      "implementation_status": "active",
+      "sqlite": {
+        "path": "runtime.sqlite3",
+        "effective_path": "__FIXTURE_ROOT__/engine/runtime.sqlite3",
+        "wal": true,
+        "busy_timeout_ms": 5000
+      },
+      "postgres": {
+        "database_url_env": "RUSTY_CREW_POSTGRES_URL",
+        "schema": "rusty_crew",
+        "boot_mode": "active",
+        "max_connections": 16,
+        "statement_timeout_ms": 30000
+      }
+    },
+    "wake_timeout": {
+      "mode": "default",
+      "default_ms": 120000
+    },
+    "brains": [
+      {
+        "implementation_id": "parity-runner-brain",
+        "profile_id": "parity-runner"
+      }
+    ],
+    "sessions": [
+      {
+        "session_id": "parity-runner-session",
+        "agent_id": "parity-runner",
+        "profile_id": "parity-runner",
+        "kind": "full",
+        "resource_limits": {
+          "workdir": "__FIXTURE_ROOT__/work",
+          "max_duration_ms": 60000,
+          "max_delegation_depth": 4
+        },
+        "owner_id": "parity-owner",
+        "max_history_messages": 128,
+        "turn_timeout_ms": 45000,
+        "effective_wake_timeout_ms": 30000,
+        "wake_timeout_source": "profile_runtime",
+        "local_tool_profile_id": "full-agent",
+        "context_policy_profile_id": "parity-runner",
+        "session_memory_prompt_profile_id": "parity-runner"
+      }
+    ],
+    "scheduled_jobs": [
+      {
+        "id": "background-review-parity-runner",
+        "schedule": "0 3 * * *",
+        "shape": "host_job",
+        "job_kind": "runtime.review.memory_skills",
+        "payload": {
+          "profile_id": "parity-runner",
+          "review_type": "combined"
+        }
+      },
+      {
+        "id": "parity-runner-wake",
+        "schedule": "*/10 * * * *",
+        "shape": "session_wake",
+        "target_session_id": "parity-runner-session"
+      }
+    ],
+    "channel_bindings": [
+      {
+        "binding_id": "parity-runner-channel",
+        "adapter_id": "den-gateway",
+        "provider": "den_conversation",
+        "agent_id": "parity-runner",
+        "session_id": "parity-runner-session",
+        "profile_id": "parity-runner",
+        "external_channel_id": "40",
+        "status": "active"
+      }
+    ],
+    "mcp_bindings": [
+      {
+        "binding_id": "parity-runner-mcp",
+        "adapter_id": "mcp-ts-main",
+        "agent_id": "parity-runner",
+        "session_id": "parity-runner-session",
+        "profile_id": "parity-runner",
+        "server_names": [
+          "den",
+          "memory"
+        ],
+        "endpoint_ref": "config://mcp/parity-runner",
+        "transport": "streamable_http",
+        "tool_profile_key": "planner",
+        "status": "active"
+      }
+    ]
+  },
+  "derived": [
+    {
+      "kind": "scheduled_job",
+      "id": "background-review-parity-runner",
+      "source": "profiles[parity-runner].backgroundReview"
+    },
+    {
+      "kind": "mcp_binding",
+      "id": "parity-runner-mcp",
+      "source": "profiles[parity-runner].mcpConfig"
+    }
+  ],
+  "defaults_applied": [
+    {
+      "path": "brains[parity-runner].implementationId",
+      "source": "canonical_profile_default"
+    },
+    {
+      "path": "sessions[parity-runner-session].kind",
+      "source": "service_default"
+    },
+    {
+      "path": "sessions[parity-runner-session].ownerId",
+      "source": "profile_session_default"
+    },
+    {
+      "path": "sessions[parity-runner-session].resourceLimits",
+      "source": "profile_runtime_default"
+    },
+    {
+      "path": "sessions[parity-runner-session].resourceLimits.workdir",
+      "source": "host_default_workdir"
+    }
+  ],
+  "diagnostics": []
+}

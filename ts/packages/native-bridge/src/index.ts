@@ -47,7 +47,11 @@ import {
 } from "./generated/core-config-facade.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 
-export { coreConfigFacadeArtifact } from "./generated/core-config-facade.js";
+export {
+  coreConfigFacadeArtifact,
+  fromCoreConfigWireRuntimeGraphPlan,
+  toCoreConfigWireRuntimeGraphPlanInput,
+} from "./generated/core-config-facade.js";
 
 import type {
   ActionBatchReceipt,

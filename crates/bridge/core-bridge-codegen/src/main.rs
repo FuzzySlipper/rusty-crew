@@ -13,7 +13,11 @@ use rusty_crew_core_config::{
     ProfileRegistryRuntimeMetadata, ProfileRuntimeMetadata, ProfileRuntimeOptions,
     ProfileSessionDefaults, RuntimeConfigDiagnostic, RuntimeConfigDiagnosticSeverity,
     RuntimeConfigDraft, RuntimeConfigPlan, RuntimeConfigValidationInput,
-    RuntimeConfigValidationResult, ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
+    RuntimeConfigValidationResult, RuntimeGraphDefaultSource, RuntimeGraphDerivedKind,
+    RuntimeGraphPlanInput, RuntimeGraphPostgresBootMode, RuntimeGraphStorageBackend,
+    RuntimeGraphStorageImplementationStatus, RuntimeGraphWakeTimeoutMode,
+    RuntimeGraphWakeTimeoutSourceKind, ScheduledJobConfigDraft, ScheduledJobShape,
+    SessionConfigDraft,
 };
 use rusty_crew_core_persistence as persistence;
 use rusty_crew_core_protocol::{
@@ -69,6 +73,7 @@ struct CoreConfigFacadeArtifact {
     source_crate: String,
     generated_module: String,
     wire_field_inventory: BTreeMap<String, Vec<String>>,
+    enum_value_inventory: BTreeMap<String, Vec<String>>,
 }
 
 fn main() -> Result<()> {
@@ -349,6 +354,14 @@ export function toCoreConfigWireCreateProfilePlanInput(input: unknown): unknown 
   return toSnakeCaseKeys(input);
 }}
 
+export function toCoreConfigWireRuntimeGraphPlanInput(input: unknown): unknown {{
+  return toSnakeCaseKeys(input);
+}}
+
+export function fromCoreConfigWireRuntimeGraphPlan(input: unknown): unknown {{
+  return toCamelCaseKeys(input);
+}}
+
 function toSnakeCaseKeys(value: unknown): unknown {{
   if (Array.isArray(value)) {{
     return value.map(toSnakeCaseKeys);
@@ -375,6 +388,27 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {{
 function camelToSnakeCase(value: string): string {{
   return value.replace(/[A-Z]/g, (letter) => `_${{letter.toLowerCase()}}`);
 }}
+
+function toCamelCaseKeys(value: unknown): unknown {{
+  if (Array.isArray(value)) {{
+    return value.map(toCamelCaseKeys);
+  }}
+  if (!isPlainObject(value)) {{
+    return value;
+  }}
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      snakeToCamelCase(key),
+      toCamelCaseKeys(item),
+    ]),
+  );
+}}
+
+function snakeToCamelCase(value: string): string {{
+  return value.replace(/_([a-z])/g, (_match, letter: string) =>
+    letter.toUpperCase(),
+  );
+}}
 "#
     ))
 }
@@ -391,14 +425,136 @@ fn core_config_facade_artifact() -> Result<CoreConfigFacadeArtifact> {
         "CreateProfilePlanInput".to_owned(),
         json_field_paths(&serde_json::to_value(sample_create_profile_plan_input())?),
     );
+    let runtime_graph_input = sample_runtime_graph_plan_input()?;
+    wire_field_inventory.insert(
+        "RuntimeGraphPlanInput".to_owned(),
+        json_field_paths(&serde_json::to_value(&runtime_graph_input)?),
+    );
+    wire_field_inventory.insert(
+        "RuntimeGraphPlan".to_owned(),
+        json_field_paths(&serde_json::to_value(
+            rusty_crew_core_config::plan_runtime_graph(&runtime_graph_input),
+        )?),
+    );
+
+    let mut enum_value_inventory = BTreeMap::new();
+    enum_value_inventory.insert(
+        "RuntimeGraphStorageBackend".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphStorageBackend::Sqlite,
+            RuntimeGraphStorageBackend::Postgres,
+        ])?,
+    );
+    enum_value_inventory.insert(
+        "RuntimeGraphPostgresBootMode".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphPostgresBootMode::Blocked,
+            RuntimeGraphPostgresBootMode::ProofAdmin,
+            RuntimeGraphPostgresBootMode::Active,
+        ])?,
+    );
+    enum_value_inventory.insert(
+        "RuntimeGraphWakeTimeoutMode".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphWakeTimeoutMode::Disabled,
+            RuntimeGraphWakeTimeoutMode::Default,
+        ])?,
+    );
+    enum_value_inventory.insert(
+        "RuntimeGraphWakeTimeoutSourceKind".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphWakeTimeoutSourceKind::Disabled,
+            RuntimeGraphWakeTimeoutSourceKind::Session,
+            RuntimeGraphWakeTimeoutSourceKind::ProfileRuntime,
+            RuntimeGraphWakeTimeoutSourceKind::ProfileSessionDefault,
+            RuntimeGraphWakeTimeoutSourceKind::ServiceDefault,
+        ])?,
+    );
+    enum_value_inventory.insert(
+        "RuntimeGraphDerivedKind".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphDerivedKind::ScheduledJob,
+            RuntimeGraphDerivedKind::McpBinding,
+        ])?,
+    );
+    enum_value_inventory.insert(
+        "RuntimeGraphDefaultSource".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphDefaultSource::CanonicalProfileDefault,
+            RuntimeGraphDefaultSource::ServiceDefault,
+            RuntimeGraphDefaultSource::HostDefaultWorkdir,
+            RuntimeGraphDefaultSource::ProfileRuntimeDefault,
+            RuntimeGraphDefaultSource::ProfileSessionDefault,
+        ])?,
+    );
+    enum_value_inventory.insert(
+        "RuntimeGraphStorageImplementationStatus".to_owned(),
+        serialized_enum_values(&[
+            RuntimeGraphStorageImplementationStatus::Active,
+            RuntimeGraphStorageImplementationStatus::ProofAdminOnly,
+            RuntimeGraphStorageImplementationStatus::BlockedUnimplemented,
+        ])?,
+    );
 
     Ok(CoreConfigFacadeArtifact {
-        format_version: 1,
+        format_version: 2,
         source_crate: "rusty-crew-core-config".to_owned(),
         generated_module: "ts/packages/native-bridge/src/generated/core-config-facade.ts"
             .to_owned(),
         wire_field_inventory,
+        enum_value_inventory,
     })
+}
+
+fn serialized_enum_values<T: Serialize>(values: &[T]) -> Result<Vec<String>> {
+    values
+        .iter()
+        .map(|value| {
+            serde_json::to_value(value)?
+                .as_str()
+                .map(ToOwned::to_owned)
+                .context("expected string-serialized core-config enum")
+        })
+        .collect()
+}
+
+fn sample_runtime_graph_plan_input() -> Result<RuntimeGraphPlanInput> {
+    let source = include_str!(concat!(
+        "../../../../fixtures/runtime-config-parity/target/complete-source.camel.json"
+    ))
+    .replace("__FIXTURE_ROOT__", "/tmp/rusty-crew-runtime-graph-fixture");
+    let camel_value: Value = serde_json::from_str(&source)?;
+    Ok(serde_json::from_value(to_snake_case_json_keys(
+        camel_value,
+    ))?)
+}
+
+fn to_snake_case_json_keys(value: Value) -> Value {
+    match value {
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(to_snake_case_json_keys).collect())
+        }
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        key.chars().fold(String::new(), |mut output, character| {
+                            if character.is_ascii_uppercase() {
+                                output.push('_');
+                                output.push(character.to_ascii_lowercase());
+                            } else {
+                                output.push(character);
+                            }
+                            output
+                        }),
+                        to_snake_case_json_keys(value),
+                    )
+                })
+                .collect(),
+        ),
+        value => value,
+    }
 }
 
 fn check_native_mapping_inventory(path: &Path) -> Result<()> {

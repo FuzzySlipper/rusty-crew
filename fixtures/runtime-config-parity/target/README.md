@@ -11,3 +11,10 @@ The service does not use that planner until the bridge and TS adoption slices.
   invalid source.
 
 Do not make TypeScript pre-expand the source to satisfy the expected plan.
+
+The `*.snake.json` files are generated Rust-wire companions:
+
+```sh
+npm run codegen:runtime-config-target-fixtures
+npm run check:runtime-config-target-fixtures
+```

@@ -6,6 +6,130 @@
     },
     "CreateProfilePlanInput": {
       "exemptFieldPaths": []
+    },
+    "RuntimeGraphPlanInput": {
+      "exemptFieldPaths": [
+        {
+          "path": "profiles[].runtime.default_resource_limits.workdir",
+          "reason": "Intentionally omitted to prove the host default-workdir branch; explicit resource workdirs are covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.brains[].implementation_id",
+          "reason": "Intentionally omitted to prove canonical brain implementation-id defaulting; explicit ids are covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].conversation_channel_id",
+          "reason": "Optional channel projection metadata is covered by RuntimeConfigValidationInput and does not participate in graph defaulting."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].conversation_project_id",
+          "reason": "Optional channel projection metadata is covered by RuntimeConfigValidationInput and does not participate in graph defaulting."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].external_thread_id",
+          "reason": "Optional external thread metadata is covered by RuntimeConfigValidationInput and does not participate in graph defaulting."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].external_user_id",
+          "reason": "Optional external user metadata is covered by RuntimeConfigValidationInput and does not participate in graph defaulting."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].instance_id",
+          "reason": "Optional adapter instance metadata is covered by RuntimeConfigValidationInput and does not participate in graph defaulting."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].provider_subscription_id",
+          "reason": "Optional provider subscription metadata is covered by RuntimeConfigValidationInput and does not participate in graph defaulting."
+        },
+        {
+          "path": "runtime_config.scheduled_jobs[].delivery_channel_id",
+          "reason": "Optional host-job delivery metadata is covered by RuntimeConfigValidationInput; the target fixture exercises session-wake input."
+        },
+        {
+          "path": "runtime_config.scheduled_jobs[].job_kind",
+          "reason": "Optional host-job kind is covered by RuntimeConfigValidationInput; the target fixture derives a host job from profile metadata."
+        },
+        {
+          "path": "runtime_config.scheduled_jobs[].payload",
+          "reason": "Authored host payload is intentionally absent so the fixture proves Rust-derived background-review payload construction."
+        },
+        {
+          "path": "runtime_config.scheduled_jobs[].script",
+          "reason": "Non-executable script-only metadata is covered by the invalid RuntimeConfigValidationInput fixture."
+        },
+        {
+          "path": "runtime_config.sessions[].history_window",
+          "reason": "Explicit history windows are covered by RuntimeConfigValidationInput; the target fixture exercises profile max-history defaulting."
+        },
+        {
+          "path": "runtime_config.sessions[].kind",
+          "reason": "Intentionally omitted to prove the canonical full-session default."
+        },
+        {
+          "path": "runtime_config.sessions[].local_tool_profile_id",
+          "reason": "Intentionally omitted to prove profile local-tool-profile inheritance."
+        },
+        {
+          "path": "runtime_config.sessions[].max_history_messages",
+          "reason": "Intentionally omitted to prove profile session-default inheritance."
+        },
+        {
+          "path": "runtime_config.sessions[].owner_id",
+          "reason": "Intentionally omitted to prove profile session-default inheritance."
+        },
+        {
+          "path": "runtime_config.sessions[].resource_limits",
+          "reason": "Intentionally omitted to prove profile resource-limit inheritance."
+        },
+        {
+          "path": "runtime_config.sessions[].turn_timeout_ms",
+          "reason": "Intentionally omitted to prove profile and service wake-timeout precedence."
+        }
+      ]
+    },
+    "RuntimeGraphPlan": {
+      "exemptFieldPaths": [
+        {
+          "path": "runtime_config.channel_bindings[].conversation_channel_id",
+          "reason": "Optional channel projection metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].conversation_project_id",
+          "reason": "Optional channel projection metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].external_thread_id",
+          "reason": "Optional external thread metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].external_user_id",
+          "reason": "Optional external user metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].instance_id",
+          "reason": "Optional adapter instance metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.channel_bindings[].provider_subscription_id",
+          "reason": "Optional provider subscription metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.mcp_bindings[].instance_id",
+          "reason": "Optional MCP adapter instance metadata remains absent in the canonical plan unless authored; its explicit wire form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.scheduled_jobs[].delivery_channel_id",
+          "reason": "The planned background-review job is session-wake based and therefore has no delivery channel; explicit delivery metadata is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.scheduled_jobs[].script",
+          "reason": "The canonical plan rejects executable script semantics and does not synthesize script metadata; the invalid form is covered by RuntimeConfigValidationInput."
+        },
+        {
+          "path": "runtime_config.sessions[].history_window",
+          "reason": "The target plan uses max_history_messages and leaves the legacy-compatible optional history_window absent; its explicit wire form is covered by RuntimeConfigValidationInput."
+        }
+      ]
     }
   }
 }

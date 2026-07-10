@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   coreConfigFacadeArtifact,
+  fromCoreConfigWireRuntimeGraphPlan,
   loadNativeBridge,
+  toCoreConfigWireRuntimeGraphPlanInput,
 } from "@rusty-crew/native-bridge";
 import type { ProfileId } from "@rusty-crew/contracts";
 import type {
@@ -123,6 +125,48 @@ try {
       profile_registry: expectedProfileRegistrySnake,
       request: expectedCreateRequestSnake,
     },
+    manifest: await readFixtureJson<RuntimeConfigCoverageManifest>(
+      "coverage-manifest.json",
+      tempRoot,
+    ),
+  });
+  const targetSourceCamel = await readFixtureJson<unknown>(
+    "target/complete-source.camel.json",
+    tempRoot,
+  );
+  const targetSourceSnake = await readFixtureJson<unknown>(
+    "target/complete-source.snake.json",
+    tempRoot,
+  );
+  const targetPlanCamel = await readFixtureJson<unknown>(
+    "target/complete-plan.camel.json",
+    tempRoot,
+  );
+  const targetPlanSnake = await readFixtureJson<unknown>(
+    "target/complete-plan.snake.json",
+    tempRoot,
+  );
+  assert.deepEqual(
+    toCoreConfigWireRuntimeGraphPlanInput(targetSourceCamel),
+    targetSourceSnake,
+    "generated runtime graph input converter drifted from Rust wire fixture",
+  );
+  assert.deepEqual(
+    fromCoreConfigWireRuntimeGraphPlan(targetPlanSnake),
+    targetPlanCamel,
+    "generated runtime graph plan converter drifted from ergonomic TS fixture",
+  );
+  assertCoveredFieldPaths({
+    family: "RuntimeGraphPlanInput",
+    value: targetSourceSnake,
+    manifest: await readFixtureJson<RuntimeConfigCoverageManifest>(
+      "coverage-manifest.json",
+      tempRoot,
+    ),
+  });
+  assertCoveredFieldPaths({
+    family: "RuntimeGraphPlan",
+    value: targetPlanSnake,
     manifest: await readFixtureJson<RuntimeConfigCoverageManifest>(
       "coverage-manifest.json",
       tempRoot,
