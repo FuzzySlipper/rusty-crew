@@ -401,10 +401,12 @@ function toCamelCaseKeys(value: unknown): unknown {{
     return value;
   }}
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      snakeToCamelCase(key),
-      isOpaqueJsonKey(key) ? item : toCamelCaseKeys(item),
-    ]),
+    Object.entries(value)
+      .filter(([, item]) => item !== null)
+      .map(([key, item]) => [
+        snakeToCamelCase(key),
+        isOpaqueJsonKey(key) ? item : toCamelCaseKeys(item),
+      ]),
   );
 }}
 
