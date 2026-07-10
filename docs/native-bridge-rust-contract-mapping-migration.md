@@ -27,8 +27,10 @@ runtime validation hooks.
 
 Current large surfaces:
 
-- `ts/packages/native-bridge/src/index.ts`: native loader, raw native binding
-  interface, wrapper methods, JSON parse/cast helpers, and ergonomic mapping.
+- `ts/packages/native-bridge/src/index.ts`: native loader, composition, stale
+  binary handling, stateful brain-runtime assembly, and compatibility exports.
+- `ts/packages/native-bridge/src/*-wrappers.ts` and `*-wire.ts`: focused
+  operation-family wrappers and snake/camel wire conversion.
 - `ts/packages/native-bridge/src/bridge-validation-schemas.ts`: TypeBox
   validation schemas for covered bridge wire families.
 - `ts/packages/contracts/src/index.ts`: shared bridge operation inventory,
@@ -46,14 +48,10 @@ Current guardrails already cover:
 - TypeBox validation coverage ratchets;
 - exact exemption groups for operations not yet fixture/schema covered.
 
-Remaining risk:
-
-- raw TS binding method declarations can drift from native JSON methods;
-- raw/ergonomic mapping code in `native-bridge/src/index.ts` is large enough to
-  hide field-level mistakes;
-- TypeBox schemas still mirror Rust shapes manually for covered families;
-- contract exports and fixtures are checked, but not enough operation families
-  are fixture-backed for the UI-heavy surfaces now growing.
+Remaining risk is tracked by the generated native signature/schema checks and
+the explicit exemption catalog. Handwritten TypeBox schemas remain only where
+napi's converted camel-case object is the real wire surface rather than Rust's
+serde representation.
 
 ## Task 5392 Baseline
 
@@ -411,6 +409,21 @@ Acceptance:
 - `index.ts` retains loader/composition logic rather than all family mapping;
 - operation-family wrappers remain covered by validation/fingerprint gates;
 - public `@rusty-crew/native-bridge` exports remain compatible.
+
+Task 5408 completed this decomposition without compatibility shims. The public
+declaration surface lives in `public-api.ts`; profile/provider and runtime
+config conversion are separate wire modules; brain-run and event/body wire
+projection have a one-way dependency; and chat, roleplay, memory, scheduler,
+admin, brain catalog, runtime config, and profile/provider wrappers are focused
+modules. `index.ts` fell from 7,761 lines after task 5396 to 1,747 lines and now
+contains loader/composition and genuinely stateful brain assembly rather than
+the family mapper catalog.
+
+`npm run check:native-mapping-inventory` now scans the full family source set
+instead of assuming every interface and converter is in `index.ts`. Its module
+boundary smoke ratchets per-file line ceilings, rejects back-imports into the
+entrypoint, and rejects runtime import cycles across the 15 bridge family and
+composition modules.
 
 ### 5. Ratchet Bridge Additions
 

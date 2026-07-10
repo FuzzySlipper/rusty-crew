@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { nativeBridgeBindingSurface } from "./generated/native-binding-surface.js";
 import { nativeMappingInventory } from "./generated/native-mapping-inventory.js";
 
 const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const source = readFileSync(sourcePath, "utf8");
-const memoryWrapperSourcePath = fileURLToPath(
-  new URL("./memory-wrappers.ts", import.meta.url),
-);
-const bridgeSources = `${source}\n${readFileSync(memoryWrapperSourcePath, "utf8")}`;
+const sourceDirectory = fileURLToPath(new URL("./", import.meta.url));
+const familySourceNames = readdirSync(sourceDirectory)
+  .filter((name) => /(?:-wrappers|-wire|public-api)\.ts$/.test(name))
+  .sort();
+const bridgeSources = [
+  source,
+  ...familySourceNames.map((name) =>
+    readFileSync(`${sourceDirectory}/${name}`, "utf8"),
+  ),
+].join("\n");
 const memory = nativeMappingInventory.families.memory;
 const brainProvider = nativeMappingInventory.families.brainProvider;
 const roleplay = nativeMappingInventory.families.roleplay;
@@ -382,8 +388,8 @@ function assertNamedConversationInterfaces() {
 function assertNamedBrainProviderInterfaces() {
   for (const interfaceName of brainProvider.namedTypeScriptInterfaces) {
     assert(
-      source.includes(`interface ${interfaceName}`) ||
-        source.includes(`type ${interfaceName}`),
+      bridgeSources.includes(`interface ${interfaceName}`) ||
+        bridgeSources.includes(`type ${interfaceName}`),
       `brain/provider expected named interface ${interfaceName} in native bridge source`,
     );
   }
@@ -392,10 +398,10 @@ function assertNamedBrainProviderInterfaces() {
 function assertNamedRuntimeSchedulerInterfaces() {
   for (const interfaceName of runtimeScheduler.namedTypeScriptInterfaces) {
     assert(
-      source.includes(`interface ${interfaceName}`) ||
-        source.includes(`export interface ${interfaceName}`) ||
-        source.includes(`type ${interfaceName}`) ||
-        source.includes(`export type ${interfaceName}`),
+      bridgeSources.includes(`interface ${interfaceName}`) ||
+        bridgeSources.includes(`export interface ${interfaceName}`) ||
+        bridgeSources.includes(`type ${interfaceName}`) ||
+        bridgeSources.includes(`export type ${interfaceName}`),
       `runtime/scheduler expected named interface ${interfaceName} in native bridge source`,
     );
   }
@@ -547,16 +553,16 @@ function assertNativeReads(
 
 function extractInterface(name: string): string {
   const marker = `interface ${name}`;
-  const start = source.indexOf(marker);
+  const start = bridgeSources.indexOf(marker);
   assert.notEqual(start, -1, `missing interface ${name}`);
-  return extractBracedBlock(source, source.indexOf("{", start));
+  return extractBracedBlock(bridgeSources, bridgeSources.indexOf("{", start));
 }
 
 function extractFunction(name: string): string {
   const marker = `function ${name}`;
-  const start = source.indexOf(marker);
+  const start = bridgeSources.indexOf(marker);
   assert.notEqual(start, -1, `missing function ${name}`);
-  return extractBracedBlock(source, source.indexOf("{", start));
+  return extractBracedBlock(bridgeSources, bridgeSources.indexOf("{", start));
 }
 
 function extractBracedBlock(text: string, openBrace: number): string {

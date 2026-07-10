@@ -1,0 +1,95 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const moduleNames = [
+  "admin-wrappers.ts",
+  "brain-run-wire.ts",
+  "brain-wrappers.ts",
+  "chat-wrappers.ts",
+  "event-body-wire.ts",
+  "index.ts",
+  "memory-wrappers.ts",
+  "profile-provider-wire.ts",
+  "profile-provider-wrappers.ts",
+  "public-api.ts",
+  "roleplay-wrappers.ts",
+  "runtime-config-wire.ts",
+  "runtime-config-wrappers.ts",
+  "scheduler-wrappers.ts",
+  "session-wire.ts",
+] as const;
+
+const sourceDirectory = fileURLToPath(new URL("./", import.meta.url));
+const sources = new Map<string, string>(
+  moduleNames.map((name) => [
+    name,
+    readFileSync(`${sourceDirectory}/${name}`, "utf8"),
+  ]),
+);
+const lineCeilings: Record<string, number> = {
+  "admin-wrappers.ts": 120,
+  "brain-run-wire.ts": 750,
+  "brain-wrappers.ts": 40,
+  "chat-wrappers.ts": 340,
+  "event-body-wire.ts": 850,
+  "index.ts": 1_900,
+  "memory-wrappers.ts": 250,
+  "profile-provider-wire.ts": 650,
+  "profile-provider-wrappers.ts": 210,
+  "public-api.ts": 2_550,
+  "roleplay-wrappers.ts": 330,
+  "runtime-config-wire.ts": 900,
+  "runtime-config-wrappers.ts": 220,
+  "scheduler-wrappers.ts": 250,
+  "session-wire.ts": 100,
+};
+
+for (const [name, source] of sources) {
+  const lines = source.split("\n").length;
+  assert(
+    lines <= lineCeilings[name],
+    `${name} grew to ${lines} lines; split its family before raising the ${lineCeilings[name]} line ceiling`,
+  );
+  if (name !== "index.ts") {
+    assert(
+      !source.includes('from "./index.js"'),
+      `${name} must depend on public-api or focused wire modules, not the composition entrypoint`,
+    );
+  }
+}
+
+const graph = new Map<string, string[]>();
+for (const [name, source] of sources) {
+  const dependencies = [...source.matchAll(/from "\.\/([^".]+)\.js"/g)]
+    .map((match) => `${match[1]}.ts`)
+    .filter((dependency) => sources.has(dependency));
+  graph.set(name, [...new Set(dependencies)]);
+}
+
+const visited = new Set<string>();
+const active = new Set<string>();
+function visit(name: string, path: string[]): void {
+  if (active.has(name)) {
+    throw new Error(
+      `native bridge module cycle: ${[...path, name].join(" -> ")}`,
+    );
+  }
+  if (visited.has(name)) return;
+  active.add(name);
+  for (const dependency of graph.get(name) ?? []) {
+    visit(dependency, [...path, name]);
+  }
+  active.delete(name);
+  visited.add(name);
+}
+for (const name of graph.keys()) visit(name, []);
+
+console.log(
+  JSON.stringify({
+    modules: moduleNames.length,
+    indexLines: sources.get("index.ts")?.split("\n").length,
+    runtimeImportCycles: 0,
+    entrypointBackImports: 0,
+  }),
+);

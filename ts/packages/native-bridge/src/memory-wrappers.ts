@@ -23,12 +23,27 @@ import {
 import type {
   NativeBranchAwareSessionMemoryQuery,
   NativeBridgeModule,
+  NativeProfileMemoryDelete,
+  NativeProfileMemoryQuery,
+  NativeProfileMemoryRecord,
+  NativeProfileMemoryReplace,
+  NativeProfileMemoryWrite,
   NativeSessionMemoryPromptContext,
   NativeSessionMemoryQuery,
   NativeSessionMemoryRecord,
-} from "./index.js";
+} from "./public-api.js";
 
 interface NativeBridgeMemoryBinding {
+  listProfileMemory(query: NativeProfileMemoryQuery): unknown[];
+  getProfileMemory(
+    profileId: string,
+    targetType: string,
+    targetId: string | undefined,
+    key: string,
+  ): unknown;
+  addProfileMemory(write: NativeProfileMemoryWrite): unknown;
+  replaceProfileMemory(replace: NativeProfileMemoryReplace): unknown;
+  removeProfileMemory(remove: NativeProfileMemoryDelete): unknown;
   listMemorySpaceDescriptorsJson(): string;
   querySessionMemoryRecordsJson(inputJson: string): string;
   buildSessionMemoryPromptContextJson(inputJson: string): string;
@@ -61,6 +76,11 @@ type NativeBridgeMemoryMethods = Pick<
   | "saveContextCompactionArtifact"
   | "listContextCompactionArtifacts"
   | "recordMemoryGovernanceDecision"
+  | "listProfileMemory"
+  | "getProfileMemory"
+  | "addProfileMemory"
+  | "replaceProfileMemory"
+  | "removeProfileMemory"
 >;
 
 export function createNativeBridgeMemoryMethods(
@@ -188,5 +208,20 @@ export function createNativeBridgeMemoryMethods(
       JSON.parse(
         binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),
       ) as MemoryGovernanceDecisionRecord,
+    listProfileMemory: async (query) =>
+      binding.listProfileMemory(query) as NativeProfileMemoryRecord[],
+    getProfileMemory: async (input) =>
+      (binding.getProfileMemory(
+        input.profileId,
+        input.targetType,
+        input.targetId,
+        input.key,
+      ) as NativeProfileMemoryRecord | null) ?? undefined,
+    addProfileMemory: async (write) =>
+      binding.addProfileMemory(write) as NativeProfileMemoryRecord,
+    replaceProfileMemory: async (replace) =>
+      binding.replaceProfileMemory(replace) as NativeProfileMemoryRecord,
+    removeProfileMemory: async (remove) =>
+      binding.removeProfileMemory(remove) as NativeProfileMemoryRecord,
   };
 }
