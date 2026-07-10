@@ -787,6 +787,11 @@ export async function applyRustyCrewRuntimeConfig(input: {
   runtimeConfig: RustyCrewRuntimeConfig;
   bridge: NativeBridgeModule;
   existingBrainHandlesByProfileId?: Record<string, BrainImplementationHandle>;
+  existingBrainModulesByProfileId?: Record<string, BrainModuleSelection>;
+  existingBrainDiagnosticsByProfileId?: Record<
+    string,
+    RuntimeBrainModuleDiagnostics
+  >;
   createMissingSessions?: boolean;
   curatorExecutor?: CuratorExecuteContext["executor"];
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
@@ -872,15 +877,13 @@ export async function applyRustyCrewRuntimeConfig(input: {
       strategy,
       moduleStrategy,
     });
-    result.brainModulesByProfileId[brain.profileId] = selection;
-    result.brainDiagnosticsByProfileId[brain.profileId] =
-      brainModuleDiagnostics({
-        profile,
-        implementationId: brain.implementationId,
-        selection,
-        strategy,
-        moduleStrategy,
-      });
+    const nextDiagnostics = brainModuleDiagnostics({
+      profile,
+      implementationId: brain.implementationId,
+      selection,
+      strategy,
+      moduleStrategy,
+    });
     try {
       const handle = await input.bridge.registerBrainRuntime(
         {
@@ -914,6 +917,8 @@ export async function applyRustyCrewRuntimeConfig(input: {
         ),
       );
       result.brainHandlesByProfileId[brain.profileId] = handle;
+      result.brainModulesByProfileId[brain.profileId] = selection;
+      result.brainDiagnosticsByProfileId[brain.profileId] = nextDiagnostics;
       result.brainsRegistered += 1;
     } catch (error) {
       if (!isAlreadyPresentError(error)) throw error;
@@ -922,6 +927,11 @@ export async function applyRustyCrewRuntimeConfig(input: {
       if (existingHandle !== undefined) {
         result.brainHandlesByProfileId[brain.profileId] = existingHandle;
       }
+      result.brainModulesByProfileId[brain.profileId] =
+        input.existingBrainModulesByProfileId?.[brain.profileId] ?? selection;
+      result.brainDiagnosticsByProfileId[brain.profileId] =
+        input.existingBrainDiagnosticsByProfileId?.[brain.profileId] ??
+        nextDiagnostics;
       result.brainsAlreadyPresent += 1;
     }
   }

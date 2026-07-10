@@ -3,7 +3,7 @@
   "displayName": "Roleplay Narrator",
   "providerAlias": "deepseek_flash",
   "brain": {
-    "module": "pi-agent-core",
+    "module": "pi-agent",
     "strategy": "roleplay_narrator"
   },
   "runtime": {

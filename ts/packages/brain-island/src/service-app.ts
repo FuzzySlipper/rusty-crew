@@ -2943,6 +2943,10 @@ async function applyServiceRuntimeConfigFromDisk(
     bridge: state.bridge,
     existingBrainHandlesByProfileId:
       state.runtimeConfigApplyResult.brainHandlesByProfileId,
+    existingBrainModulesByProfileId:
+      state.runtimeConfigApplyResult.brainModulesByProfileId,
+    existingBrainDiagnosticsByProfileId:
+      state.runtimeConfigApplyResult.brainDiagnosticsByProfileId,
     createMissingSessions: options.createMissingSessions,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),

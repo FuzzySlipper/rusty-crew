@@ -283,7 +283,11 @@ function writeRuntimeConfig(root: string): void {
     JSON.stringify(
       {
         profileId: "replace-profile",
-        modelConfig: { provider: "local", modelName: "deterministic" },
+        modelConfig: {
+          provider: "custom",
+          modelName: "deepseek-flash",
+          baseUrl: "http://127.0.0.1:18082/v1",
+        },
         skills: "all",
       },
       null,

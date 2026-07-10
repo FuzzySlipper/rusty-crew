@@ -129,7 +129,9 @@ Expected result:
 Read back the profile:
 
 ```bash
-curl -fsS "$CREW/v1/admin/control/profiles/tester/read" \
+curl -fsS -X POST "$CREW/v1/admin/control/profiles/tester/read" \
+  -H "content-type: application/json" \
+  --data '{}' \
   | jq .
 ```
 
