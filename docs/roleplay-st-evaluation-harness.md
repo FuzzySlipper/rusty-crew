@@ -11,7 +11,7 @@ reply.
 ## Entry Points
 
 - `npm -w @rusty-crew/brain-island run smoke:roleplay-behavior-eval`
-- `npm -w @rusty-crew/brain-island run smoke:roleplay-st-import-api`
+- `npm -w @rusty-crew/brain-island run smoke:roleplay-st-import-service-api`
 
 The shared fixture module exposes:
 

@@ -48,7 +48,7 @@
     "smoke:roleplay-narrator-brain": "tsx smokes/smoke-roleplay-narrator-brain.ts",
     "smoke:roleplay-narrator-fsm-bridge": "tsx smokes/smoke-roleplay-narrator-fsm-bridge.ts",
     "smoke:roleplay-browser-api": "tsx ../../smokes/brain-island/smoke-roleplay-browser-api.ts",
-    "smoke:roleplay-st-import-api": "tsx ../../smokes/brain-island/smoke-roleplay-st-import-api.ts",
+    "smoke:roleplay-st-import-service-api": "tsx ../../smokes/brain-island/smoke-roleplay-st-import-service-api.ts",
     "smoke:roleplay-behavior-eval": "tsx smokes/smoke-roleplay-behavior-eval.ts",
     "smoke:roleplay-quality-spike-live": "tsx smokes/smoke-roleplay-quality-spike-live.ts",
     "smoke:roleplay-persistence-live": "tsx smokes/smoke-roleplay-persistence-live.ts",

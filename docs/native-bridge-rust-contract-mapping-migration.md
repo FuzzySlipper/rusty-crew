@@ -447,9 +447,10 @@ value/helper exemptions have explicit implementation tasks:
 - #5565: OAuth, buffered diagnostics, model-secret, and GitHub gate helpers (9);
 - #5566: event subscription and runtime-buffer value contracts (2).
 
-The removed deterministic `local` brain still leaves the ST import smoke stale;
-#5563 owns that separate smoke repair rather than weakening production brain
-selection.
+The ST import smoke now declares its service-host lane explicitly and uses the
+supported `pi-agent` production brain without invoking a provider. This keeps
+API-only roleplay import coverage independent of removed deterministic brain
+fallbacks.
 
 Representative live certification ran against the restarted SQLite debug
 service at `http://127.0.0.1:9348` using

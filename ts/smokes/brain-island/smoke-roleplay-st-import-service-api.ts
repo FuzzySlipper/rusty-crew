@@ -149,8 +149,12 @@ function writeRuntimeConfig(dataDir: string): void {
       {
         profileId,
         displayName: "ST Import Profile",
-        modelConfig: { provider: "local", modelName: "deterministic" },
-        brain: { module: "local" },
+        modelConfig: {
+          provider: "local",
+          modelName: "deepseek-flash",
+          baseUrl: "http://127.0.0.1:18082/v1",
+        },
+        brain: { module: "pi-agent" },
         toolPolicy: { requestedTools: [] },
       },
       null,
