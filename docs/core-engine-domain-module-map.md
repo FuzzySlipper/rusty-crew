@@ -160,3 +160,22 @@ composition fields, construction wiring, and facade documentation. It is a
 final target, not a temporary ceiling: each extraction commit should lower a
 monotonic interim ceiling so new work cannot refill `lib.rs` while the campaign
 is in progress.
+
+## Landed Shape
+
+Task #5367 completed the production extraction and test split on 2026-07-10.
+`lib.rs` is 186 lines and contains composition types, module declarations,
+shared imports, and `mod tests;`; it contains no production method bodies or
+inline test module. Fourteen cohesive implementation modules own the engine
+domains listed above. Existing store-port modules remain separate adapters.
+
+The former inline tests are split under `src/tests/` into bootstrap/session,
+body, brain runtime, scheduler, delegation lifecycle, delegation fan-out,
+restart hydration, profile admin, chat read, chat mutation, and GitHub gate
+modules. Chat and delegation builders have their own support modules; only
+genuinely shared engine/session/profile builders remain in `tests/mod.rs`.
+
+`npm run check:core-engine-decomposition` enforces the final line/byte ceilings,
+required domain modules, domain-test ceilings, absence of catch-all modules,
+absence of inline tests, and the core-engine crate firewall. It runs in the
+normal `smoke:architecture-boundaries` CI path.
