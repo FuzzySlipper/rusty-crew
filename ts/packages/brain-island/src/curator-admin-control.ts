@@ -26,6 +26,9 @@ export interface CuratorAdminStatus {
   archivedSkillCount?: number;
   lastRunAt?: string;
   lastError?: string;
+  activityProjectionFailureCount?: number;
+  lastActivityReceiptId?: string;
+  lastActivitySequence?: number;
   lifecycle?: CuratorLifecycleReport;
 }
 

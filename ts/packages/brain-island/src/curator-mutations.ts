@@ -21,6 +21,7 @@ import type {
   CuratorCandidateBatch,
   CuratorCandidateSourceRef,
 } from "./curator-candidates.js";
+import type { CuratorActivityReceipt } from "./curator-observation.js";
 
 export type CuratorMutationOperation =
   | {
@@ -392,18 +393,21 @@ export class NativeCuratorGovernanceStore
     now: string;
     skillsDir: string;
     snapshotRoot: string;
+    publishActivity?: (receipt: CuratorActivityReceipt) => Promise<void>;
   }): Promise<NativeCuratorGovernanceStore> {
     const store = new NativeCuratorGovernanceStore({
       bridge: input.bridge,
       now: () => input.now,
       skillsDir: input.skillsDir,
       snapshotRoot: input.snapshotRoot,
+      publishActivity: input.publishActivity,
     });
     for (const record of await listAllCuratorCandidates(input.bridge)) {
       const payload = record.candidatePayload as NativeCandidatePayload;
       store.candidates.set(record.candidateId, payload.stored);
       store.candidateRevisions.set(record.candidateId, record.revision);
       store.candidateHashes.set(record.candidateId, stableHash(payload.stored));
+      store.candidateProfileIds.set(record.candidateId, payload.profileId);
       if (payload.stored.approval) {
         store.persistedApprovalIds.add(approvalId(payload.stored.approval));
       }
@@ -425,23 +429,34 @@ export class NativeCuratorGovernanceStore
   private readonly now: () => string;
   private readonly skillsDir: string;
   private readonly snapshotRoot: string;
+  private readonly publishActivityCallback:
+    | ((receipt: CuratorActivityReceipt) => Promise<void>)
+    | undefined;
   private readonly candidateRevisions = new Map<string, number>();
   private readonly candidateHashes = new Map<string, string>();
   private readonly mutationRevisions = new Map<string, number>();
   private readonly mutationHashes = new Map<string, string>();
   private readonly persistedApprovalIds = new Set<string>();
+  private readonly candidateProfileIds = new Map<string, string>();
+  readonly activityProjectionFailures: Array<{
+    receiptId: string;
+    message: string;
+  }> = [];
+  lastActivityReceipt?: CuratorActivityReceipt;
 
   private constructor(input: {
     bridge: CuratorPersistenceBridge;
     now: () => string;
     skillsDir: string;
     snapshotRoot: string;
+    publishActivity?: (receipt: CuratorActivityReceipt) => Promise<void>;
   }) {
     super();
     this.bridge = input.bridge;
     this.now = input.now;
     this.skillsDir = resolve(input.skillsDir);
     this.snapshotRoot = resolve(input.snapshotRoot);
+    this.publishActivityCallback = input.publishActivity;
   }
 
   async persist(): Promise<void> {
@@ -468,6 +483,7 @@ export class NativeCuratorGovernanceStore
           mutation.mutationId,
           stored,
           this.now(),
+          this.profileIdForCandidate(stored.candidate),
           mutation.actorId,
           mutation.error,
         ),
@@ -483,6 +499,7 @@ export class NativeCuratorGovernanceStore
         );
         this.mutationHashes.set(mutation.mutationId, stableHash(mutation));
       }
+      await this.publishActivity(result.receipt);
     }
 
     for (const stored of this.candidates.values()) {
@@ -501,6 +518,7 @@ export class NativeCuratorGovernanceStore
           candidateId,
           stored,
           this.now(),
+          this.profileIdForCandidate(stored.candidate),
           stored.approval?.actorId,
           stored.lifecycle?.reasonCode,
         ),
@@ -509,6 +527,53 @@ export class NativeCuratorGovernanceStore
         throw new CuratorExecuteError("curator_candidate_persist_failed");
       }
       this.rememberCandidate(stored, result.candidate.revision);
+      await this.publishActivity(result.receipt);
+    }
+  }
+
+  async recordRejectedRequest(
+    request: CuratorExecuteRequest,
+    error: unknown,
+  ): Promise<void> {
+    const stored = request.candidateId
+      ? this.candidates.get(request.candidateId)
+      : undefined;
+    const reasonCode =
+      error instanceof CuratorExecuteError
+        ? error.reasonCode
+        : "curator_execution_failed";
+    const activityKind =
+      request.action === "apply_candidate"
+        ? "mutation_failed"
+        : "candidate_denied";
+    const subjectId =
+      request.candidateId ?? request.scopeId ?? request.scopeType ?? "service";
+    const profileId = stored
+      ? this.profileIdForCandidate(stored.candidate)
+      : request.scopeType === "profile" && request.scopeId
+        ? request.scopeId
+        : "service";
+    try {
+      const result = (await this.bridge.applyCuratorGovernanceWrite({
+        receipt: failureAuditReceipt({
+          activityKind,
+          subjectId,
+          candidateId: request.candidateId,
+          correlationId: stored
+            ? `curator:${stored.candidate.batchId}`
+            : `curator:${profileId}`,
+          profileId,
+          actorId: request.actorId,
+          reasonCode,
+          now: this.now(),
+        }),
+      })) as NativeGovernanceWriteResult;
+      await this.publishActivity(result.receipt);
+    } catch (recordError) {
+      this.activityProjectionFailures.push({
+        receiptId: `curator-unrecorded:${activityKind}:${subjectId}`,
+        message: `failed to record curator failure: ${recordError instanceof Error ? recordError.message : String(recordError)}`,
+      });
     }
   }
 
@@ -607,7 +672,31 @@ export class NativeCuratorGovernanceStore
   }
 
   private profileIdForCandidate(candidate: CuratorMutationCandidate): string {
-    return String(this.batches.get(candidate.batchId)?.profileId ?? "service");
+    const profileId = String(
+      this.candidateProfileIds.get(candidate.candidateId) ??
+        this.batches.get(candidate.batchId)?.profileId ??
+        "service",
+    );
+    this.candidateProfileIds.set(candidate.candidateId, profileId);
+    return profileId;
+  }
+
+  private async publishActivity(
+    receipt: CuratorActivityReceipt,
+  ): Promise<void> {
+    this.lastActivityReceipt = receipt;
+    if (!this.publishActivityCallback) return;
+    try {
+      await this.publishActivityCallback(receipt);
+    } catch (error) {
+      this.activityProjectionFailures.push({
+        receiptId: receipt.receiptId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (this.activityProjectionFailures.length > 100) {
+        this.activityProjectionFailures.shift();
+      }
+    }
   }
 }
 
@@ -656,6 +745,7 @@ interface NativePage<T> {
 interface NativeGovernanceWriteResult {
   candidate?: NativeCandidateRecord;
   mutation?: NativeMutationRecord;
+  receipt: CuratorActivityReceipt;
 }
 
 interface NativeApprovalRecord {
@@ -758,6 +848,7 @@ function auditReceipt(
   subjectId: string,
   stored: CuratorStoredCandidate,
   now: string,
+  profileId: string,
   actorId?: string,
   reasonCode?: string,
 ): unknown {
@@ -771,7 +862,7 @@ function auditReceipt(
     receiptId: `curator-receipt:${activityKind}:${idempotencyKey.slice(0, 20)}`,
     correlationId: `curator:${stored.candidate.batchId}`,
     idempotencyKey,
-    profileId: undefined,
+    profileId,
     sessionId: undefined,
     candidateId: stored.candidate.candidateId,
     mutationId:
@@ -786,6 +877,35 @@ function auditReceipt(
     actorId,
     details: undefined,
     occurredAt: now,
+  };
+}
+
+function failureAuditReceipt(input: {
+  activityKind: string;
+  subjectId: string;
+  candidateId?: string;
+  correlationId: string;
+  profileId: string;
+  actorId?: string;
+  reasonCode: string;
+  now: string;
+}): unknown {
+  const idempotencyKey = stableHash(input);
+  return {
+    sequence: 0,
+    receiptId: `curator-receipt:${input.activityKind}:${idempotencyKey.slice(0, 20)}`,
+    correlationId: input.correlationId,
+    idempotencyKey,
+    profileId: input.profileId,
+    candidateId: input.candidateId,
+    mutationId:
+      input.activityKind === "mutation_failed" ? input.subjectId : undefined,
+    activityKind: input.activityKind,
+    outcome: "failed",
+    reasonCode: input.reasonCode,
+    summary: `${input.activityKind} for ${input.subjectId}: ${input.reasonCode}`,
+    actorId: input.actorId,
+    occurredAt: input.now,
   };
 }
 
@@ -907,7 +1027,16 @@ function safeRelative(root: string, target: string): string {
 export function createCuratorGovernanceExecutor(
   options: CuratorGovernanceExecutorOptions,
 ): (request: CuratorExecuteRequest) => Promise<CuratorExecuteReceipt> {
-  return async (request) => executeCuratorGovernanceRequest(options, request);
+  return async (request) => {
+    try {
+      return await executeCuratorGovernanceRequest(options, request);
+    } catch (error) {
+      if (options.store instanceof NativeCuratorGovernanceStore) {
+        await options.store.recordRejectedRequest(request, error);
+      }
+      throw error;
+    }
+  };
 }
 
 export async function executeCuratorGovernanceRequest(

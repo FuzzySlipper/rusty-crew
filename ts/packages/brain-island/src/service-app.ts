@@ -306,7 +306,6 @@ import {
   rollbackCuratorMutation,
   type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
-  type PersistableCuratorGovernanceStore,
 } from "./curator-mutations.js";
 import type {
   CuratorExecuteContext,
@@ -384,6 +383,11 @@ import {
   scheduledHostExecutorContext as scheduledHostExecutorContextFromModule,
   type ServiceBackgroundReviewContext,
 } from "./service-background-review.js";
+import { AgentActivityObservationProducer } from "./agent-activity-observation.js";
+import {
+  publishCuratorActivityObservation,
+  type CuratorActivityReceipt,
+} from "./curator-observation.js";
 
 export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
@@ -821,8 +825,7 @@ interface ServiceSchedulerHeartbeatState {
 }
 
 interface ServiceCuratorRuntime {
-  readonly store: MemoryCuratorGovernanceStore &
-    PersistableCuratorGovernanceStore;
+  readonly store: NativeCuratorGovernanceStore;
   executor: NonNullable<CuratorExecuteContext["executor"]>;
   runtimeConfig: RustyCrewRuntimeConfig;
   lastRunAt?: string;
@@ -883,13 +886,18 @@ export async function createRustyCrewServiceApp(
       runtimeConfig,
       options.adapterFactories,
     );
+    let liveState: ServiceState | undefined;
     const curator = await createServiceCuratorRuntime({
       config,
       runtimeConfig,
       bridge,
       now: options.now ?? (() => new Date().toISOString()),
+      publishActivity: async (receipt) => {
+        if (liveState) {
+          await publishServiceCuratorActivity(liveState, receipt);
+        }
+      },
     });
-    let liveState: ServiceState | undefined;
     const toolCallDebugStore =
       options.toolCallDebugStore ??
       new MemoryToolCallDebugStore({
@@ -2667,6 +2675,7 @@ async function createServiceCuratorRuntime(input: {
   runtimeConfig: RustyCrewRuntimeConfig;
   bridge: NativeBridgeModule;
   now: () => string;
+  publishActivity?: (receipt: CuratorActivityReceipt) => Promise<void>;
 }): Promise<ServiceCuratorRuntime> {
   const skillsDir = curatorSkillsDir(input.runtimeConfig);
   const snapshotRoot = join(input.config.paths.backupDir, "curator-snapshots");
@@ -2675,6 +2684,7 @@ async function createServiceCuratorRuntime(input: {
     now: input.now(),
     skillsDir,
     snapshotRoot,
+    publishActivity: input.publishActivity,
   });
   const runtime: ServiceCuratorRuntime = {
     store,
@@ -2712,6 +2722,37 @@ async function createServiceCuratorRuntime(input: {
     },
   });
   return runtime;
+}
+
+async function publishServiceCuratorActivity(
+  state: ServiceState,
+  receipt: CuratorActivityReceipt,
+): Promise<void> {
+  if (state.denGatewayClient === undefined) return;
+  const result = await publishCuratorActivityObservation({
+    producer: new AgentActivityObservationProducer({
+      sink: createDenGatewayObservationSink(state.denGatewayClient),
+      required: true,
+    }),
+    receipt,
+  });
+  recordServiceEvent(state, {
+    source: "curator",
+    eventType: `curator_${receipt.activityKind}`,
+    summary: receipt.summary,
+    severity: result.status === "degraded" ? "warning" : "info",
+    workRef: {
+      receiptId: receipt.receiptId,
+      sequence: receipt.sequence,
+      correlationId: receipt.correlationId,
+    },
+    resultRef: {
+      artifactPath: `curator://receipt/${receipt.receiptId}`,
+    },
+  });
+  if (result.status === "degraded") {
+    throw new Error(result.message);
+  }
 }
 
 function createServiceBackgroundReviewRuntime(
@@ -2889,13 +2930,21 @@ async function curatorStatus(state: ServiceState): Promise<CuratorAdminStatus> {
     listCuratorArchivedSkills(skillsDir),
   ]);
   return {
-    status: state.curator.lastError ? "degraded" : "available",
+    status:
+      state.curator.lastError ||
+      state.curator.store.activityProjectionFailures.length > 0
+        ? "degraded"
+        : "available",
     candidateCount: state.curator.store.candidates.size,
     mutationCount: state.curator.store.mutations.size,
     pinnedSkillCount: pinnedSkills.length,
     archivedSkillCount: archivedSkills.length,
     lastRunAt: state.curator.lastRunAt,
     lastError: state.curator.lastError,
+    activityProjectionFailureCount:
+      state.curator.store.activityProjectionFailures.length,
+    lastActivityReceiptId: state.curator.store.lastActivityReceipt?.receiptId,
+    lastActivitySequence: state.curator.store.lastActivityReceipt?.sequence,
     lifecycle: state.curator.lastLifecycleReport,
   };
 }

@@ -233,14 +233,23 @@ const nativeCandidate: CuratorMutationCandidate = {
     newString: "Native persisted body.",
   },
 };
+const projectedReceiptIds: string[] = [];
+let failActivityProjection = false;
 const nativeStore = await NativeCuratorGovernanceStore.load({
   bridge,
   now: "2026-06-21T14:00:00.000Z",
   skillsDir,
   snapshotRoot: nativeSnapshotRoot,
+  publishActivity: async (receipt) => {
+    projectedReceiptIds.push(receipt.receiptId);
+    if (failActivityProjection) {
+      throw new Error("synthetic observation outage");
+    }
+  },
 });
 nativeStore.upsertCandidate(nativeCandidate);
 await nativeStore.persist();
+assert.equal(projectedReceiptIds.length, 1);
 const nativeExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store: nativeStore,
@@ -248,6 +257,27 @@ const nativeExecutor = createCuratorGovernanceExecutor({
   now: () => new Date("2026-06-21T14:00:00.000Z"),
   planner,
 });
+await assert.rejects(
+  nativeExecutor({
+    action: "apply_candidate",
+    candidateId: nativeCandidate.candidateId,
+    reason: "must reject unapproved mutation",
+    dryRun: false,
+  }),
+  /curator_candidate_not_approved/,
+);
+const rejectedAudit = (await bridge.listCuratorAuditReceipts({
+  candidate_id: nativeCandidate.candidateId,
+  page: { limit: 20, offset: 0 },
+})) as {
+  items: Array<{ activityKind: string; reasonCode?: string }>;
+};
+assert.equal(rejectedAudit.items.at(-1)?.activityKind, "mutation_failed");
+assert.equal(
+  rejectedAudit.items.at(-1)?.reasonCode,
+  "curator_candidate_not_approved",
+);
+failActivityProjection = true;
 const nativeApproval = await nativeExecutor({
   action: "approve_candidate",
   candidateId: nativeCandidate.candidateId,
@@ -255,6 +285,11 @@ const nativeApproval = await nativeExecutor({
   dryRun: false,
 });
 assert.equal(nativeApproval.status, "approved");
+assert.equal(nativeStore.activityProjectionFailures.length, 1);
+assert.match(
+  nativeStore.activityProjectionFailures[0]!.message,
+  /synthetic observation outage/,
+);
 
 const reloadedNativeStore = await NativeCuratorGovernanceStore.load({
   bridge,
