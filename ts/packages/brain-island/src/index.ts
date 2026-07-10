@@ -8,9 +8,6 @@ export type {
 } from "./local-brain.js";
 export {
   createBrainWakeExecutor,
-  createLocalBrain,
-  createPlaceholderBrain,
-  envelope,
   registerBrainImplementationRuntime,
 } from "./local-brain.js";
 export * from "./package-surface/service.js";

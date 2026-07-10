@@ -1,6 +1,8 @@
+mod catalog;
 mod coordinator;
 mod tool_policy;
 
+pub use catalog::*;
 pub use coordinator::*;
 pub use tool_policy::*;
 

@@ -182,7 +182,7 @@ export function createPiAgentBrain(
       const providerDebug = options.providerRequestDebugStore?.record({
         sessionId: input.sessionId,
         wakeId: input.wakeId,
-        brainModule: "pi-agent-core",
+        brainModule: "pi-agent",
         model: modelConfig?.modelName,
         protocol: modelConfig?.api,
         providerKind: modelConfig?.provider,

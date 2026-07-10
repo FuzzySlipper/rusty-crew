@@ -4,7 +4,7 @@ import type {
   SessionHandle,
   SessionId,
 } from "@rusty-crew/contracts";
-import { createLocalBrain } from "../src/index.js";
+import { createLocalBrain } from "./support/local-brain-test-support.js";
 
 const sessionId = "smoke-session" as SessionId;
 

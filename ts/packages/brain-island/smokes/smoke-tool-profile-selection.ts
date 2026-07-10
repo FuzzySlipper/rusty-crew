@@ -13,11 +13,11 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildBrainRegistrationFromToolProfile,
-  createLocalBrain,
   createToolCatalogChangedPayload,
   registerBrainImplementationRuntime,
   selectToolProfile,
 } from "../src/index.js";
+import { createLocalBrain } from "./support/local-brain-test-support.js";
 import type { BrainRoleAssembly } from "../src/index.js";
 
 const encoder = new TextEncoder();

@@ -5,7 +5,7 @@ import type {
   ProfileId,
   ResourceLimits,
 } from "@rusty-crew/contracts";
-import type { BrainModuleId } from "./brain-module.js";
+import type { BrainModuleId } from "./brain-catalog.js";
 import {
   selectToolProfile,
   type ProfileToolPolicy,

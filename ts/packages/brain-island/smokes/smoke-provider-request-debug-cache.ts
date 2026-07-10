@@ -141,7 +141,7 @@ const detail = providerRequestDebugStore.get({
   debugDetailId: metadata.provider_request_debug_detail_id ?? "",
 });
 assert.ok(detail);
-assert.equal(detail.provider.brain_module, "pi-agent-core");
+assert.equal(detail.provider.brain_module, "pi-agent");
 assert.equal(detail.provider.model, "debug-model");
 assert.equal(detail.request.redacted, false);
 const request = detail.request.value as {

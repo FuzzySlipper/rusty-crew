@@ -47,6 +47,24 @@ summary = "Drain and close the Rust coordination engine."
 # Brain island registration and wake path.
 
 [[operation]]
+name = "brain_catalog"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "brain_runtime::BrainCatalog"
+errors = "core_protocol::CoreError"
+summary = "Read the canonical Rust-owned built-in brain and strategy catalog."
+
+[[operation]]
+name = "plan_brain_selection"
+surface = "stable"
+direction = "ts_to_rust"
+input = "brain_runtime::BrainSelectionRequest"
+output = "brain_runtime::BrainSelectionPlan"
+errors = "core_protocol::CoreError"
+summary = "Validate and resolve a profile/provider brain selection through the Rust catalog."
+
+[[operation]]
 name = "register_brain_implementation"
 surface = "stable"
 direction = "ts_to_rust"

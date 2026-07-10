@@ -15,9 +15,9 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildDelegatedRoleAssemblyFromLifecyclePlan,
-  createLocalBrain,
   registerBrainImplementationRuntime,
 } from "../src/index.js";
+import { createLocalBrain } from "./support/local-brain-test-support.js";
 
 const encoder = new TextEncoder();
 const engineDataDir = mkdtempSync(

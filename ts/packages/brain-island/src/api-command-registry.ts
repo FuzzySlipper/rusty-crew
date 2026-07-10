@@ -935,6 +935,14 @@ export const API_CAPABILITIES = [
     ["tool", "profile", "config"],
   ),
   readCapability(
+    "admin.brain_catalog.read",
+    "GET",
+    "/v1/admin/brains/catalog",
+    "List canonical Rust-owned brain modules, strategies, protocols, and host capability requirements.",
+    "admin",
+    ["service", "profile", "config"],
+  ),
+  readCapability(
     "admin.context_strategies.catalog",
     "GET",
     "/v1/admin/context-strategies",

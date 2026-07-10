@@ -12,7 +12,7 @@ import {
   profilePromptAssetConfigPaths,
   profileRuntimeGraphWireFieldPaths,
   ProfileLoadError,
-  resolveBrainModuleSelection,
+  resolveBrainCatalogSelection,
 } from "../src/index.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-profile-loading-"));
@@ -165,8 +165,9 @@ Use Codex for bounded coding delegation when context isolation helps.
   assert.equal(context.profile.displayName, "Prime Coder");
   assert.equal(context.profile.modelConfig.provider, "den-router");
   assert.equal(
-    resolveBrainModuleSelection(context.profile).moduleId,
-    "pi-agent-core",
+    (await resolveBrainCatalogSelection(native, context.profile)).selection
+      .moduleId,
+    "pi-agent",
   );
   assert.equal(
     context.profile.runtime?.defaultResourceLimits?.maxDelegationDepth,

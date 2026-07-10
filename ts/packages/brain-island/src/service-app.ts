@@ -74,6 +74,7 @@ import {
   type MemorySpaceDiagnosticsProjection,
 } from "./admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
+import { handleAdminBrainCatalogRequest } from "./service-brain-catalog-routes.js";
 import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
 import { handleAdminMcpServerRegistryRequest } from "./service-mcp-server-registry-routes.js";
 import {
@@ -1345,6 +1346,16 @@ async function handleHttpRequest(
       method: request.method ?? "GET",
       requestId: requestId(request),
     });
+  }
+
+  if (route?.id === "admin.brain_catalog") {
+    return handleAdminBrainCatalogRequest(
+      {
+        method: request.method ?? "GET",
+        requestId: requestId(request),
+      },
+      state.bridge,
+    );
   }
 
   if (route?.id === "admin.context_strategies") {

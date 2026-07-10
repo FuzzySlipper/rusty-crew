@@ -33,7 +33,7 @@ const profile: ProfileConfig = {
     modelName: "local-deterministic",
   },
   brain: {
-    module: "local",
+    module: "pi-agent",
     strategy: "default",
   },
   runtime: {

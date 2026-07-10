@@ -33,9 +33,6 @@ const runtimeExportGroups: Record<string, string[]> = {
   coreBrain: [
     "createBrainWakeExecutor",
     "registerBrainImplementationRuntime",
-    "createLocalBrain",
-    "createPlaceholderBrain",
-    "envelope",
     "wakeBrainFromBridgeRequest",
   ],
   serviceConfig: [
@@ -126,11 +123,17 @@ assert.equal(
   "function",
   "service app factory should stay callable from the package root",
 );
-assert.equal(
-  typeof brainIsland.createLocalBrain,
-  "function",
-  "local brain factory should stay callable from the package root",
-);
+for (const testOnlyExport of [
+  "createLocalBrain",
+  "createPlaceholderBrain",
+  "envelope",
+]) {
+  assert.equal(
+    testOnlyExport in brainIsland,
+    false,
+    `${testOnlyExport} must remain test-only`,
+  );
+}
 assert.equal(
   typeof brainIsland.readFileTool,
   "function",

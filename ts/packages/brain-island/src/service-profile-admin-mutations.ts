@@ -572,6 +572,19 @@ export async function createServiceProfile(
   );
   const runtimeConfigFile = await readRuntimeConfigFileForMutation(context);
   const profiles = await loadRuntimeConfigProfiles(context);
+  const requestedBrain =
+    profileBrainFromBody(command.body.brain ?? command.body.brainSelection) ??
+    defaultProfileBrainForModelProvider(modelProvider);
+  const brainSelection = await context.bridge.planBrainSelection({
+    ...(requestedBrain.module === undefined
+      ? {}
+      : { configuredModuleId: requestedBrain.module }),
+    ...(requestedBrain.strategy === undefined
+      ? {}
+      : { configuredStrategyId: requestedBrain.strategy }),
+    providerProtocol: modelProvider.protocol,
+    providerKind: modelProvider.providerKind,
+  });
   const plan = await planCreateProfileWithRust({
     bridge: context.bridge,
     runtimeConfig: context.runtimeConfig,
@@ -584,10 +597,10 @@ export async function createServiceProfile(
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
       providerAlias,
-      brain:
-        profileBrainFromBody(
-          command.body.brain ?? command.body.brainSelection,
-        ) ?? defaultProfileBrainForModelProvider(modelProvider),
+      brain: {
+        module: brainSelection.module_id,
+        strategy: brainSelection.selected_strategy_id,
+      },
       mcpBindings: createProfileMcpBindingsFromBody(command.body.mcpBindings),
       mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
       source: profileCreateSourceFromBody(command.body.source),
@@ -989,10 +1002,7 @@ export function defaultProfileBrainForModelProvider(
   if (provider.protocol === "responses") {
     return { module: "openai-responses" };
   }
-  if (provider.providerKind === "local") {
-    return { module: "local" };
-  }
-  return { module: "pi-agent-core" };
+  return { module: "pi-agent" };
 }
 
 export interface RuntimeConfigFileForMutation {

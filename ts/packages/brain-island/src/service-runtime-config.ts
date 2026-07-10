@@ -8,6 +8,7 @@ import type {
   BrainImplementationHandle,
   BrainImplementationId,
   BrainProviderStateScope,
+  BrainStrategyMetadata,
   CompletionStatus,
   CompletionPacket,
   ChannelBindingRecord,
@@ -48,17 +49,16 @@ import {
 } from "./coordination-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
 import {
-  createBrainModuleRegistry,
-  brainStrategyMetadataForModuleStrategy,
+  brainExecutorForSelection,
   openAiResponsesClientMode,
   openAiResponsesStreamIdleTimeoutMs,
-  providerStateRebuildPolicyForModuleStrategy,
-  resolveBrainModuleStrategy,
-  resolveBrainStrategyMetadata,
-  resolveBrainModuleSelection,
   type BrainModule,
-  type BrainModuleSelection,
 } from "./brain-module.js";
+import {
+  resolveBrainCatalogSelection,
+  type BrainModuleSelection,
+  type BrainModuleStrategyMetadata,
+} from "./brain-catalog.js";
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { nextCronDueAt } from "./cron-expression.js";
 import {
@@ -790,16 +790,14 @@ export async function applyRustyCrewRuntimeConfig(input: {
     brainDiagnosticsByProfileId: {},
   };
 
-  const brainModuleRegistry = createBrainModuleRegistry();
   for (const brain of runtimeConfig.brains) {
     const profile = await loadProfile(brain.profileId);
-    const selection = resolveBrainModuleSelection(profile.profile);
-    const module = brainModuleRegistry.require(selection.moduleId);
-    const moduleStrategy = resolveBrainModuleStrategy(module, selection);
-    const strategy = brainStrategyMetadataForModuleStrategy(
-      module,
-      moduleStrategy,
+    const resolvedBrain = await resolveBrainCatalogSelection(
+      input.bridge,
+      profile.profile,
     );
+    const { selection, moduleStrategy, strategy } = resolvedBrain;
+    const module = brainExecutorForSelection(selection);
     const providerStateScope = providerStateScopeForProfile({
       profile,
       strategy,
@@ -813,7 +811,6 @@ export async function applyRustyCrewRuntimeConfig(input: {
         selection,
         strategy,
         moduleStrategy,
-        module,
       });
     try {
       const handle = await input.bridge.registerBrainRuntime(
@@ -1049,14 +1046,12 @@ export async function rebuildConfiguredBrainRuntime(input: {
       input.adapterFactories,
     ),
   });
-  const brainModuleRegistry = createBrainModuleRegistry();
-  const selection = resolveBrainModuleSelection(profile.profile);
-  const module = brainModuleRegistry.require(selection.moduleId);
-  const moduleStrategy = resolveBrainModuleStrategy(module, selection);
-  const strategy = brainStrategyMetadataForModuleStrategy(
-    module,
-    moduleStrategy,
+  const resolvedBrain = await resolveBrainCatalogSelection(
+    input.bridge,
+    profile.profile,
   );
+  const { selection, moduleStrategy, strategy } = resolvedBrain;
+  const module = brainExecutorForSelection(selection);
   const providerStateScope = providerStateScopeForProfile({
     profile,
     strategy,
@@ -1104,7 +1099,6 @@ export async function rebuildConfiguredBrainRuntime(input: {
       selection,
       strategy,
       moduleStrategy,
-      module,
     }),
   };
 }
@@ -1303,9 +1297,8 @@ function brainModuleDiagnostics(input: {
   profile: Awaited<ReturnType<typeof loadProfileContext>>;
   implementationId: BrainImplementationId;
   selection: BrainModuleSelection;
-  strategy: ReturnType<typeof resolveBrainStrategyMetadata>;
-  moduleStrategy: ReturnType<typeof resolveBrainModuleStrategy>;
-  module: BrainModule;
+  strategy: BrainStrategyMetadata;
+  moduleStrategy: BrainModuleStrategyMetadata;
 }): RuntimeBrainModuleDiagnostics {
   return {
     profileId: input.profile.profile.profileId,
@@ -1314,7 +1307,7 @@ function brainModuleDiagnostics(input: {
     ...(input.selection.strategy === undefined
       ? {}
       : { strategy: input.selection.strategy }),
-    effectiveStrategy: input.strategy.strategyId,
+    effectiveStrategy: input.moduleStrategy.diagnostics.effectiveStrategyId,
     ...(input.profile.profile.providerAlias === undefined
       ? {}
       : { providerAlias: input.profile.profile.providerAlias }),
@@ -1362,15 +1355,11 @@ function brainModuleDiagnostics(input: {
           }),
     },
     providerStateMode: input.strategy.providerState.mode,
-    providerStateRebuild: providerStateRebuildPolicyForModuleStrategy(
-      input.moduleStrategy,
-    ),
-    ...(input.moduleStrategy.diagnostics === undefined
-      ? {}
-      : { strategyDiagnostics: input.moduleStrategy.diagnostics }),
+    providerStateRebuild: input.moduleStrategy.providerState.rebuild,
+    strategyDiagnostics: input.moduleStrategy.diagnostics,
     selectedToolCount: input.profile.toolSelection.toolProfile.tools.length,
     selectedToolSource: input.profile.toolSelection.catalogId,
-    toolAdapterStatus: input.module.diagnostics.toolAdapterStatus,
+    toolAdapterStatus: "native_neutral_tools",
   };
 }
 

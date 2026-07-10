@@ -5,7 +5,8 @@
 //! transport dependencies into core crates.
 
 use rusty_crew_brain_runtime::{
-    BrainRuntimeError, BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic,
+    brain_catalog, plan_brain_selection, BrainRuntimeError, BrainSelectionRequest,
+    BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic,
 };
 use rusty_crew_core_bridge_api::{
     manifest_summary, wire_shape_fingerprint, ActionBatchReceipt, BrainActionBatch,
@@ -109,6 +110,7 @@ use rusty_crew_roleplay_core::{
     RoleplaySceneStateReadInput, RoleplaySceneStateUpdateInput, RoleplaySessionLifecyclePlanInput,
     RoleplaySessionMetadataPatchInput, RoleplaySpeakerIdentityInput,
 };
+mod binding_brains;
 mod binding_config_profiles;
 mod binding_conversation;
 mod binding_delegation;

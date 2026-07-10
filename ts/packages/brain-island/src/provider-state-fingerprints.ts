@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BrainProviderStateScope } from "@rusty-crew/contracts";
-import type { BrainModuleStrategyMetadata } from "./brain-module.js";
+import type { BrainModuleStrategyMetadata } from "./brain-catalog.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
 import type { BrainStrategyMetadata } from "@rusty-crew/contracts";
 

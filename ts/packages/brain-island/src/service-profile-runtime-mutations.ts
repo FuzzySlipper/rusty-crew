@@ -39,6 +39,7 @@ export interface ProfileRegistryRuntimeConfigMutationContext {
     | "deleteSimpleKv"
     | "validateLocalToolProfilePolicy"
     | "planProfileRegistryMutation"
+    | "planBrainSelection"
   >;
   runtimeConfig: RustyCrewRuntimeConfig;
   serviceConfigFile: string;
@@ -381,11 +382,36 @@ async function editableRuntimeConfigFromBody(
     });
   }
 
-  const brain = Object.hasOwn(body, "brain")
+  let brain = Object.hasOwn(body, "brain")
     ? profileBrainFromBody(body.brain)
     : Object.hasOwn(body, "providerAlias") && modelProvider !== undefined
       ? defaultProfileBrainForModelProvider(modelProvider)
       : existing.runtimeConfig.brain;
+  if (modelProvider !== undefined && brain !== undefined) {
+    try {
+      const selection = await context.bridge.planBrainSelection({
+        ...(brain.module === undefined
+          ? {}
+          : { configuredModuleId: brain.module }),
+        ...(brain.strategy === undefined
+          ? {}
+          : { configuredStrategyId: brain.strategy }),
+        providerProtocol: modelProvider.protocol,
+        providerKind: modelProvider.providerKind,
+      });
+      brain = {
+        module: selection.module_id,
+        strategy: selection.selected_strategy_id,
+      };
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "brain_selection_invalid",
+        path: "brain",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   const localToolProfileId = Object.hasOwn(body, "localToolProfileId")
     ? optionalString(body.localToolProfileId)
@@ -728,10 +754,7 @@ function defaultProfileBrainForModelProvider(
   if (provider.protocol === "responses") {
     return { module: "openai-responses" };
   }
-  if (provider.providerKind === "local") {
-    return { module: "local" };
-  }
-  return { module: "pi-agent-core" };
+  return { module: "pi-agent" };
 }
 
 function profileBrainFromBody(

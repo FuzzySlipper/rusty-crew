@@ -12,6 +12,7 @@ export type ServiceApiRouteId =
   | "admin.mcp.catalog"
   | "admin.mcp.servers"
   | "admin.tools.catalog"
+  | "admin.brain_catalog"
   | "admin.context_strategies"
   | "admin.local_tool_profiles"
   | "roleplay"
@@ -91,6 +92,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     (path) =>
       path === "/v1/admin/tools/catalog" ||
       path === "/v1/admin/tool-policy/catalog",
+  ),
+  route(
+    "admin.brain_catalog",
+    165,
+    "after_auth",
+    "Rust brain catalog route",
+    (path) => path === "/v1/admin/brains/catalog",
   ),
   route(
     "admin.context_strategies",

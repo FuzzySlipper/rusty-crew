@@ -421,6 +421,12 @@ function serviceRouteFamilyCoverage(): readonly {
       pathTemplate: "/v1/admin/tools/catalog",
     },
     {
+      routeId: "admin.brain_catalog",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/brains/catalog",
+    },
+    {
       routeId: "admin.context_strategies",
       authPhase: "after_auth",
       method: "GET",

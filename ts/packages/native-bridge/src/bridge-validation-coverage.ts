@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 178;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 180;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 40;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 33;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 145;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 147;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -88,6 +88,12 @@ const RUST_FIXTURE_FAMILY_NAMES = [
 ] as const;
 
 const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
+  {
+    group: "brain_catalog",
+    reason:
+      "Rust catalog DTOs are checked through the generated native declaration surface, Rust selection tests, and the runtime catalog smoke; add TypeBox validation before admitting foreign brain catalog entries.",
+    operations: ["brain_catalog", "plan_brain_selection"],
+  },
   {
     group: "engine_lifecycle",
     reason:

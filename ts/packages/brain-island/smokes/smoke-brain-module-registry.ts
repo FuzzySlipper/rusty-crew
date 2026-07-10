@@ -3,11 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-} from "./support/legacy-pi-agent-test-harness.js";
-import type {
   BrainImplementationHandle,
   SessionId,
 } from "@rusty-crew/contracts";
@@ -21,74 +16,12 @@ import {
   applyRustyCrewRuntimeConfig,
   loadRustyCrewRuntimeConfig,
 } from "../src/service-runtime-config.js";
+import { handleAdminBrainCatalogRequest } from "../src/service-brain-catalog-routes.js";
+import { resolveBrainCatalogSelection } from "../src/brain-catalog.js";
 
 const encoder = new TextEncoder();
-const abortSignal = new AbortController().signal;
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-brain-modules-"));
 const native = await loadNativeBridge();
-
-class FinalTextFakePiAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
-
-  constructor(private readonly options: PiAgentOptions) {}
-
-  subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
-  ): () => void {
-    this.listener = listener;
-    return () => {
-      this.listener = undefined;
-    };
-  }
-
-  async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
-  ): Promise<void> {
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, abortSignal);
-    this.listener?.(
-      {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [
-            {
-              type: "text",
-              text: `pi module ${this.options.sessionId} replied`,
-            },
-          ],
-          api: "openai-completions",
-          provider: "den-router",
-          model: "fake-model",
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: {
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              total: 0,
-            },
-          },
-          stopReason: "stop",
-          timestamp: Date.now(),
-        },
-      } as PiAgentEvent,
-      abortSignal,
-    );
-    this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
-      abortSignal,
-    );
-  }
-
-  async waitForIdle(): Promise<void> {}
-
-  clearAllQueues(): void {}
-}
 
 try {
   writeRuntimeConfig(root);
@@ -104,6 +37,44 @@ try {
     defaultIdleTimeoutMs: 1_000,
   });
   try {
+    const catalog = await native.brainCatalog();
+    assert.deepEqual(
+      catalog.modules.map((module) => module.module_id),
+      ["pi-agent", "openai-responses"],
+    );
+    await assert.rejects(
+      () =>
+        resolveBrainCatalogSelection(
+          native,
+          {
+            modelConfig: {
+              provider: "test",
+              modelName: "test",
+              api: "responses",
+            },
+          },
+          {
+            registrationId: "rusty-crew-ts-host",
+            capabilities: ["execute_tool"],
+          },
+        ),
+      /unregistered host capabilities/,
+    );
+    assert.equal(
+      catalog.modules.some((module) => module.module_id === "local"),
+      false,
+    );
+    const catalogRoute = await handleAdminBrainCatalogRequest(
+      { method: "GET", requestId: "brain-catalog-smoke" },
+      native,
+    );
+    assert.equal(catalogRoute.status, 200);
+    assert.deepEqual(
+      (catalogRoute.body as { data: typeof catalog }).data.modules.map(
+        (module) => module.module_id,
+      ),
+      ["pi-agent", "openai-responses"],
+    );
     const applyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig,
       runtimeConfig,
@@ -112,11 +83,7 @@ try {
 
     assert.equal(
       applyResult.brainModulesByProfileId["pi-profile"]?.moduleId,
-      "pi-agent-core",
-    );
-    assert.equal(
-      applyResult.brainModulesByProfileId["local-profile"]?.moduleId,
-      "local",
+      "pi-agent",
     );
     assert.equal(
       applyResult.brainModulesByProfileId["responses-profile"]?.moduleId,
@@ -124,7 +91,7 @@ try {
     );
     assert.equal(
       applyResult.brainModulesByProfileId["narrator-profile"]?.moduleId,
-      "pi-agent-core",
+      "pi-agent",
     );
     assert.equal(
       applyResult.brainModulesByProfileId["narrator-profile"]?.strategy,
@@ -142,11 +109,6 @@ try {
       (applyResult.brainDiagnosticsByProfileId["pi-profile"]
         ?.selectedToolCount ?? 0) > 0,
       "pi module diagnostics should report selected tools",
-    );
-    assert.equal(
-      applyResult.brainDiagnosticsByProfileId["local-profile"]
-        ?.toolAdapterStatus,
-      "tools_not_used",
     );
     assert.equal(
       applyResult.brainDiagnosticsByProfileId["responses-profile"]
@@ -204,22 +166,12 @@ try {
         [
           "pi-profile",
           "pi-brain",
-          "pi-agent-core",
+          "pi-agent",
           "default",
           "default",
           "unused",
           "default-local-tools",
           "native_neutral_tools",
-        ],
-        [
-          "local-profile",
-          "local-brain",
-          "local",
-          undefined,
-          "default",
-          "unused",
-          "default-local-tools",
-          "tools_not_used",
         ],
         [
           "responses-profile",
@@ -236,7 +188,7 @@ try {
           "responses-chain-brain",
           "openai-responses",
           "previous-response-chain",
-          "previous-response-chain",
+          "replay",
           "optional",
           "default-local-tools",
           "native_neutral_tools",
@@ -244,7 +196,7 @@ try {
         [
           "narrator-profile",
           "narrator-brain",
-          "pi-agent-core",
+          "pi-agent",
           "roleplay_narrator",
           "roleplay_narrator",
           "unused",
@@ -268,11 +220,6 @@ try {
       "pi-session" as SessionId,
       "wake-pi-module",
     );
-    const localResult = await wakeSession(
-      applyResult.brainHandlesByProfileId["local-profile"],
-      "local-session" as SessionId,
-      "wake-local-module",
-    );
     const responsesResult = await wakeSession(
       applyResult.brainHandlesByProfileId["responses-profile"],
       "responses-session" as SessionId,
@@ -285,10 +232,6 @@ try {
     );
 
     assert.deepEqual(piResult, { wakeId: "wake-pi-module", accepted: true });
-    assert.deepEqual(localResult, {
-      wakeId: "wake-local-module",
-      accepted: true,
-    });
     assert.deepEqual(responsesResult, {
       wakeId: "wake-responses-module",
       accepted: true,
@@ -297,7 +240,7 @@ try {
       wakeId: "wake-narrator-module",
       accepted: true,
     });
-    assert.equal(await native.countRows("completion_packets"), 4);
+    assert.equal(await native.countRows("completion_packets"), 3);
 
     const observedEvents = await native.drainSubscriptionEvents(
       brainEvents,
@@ -408,7 +351,6 @@ function writeRuntimeConfig(dataDir: string): void {
         profilesDir,
         brains: [
           { profileId: "pi-profile", implementationId: "pi-brain" },
-          { profileId: "local-profile", implementationId: "local-brain" },
           {
             profileId: "responses-profile",
             implementationId: "responses-brain",
@@ -427,12 +369,6 @@ function writeRuntimeConfig(dataDir: string): void {
             sessionId: "pi-session",
             agentId: "pi-agent",
             profileId: "pi-profile",
-            kind: "full",
-          },
-          {
-            sessionId: "local-session",
-            agentId: "local-agent",
-            profileId: "local-profile",
             kind: "full",
           },
           {
@@ -475,23 +411,6 @@ function writeRuntimeConfig(dataDir: string): void {
         },
         toolPolicy: {
           requestedTools: ["git_status"],
-        },
-      },
-      null,
-      2,
-    ),
-  );
-  writeFileSync(
-    join(profilesDir, "local-profile.json"),
-    JSON.stringify(
-      {
-        profileId: "local-profile",
-        modelConfig: {
-          provider: "local",
-          modelName: "deterministic",
-        },
-        brain: {
-          module: "local",
         },
       },
       null,

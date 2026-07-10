@@ -317,6 +317,8 @@ interface NativeBridgeBinding {
     kind: string;
     displayName: string;
   }): number;
+  brainCatalogJson(): string;
+  planBrainSelectionJson(inputJson: string): string;
   validateToolMetadataPolicyJson(inputJson: string): string;
   validateLocalToolProfilePolicyJson(inputJson: string): string;
   planToolAvailabilityJson(inputJson: string): string;
@@ -1921,6 +1923,73 @@ export interface NativeNewSessionControlPlan {
   }>;
 }
 
+export type NativeBrainProviderProtocol = "chat_completions" | "responses";
+export type NativeBrainProviderStateMode = "unused" | "optional" | "required";
+export type NativeBrainHostCapability =
+  | "execute_tool"
+  | "project_debug_reference"
+  | "project_event";
+
+export interface NativeBrainProviderStatePolicy {
+  mode: NativeBrainProviderStateMode;
+  rebuild: {
+    action: "discard" | "migrate" | "unsupported";
+    reason: string;
+    migration_id?: string;
+  };
+}
+
+export interface NativeBrainStrategyDiagnostics {
+  selected_strategy_id: string;
+  effective_strategy_id: string;
+  replay_fallback_used: boolean;
+  fallback_reason?: string;
+  fallback_reason_catalog?: string[];
+}
+
+export interface NativeBrainCatalogStrategy {
+  strategy_id: string;
+  provider_state: NativeBrainProviderStatePolicy;
+  profile_fingerprint_options?: unknown;
+  provider_fingerprint_options?: unknown;
+  diagnostics: NativeBrainStrategyDiagnostics;
+}
+
+export interface NativeBrainCatalogModule {
+  module_id: string;
+  display_name: string;
+  provider_protocols: NativeBrainProviderProtocol[];
+  default_strategy_id: string;
+  strategies: NativeBrainCatalogStrategy[];
+  required_host_capabilities: NativeBrainHostCapability[];
+}
+
+export interface NativeBrainCatalog {
+  revision: number;
+  modules: NativeBrainCatalogModule[];
+}
+
+export interface NativeBrainSelectionRequest {
+  configuredModuleId?: string;
+  configuredStrategyId?: string;
+  providerProtocol: NativeBrainProviderProtocol;
+  providerKind: string;
+  roleplayNarratorEnabled?: boolean;
+}
+
+export interface NativeBrainSelectionPlan {
+  catalog_revision: number;
+  module_id: string;
+  canonicalized_from?: string;
+  selected_strategy_id: string;
+  effective_strategy_id: string;
+  provider_state_policy: NativeBrainProviderStatePolicy;
+  profile_fingerprint_options?: unknown;
+  provider_fingerprint_options?: unknown;
+  strategy_diagnostics: NativeBrainStrategyDiagnostics;
+  required_host_capabilities: NativeBrainHostCapability[];
+}
+
 export interface NativeReloadMcpControlPlanInput {
   command: {
     commandKind: string;
@@ -2289,6 +2358,10 @@ export interface NativeBridgeModule {
   registerPlatformAdapter(
     registration: PlatformAdapterRegistration,
   ): Promise<PlatformAdapterHandle>;
+  brainCatalog(): Promise<NativeBrainCatalog>;
+  planBrainSelection(
+    input: NativeBrainSelectionRequest,
+  ): Promise<NativeBrainSelectionPlan>;
   validateToolMetadataPolicy(
     input: NativeToolMetadataPolicyValidationInput,
   ): Promise<NativeToolMetadataPolicyValidationResult>;
@@ -2855,6 +2928,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     submitBrainEvent: unavailable("submit_brain_event"),
     submitBrainActions: unavailable("submit_brain_actions"),
     registerPlatformAdapter: unavailable("register_platform_adapter"),
+    brainCatalog: unavailable("brain_catalog"),
+    planBrainSelection: unavailable("plan_brain_selection"),
     validateToolMetadataPolicy: unavailable("validate_tool_metadata_policy"),
     validateLocalToolProfilePolicy: unavailable(
       "validate_local_tool_profile_policy",
@@ -3601,6 +3676,24 @@ function createNativeBridgeModule(
         kind: registration.kind,
         displayName: registration.displayName,
       }) as PlatformAdapterHandle,
+    brainCatalog: async () =>
+      JSON.parse(binding.brainCatalogJson()) as NativeBrainCatalog,
+    planBrainSelection: async (input) =>
+      JSON.parse(
+        binding.planBrainSelectionJson(
+          JSON.stringify({
+            ...(input.configuredModuleId === undefined
+              ? {}
+              : { configured_module_id: input.configuredModuleId }),
+            ...(input.configuredStrategyId === undefined
+              ? {}
+              : { configured_strategy_id: input.configuredStrategyId }),
+            provider_protocol: input.providerProtocol,
+            provider_kind: input.providerKind,
+            roleplay_narrator_enabled: input.roleplayNarratorEnabled ?? false,
+          }),
+        ),
+      ) as NativeBrainSelectionPlan,
     validateToolMetadataPolicy: async (input) =>
       JSON.parse(
         binding.validateToolMetadataPolicyJson(JSON.stringify(input)),

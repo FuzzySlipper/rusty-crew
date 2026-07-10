@@ -2,13 +2,9 @@ import type {
   BrainAction,
   BrainEvent,
   BrainEventEnvelope,
-  CompletionPacket,
   BrainProviderStateScope,
   BrainWakeProviderStateOutput,
   BrainWakeStreamItem,
-  BrainStrategyMetadata,
-  ProviderStateMode,
-  SessionId,
   ToolProfile,
 } from "@rusty-crew/contracts";
 import type {
@@ -51,75 +47,7 @@ import {
   type BrainActionCollector,
   type BrainToolResolver,
 } from "./tool-session-selection.js";
-
-export type BrainModuleId = "pi-agent-core" | "local" | (string & {});
-
-export interface BrainModuleSelection {
-  moduleId: BrainModuleId;
-  strategy?: string;
-}
-
-export interface BrainModuleStrategyProviderStateMetadata {
-  mode: ProviderStateMode;
-  rebuild: BrainModuleProviderStateRebuildPolicy;
-}
-
-export type BrainModuleProviderStateRebuildAction =
-  | "discard"
-  | "migrate"
-  | "unsupported";
-
-export interface BrainModuleProviderStateRebuildPolicy {
-  action: BrainModuleProviderStateRebuildAction;
-  reason: string;
-  migrationId?: string;
-}
-
-export type PreviousResponseChainFallbackReason =
-  | "no_predecessor_state"
-  | "request_fingerprint_mismatch"
-  | "profile_fingerprint_mismatch"
-  | "provider_fingerprint_mismatch"
-  | "predecessor_rejected_by_provider"
-  | "provider_state_expired"
-  | "provider_state_load_failed"
-  | "input_not_append_only"
-  | "normal_invalidation";
-
-export interface BrainModuleStrategyFingerprintMetadata {
-  profileOptions?: unknown;
-  providerOptions?: unknown;
-}
-
-export interface BrainModuleStrategyDiagnosticsMetadata {
-  selectedStrategyId: string;
-  effectiveStrategyId: string;
-  replayFallbackUsed: boolean;
-  fallbackReason?: PreviousResponseChainFallbackReason;
-  fallbackReasonCatalog?: readonly PreviousResponseChainFallbackReason[];
-}
-
-export interface BrainModuleStrategyMetadata {
-  strategyId: string;
-  providerState: BrainModuleStrategyProviderStateMetadata;
-  fingerprints?: BrainModuleStrategyFingerprintMetadata;
-  diagnostics?: BrainModuleStrategyDiagnosticsMetadata;
-}
-
-export type BrainModuleToolAdapterStatus =
-  | "neutral_tools_adapted_to_pi"
-  | "native_neutral_tools"
-  | "tools_not_used"
-  | "unknown";
-
-export interface BrainModuleDiagnosticsMetadata {
-  toolAdapterStatus: BrainModuleToolAdapterStatus;
-}
-
-export interface BrainModuleConfigSelection {
-  module?: BrainModuleId;
-  strategy?: string;
-}
+import type { BrainModuleSelection } from "./brain-catalog.js";
 
 export interface BrainModuleContext {
   profile: LoadedProfileContext;
@@ -135,154 +63,27 @@ export interface BrainModuleContext {
 }
 
 export interface BrainModule {
-  readonly moduleId: BrainModuleId;
-  readonly displayName: string;
-  readonly defaultStrategyId: string;
-  readonly strategies: readonly BrainModuleStrategyMetadata[];
-  readonly diagnostics: BrainModuleDiagnosticsMetadata;
   createBrain(context: BrainModuleContext): Promise<BrainImplementation>;
 }
 
-export interface BrainModuleRegistry {
-  get(moduleId: BrainModuleId): BrainModule | undefined;
-  require(moduleId: BrainModuleId): BrainModule;
-  list(): readonly BrainModule[];
-}
-
-export function createBrainModuleRegistry(
-  modules: readonly BrainModule[] = defaultBrainModules(),
-): BrainModuleRegistry {
-  const byId = new Map(modules.map((module) => [module.moduleId, module]));
-  return {
-    get(moduleId) {
-      return byId.get(moduleId);
-    },
-    require(moduleId) {
-      const module = byId.get(moduleId);
-      if (!module) {
-        throw new Error(`unknown brain module ${moduleId}`);
-      }
-      return module;
-    },
-    list() {
-      return [...byId.values()].sort((left, right) =>
-        left.moduleId.localeCompare(right.moduleId),
-      );
-    },
-  };
-}
-
-export function defaultBrainModules(): BrainModule[] {
-  return [
-    localBrainModule,
-    openAiResponsesBrainModule,
-    rustPiAgentBrainModule,
-    piAgentCoreBrainModule,
-  ];
-}
-
-export function resolveBrainModuleSelection(
-  input: Pick<LoadedProfileContext["profile"], "brain" | "modelConfig">,
-): BrainModuleSelection {
-  const configured = input.brain;
-  if (configured?.module !== undefined) {
-    return {
-      moduleId: configured.module,
-      ...(configured.strategy === undefined
-        ? {}
-        : { strategy: configured.strategy }),
-    };
+export function brainExecutorForSelection(
+  selection: BrainModuleSelection,
+): BrainModule {
+  if (selection.moduleId === "pi-agent") return piAgentBrainModule;
+  if (selection.moduleId === "openai-responses") {
+    return openAiResponsesBrainModule;
   }
-  return {
-    moduleId:
-      input.modelConfig.provider === "local" ? "local" : "pi-agent-core",
-  };
-}
-
-export function brainModuleSelectionFromRuntimeConfig(
-  input?: BrainModuleConfigSelection,
-): BrainModuleSelection | undefined {
-  if (!input?.module) return undefined;
-  return {
-    moduleId: input.module,
-    ...(input.strategy === undefined ? {} : { strategy: input.strategy }),
-  };
-}
-
-export function resolveBrainStrategyMetadata(
-  module: BrainModule,
-  selection: BrainModuleSelection,
-): BrainStrategyMetadata {
-  const strategy = resolveBrainModuleStrategy(module, selection);
-  return brainStrategyMetadataForModuleStrategy(module, strategy);
-}
-
-export function resolveBrainModuleStrategy(
-  module: BrainModule,
-  selection: BrainModuleSelection,
-): BrainModuleStrategyMetadata {
-  const strategyId = selection.strategy ?? module.defaultStrategyId;
-  const strategy = module.strategies.find(
-    (candidate) => candidate.strategyId === strategyId,
+  throw new Error(
+    `Rust selected brain ${selection.moduleId} has no production host executor`,
   );
-  if (!strategy) {
-    throw new Error(
-      `unknown strategy ${strategyId} for brain module ${module.moduleId}`,
-    );
-  }
-  return strategy;
 }
 
-export function brainStrategyMetadataForModuleStrategy(
-  module: BrainModule,
-  strategy: BrainModuleStrategyMetadata,
-): BrainStrategyMetadata {
-  return {
-    moduleId: module.moduleId,
-    strategyId: strategy.strategyId,
-    providerState: strategy.providerState,
-  };
-}
-
-export function providerStateRebuildPolicyForModuleStrategy(
-  strategy: BrainModuleStrategyMetadata,
-): BrainModuleProviderStateRebuildPolicy {
-  return strategy.providerState.rebuild;
-}
-
-export const piAgentCoreBrainModule: BrainModule = {
-  moduleId: "pi-agent-core",
-  displayName: "pi-agent-core",
-  defaultStrategyId: "default",
-  strategies: [
-    {
-      strategyId: "default",
-      providerState: {
-        mode: "unused",
-        rebuild: {
-          action: "discard",
-          reason:
-            "pi-agent-core compatibility path uses Rust pi-agent without persisted provider wire state",
-        },
-      },
-    },
-    {
-      strategyId: "roleplay_narrator",
-      providerState: {
-        mode: "unused",
-        rebuild: {
-          action: "discard",
-          reason:
-            "roleplay narrator uses Rust pi-agent phase turns without persisted provider wire state",
-        },
-      },
-    },
-  ],
-  diagnostics: {
-    toolAdapterStatus: "native_neutral_tools",
-  },
+export const piAgentBrainModule: BrainModule = {
   async createBrain(context) {
-    if (context.profile.profile.brain?.strategy === "roleplay_narrator") {
+    if (
+      context.profile.profile.brain?.strategy === "roleplay_narrator" ||
+      context.profile.profile.roleplayNarrator !== undefined
+    ) {
       if (!context.bridge) {
         throw new Error("roleplay narrator Rust FSM bridge is required");
       }
@@ -290,7 +91,7 @@ export const piAgentCoreBrainModule: BrainModule = {
         narratorFsm: createRoleplayNarratorFsmBridge(context.bridge),
         createPhaseBrain: (phase: RoleplayNarratorPhaseBrainOptions) =>
           createRustPiAgentBrainImplementation(context, {
-            moduleLabel: "pi-agent-core",
+            moduleLabel: "pi-agent",
             toolResolver: phase.resolveTools,
             toolProfile: phase.toolProfile,
             submitEvent: phase.submitEvent,
@@ -314,7 +115,7 @@ export const piAgentCoreBrainModule: BrainModule = {
       });
     }
     return createRustPiAgentBrainImplementation(context, {
-      moduleLabel: "pi-agent-core",
+      moduleLabel: "pi-agent",
       planActions: context.planActions,
     });
   },
@@ -350,33 +151,6 @@ function rustPiAgentClientConfig(
     ...(apiKey ? { apiKey } : {}),
   };
 }
-
-export const rustPiAgentBrainModule: BrainModule = {
-  moduleId: "rust-pi-agent",
-  displayName: "Rust pi-agent",
-  defaultStrategyId: "default",
-  strategies: [
-    {
-      strategyId: "default",
-      providerState: {
-        mode: "unused",
-        rebuild: {
-          action: "discard",
-          reason:
-            "rust-pi-agent chat-completions does not use persisted provider wire state",
-        },
-      },
-    },
-  ],
-  diagnostics: {
-    toolAdapterStatus: "native_neutral_tools",
-  },
-  async createBrain(context) {
-    return createRustPiAgentBrainImplementation(context, {
-      moduleLabel: "rust-pi-agent",
-    });
-  },
-};
 
 interface RustPiAgentBrainImplementationOptions {
   moduleLabel: string;
@@ -503,63 +277,6 @@ function rustPiAgentMessages(
     })),
   ];
 }
-
-export const localBrainModule: BrainModule = {
-  moduleId: "local",
-  displayName: "Local deterministic",
-  defaultStrategyId: "default",
-  strategies: [
-    {
-      strategyId: "default",
-      providerState: {
-        mode: "unused",
-        rebuild: {
-          action: "discard",
-          reason: "local deterministic brain does not use provider wire state",
-        },
-      },
-    },
-  ],
-  diagnostics: {
-    toolAdapterStatus: "tools_not_used",
-  },
-  async createBrain() {
-    return {
-      async wake(
-        wake,
-        options,
-      ): Promise<{
-        events: BrainEventEnvelope[];
-        actions: BrainAction[];
-      }> {
-        return {
-          events: [
-            {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              event: { type: "started" },
-            },
-            {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              event: { type: "finished" },
-            },
-          ],
-          actions: [
-            {
-              type: "deliver_completion",
-              packet: {
-                sessionId: wake.sessionId as SessionId,
-                status: "completed",
-                summary: "local service brain wake completed",
-              } satisfies CompletionPacket,
-            },
-          ],
-        };
-      },
-    };
-  },
-};
 
 export type OpenAiResponsesClientMode = "fake" | "live";
 
@@ -887,7 +604,7 @@ async function runRustPiAgentBrainWithIncrementalDrain(
     toolProfile?: ToolProfile;
     planActions?: BrainActionPlanner;
   } = {
-    moduleLabel: "rust-pi-agent",
+    moduleLabel: "pi-agent",
     events: [],
   },
 ): Promise<{
@@ -900,7 +617,7 @@ async function runRustPiAgentBrainWithIncrementalDrain(
 }> {
   const bridge = context.bridge;
   if (bridge === undefined) {
-    throw new Error("rust-pi-agent incremental drain requires native bridge");
+    throw new Error("pi-agent incremental drain requires native bridge");
   }
   const selectionActions = createResponsesBrainActionCollector();
   const toolSelection = resolveToolSession({
@@ -1452,68 +1169,6 @@ async function delay(delayMs: number): Promise<void> {
 }
 
 export const openAiResponsesBrainModule: BrainModule = {
-  moduleId: "openai-responses",
-  displayName: "OpenAI Responses",
-  defaultStrategyId: "replay",
-  strategies: [
-    {
-      strategyId: "replay",
-      providerState: {
-        mode: "optional",
-        rebuild: {
-          action: "discard",
-          reason:
-            "OpenAI Responses wire state is response-chain scoped and is discarded on runtime brain rebuild unless a safe migration is explicitly implemented",
-        },
-      },
-      fingerprints: {
-        providerOptions: {
-          strategy: "replay",
-        },
-      },
-      diagnostics: {
-        selectedStrategyId: "replay",
-        effectiveStrategyId: "replay",
-        replayFallbackUsed: false,
-      },
-    },
-    {
-      strategyId: "previous-response-chain",
-      providerState: {
-        mode: "optional",
-        rebuild: {
-          action: "discard",
-          reason:
-            "OpenAI Responses previous_response_id state is provider-chain scoped and is discarded on runtime brain rebuild unless a safe migration is explicitly implemented",
-        },
-      },
-      fingerprints: {
-        providerOptions: {
-          strategy: "previous-response-chain",
-        },
-      },
-      diagnostics: {
-        selectedStrategyId: "previous-response-chain",
-        effectiveStrategyId: "replay",
-        replayFallbackUsed: true,
-        fallbackReason: "normal_invalidation",
-        fallbackReasonCatalog: [
-          "no_predecessor_state",
-          "request_fingerprint_mismatch",
-          "profile_fingerprint_mismatch",
-          "provider_fingerprint_mismatch",
-          "predecessor_rejected_by_provider",
-          "provider_state_expired",
-          "provider_state_load_failed",
-          "input_not_append_only",
-          "normal_invalidation",
-        ],
-      },
-    },
-  ],
-  diagnostics: {
-    toolAdapterStatus: "native_neutral_tools",
-  },
   async createBrain(context) {
     let responsesClientConfig = await openAiResponsesClientConfig(context);
     return {

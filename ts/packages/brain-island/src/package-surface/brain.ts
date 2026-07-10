@@ -32,22 +32,25 @@ export type {
   BrainToolUpdateCallback,
 } from "../brain-tool.js";
 export {
-  createBrainModuleRegistry,
-  defaultBrainModules,
-  localBrainModule,
-  piAgentCoreBrainModule,
-  resolveBrainModuleSelection,
-  rustPiAgentBrainModule,
+  brainExecutorForSelection,
+  piAgentBrainModule,
 } from "../brain-module.js";
+export type { BrainModule, BrainModuleContext } from "../brain-module.js";
+export {
+  BRAIN_HOST_CAPABILITY_REGISTRATION,
+  resolveBrainCatalogSelection,
+  selectionFromNativePlan,
+} from "../brain-catalog.js";
 export type {
-  BrainModule,
-  BrainModuleContext,
-  BrainModuleDiagnosticsMetadata,
+  BrainHostCapabilityRegistration,
   BrainModuleId,
-  BrainModuleRegistry,
+  BrainModuleProviderStateRebuildPolicy,
   BrainModuleSelection,
-  BrainModuleToolAdapterStatus,
-} from "../brain-module.js";
+  BrainModuleStrategyDiagnosticsMetadata,
+  BrainModuleStrategyMetadata,
+  PreviousResponseChainFallbackReason,
+  ResolvedBrainCatalogSelection,
+} from "../brain-catalog.js";
 export type { BridgeBufferClient } from "../bridge-wake.js";
 export { wakeBrainFromBridgeRequest } from "../bridge-wake.js";
 export {

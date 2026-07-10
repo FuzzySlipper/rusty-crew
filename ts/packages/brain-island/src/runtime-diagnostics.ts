@@ -11,7 +11,7 @@ import type {
   BrainModuleProviderStateRebuildPolicy,
   BrainModuleStrategyDiagnosticsMetadata,
   PreviousResponseChainFallbackReason,
-} from "./brain-module.js";
+} from "./brain-catalog.js";
 
 export type DiagnosticsHealth = "ok" | "degraded" | "blocked";
 

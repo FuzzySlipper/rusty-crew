@@ -29,6 +29,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "submit_brain_event",
     "submit_brain_actions",
     "apply_brain_provider_state_output",
+    "brain_catalog",
+    "plan_brain_selection",
     "run_openai_responses_brain",
     "start_openai_responses_brain",
     "drain_openai_responses_brain_stream",
