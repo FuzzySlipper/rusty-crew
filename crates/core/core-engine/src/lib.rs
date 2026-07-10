@@ -3,6 +3,7 @@
 mod body_queue;
 mod chat_store;
 mod delegation_store;
+mod github_gate_wait;
 mod memory_spaces;
 mod memory_store;
 mod provider_state_store;
@@ -24,6 +25,11 @@ use delegation_store::{
     load_delegated_worker_run, load_delegated_worker_run_by_session, load_worker_pool_member,
     save_delegated_worker_run_requested, update_delegated_worker_run_status,
     update_delegated_worker_run_status_by_session,
+};
+use github_gate_wait::{
+    list_waits as list_github_gate_waits, load_cursor as load_github_gate_cursor,
+    load_wait as load_github_gate_wait, save_cursor as save_github_gate_cursor,
+    save_wait as save_github_gate_wait,
 };
 use memory_store::CrewMemoryStore;
 use provider_state_store::{
@@ -94,17 +100,18 @@ use rusty_crew_core_protocol::{
     CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
-    FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
-    MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
-    MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderRefreshImpact,
-    ModelProviderRefreshImpactRequest, ModelProviderRefreshMode, ModelProviderRefreshPlan,
-    ModelProviderRefreshPlanRequest, ModelProviderRefreshProfileAction, ModelProviderWrite,
-    ParentConsumptionPolicy, ProfileId, ProfilePurgeReport, ProfileRegistryRecord,
-    ProfileRegistryWrite, ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode,
-    ResourceLimits, RunId, SessionActivityDigest, SessionActivityDigestQuery, SessionConfig,
-    SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
-    WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
+    FanOutFailurePolicy, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
+    GitHubGateTerminalReceipt, GitHubGateWaitPhase, GitHubGateWaitRecord, GitHubGateWakeResult,
+    IsoTimestamp, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
+    MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor,
+    MessageSlotId, MessageVariantId, ModelProviderQuery, ModelProviderRecord,
+    ModelProviderRefreshImpact, ModelProviderRefreshImpactRequest, ModelProviderRefreshMode,
+    ModelProviderRefreshPlan, ModelProviderRefreshPlanRequest, ModelProviderRefreshProfileAction,
+    ModelProviderWrite, ParentConsumptionPolicy, ProfileId, ProfilePurgeReport,
+    ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionActivityDigest,
+    SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
+    ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use serde_json::json;
@@ -145,6 +152,7 @@ pub struct CoreEngine {
     action_executor: BrainActionExecutor,
     profile_tool_profiles: Arc<Mutex<HashMap<ProfileId, ToolProfile>>>,
     scheduler_tick_lock: Arc<Mutex<()>>,
+    github_gate_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Default)]
@@ -194,6 +202,7 @@ impl CoreEngine {
             store,
             profile_tool_profiles: Arc::new(Mutex::new(HashMap::new())),
             scheduler_tick_lock: Arc::new(Mutex::new(())),
+            github_gate_lock: Arc::new(Mutex::new(())),
         };
         engine.cleanup_orphaned_delegated_sessions()?;
         engine.expire_delegated_sessions()?;
@@ -564,6 +573,194 @@ impl CoreEngine {
             session_id: session_id.clone(),
         })?;
         Ok(record)
+    }
+
+    pub fn suspend_for_github_gate(
+        &self,
+        request: GitHubGateSuspendRequest,
+    ) -> CoreResult<GitHubGateWaitRecord> {
+        let _guard = self.github_gate_lock.lock().map_err(|_| {
+            CoreError::new(CoreErrorKind::InternalError, "GitHub gate lock poisoned")
+        })?;
+        validate_github_gate_suspend(&request)?;
+        let session = self.sessions.get_session(&request.session_id)?;
+        if session.status == SessionStatus::Archived {
+            return Err(CoreError::new(
+                CoreErrorKind::SessionExpired,
+                format!("session {} is archived", request.session_id),
+            ));
+        }
+        if let Some(existing) = load_github_gate_wait(&self.store, &request.session_id)? {
+            if existing.phase == GitHubGateWaitPhase::Waiting
+                && existing.gate_id == request.gate_id
+                && existing.commit_sha == request.commit_sha
+            {
+                return Ok(existing);
+            }
+        }
+        let wait = GitHubGateWaitRecord {
+            session_id: request.session_id.clone(),
+            run_id: request.run_id,
+            provider_thread_id: request.provider_thread_id,
+            project_id: request.project_id,
+            task_id: request.task_id,
+            gate_id: request.gate_id,
+            commit_sha: request.commit_sha.to_ascii_lowercase(),
+            phase: GitHubGateWaitPhase::Waiting,
+            terminal_event_id: None,
+            created_at: request.now.clone(),
+            updated_at: request.now.clone(),
+        };
+        save_github_gate_wait(&self.store, &wait)?;
+        let idle = self.sessions.mark_idle(&request.session_id, request.now)?;
+        save_engine_session(&self.store, &idle)?;
+        Ok(wait)
+    }
+
+    pub fn consume_github_gate_terminal_event(
+        &self,
+        event: GitHubGateTerminalEvent,
+    ) -> CoreResult<GitHubGateTerminalReceipt> {
+        let _guard = self.github_gate_lock.lock().map_err(|_| {
+            CoreError::new(CoreErrorKind::InternalError, "GitHub gate lock poisoned")
+        })?;
+        validate_github_gate_terminal_event(&event)?;
+        let cursor = load_github_gate_cursor(&self.store)?;
+        if event.event_id <= cursor {
+            return Ok(GitHubGateTerminalReceipt {
+                event_id: event.event_id,
+                cursor,
+                duplicate: true,
+                wake_scheduled: false,
+                ignored_reason: Some("event_cursor_already_consumed".to_string()),
+                wait: None,
+            });
+        }
+        let matching = list_github_gate_waits(&self.store)?
+            .into_iter()
+            .find(|wait| {
+                wait.phase == GitHubGateWaitPhase::Waiting
+                    && wait.gate_id == event.gate_id
+                    && wait.commit_sha.eq_ignore_ascii_case(&event.commit_sha)
+            });
+        let Some(mut wait) = matching else {
+            save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+            return Ok(GitHubGateTerminalReceipt {
+                event_id: event.event_id,
+                cursor: event.event_id,
+                duplicate: false,
+                wake_scheduled: false,
+                ignored_reason: Some("no_current_wait_for_gate_and_sha".to_string()),
+                wait: None,
+            });
+        };
+        let session = self.sessions.get_session(&wait.session_id)?;
+        if session.status == SessionStatus::Archived {
+            wait.phase = GitHubGateWaitPhase::Cancelled;
+            wait.terminal_event_id = Some(event.event_id);
+            wait.updated_at = event.completed_at.clone();
+            save_github_gate_wait(&self.store, &wait)?;
+            save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+            return Ok(GitHubGateTerminalReceipt {
+                event_id: event.event_id,
+                cursor: event.event_id,
+                duplicate: false,
+                wake_scheduled: false,
+                ignored_reason: Some("session_cancelled_or_archived".to_string()),
+                wait: Some(wait),
+            });
+        }
+        let result = GitHubGateWakeResult {
+            event_id: event.event_id,
+            gate_id: event.gate_id,
+            commit_sha: event.commit_sha,
+            status: event.status,
+            terminal_reason: event.terminal_reason,
+            summary: event.summary,
+            failure_summary: event.failure_summary,
+            completed_at: event.completed_at.clone(),
+        };
+        let body = serde_json::to_string(&serde_json::json!({
+            "type": "github_gate_terminal_result",
+            "result": result,
+        }))
+        .map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                format!("encode GitHub gate wake result: {error}"),
+            )
+        })?;
+        let state = self.body_projector.project(&wait.session_id)?;
+        let ttl_ms = state.delta_policy.queued_message_ttl_ms;
+        let message = QueuedMessageRecord {
+            message_id: format!("github-gate-event:{}", event.event_id),
+            owner_session_id: Some(wait.session_id.clone()),
+            owner_agent_id: session.agent_id.clone(),
+            message: AgentMessage {
+                from: AgentId::new("rusty-crew:review-gate"),
+                to: session.agent_id,
+                body,
+                correlation_id: Some(format!("github-gate-event:{}", event.event_id)),
+                projection: None,
+            },
+            source_sequence: None,
+            enqueued_at: event.completed_at.clone(),
+            expires_at: add_millis_to_iso(&event.completed_at, ttl_ms as u64)?,
+            ttl_ms,
+            delivery_attempts: 0,
+            state: QueuedMessageState::Pending,
+            terminal_at: None,
+            state_reason: None,
+        };
+        self.store.save_queued_message(&message)?;
+        wait.phase = GitHubGateWaitPhase::WakeScheduled;
+        wait.terminal_event_id = Some(event.event_id);
+        wait.updated_at = event.completed_at.clone();
+        save_github_gate_wait(&self.store, &wait)?;
+        save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+        self.bus.publish(CoreEvent::BrainWakeRequested {
+            session_id: wait.session_id.clone(),
+        })?;
+        Ok(GitHubGateTerminalReceipt {
+            event_id: event.event_id,
+            cursor: event.event_id,
+            duplicate: false,
+            wake_scheduled: true,
+            ignored_reason: None,
+            wait: Some(wait),
+        })
+    }
+
+    pub fn recover_github_gate_wakes(&self) -> CoreResult<u32> {
+        let _guard = self.github_gate_lock.lock().map_err(|_| {
+            CoreError::new(CoreErrorKind::InternalError, "GitHub gate lock poisoned")
+        })?;
+        let mut recovered = 0_u32;
+        for wait in list_github_gate_waits(&self.store)? {
+            if wait.phase != GitHubGateWaitPhase::WakeScheduled {
+                continue;
+            }
+            let session = self.sessions.get_session(&wait.session_id)?;
+            if session.status == SessionStatus::Archived {
+                continue;
+            }
+            self.bus.publish(CoreEvent::BrainWakeRequested {
+                session_id: wait.session_id,
+            })?;
+            recovered += 1;
+        }
+        Ok(recovered)
+    }
+
+    pub fn github_gate_wait(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<Option<GitHubGateWaitRecord>> {
+        load_github_gate_wait(&self.store, session_id)
+    }
+
+    pub fn github_gate_event_cursor(&self) -> CoreResult<u64> {
+        load_github_gate_cursor(&self.store)
     }
 
     pub fn register_profile_tool_profile(
@@ -2894,6 +3091,47 @@ fn validate_tool_profile(tool_profile: &ToolProfile) -> CoreResult<()> {
     Ok(())
 }
 
+fn validate_github_gate_suspend(request: &GitHubGateSuspendRequest) -> CoreResult<()> {
+    if request.gate_id == 0
+        || request.project_id.0.trim().is_empty()
+        || request.task_id.0.trim().is_empty()
+        || !valid_full_github_sha(&request.commit_sha)
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "GitHub gate suspension requires gate_id, project/task, and an exact 40-character SHA",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_github_gate_terminal_event(event: &GitHubGateTerminalEvent) -> CoreResult<()> {
+    let valid_status = matches!(
+        event.status.as_str(),
+        "passed" | "failed" | "timed_out" | "superseded"
+    );
+    let valid_reason = matches!(
+        event.terminal_reason.as_str(),
+        "checks_passed" | "checks_failed" | "required_checks_missing" | "timeout" | "superseded"
+    );
+    if event.event_id == 0
+        || event.gate_id == 0
+        || !valid_full_github_sha(&event.commit_sha)
+        || !valid_status
+        || !valid_reason
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "invalid Review GitHub gate terminal event",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_full_github_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
     OffsetDateTime::parse(value, &Rfc3339).map_err(|error| {
         CoreError::new(
@@ -2925,7 +3163,7 @@ mod tests {
         AdapterId, AgentId, AgentMessage, AttachmentLinkId, BrainAction, BrainEvent,
         CompletionPacket, CompletionStatus, ConversationBranchId, ConversationSnapshotId,
         CoreErrorKind, CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase,
-        ExternalEventPayload, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind,
+        ExternalEventPayload, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind, TaskId,
         ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
     };
     use std::path::PathBuf;
@@ -6726,6 +6964,7 @@ mod tests {
             result.branch.unwrap().head_message_id,
             Some(MessageId::new("roleplay-alt-session-message-2"))
         );
+
         let mut losing = request.clone();
         losing.create_variant.as_mut().unwrap().variant_id =
             MessageVariantId::new("roleplay-alt-loser");
@@ -7730,6 +7969,158 @@ mod tests {
 
     fn test_engine() -> CoreEngine {
         test_engine_with_data_dir(unique_data_dir("engine"))
+    }
+
+    #[test]
+    fn github_gate_wait_is_durable_idempotent_and_recovers_exact_session_wake() {
+        let data_dir = unique_data_dir("github-gate-wait");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let session = engine
+            .create_session(session_config(
+                "gate-session",
+                "gate-agent",
+                "gate-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let wait = engine
+            .suspend_for_github_gate(GitHubGateSuspendRequest {
+                session_id: session.session_id.clone(),
+                run_id: Some(RunId::new("run-1")),
+                provider_thread_id: Some("thread-1".to_string()),
+                project_id: ProjectId::new("den-services"),
+                task_id: TaskId::new("5500"),
+                gate_id: 901,
+                commit_sha: "1111111111111111111111111111111111111111".to_string(),
+                now: "2026-06-19T00:00:10Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(wait.phase, GitHubGateWaitPhase::Waiting);
+        assert_eq!(
+            engine.get_session(&session.session_id).unwrap().status,
+            SessionStatus::Idle
+        );
+
+        let (_, receiver) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainWakeRequested],
+                session_id: Some(session.session_id.clone()),
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+        let event = GitHubGateTerminalEvent {
+            event_id: 44,
+            gate_id: 901,
+            project_id: ProjectId::new("den-services"),
+            task_id: TaskId::new("5500"),
+            commit_sha: "1111111111111111111111111111111111111111".to_string(),
+            status: "failed".to_string(),
+            terminal_reason: "required_checks_missing".to_string(),
+            summary: Some("wrong check name".to_string()),
+            failure_summary: Some("missing Verify".to_string()),
+            completed_at: "2026-06-19T00:01:00Z".to_string(),
+        };
+        let receipt = engine
+            .consume_github_gate_terminal_event(event.clone())
+            .unwrap();
+        assert!(receipt.wake_scheduled);
+        assert!(matches!(
+            receiver.recv_timeout(std::time::Duration::from_millis(50)),
+            Ok(CoreEvent::BrainWakeRequested { session_id }) if session_id == session.session_id
+        ));
+        let duplicate = engine.consume_github_gate_terminal_event(event).unwrap();
+        assert!(duplicate.duplicate);
+        assert!(!duplicate.wake_scheduled);
+        let queued = engine
+            .store
+            .load_queued_messages(&rusty_crew_core_persistence::QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(session.session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].message_id, "github-gate-event:44");
+        assert!(queued[0].message.body.contains("required_checks_missing"));
+        drop(engine);
+
+        let hydrated = test_engine_with_data_dir(data_dir);
+        let persisted = hydrated
+            .github_gate_wait(&session.session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.phase, GitHubGateWaitPhase::WakeScheduled);
+        let (_, recovered_receiver) = hydrated
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainWakeRequested],
+                session_id: Some(session.session_id.clone()),
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+        assert_eq!(hydrated.recover_github_gate_wakes().unwrap(), 1);
+        assert!(recovered_receiver
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_ok());
+    }
+
+    #[test]
+    fn newer_github_gate_wait_rejects_stale_sha_terminal_event() {
+        let engine = test_engine();
+        let session = engine
+            .create_session(session_config(
+                "newer-gate-session",
+                "gate-agent",
+                "gate-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        for (gate_id, sha) in [
+            (1, "1111111111111111111111111111111111111111"),
+            (2, "2222222222222222222222222222222222222222"),
+        ] {
+            engine
+                .suspend_for_github_gate(GitHubGateSuspendRequest {
+                    session_id: session.session_id.clone(),
+                    run_id: None,
+                    provider_thread_id: None,
+                    project_id: ProjectId::new("den-services"),
+                    task_id: TaskId::new("5500"),
+                    gate_id,
+                    commit_sha: sha.to_string(),
+                    now: "2026-06-19T00:00:10Z".to_string(),
+                })
+                .unwrap();
+        }
+        let receipt = engine
+            .consume_github_gate_terminal_event(GitHubGateTerminalEvent {
+                event_id: 1,
+                gate_id: 1,
+                project_id: ProjectId::new("den-services"),
+                task_id: TaskId::new("5500"),
+                commit_sha: "1111111111111111111111111111111111111111".to_string(),
+                status: "superseded".to_string(),
+                terminal_reason: "superseded".to_string(),
+                summary: None,
+                failure_summary: None,
+                completed_at: "2026-06-19T00:01:00Z".to_string(),
+            })
+            .unwrap();
+        assert!(!receipt.wake_scheduled);
+        assert_eq!(
+            receipt.ignored_reason.as_deref(),
+            Some("no_current_wait_for_gate_and_sha")
+        );
+        assert_eq!(
+            engine
+                .github_gate_wait(&session.session_id)
+                .unwrap()
+                .unwrap()
+                .gate_id,
+            2
+        );
     }
 
     fn test_engine_with_data_dir(data_dir: PathBuf) -> CoreEngine {

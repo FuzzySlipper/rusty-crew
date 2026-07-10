@@ -81,9 +81,10 @@ use rusty_crew_core_protocol::{
     BackgroundMemoryAutoMutationPlanInput, BodyState, BrainWakeProviderStateInput,
     BrainWakeStreamItem, CaptureMemoryProposalPlanInput, ContextCompactionArtifact,
     ContextCompactionArtifactQuery, CuratorGovernancePlanInput, CuratorLifecyclePlanInput,
-    DataBankScopeId, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
-    MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor,
-    MessageSlotId, MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
+    DataBankScopeId, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
+    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
+    MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
+    MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
     ModelProviderRefreshPlanRequest, ModelProviderWrite, ProfileRegistryLifecycleStatus,
     ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
@@ -416,6 +417,71 @@ impl NativeBridgeBinding {
                 format!("serialize buffered brain run cleanup report: {error}"),
             )
         })
+    }
+
+    #[napi]
+    pub fn suspend_for_github_gate_json(&self, input_json: String) -> napi::Result<String> {
+        let request: GitHubGateSuspendRequest =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid GitHub gate suspension JSON: {error}"),
+                )
+            })?;
+        let bridge = self.bridge()?;
+        serde_json::to_string(
+            &bridge
+                .suspend_for_github_gate(request)
+                .map_err(to_napi_error)?,
+        )
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn consume_github_gate_terminal_event_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let event: GitHubGateTerminalEvent =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid GitHub gate terminal event JSON: {error}"),
+                )
+            })?;
+        let bridge = self.bridge()?;
+        serde_json::to_string(
+            &bridge
+                .consume_github_gate_terminal_event(event)
+                .map_err(to_napi_error)?,
+        )
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn recover_github_gate_wakes(&self) -> napi::Result<u32> {
+        self.bridge()?
+            .recover_github_gate_wakes()
+            .map_err(to_napi_error)
+    }
+
+    #[napi]
+    pub fn github_gate_wait_json(&self, session_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        serde_json::to_string(
+            &bridge
+                .github_gate_wait(SessionId::new(session_id))
+                .map_err(to_napi_error)?,
+        )
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn github_gate_event_cursor(&self) -> napi::Result<f64> {
+        Ok(self
+            .bridge()?
+            .github_gate_event_cursor()
+            .map_err(to_napi_error)? as f64)
     }
 
     fn bridge(&self) -> napi::Result<std::sync::MutexGuard<'_, NativeBridge>> {

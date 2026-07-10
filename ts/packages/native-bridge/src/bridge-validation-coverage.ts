@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 187;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 192;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 34;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 153;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 158;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -327,6 +327,18 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "plan_curator_governance_transition",
       "plan_curator_lifecycle_transition",
       "plan_background_memory_auto_mutations",
+    ],
+  },
+  {
+    group: "github_gate_wait",
+    reason:
+      "GitHub gate suspension/recovery is covered by its Rust lifecycle tests and focused native service smoke; add wire fixtures when these receipts become a browser-facing contract.",
+    operations: [
+      "suspend_for_github_gate",
+      "consume_github_gate_terminal_event",
+      "recover_github_gate_wakes",
+      "github_gate_wait",
+      "github_gate_event_cursor",
     ],
   },
   {

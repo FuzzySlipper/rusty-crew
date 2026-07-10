@@ -87,6 +87,10 @@ import type {
   EventReceipt,
   EventSubscription,
   ExternalEvent,
+  GitHubGateSuspendRequest,
+  GitHubGateTerminalEvent,
+  GitHubGateTerminalReceipt,
+  GitHubGateWaitRecord,
   ManifestOperationName,
   MemoryGovernanceDecisionInput,
   MemoryGovernanceDecisionRecord,
@@ -534,6 +538,11 @@ interface NativeBridgeBinding {
   storageSchema(): NativeRuntimeModuleSchemaRegistryDiagnostics;
   bufferedBrainRunDiagnosticsJson(): string;
   cleanupBufferedBrainRunsJson(reasonCode: string, summary: string): string;
+  suspendForGithubGateJson(inputJson: string): string;
+  consumeGithubGateTerminalEventJson(inputJson: string): string;
+  recoverGithubGateWakes(): number;
+  githubGateWaitJson(sessionId: string): string;
+  githubGateEventCursor(): number;
   createProfileRegistryRecordJson(writeJson: string): string;
   updateProfileRegistryRecordJson(updateJson: string): string;
   listProfileRegistryRecordsJson(queryJson: string): string;
@@ -2644,6 +2653,17 @@ export interface NativeBridgeModule {
     reasonCode: string;
     summary: string;
   }): Promise<NativeBufferedBrainRunCleanupSummary>;
+  suspendForGitHubGate(
+    input: GitHubGateSuspendRequest,
+  ): Promise<GitHubGateWaitRecord>;
+  consumeGitHubGateTerminalEvent(
+    input: GitHubGateTerminalEvent,
+  ): Promise<GitHubGateTerminalReceipt>;
+  recoverGitHubGateWakes(): Promise<number>;
+  gitHubGateWait(
+    sessionId: SessionId,
+  ): Promise<GitHubGateWaitRecord | undefined>;
+  gitHubGateEventCursor(): Promise<number>;
   storageSchema(): Promise<NativeRuntimeModuleSchemaRegistryDiagnostics>;
   createProfileRegistryRecord(
     write: NativeProfileRegistryWrite,
@@ -2943,6 +2963,100 @@ export interface NativeBridgeModule {
   releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit>;
 }
 
+interface RawGitHubGateWaitRecord {
+  session_id: string;
+  run_id?: string | null;
+  provider_thread_id?: string | null;
+  project_id: string;
+  task_id: string;
+  gate_id: number;
+  commit_sha: string;
+  phase: GitHubGateWaitRecord["phase"];
+  terminal_event_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawGitHubGateTerminalReceipt {
+  event_id: number;
+  cursor: number;
+  duplicate: boolean;
+  wake_scheduled: boolean;
+  ignored_reason?: string | null;
+  wait?: RawGitHubGateWaitRecord | null;
+}
+
+function toRawGitHubGateSuspendRequest(input: GitHubGateSuspendRequest) {
+  return {
+    session_id: input.sessionId,
+    ...(input.runId === undefined ? {} : { run_id: input.runId }),
+    ...(input.providerThreadId === undefined
+      ? {}
+      : { provider_thread_id: input.providerThreadId }),
+    project_id: input.projectId,
+    task_id: input.taskId,
+    gate_id: input.gateId,
+    commit_sha: input.commitSha,
+    now: input.now,
+  };
+}
+
+function toRawGitHubGateTerminalEvent(input: GitHubGateTerminalEvent) {
+  return {
+    event_id: input.eventId,
+    gate_id: input.gateId,
+    project_id: input.projectId,
+    task_id: input.taskId,
+    commit_sha: input.commitSha,
+    status: input.status,
+    terminal_reason: input.terminalReason,
+    ...(input.summary === undefined ? {} : { summary: input.summary }),
+    ...(input.failureSummary === undefined
+      ? {}
+      : { failure_summary: input.failureSummary }),
+    completed_at: input.completedAt,
+  };
+}
+
+function fromRawGitHubGateWaitRecord(
+  raw: RawGitHubGateWaitRecord,
+): GitHubGateWaitRecord {
+  return {
+    sessionId: raw.session_id as SessionId,
+    ...(raw.run_id == null ? {} : { runId: raw.run_id as RunId }),
+    ...(raw.provider_thread_id == null
+      ? {}
+      : { providerThreadId: raw.provider_thread_id }),
+    projectId: raw.project_id as ProjectId,
+    taskId: raw.task_id as TaskId,
+    gateId: raw.gate_id,
+    commitSha: raw.commit_sha,
+    phase: raw.phase,
+    ...(raw.terminal_event_id == null
+      ? {}
+      : { terminalEventId: raw.terminal_event_id }),
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  };
+}
+
+function fromRawGitHubGateTerminalReceipt(
+  raw: RawGitHubGateTerminalReceipt,
+): GitHubGateTerminalReceipt {
+  return {
+    eventId: raw.event_id,
+    cursor: raw.cursor,
+    duplicate: raw.duplicate,
+    wakeScheduled: raw.wake_scheduled,
+    ...(raw.ignored_reason == null
+      ? {}
+      : { ignoredReason: raw.ignored_reason }),
+    ...(raw.wait == null
+      ? {}
+      : { wait: fromRawGitHubGateWaitRecord(raw.wait) }),
+  };
+}
+
 export const nativeManifestOperationNames = manifestOperationNames;
 export const nativeManifestVersion = 1;
 export const nativeWireShapeFingerprint = bridgeWireShapeFingerprint;
@@ -3235,6 +3349,13 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     bufferedBrainRunDiagnostics: unavailable("buffered_brain_run_diagnostics"),
     cleanupBufferedBrainRuns: unavailable("cleanup_buffered_brain_runs"),
+    suspendForGitHubGate: unavailable("suspend_for_github_gate"),
+    consumeGitHubGateTerminalEvent: unavailable(
+      "consume_github_gate_terminal_event",
+    ),
+    recoverGitHubGateWakes: unavailable("recover_github_gate_wakes"),
+    gitHubGateWait: unavailable("github_gate_wait"),
+    gitHubGateEventCursor: unavailable("github_gate_event_cursor"),
     exchangeOpenAiOauthCode: unavailable("wake_brain"),
     startBrainRun: unavailable("start_brain_run"),
     drainBrainRun: unavailable("drain_brain_run"),
@@ -4206,6 +4327,30 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.cleanupBufferedBrainRunsJson(input.reasonCode, input.summary),
       ) as NativeBufferedBrainRunCleanupSummary,
+    suspendForGitHubGate: async (input) =>
+      fromRawGitHubGateWaitRecord(
+        JSON.parse(
+          binding.suspendForGithubGateJson(
+            JSON.stringify(toRawGitHubGateSuspendRequest(input)),
+          ),
+        ) as RawGitHubGateWaitRecord,
+      ),
+    consumeGitHubGateTerminalEvent: async (input) =>
+      fromRawGitHubGateTerminalReceipt(
+        JSON.parse(
+          binding.consumeGithubGateTerminalEventJson(
+            JSON.stringify(toRawGitHubGateTerminalEvent(input)),
+          ),
+        ) as RawGitHubGateTerminalReceipt,
+      ),
+    recoverGitHubGateWakes: async () => binding.recoverGithubGateWakes(),
+    gitHubGateWait: async (sessionId) => {
+      const raw = JSON.parse(
+        binding.githubGateWaitJson(sessionId),
+      ) as RawGitHubGateWaitRecord | null;
+      return raw === null ? undefined : fromRawGitHubGateWaitRecord(raw);
+    },
+    gitHubGateEventCursor: async () => binding.githubGateEventCursor(),
     storageSchema: async () => binding.storageSchema(),
     createProfileRegistryRecord: async (write) =>
       toNativeProfileRegistryRecord(

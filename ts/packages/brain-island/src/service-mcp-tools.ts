@@ -207,7 +207,10 @@ export async function buildServiceMcpToolCatalog(
 
 export function createServiceMcpToolResolver(input: {
   catalog: ServiceMcpToolCatalog;
-  bridge?: Pick<NativeBridgeModule, "submitBrainEvent">;
+  bridge?: Pick<
+    NativeBridgeModule,
+    "submitBrainEvent" | "suspendForGitHubGate"
+  >;
   mcpConfig?: ServiceMcpEndpointConfig;
   executorFactory?: ServiceMcpToolExecutorFactory;
 }): BrainToolResolver {
@@ -226,54 +229,152 @@ export function createServiceMcpToolResolver(input: {
         });
         if (!decision.allowed) return [];
         const tool = createMcpBrainTool(binding, candidate, executor);
+        const execute = async (
+          toolCallId: string,
+          params: unknown,
+          signal: AbortSignal | undefined,
+          contextWake = wake,
+        ) => {
+          await input.bridge?.submitBrainEvent({
+            wakeId: wake.wakeId,
+            sessionId: wake.sessionId,
+            event: createMcpToolStartedEvent({
+              binding,
+              toolName: candidate.name,
+              sourceToolName: candidate.source.sourceToolName,
+              catalogRevision: candidate.source.catalogRevision,
+            }),
+          });
+          try {
+            let result = await tool.execute(toolCallId, params, signal);
+            if (
+              input.bridge !== undefined &&
+              isGitHubGateWatch(candidate.source.sourceToolName)
+            ) {
+              const gate = pendingGitHubGate(result.details);
+              if (gate !== undefined) {
+                await input.bridge.suspendForGitHubGate({
+                  sessionId: contextWake.sessionId,
+                  runId: contextWake.wakeId as never,
+                  ...(providerThreadIdentity(contextWake.providerState) ===
+                  undefined
+                    ? {}
+                    : {
+                        providerThreadId: providerThreadIdentity(
+                          contextWake.providerState,
+                        ),
+                      }),
+                  projectId: gate.projectId as never,
+                  taskId: String(gate.taskId) as never,
+                  gateId: gate.gateId,
+                  commitSha: gate.commitSha,
+                  now: new Date().toISOString(),
+                });
+                result = { ...result, terminate: true };
+              }
+            }
+            await input.bridge?.submitBrainEvent({
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              event: createMcpToolFinishedEvent({
+                binding,
+                toolName: candidate.name,
+                sourceToolName: candidate.source.sourceToolName,
+                catalogRevision: candidate.source.catalogRevision,
+                isError: false,
+                allowed: true,
+              }),
+            });
+            return result;
+          } catch (error) {
+            await input.bridge?.submitBrainEvent({
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              event: createMcpToolFinishedEvent({
+                binding,
+                toolName: candidate.name,
+                sourceToolName: candidate.source.sourceToolName,
+                catalogRevision: candidate.source.catalogRevision,
+                isError: true,
+                allowed: true,
+              }),
+            });
+            throw error;
+          }
+        };
         return [
           {
             ...tool,
-            execute: async (toolCallId, params, signal) => {
-              await input.bridge?.submitBrainEvent({
-                wakeId: wake.wakeId,
-                sessionId: wake.sessionId,
-                event: createMcpToolStartedEvent({
-                  binding,
-                  toolName: candidate.name,
-                  sourceToolName: candidate.source.sourceToolName,
-                  catalogRevision: candidate.source.catalogRevision,
-                }),
-              });
-              try {
-                const result = await tool.execute(toolCallId, params, signal);
-                await input.bridge?.submitBrainEvent({
-                  wakeId: wake.wakeId,
-                  sessionId: wake.sessionId,
-                  event: createMcpToolFinishedEvent({
-                    binding,
-                    toolName: candidate.name,
-                    sourceToolName: candidate.source.sourceToolName,
-                    catalogRevision: candidate.source.catalogRevision,
-                    isError: false,
-                    allowed: true,
-                  }),
-                });
-                return result;
-              } catch (error) {
-                await input.bridge?.submitBrainEvent({
-                  wakeId: wake.wakeId,
-                  sessionId: wake.sessionId,
-                  event: createMcpToolFinishedEvent({
-                    binding,
-                    toolName: candidate.name,
-                    sourceToolName: candidate.source.sourceToolName,
-                    catalogRevision: candidate.source.catalogRevision,
-                    isError: true,
-                    allowed: true,
-                  }),
-                });
-                throw error;
-              }
-            },
+            execute: (toolCallId, params, signal) =>
+              execute(toolCallId, params, signal, wake),
+            executeWithContext: async (params, context) =>
+              execute(context.callId, params, context.signal, context.wake),
           },
         ];
       });
+}
+
+function isGitHubGateWatch(toolName: string): boolean {
+  return (
+    toolName === "watch_github_checks" || toolName === "await_github_checks"
+  );
+}
+
+function pendingGitHubGate(
+  details: unknown,
+):
+  | { gateId: number; projectId: string; taskId: number; commitSha: string }
+  | undefined {
+  if (!isRecord(details)) return undefined;
+  const structured = isRecord(details.structuredContent)
+    ? details.structuredContent
+    : details;
+  if (
+    structured.status !== "pending" ||
+    typeof structured.id !== "number" ||
+    typeof structured.project_id !== "string" ||
+    typeof structured.task_id !== "number" ||
+    typeof structured.commit_sha !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    gateId: structured.id,
+    projectId: structured.project_id,
+    taskId: structured.task_id,
+    commitSha: structured.commit_sha,
+  };
+}
+
+function providerThreadIdentity(
+  providerState:
+    | {
+        moduleId: string;
+        strategyId: string;
+        providerFingerprint: string;
+        payload: unknown;
+      }
+    | undefined,
+): string | undefined {
+  if (providerState === undefined) return undefined;
+  if (isRecord(providerState.payload)) {
+    for (const key of [
+      "responseId",
+      "response_id",
+      "threadId",
+      "thread_id",
+      "conversationId",
+      "conversation_id",
+    ]) {
+      const value = providerState.payload[key];
+      if (typeof value === "string" && value.trim() !== "") return value;
+    }
+  }
+  return `${providerState.moduleId}:${providerState.strategyId}:${providerState.providerFingerprint}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function profileAccumulator(

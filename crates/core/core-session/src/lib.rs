@@ -250,6 +250,28 @@ impl SessionRegistry {
         }
         Ok(state.clone())
     }
+
+    pub fn mark_idle(&self, session_id: &SessionId, now: IsoTimestamp) -> CoreResult<SessionState> {
+        let mut sessions =
+            self.inner.sessions.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
+            })?;
+        let state = sessions.get_mut(session_id).ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session {session_id} not found"),
+            )
+        })?;
+        if state.status == SessionStatus::Archived {
+            return Err(CoreError::new(
+                CoreErrorKind::SessionExpired,
+                format!("session {session_id} is archived"),
+            ));
+        }
+        state.status = SessionStatus::Idle;
+        state.last_active_at = now;
+        Ok(state.clone())
+    }
 }
 
 impl Default for SessionRegistry {

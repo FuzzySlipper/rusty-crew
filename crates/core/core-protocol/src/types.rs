@@ -427,6 +427,78 @@ pub struct SessionHistoryWindow {
     pub max_messages: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubGateWaitPhase {
+    Waiting,
+    WakeScheduled,
+    Consumed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubGateSuspendRequest {
+    pub session_id: SessionId,
+    pub run_id: Option<RunId>,
+    pub provider_thread_id: Option<String>,
+    pub project_id: ProjectId,
+    pub task_id: TaskId,
+    pub gate_id: u64,
+    pub commit_sha: String,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubGateWaitRecord {
+    pub session_id: SessionId,
+    pub run_id: Option<RunId>,
+    pub provider_thread_id: Option<String>,
+    pub project_id: ProjectId,
+    pub task_id: TaskId,
+    pub gate_id: u64,
+    pub commit_sha: String,
+    pub phase: GitHubGateWaitPhase,
+    pub terminal_event_id: Option<u64>,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubGateTerminalEvent {
+    pub event_id: u64,
+    pub gate_id: u64,
+    pub project_id: ProjectId,
+    pub task_id: TaskId,
+    pub commit_sha: String,
+    pub status: String,
+    pub terminal_reason: String,
+    pub summary: Option<String>,
+    pub failure_summary: Option<String>,
+    pub completed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubGateWakeResult {
+    pub event_id: u64,
+    pub gate_id: u64,
+    pub commit_sha: String,
+    pub status: String,
+    pub terminal_reason: String,
+    pub summary: Option<String>,
+    pub failure_summary: Option<String>,
+    pub completed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitHubGateTerminalReceipt {
+    pub event_id: u64,
+    pub cursor: u64,
+    pub duplicate: bool,
+    pub wake_scheduled: bool,
+    pub ignored_reason: Option<String>,
+    pub wait: Option<GitHubGateWaitRecord>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentMessage {
     pub from: AgentId,

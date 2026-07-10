@@ -49,6 +49,35 @@ impl NativeBridge {
             .enqueue_body_follow_up_message(&session_id, from, body, correlation_id)
     }
 
+    pub fn suspend_for_github_gate(
+        &self,
+        request: rusty_crew_core_bridge_api::GitHubGateSuspendRequest,
+    ) -> CoreResult<rusty_crew_core_bridge_api::GitHubGateWaitRecord> {
+        self.engine()?.suspend_for_github_gate(request)
+    }
+
+    pub fn consume_github_gate_terminal_event(
+        &self,
+        event: rusty_crew_core_bridge_api::GitHubGateTerminalEvent,
+    ) -> CoreResult<rusty_crew_core_bridge_api::GitHubGateTerminalReceipt> {
+        self.engine()?.consume_github_gate_terminal_event(event)
+    }
+
+    pub fn recover_github_gate_wakes(&self) -> CoreResult<u32> {
+        self.engine()?.recover_github_gate_wakes()
+    }
+
+    pub fn github_gate_wait(
+        &self,
+        session_id: SessionId,
+    ) -> CoreResult<Option<rusty_crew_core_bridge_api::GitHubGateWaitRecord>> {
+        self.engine()?.github_gate_wait(&session_id)
+    }
+
+    pub fn github_gate_event_cursor(&self) -> CoreResult<u64> {
+        self.engine()?.github_gate_event_cursor()
+    }
+
     pub fn register_platform_adapter(
         &mut self,
         registration: PlatformAdapterRegistration,

@@ -190,6 +190,13 @@ export async function runBufferedBrainHost(options: {
             ? {}
             : { debugDetailId: request.debugDetailId }),
         });
+        if (output.suspend === true) {
+          await cancelBufferedWake(
+            "external_gate_wait",
+            `wake ${started.wakeId} suspended until its external GitHub gate is terminal`,
+          );
+          break;
+        }
       }
       if (drained.error !== undefined) {
         throw new Error(

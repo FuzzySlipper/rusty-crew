@@ -115,6 +115,7 @@
     "smoke:mcp-tool-registry": "tsx ts/smokes/mcp-tool-registry.ts",
     "smoke:mcp-reload": "npm run smoke:mcp-reload -w @rusty-crew/service-host",
     "smoke:mcp-tool-telemetry": "npm run smoke:mcp-tool-telemetry -w @rusty-crew/brain-island",
+    "smoke:github-gate-wait": "tsx ts/smokes/brain-island/smoke-github-gate-wait.ts",
     "smoke:web-browser-tool-telemetry": "npm run smoke:web-browser-tool-telemetry -w @rusty-crew/brain-island",
     "smoke:web-browser-diagnostics": "npm run smoke:web-browser-diagnostics -w @rusty-crew/brain-island",
     "smoke:mcp-surfaces-e2e": "npm run smoke:mcp-surfaces-e2e -w @rusty-crew/brain-island",

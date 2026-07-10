@@ -34,6 +34,7 @@ interface BrainHostToolFailure {
 export interface BrainHostToolExecutionResult {
   output: string;
   failure?: BrainHostToolFailure;
+  suspend?: boolean;
 }
 
 export function prepareBrainHostToolRequest(
@@ -190,6 +191,7 @@ export async function executePreparedBrainHostToolRequest(
     );
     return {
       output: brainToolResultToHostOutput(result),
+      ...(result.terminate === true ? { suspend: true } : {}),
       ...(failure === undefined ? {} : { failure }),
     };
   } catch (error) {

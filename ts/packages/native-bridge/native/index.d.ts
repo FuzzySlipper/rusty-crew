@@ -209,6 +209,11 @@ export declare class NativeBridgeBinding {
   shutdownEngine(engine: number, drainTimeoutMs: number): JsShutdownSummary
   bufferedBrainRunDiagnosticsJson(): string
   cleanupBufferedBrainRunsJson(reasonCode: string, summary: string): string
+  suspendForGithubGateJson(inputJson: string): string
+  consumeGithubGateTerminalEventJson(inputJson: string): string
+  recoverGithubGateWakes(): number
+  githubGateWaitJson(sessionId: string): string
+  githubGateEventCursor(): number
 }
 
 export interface JsActionBatchReceipt {

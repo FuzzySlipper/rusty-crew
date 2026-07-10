@@ -127,6 +127,64 @@ export interface SessionState extends SessionConfig {
   lastActiveAt: string;
 }
 
+export type GitHubGateWaitPhase =
+  | "waiting"
+  | "wake_scheduled"
+  | "consumed"
+  | "cancelled";
+
+export interface GitHubGateSuspendRequest {
+  sessionId: SessionId;
+  runId?: RunId;
+  providerThreadId?: string;
+  projectId: ProjectId;
+  taskId: TaskId;
+  gateId: number;
+  commitSha: string;
+  now: string;
+}
+
+export interface GitHubGateWaitRecord {
+  sessionId: SessionId;
+  runId?: RunId;
+  providerThreadId?: string;
+  projectId: ProjectId;
+  taskId: TaskId;
+  gateId: number;
+  commitSha: string;
+  phase: GitHubGateWaitPhase;
+  terminalEventId?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubGateTerminalEvent {
+  eventId: number;
+  gateId: number;
+  projectId: ProjectId;
+  taskId: TaskId;
+  commitSha: string;
+  status: "passed" | "failed" | "timed_out" | "superseded";
+  terminalReason:
+    | "checks_passed"
+    | "checks_failed"
+    | "required_checks_missing"
+    | "timeout"
+    | "superseded";
+  summary?: string;
+  failureSummary?: string;
+  completedAt: string;
+}
+
+export interface GitHubGateTerminalReceipt {
+  eventId: number;
+  cursor: number;
+  duplicate: boolean;
+  wakeScheduled: boolean;
+  ignoredReason?: string;
+  wait?: GitHubGateWaitRecord;
+}
+
 export interface AgentMessage {
   from: AgentId;
   to: AgentId;
@@ -1583,6 +1641,11 @@ export const manifestOperationNames = [
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
+  "suspend_for_github_gate",
+  "consume_github_gate_terminal_event",
+  "recover_github_gate_wakes",
+  "github_gate_wait",
+  "github_gate_event_cursor",
   "archive_session",
   "ensure_configured_session",
   "register_scheduled_wake_job",
@@ -1737,6 +1800,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "c6773478d20b35340f2311385adf2ec15a01aec2a93e5b617fce6ca1958edf90";
+  "b0f8593388d5da760e66f6c409c68e8397ae009fd4ef9ed4cf942b51b88fe0be";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

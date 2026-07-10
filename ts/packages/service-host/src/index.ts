@@ -14,6 +14,7 @@ import {
 } from "@rusty-crew/brain-island";
 import {
   createDenMemoryClient,
+  ReviewGitHubGateEventConsumer,
   createDenSuccessorGatewayClient,
   dispatchChannelMessageProjection,
   ingestChannelInboundMessage,
@@ -106,11 +107,27 @@ export async function startRustyCrewServiceHost(
   });
 
   let backgroundLoopController: ServiceHostBackgroundLoopController | undefined;
+  let githubGateConsumerAbort: AbortController | undefined;
   try {
     await listen(server, app.adminPort, app.adminHost);
     backgroundLoopController = startServiceHostBackgroundLoopTimers(
       app.backgroundLoops,
     );
+    const reviewUrl = env.RUSTY_CREW_REVIEW_URL?.trim();
+    const reviewProjectId = env.RUSTY_CREW_REVIEW_PROJECT_ID?.trim();
+    if (reviewUrl && reviewProjectId) {
+      githubGateConsumerAbort = new AbortController();
+      const consumer = new ReviewGitHubGateEventConsumer({
+        baseUrl: new URL(reviewUrl),
+        projectId: reviewProjectId,
+        bridge: app.bridge,
+      });
+      void consumer.run(githubGateConsumerAbort.signal).catch((error) => {
+        if (!githubGateConsumerAbort?.signal.aborted) {
+          console.warn("Review GitHub gate consumer stopped", error);
+        }
+      });
+    }
   } catch (error) {
     backgroundLoopController?.stop();
     await closeServer(server).catch(() => undefined);
@@ -127,6 +144,7 @@ export async function startRustyCrewServiceHost(
     url: app.url,
     stop: async () => {
       backgroundLoopController?.stop();
+      githubGateConsumerAbort?.abort();
       const closePromise = closeServer(server);
       await app.stop();
       await closePromise;

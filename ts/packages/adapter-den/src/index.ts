@@ -36,6 +36,7 @@ export * from "./channel-projection.js";
 export * from "./successor-gateway.js";
 export * from "./successor-conversation-resolution.js";
 export * from "./memory-client.js";
+export * from "./github-gate-events.js";
 
 export type DenAdapterConnectionState =
   | "connected"
