@@ -5,6 +5,7 @@ import {
 
 import * as bridgeSchemas from "./bridge-validation-schemas.js";
 import { bridgeWireSchemaArtifact } from "./generated/bridge-wire-schemas.js";
+import { directBridgeValidatedOperations } from "./direct-binding-validation.js";
 
 export interface RustBridgeValidationFixtureSummary {
   operation_count: number;
@@ -25,8 +26,8 @@ const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 122;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 173;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 27;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 189;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 11;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -66,6 +67,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "validate_tool_metadata_policy",
   "validate_local_tool_profile_policy",
   "wake_brain",
+  ...directBridgeValidatedOperations,
 ] as const satisfies readonly ManifestOperationName[];
 
 const RUST_FIXTURE_BACKED_OPERATIONS = [
@@ -116,18 +118,6 @@ const UNIT_RETURN_MANIFEST_OPERATIONS = [
 
 const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
-    group: "engine_lifecycle",
-    reason:
-      "Core engine and brain-registration calls currently use narrow command/receipt shapes; add fixture coverage when their payloads grow beyond startup plumbing.",
-    operations: [
-      "initialize_engine",
-      "shutdown_engine",
-      "register_brain_implementation",
-      "replace_brain_implementation",
-      "unregister_brain_implementation_for_profile",
-    ],
-  },
-  {
     group: "openai_oauth",
     reason:
       "OAuth code exchange is independently covered by the Rust OAuth client tests and service authorization flow.",
@@ -140,31 +130,6 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     operations: [
       "buffered_brain_run_diagnostics",
       "cleanup_buffered_brain_runs",
-    ],
-  },
-  {
-    group: "config_and_adapter_ingress",
-    reason:
-      "The remaining adapter registration and external-ingress operations use direct napi command/receipt shapes; JSON-returning runtime/profile/tool planning operations use generated Rust schemas.",
-    operations: [
-      "register_platform_adapter",
-      "inject_external_event",
-      "inject_den_data_update",
-      "enqueue_body_follow_up_message",
-    ],
-  },
-  {
-    group: "sessions_scheduler_delegation",
-    reason:
-      "Value-returning scheduler operations use named Rust wire DTOs and generated schemas. The remaining lifecycle/delegation operations are direct napi DTOs or unit-return commands.",
-    operations: [
-      "archive_session",
-      "ensure_configured_session",
-      "cancel_delegated_session",
-      "request_delegated_checkpoint",
-      "drain_delegated_sessions",
-      "cleanup_delegated_resources",
-      "delegated_session_status",
     ],
   },
   {

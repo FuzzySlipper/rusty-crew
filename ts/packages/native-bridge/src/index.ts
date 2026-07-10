@@ -48,6 +48,7 @@ import {
   toCoreConfigWireRuntimeGraphPlanInput,
 } from "./generated/core-config-facade.js";
 import { withGeneratedBridgeOutputValidation } from "./generated-binding-validation.js";
+import { withDirectBridgeOutputValidation } from "./direct-binding-validation.js";
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 import { createNativeBridgeSchedulerMethods } from "./scheduler-wrappers.js";
@@ -595,8 +596,8 @@ export async function loadNativeBridge(): Promise<NativeBridgeModule> {
     return createUnavailableNativeBridge();
   }
 
-  const binding = withGeneratedBridgeOutputValidation(
-    new addon.NativeBridgeBinding(),
+  const binding = withDirectBridgeOutputValidation(
+    withGeneratedBridgeOutputValidation(new addon.NativeBridgeBinding()),
   );
   assertNativeBridgeContract(binding);
   return createNativeBridgeModule(binding);
