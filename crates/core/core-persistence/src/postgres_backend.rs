@@ -4990,6 +4990,30 @@ fn validate_create_chat_message_slot_request(
             "create chat message slot primary message branch_id must match target branch_id",
         ));
     }
+    if let Some(ensure) = &request.ensure_active_branch {
+        if ensure.session_id != request.slot.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "ensured chat branch session_id must match message slot session_id",
+            ));
+        }
+        if ensure.branch_id != request.branch_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "ensured chat branch_id must match message slot target branch_id",
+            ));
+        }
+    }
+    if request
+        .idempotency_key
+        .as_deref()
+        .is_some_and(|key| key.trim().is_empty() || key.len() > 500)
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot idempotency_key must contain 1 to 500 characters",
+        ));
+    }
     Ok(())
 }
 
@@ -9294,6 +9318,10 @@ mod tests {
     }
 
     trait ConversationConformanceStore {
+        fn create_chat_message_slot(
+            &self,
+            request: &CreateChatMessageSlotRequest,
+        ) -> CoreResult<CreateChatMessageSlotResult>;
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()>;
         fn save_message_variant(
             &self,
@@ -9718,6 +9746,13 @@ mod tests {
     }
 
     impl ConversationConformanceStore for CoordinationStore {
+        fn create_chat_message_slot(
+            &self,
+            request: &CreateChatMessageSlotRequest,
+        ) -> CoreResult<CreateChatMessageSlotResult> {
+            CoordinationStore::create_chat_message_slot(self, request)
+        }
+
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
             CoordinationStore::save_message_slot(self, slot)
         }
@@ -10219,6 +10254,13 @@ mod tests {
     }
 
     impl ConversationConformanceStore for PostgresBackendStore {
+        fn create_chat_message_slot(
+            &self,
+            request: &CreateChatMessageSlotRequest,
+        ) -> CoreResult<CreateChatMessageSlotResult> {
+            PostgresBackendStore::create_chat_message_slot(self, request)
+        }
+
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
             PostgresBackendStore::save_message_slot(self, slot)
         }
@@ -11565,7 +11607,7 @@ mod tests {
                 .iter()
                 .find(|count| count.table == "conversation_branches")
                 .map(|count| count.rows),
-            Some(2)
+            Some(3)
         );
         assert_eq!(
             diagnostics
@@ -11573,7 +11615,7 @@ mod tests {
                 .iter()
                 .find(|count| count.table == "message_variants")
                 .map(|count| count.rows),
-            Some(3)
+            Some(5)
         );
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "conversations_attachments"
@@ -11975,6 +12017,56 @@ mod tests {
             Some(MessageVariantId::new("variant-conflict-a"))
         );
 
+        setup.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_chat_message_ingest_is_idempotent_across_connections() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!(
+                "skipping PostgreSQL chat ingest concurrency backend; no database URL env is set"
+            );
+            return;
+        };
+        let schema = unique_schema("rusty_crew_chat_ingest_concurrency_backend");
+        let setup = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let request = conversation_chat_slot_ingest_request(
+            "session-chat-concurrent",
+            "concurrent-once",
+            BranchHeadExpectation::Any,
+        );
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles = (0..2)
+            .map(|_| {
+                let database_url = database_url.clone();
+                let schema = schema.clone();
+                let request = request.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+                    barrier.wait();
+                    store.create_chat_message_slot(&request).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.duplicate).count(), 1);
+        assert_eq!(results.iter().filter(|result| !result.duplicate).count(), 1);
+        assert!(results.iter().all(|result| result.conflict.is_none()));
+        assert!(results.iter().all(|result| result.slot.is_some()));
+
+        let slots = setup
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(SessionId::new("session-chat-concurrent")),
+                include_alternates: true,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(slots.len(), 1);
         setup.drop_schema_for_test().unwrap();
     }
 
@@ -12910,6 +13002,51 @@ mod tests {
     }
 
     fn conversation_conformance(store: &dyn ConversationConformanceStore) {
+        let ingest = conversation_chat_slot_ingest_request(
+            "session-chat-ingest",
+            "ingest-once",
+            BranchHeadExpectation::Any,
+        );
+        let created = store.create_chat_message_slot(&ingest).unwrap();
+        assert!(!created.duplicate);
+        assert!(created.conflict.is_none());
+        assert_eq!(
+            created.slot.as_ref().unwrap().primary.message.branch_id,
+            Some(ingest.branch_id.clone())
+        );
+        let replayed = store.create_chat_message_slot(&ingest).unwrap();
+        assert!(replayed.duplicate);
+        assert!(replayed.conflict.is_none());
+        assert_eq!(replayed.slot, created.slot);
+        assert_eq!(replayed.branch, created.branch);
+        let ingest_slots = store
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(SessionId::new("session-chat-ingest")),
+                include_alternates: true,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(ingest_slots.len(), 1);
+
+        let conflicted = conversation_chat_slot_ingest_request(
+            "session-chat-ingest",
+            "ingest-after-conflict",
+            BranchHeadExpectation::None,
+        );
+        let conflict = store.create_chat_message_slot(&conflicted).unwrap();
+        assert!(!conflict.duplicate);
+        assert!(conflict.slot.is_none());
+        assert_eq!(
+            conflict.conflict.unwrap().actual,
+            Some(ingest.primary_variant.message.message_id.clone())
+        );
+        let mut retry = conflicted;
+        retry.expected_branch_head = BranchHeadExpectation::Any;
+        let retried = store.create_chat_message_slot(&retry).unwrap();
+        assert!(!retried.duplicate);
+        assert!(retried.conflict.is_none());
+        assert!(retried.slot.is_some());
+
         seed_conversation_base_fixture(store, "session-conversation", "slot-conversation");
 
         let lazy_slots = store
@@ -13351,6 +13488,67 @@ mod tests {
             metadata_json: json!({"variant": variant_id.0}),
             created_at: "2026-06-26T02:00:00Z".to_string(),
             updated_at: "2026-06-26T02:00:00Z".to_string(),
+        }
+    }
+
+    fn conversation_chat_slot_ingest_request(
+        session_id: &str,
+        idempotency_key: &str,
+        expected_branch_head: BranchHeadExpectation,
+    ) -> CreateChatMessageSlotRequest {
+        let branch_id = ConversationBranchId::new(format!("branch:{session_id}:default"));
+        let slot_id = MessageSlotId::new(format!("slot:{session_id}:{idempotency_key}"));
+        let variant_id = MessageVariantId::new(format!("variant:{session_id}:{idempotency_key}"));
+        let message_id = MessageId::new(format!("message:{session_id}:{idempotency_key}"));
+        let timestamp = "2026-06-26T01:00:00Z".to_string();
+        let primary_variant = MessageVariantWrite {
+            variant_id: variant_id.clone(),
+            slot_id: slot_id.clone(),
+            source: MessageVariantSource::Primary,
+            ordinal: 0,
+            status: MessageVariantStatus::Active,
+            message: DurableMessageWrite {
+                message_id,
+                session_id: SessionId::new(session_id),
+                branch_id: Some(branch_id.clone()),
+                parent_message_id: None,
+                previous_message_id: None,
+                author_id: "user-backend".to_string(),
+                author_role: "user".to_string(),
+                status: DurableMessageStatus::Completed,
+                body: "hello from conformance".to_string(),
+                metadata_json: json!({"idempotency_key": idempotency_key}),
+                created_at: timestamp.clone(),
+                blocks: Vec::new(),
+            },
+            metadata_json: json!({}),
+            created_at: timestamp.clone(),
+            updated_at: timestamp.clone(),
+        };
+        CreateChatMessageSlotRequest {
+            slot: MessageSlotWrite {
+                slot_id,
+                session_id: SessionId::new(session_id),
+                primary_variant_id: variant_id,
+                active_variant_id: None,
+                metadata_json: json!({"idempotency_key": idempotency_key}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp.clone(),
+            },
+            primary_variant,
+            branch_id: branch_id.clone(),
+            expected_branch_head,
+            updated_at: timestamp.clone(),
+            ensure_active_branch: Some(EnsureActiveChatConversationBranchRequest {
+                session_id: SessionId::new(session_id),
+                branch_id,
+                label: Some("Default".to_string()),
+                metadata_json: json!({"source": "backend_conformance"}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+            }),
+            inherit_branch_head: true,
+            idempotency_key: Some(idempotency_key.to_string()),
         }
     }
 

@@ -3,6 +3,185 @@
 use super::*;
 use crate::{ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult};
 
+const CHAT_SLOT_RECEIPT_SCOPE_TYPE: &str = "chat_message_ingest";
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct ChatSlotReceipt {
+    slot_id: MessageSlotId,
+    branch_id: ConversationBranchId,
+}
+
+fn reserve_chat_slot_receipt_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    request: &CreateChatMessageSlotRequest,
+    key: &str,
+) -> CoreResult<Option<ChatSlotReceipt>> {
+    let provisional = ChatSlotReceipt {
+        slot_id: request.slot.slot_id.clone(),
+        branch_id: request.branch_id.clone(),
+    };
+    let inserted = tx
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.module_simple_kv_entries (
+                    scope_type, scope_id, entry_key, value_json, revision,
+                    created_at, updated_at, expires_at
+                 ) VALUES ($1, $2, $3, $4, 1, $5, $5, NULL)
+                 ON CONFLICT(scope_type, scope_id, entry_key) DO NOTHING"
+            ),
+            &[
+                &CHAT_SLOT_RECEIPT_SCOPE_TYPE,
+                &request.slot.session_id.0,
+                &key,
+                &to_json_text(&provisional)?,
+                &request.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("reserve PostgreSQL chat message receipt", error))?;
+    if inserted == 1 {
+        return Ok(None);
+    }
+    let row = tx
+        .query_one(
+            &format!(
+                "SELECT value_json
+                 FROM {schema}.module_simple_kv_entries
+                 WHERE scope_type = $1 AND scope_id = $2 AND entry_key = $3"
+            ),
+            &[
+                &CHAT_SLOT_RECEIPT_SCOPE_TYPE,
+                &request.slot.session_id.0,
+                &key,
+            ],
+        )
+        .map_err(|error| postgres_error("load duplicate PostgreSQL chat receipt", error))?;
+    let value_json = row.get::<_, String>(0);
+    let receipt = from_json_text(&value_json).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("decode duplicate PostgreSQL chat receipt: {error}"),
+        )
+    })?;
+    Ok(Some(receipt))
+}
+
+fn finish_chat_slot_receipt_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    request: &CreateChatMessageSlotRequest,
+    key: &str,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<()> {
+    let receipt = ChatSlotReceipt {
+        slot_id: request.slot.slot_id.clone(),
+        branch_id: branch_id.clone(),
+    };
+    let updated = tx
+        .execute(
+            &format!(
+                "UPDATE {schema}.module_simple_kv_entries
+                 SET value_json = $4, updated_at = $5
+                 WHERE scope_type = $1 AND scope_id = $2 AND entry_key = $3"
+            ),
+            &[
+                &CHAT_SLOT_RECEIPT_SCOPE_TYPE,
+                &request.slot.session_id.0,
+                &key,
+                &to_json_text(&receipt)?,
+                &request.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("finish PostgreSQL chat message receipt", error))?;
+    if updated != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "reserved PostgreSQL chat message receipt disappeared before commit",
+        ));
+    }
+    Ok(())
+}
+
+fn load_chat_slot_receipt_result_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    receipt: &ChatSlotReceipt,
+) -> CoreResult<CreateChatMessageSlotResult> {
+    Ok(CreateChatMessageSlotResult {
+        slot: Some(load_message_slot_in_tx(tx, schema, &receipt.slot_id, true)?),
+        branch: load_conversation_branch_in_tx(tx, schema, &receipt.branch_id)?,
+        conflict: None,
+        duplicate: true,
+    })
+}
+
+fn resolve_chat_slot_branch_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    request: &CreateChatMessageSlotRequest,
+) -> CoreResult<ConversationBranchRecord> {
+    let Some(ensure) = &request.ensure_active_branch else {
+        ensure_branch_belongs_to_session_in_tx(
+            tx,
+            schema,
+            &request.slot.session_id,
+            &request.branch_id,
+        )?;
+        return load_conversation_branch_in_tx(tx, schema, &request.branch_id);
+    };
+    if let Some(active_branch_id) = current_active_branch_in_tx(tx, schema, &ensure.session_id)? {
+        ensure_branch_belongs_to_session_in_tx(tx, schema, &ensure.session_id, &active_branch_id)?;
+        return load_conversation_branch_in_tx(tx, schema, &active_branch_id);
+    }
+    let fallback =
+        load_conversation_branch_in_tx(tx, schema, &ensure.branch_id).or_else(|error| {
+            if error.kind != CoreErrorKind::NotFound {
+                return Err(error);
+            }
+            let branch = ConversationBranchWrite {
+                branch_id: ensure.branch_id.clone(),
+                session_id: ensure.session_id.clone(),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: None,
+                head_message_id: None,
+                label: ensure.label.clone(),
+                metadata_json: ensure.metadata_json.clone(),
+                created_at: ensure.created_at.clone(),
+                updated_at: ensure.updated_at.clone(),
+            };
+            save_conversation_branch_in_tx(tx, schema, &branch)?;
+            load_conversation_branch_in_tx(tx, schema, &branch.branch_id)
+        })?;
+    if fallback.session_id != ensure.session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!(
+                "conversation branch {} not found for session {}",
+                ensure.branch_id, ensure.session_id
+            ),
+        ));
+    }
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.conversation_branch_state (
+                session_id, active_branch_id, updated_at, version
+             ) VALUES ($1, $2, $3, 0)
+             ON CONFLICT(session_id) DO UPDATE SET
+                active_branch_id = EXCLUDED.active_branch_id,
+                updated_at = EXCLUDED.updated_at,
+                version = conversation_branch_state.version + 1"
+        ),
+        &[
+            &ensure.session_id.0,
+            &ensure.branch_id.0,
+            &ensure.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("select PostgreSQL chat slot active branch", error))?;
+    Ok(fallback)
+}
+
 impl PostgresBackendStore {
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
         let schema = self.quoted_schema();
@@ -333,22 +512,26 @@ impl PostgresBackendStore {
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start create PostgreSQL chat message slot", error))?;
-        ensure_branch_belongs_to_session_in_tx(
-            &mut tx,
-            &schema,
-            &request.slot.session_id,
-            &request.branch_id,
-        )?;
-        let current = current_branch_head_in_tx(&mut tx, &schema, &request.branch_id)?;
+        if let Some(key) = request.idempotency_key.as_deref() {
+            if let Some(receipt) = reserve_chat_slot_receipt_in_tx(&mut tx, &schema, request, key)?
+            {
+                let result = load_chat_slot_receipt_result_in_tx(&mut tx, &schema, &receipt)?;
+                tx.commit().map_err(|error| {
+                    postgres_error("commit duplicate PostgreSQL chat message slot", error)
+                })?;
+                return Ok(result);
+            }
+        }
+        let branch = resolve_chat_slot_branch_in_tx(&mut tx, &schema, request)?;
+        let current = current_branch_head_in_tx(&mut tx, &schema, &branch.branch_id)?;
         let expected = match &request.expected_branch_head {
             BranchHeadExpectation::Any => current.clone(),
             BranchHeadExpectation::None => None,
             BranchHeadExpectation::Message(message_id) => Some(message_id.clone()),
         };
         if request.expected_branch_head != BranchHeadExpectation::Any && current != expected {
-            let branch = load_conversation_branch_in_tx(&mut tx, &schema, &request.branch_id)?;
-            tx.commit().map_err(|error| {
-                postgres_error("commit PostgreSQL create chat slot conflict", error)
+            tx.rollback().map_err(|error| {
+                postgres_error("rollback PostgreSQL create chat slot conflict", error)
             })?;
             return Ok(CreateChatMessageSlotResult {
                 slot: None,
@@ -357,10 +540,17 @@ impl PostgresBackendStore {
                     expected,
                     actual: current,
                 }),
+                duplicate: false,
             });
         }
+        let mut primary_variant = request.primary_variant.clone();
+        if request.inherit_branch_head {
+            primary_variant.message.branch_id = Some(branch.branch_id.clone());
+            primary_variant.message.parent_message_id = current.clone();
+            primary_variant.message.previous_message_id = current;
+        }
         save_message_slot_in_tx(&mut tx, &schema, &request.slot)?;
-        save_message_variant_in_tx(&mut tx, &schema, &request.primary_variant)?;
+        save_message_variant_in_tx(&mut tx, &schema, &primary_variant)?;
         tx.execute(
             &format!(
                 "UPDATE {schema}.conversation_branches
@@ -370,20 +560,24 @@ impl PostgresBackendStore {
                  WHERE branch_id = $1"
             ),
             &[
-                &request.branch_id.0,
-                &request.primary_variant.message.message_id.0,
+                &branch.branch_id.0,
+                &primary_variant.message.message_id.0,
                 &request.updated_at,
             ],
         )
         .map_err(|error| postgres_error("update PostgreSQL create chat slot branch head", error))?;
         let slot = load_message_slot_in_tx(&mut tx, &schema, &request.slot.slot_id, true)?;
-        let branch = load_conversation_branch_in_tx(&mut tx, &schema, &request.branch_id)?;
+        let branch = load_conversation_branch_in_tx(&mut tx, &schema, &branch.branch_id)?;
+        if let Some(key) = request.idempotency_key.as_deref() {
+            finish_chat_slot_receipt_in_tx(&mut tx, &schema, request, key, &branch.branch_id)?;
+        }
         tx.commit()
             .map_err(|error| postgres_error("commit create PostgreSQL chat message slot", error))?;
         Ok(CreateChatMessageSlotResult {
             slot: Some(slot),
             branch,
             conflict: None,
+            duplicate: false,
         })
     }
 

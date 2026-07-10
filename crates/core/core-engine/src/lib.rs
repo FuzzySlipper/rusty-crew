@@ -6753,6 +6753,9 @@ mod tests {
                 branch_id: ConversationBranchId::new("create-slot-branch"),
                 expected_branch_head: BranchHeadExpectation::None,
                 updated_at: "2026-06-19T00:01:30Z".to_string(),
+                ensure_active_branch: None,
+                inherit_branch_head: false,
+                idempotency_key: None,
             })
             .unwrap();
 
@@ -6823,6 +6826,9 @@ mod tests {
                 branch_id: ConversationBranchId::new("create-conflict-branch"),
                 expected_branch_head: BranchHeadExpectation::None,
                 updated_at: "2026-06-19T00:02:30Z".to_string(),
+                ensure_active_branch: None,
+                inherit_branch_head: false,
+                idempotency_key: None,
             })
             .unwrap();
 
@@ -6844,6 +6850,112 @@ mod tests {
         assert!(slots
             .iter()
             .all(|slot| slot.slot_id != MessageSlotId::new("create-conflict-session-slot-2")));
+    }
+
+    #[test]
+    fn create_chat_message_slot_ensures_branch_and_replays_durable_receipt() {
+        let engine = test_engine();
+        let request = chat_slot_ingest_request("ingest-session", 1, "request-alpha");
+
+        let created = engine.create_chat_message_slot(&request).unwrap();
+        assert!(!created.duplicate);
+        assert!(created.conflict.is_none());
+        assert_eq!(
+            created.branch.branch_id,
+            ConversationBranchId::new("branch:ingest-session:default")
+        );
+        let created_slot = created.slot.unwrap();
+        assert_eq!(
+            created_slot.primary.message.branch_id,
+            Some(created.branch.branch_id.clone())
+        );
+        assert_eq!(created_slot.primary.message.parent_message_id, None);
+
+        let duplicate = engine.create_chat_message_slot(&request).unwrap();
+        assert!(duplicate.duplicate);
+        assert!(duplicate.conflict.is_none());
+        assert_eq!(duplicate.slot.unwrap().slot_id, created_slot.slot_id);
+        assert_eq!(duplicate.branch.branch_id, created.branch.branch_id);
+        assert_eq!(
+            engine
+                .query_message_slots(&MessageSlotQuery {
+                    session_id: Some(SessionId::new("ingest-session")),
+                    include_alternates: true,
+                    page: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn create_chat_message_slot_receipt_rolls_back_with_conflict() {
+        let engine = test_engine();
+        engine
+            .create_chat_message_slot(&chat_slot_ingest_request(
+                "receipt-rollback-session",
+                1,
+                "request-first",
+            ))
+            .unwrap();
+        let mut request = chat_slot_ingest_request("receipt-rollback-session", 2, "request-retry");
+        request.expected_branch_head = BranchHeadExpectation::None;
+        let conflict = engine.create_chat_message_slot(&request).unwrap();
+        assert!(conflict.conflict.is_some());
+        assert!(!conflict.duplicate);
+
+        request.expected_branch_head = BranchHeadExpectation::Any;
+        let retried = engine.create_chat_message_slot(&request).unwrap();
+        assert!(retried.conflict.is_none());
+        assert!(!retried.duplicate);
+        assert_eq!(
+            engine
+                .query_message_slots(&MessageSlotQuery {
+                    session_id: Some(SessionId::new("receipt-rollback-session")),
+                    include_alternates: true,
+                    page: None,
+                })
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn concurrent_chat_message_slot_ingest_creates_once() {
+        let engine = test_engine();
+        let request = chat_slot_ingest_request("concurrent-ingest-session", 1, "same-key");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let results = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for _ in 0..2 {
+                let engine = engine.clone();
+                let request = request.clone();
+                let barrier = barrier.clone();
+                handles.push(scope.spawn(move || {
+                    barrier.wait();
+                    engine.create_chat_message_slot(&request).unwrap()
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|result| result.duplicate).count(), 1);
+        assert_eq!(results.iter().filter(|result| !result.duplicate).count(), 1);
+        assert_eq!(
+            engine
+                .query_message_slots(&MessageSlotQuery {
+                    session_id: Some(SessionId::new("concurrent-ingest-session")),
+                    include_alternates: true,
+                    page: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -7964,6 +8076,56 @@ mod tests {
             metadata_json: json!({ "correlation_id": format!("correlation-{ordinal}") }),
             created_at: format!("2026-06-19T00:{ordinal:02}:00Z"),
             blocks: Vec::new(),
+        }
+    }
+
+    fn chat_slot_ingest_request(
+        session_id: &str,
+        ordinal: u32,
+        idempotency_key: &str,
+    ) -> CreateChatMessageSlotRequest {
+        let branch_id = ConversationBranchId::new(format!("branch:{session_id}:default"));
+        let slot_id = MessageSlotId::new(format!("slot:{session_id}:{idempotency_key}"));
+        let variant_id = MessageVariantId::new(format!("variant:{session_id}:{idempotency_key}"));
+        let message_id = MessageId::new(format!("message:{session_id}:{idempotency_key}"));
+        let timestamp = format!("2026-06-19T00:{ordinal:02}:00Z");
+        let mut message = test_message_write(session_id, ordinal, "user", "user", "hello");
+        message.message_id = message_id;
+        message.branch_id = Some(branch_id.clone());
+        CreateChatMessageSlotRequest {
+            slot: MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: SessionId::new(session_id),
+                primary_variant_id: variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({"idempotency_key": idempotency_key}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp.clone(),
+            },
+            primary_variant: MessageVariantWrite {
+                variant_id,
+                slot_id,
+                source: MessageVariantSource::Primary,
+                ordinal: 0,
+                status: MessageVariantStatus::Active,
+                message,
+                metadata_json: json!({}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp.clone(),
+            },
+            branch_id: branch_id.clone(),
+            expected_branch_head: BranchHeadExpectation::Any,
+            updated_at: timestamp.clone(),
+            ensure_active_branch: Some(EnsureActiveChatConversationBranchRequest {
+                session_id: SessionId::new(session_id),
+                branch_id,
+                label: Some("Default".to_string()),
+                metadata_json: json!({"source": "test"}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+            }),
+            inherit_branch_head: true,
+            idempotency_key: Some(idempotency_key.to_string()),
         }
     }
 

@@ -2930,6 +2930,9 @@ fn sample_create_chat_message_slot_request() -> persistence::CreateChatMessageSl
         branch_id: sample_conversation_branch_id(),
         expected_branch_head: persistence::BranchHeadExpectation::Message(sample_message_id()),
         updated_at: sample_timestamp(),
+        ensure_active_branch: None,
+        inherit_branch_head: false,
+        idempotency_key: Some("chat-request-alpha".to_string()),
     }
 }
 
@@ -2941,6 +2944,7 @@ fn sample_create_chat_message_slot_result() -> persistence::CreateChatMessageSlo
             expected: Some(sample_message_id()),
             actual: Some(MessageId::new("validation-actual-head-message")),
         }),
+        duplicate: false,
     }
 }
 

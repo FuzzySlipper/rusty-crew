@@ -438,7 +438,10 @@ export const nativeMappingInventory = {
         ],
         "CreateChatMessageSlotRequest": [
           "branch_id",
+          "ensure_active_branch",
           "expected_branch_head",
+          "idempotency_key",
+          "inherit_branch_head",
           "primary_variant",
           "slot",
           "updated_at"
@@ -446,6 +449,7 @@ export const nativeMappingInventory = {
         "CreateChatMessageSlotResult": [
           "branch",
           "conflict",
+          "duplicate",
           "slot"
         ],
         "CreateChatMessageVariantRequest": [

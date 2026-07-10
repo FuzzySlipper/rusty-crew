@@ -216,7 +216,6 @@ import {
 import {
   type ChatEvent,
   type ConversationBranchStateRecord,
-  type SendChatMessageResult,
 } from "./rusty-view-chat-api.js";
 import {
   handleRustyViewChatRouteRequest,
@@ -448,7 +447,6 @@ interface ServiceState {
   readonly claimedDeliveryIntentIds: Set<number>;
   readonly unmatchedDeliveryIntentIds: Set<number>;
   readonly directDispatchSessions: Set<SessionId>;
-  readonly chatMessageReceipts: Map<string, SendChatMessageResult>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly toolCallDebugStore: ToolCallDebugStore;
   readonly providerRequestDebugStore: ProviderRequestDebugStore;
@@ -699,7 +697,6 @@ function rustyViewChatOperationsContext(
     },
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
-    chatMessageReceipts: state.chatMessageReceipts,
     now: state.now,
     appendChatEvent: (sessionId, event) =>
       appendChatEventFromModule(chatEventLogContext(state), sessionId, event),
@@ -959,7 +956,6 @@ export async function createRustyCrewServiceApp(
       claimedDeliveryIntentIds: new Set(),
       unmatchedDeliveryIntentIds: new Set(),
       directDispatchSessions: new Set(),
-      chatMessageReceipts: new Map(),
       chatSubscribersBySession: new Map(),
       toolCallDebugStore,
       providerRequestDebugStore,

@@ -434,6 +434,12 @@ pub struct CreateChatMessageSlotRequest {
     pub branch_id: ConversationBranchId,
     pub expected_branch_head: BranchHeadExpectation,
     pub updated_at: IsoTimestamp,
+    #[serde(default)]
+    pub ensure_active_branch: Option<EnsureActiveChatConversationBranchRequest>,
+    #[serde(default)]
+    pub inherit_branch_head: bool,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -441,6 +447,8 @@ pub struct CreateChatMessageSlotResult {
     pub slot: Option<MessageSlotRecord>,
     pub branch: ConversationBranchRecord,
     pub conflict: Option<BranchHeadConflict>,
+    #[serde(default)]
+    pub duplicate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

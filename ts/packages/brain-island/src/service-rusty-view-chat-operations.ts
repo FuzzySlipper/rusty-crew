@@ -101,7 +101,6 @@ export interface RustyViewChatOperationsContext {
   get runtimeConfig(): RustyCrewRuntimeConfig;
   toolCallDebugStore: ToolCallDebugStore;
   providerRequestDebugStore: ProviderRequestDebugStore;
-  chatMessageReceipts: Map<string, SendChatMessageResult>;
   now(): string;
   appendChatEvent(
     sessionId: SessionId,
@@ -128,20 +127,17 @@ export async function submitRustyViewChatMessage(
   context: RustyViewChatOperationsContext,
   input: ChatSendMessageInput,
 ): Promise<SendChatMessageResult> {
-  const receiptKey = `${input.session.sessionId}:${input.idempotencyKey}`;
-  const existing = context.chatMessageReceipts.get(receiptKey);
-  if (existing !== undefined) {
-    return { ...existing, status: "duplicate" };
-  }
   const messageId = input.clientMessageId ?? `chat:${input.idempotencyKey}`;
   const correlationId = `chat:${input.idempotencyKey}`;
-  const slotId = stableChatRecordId("slot", messageId);
+  const slotId = stableChatRecordId(
+    "slot",
+    `${input.session.sessionId}:${input.idempotencyKey}`,
+  );
   const primaryVariantId = stableChatRecordId("variant", slotId);
   const now = context.now();
-  const branch = await ensureActiveConversationBranch(
-    context,
-    input.session,
-    now,
+  const fallbackBranchId = stableChatRecordId(
+    "branch",
+    `${input.session.sessionId}:default`,
   );
   const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
     context.roleplayRouteContext(),
@@ -157,17 +153,17 @@ export async function submitRustyViewChatMessage(
       ? {}
       : { speaker_identity: speakerIdentity }),
   };
-  await context.bridge.saveMessageSlot({
-    slot_id: slotId,
-    session_id: input.session.sessionId,
-    primary_variant_id: primaryVariantId,
-    active_variant_id: null,
-    metadata_json: messageMetadata,
-    created_at: now,
-    updated_at: now,
-  });
-  await context.bridge.saveMessageVariant(
-    messageVariantWrite({
+  const durable = (await context.bridge.createChatMessageSlot({
+    slot: {
+      slot_id: slotId,
+      session_id: input.session.sessionId,
+      primary_variant_id: primaryVariantId,
+      active_variant_id: null,
+      metadata_json: messageMetadata,
+      created_at: now,
+      updated_at: now,
+    },
+    primary_variant: messageVariantWrite({
       sessionId: input.session.sessionId,
       slotId,
       variantId: primaryVariantId,
@@ -176,22 +172,62 @@ export async function submitRustyViewChatMessage(
       ordinal: 0,
       actor: input.actor,
       body: input.body,
-      branchId: branch.branch_id,
-      parentMessageId: branch.head_message_id ?? undefined,
-      previousMessageId: branch.head_message_id ?? undefined,
+      branchId: fallbackBranchId,
       metadataJson: messageMetadata,
       now,
     }),
-  );
+    branch_id: fallbackBranchId,
+    expected_branch_head: { type: "any" },
+    updated_at: now,
+    ensure_active_branch: {
+      session_id: input.session.sessionId,
+      branch_id: fallbackBranchId,
+      label: "Default",
+      metadata_json: { source: "rusty_view_chat_default" },
+      created_at: now,
+      updated_at: now,
+    },
+    inherit_branch_head: true,
+    idempotency_key: input.idempotencyKey,
+  })) as {
+    slot?: MessageSlotRecord | null;
+    branch: ConversationBranchRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+    duplicate?: boolean;
+  };
+  if (durable.conflict || !durable.slot) {
+    throw new Error(
+      `chat message ingest conflicted for ${input.session.sessionId}`,
+    );
+  }
+  const branch = durable.branch;
+  const persistedMessage = durable.slot.primary.message;
+  if (durable.duplicate) {
+    const latest = await context.listChatEventsAfterCursor(
+      input.session,
+      undefined,
+      1,
+    );
+    return {
+      status: "duplicate",
+      message_id: persistedMessage.message_id,
+      slot_id: durable.slot.slot_id,
+      primary_variant_id: durable.slot.primary_variant_id,
+      correlation_id: correlationId,
+      latest_cursor: latest.at(-1)?.event_id ?? `${input.session.sessionId}:0`,
+      summary: "duplicate chat message ignored",
+      reason_code: "duplicate_idempotency_key",
+    };
+  }
   const inbound = await context.appendChatEvent(input.session.sessionId, {
     kind: "message_created",
     payload: {
       message_id: messageId,
       slot_id: slotId,
       primary_variant_id: primaryVariantId,
-      branch_id: branch.branch_id,
-      parent_message_id: branch.head_message_id,
-      previous_message_id: branch.head_message_id,
+      branch_id: persistedMessage.branch_id,
+      parent_message_id: persistedMessage.parent_message_id,
+      previous_message_id: persistedMessage.previous_message_id,
       role: input.actor.kind === "agent" ? "assistant" : "user",
       actor: input.actor,
       body: input.body,
@@ -201,12 +237,6 @@ export async function submitRustyViewChatMessage(
       correlation_id: correlationId,
       reason: input.reason,
     },
-  });
-  await context.bridge.updateConversationBranchHead({
-    branch_id: branch.branch_id,
-    head_message_id: messageId,
-    expected: { type: "any" },
-    updated_at: context.now(),
   });
   const wakeReport = await context.submitServiceTurn({
     sessionId: input.session.sessionId,
@@ -235,7 +265,6 @@ export async function submitRustyViewChatMessage(
     summary: wakeReport.summary,
     reason_code: wakeReport.reasonCode,
   };
-  rememberChatMessageReceipt(context, receiptKey, result);
   return result;
 }
 
@@ -301,6 +330,9 @@ async function persistCompletedAssistantTurn(
     branch_id: input.branch.branch_id,
     expected_branch_head: { type: "any" },
     updated_at: now,
+    ensure_active_branch: null,
+    inherit_branch_head: false,
+    idempotency_key: null,
   })) as {
     slot?: MessageSlotRecord | null;
     conflict?: { expected?: string | null; actual?: string | null } | null;
@@ -1225,27 +1257,6 @@ export async function removeRustyViewDataBankScope(
   return { status: "removed", scope: removed, latest_cursor: event.event_id };
 }
 
-async function ensureActiveConversationBranch(
-  context: RustyViewChatOperationsContext,
-  session: ChatSendMessageInput["session"],
-  now: string,
-): Promise<ConversationBranchRecord> {
-  const branchId = stableChatRecordId("branch", `${session.sessionId}:default`);
-  const result = (await context.bridge.ensureActiveChatConversationBranch({
-    session_id: session.sessionId,
-    branch_id: branchId,
-    label: "Default",
-    metadata_json: { source: "rusty_view_chat_default" },
-    created_at: now,
-    updated_at: now,
-  })) as {
-    branch: ConversationBranchRecord;
-    state: ConversationBranchStateRecord;
-    conflict?: { expected?: string | null; actual?: string | null } | null;
-  };
-  return result.branch;
-}
-
 export async function listRustyViewMessageVariants(
   context: RustyViewChatOperationsContext,
   input: ListMessageVariantsInput,
@@ -1278,10 +1289,9 @@ export async function createRustyViewMessageSlot(
     stableChatRecordId("slot", `${input.session.sessionId}:${input.requestId}`);
   const variantId =
     input.request.primary_variant_id ?? stableChatRecordId("variant", slotId);
-  const branch = await ensureActiveConversationBranch(
-    context,
-    input.session,
-    now,
+  const fallbackBranchId = stableChatRecordId(
+    "branch",
+    `${input.session.sessionId}:default`,
   );
   const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
     context.roleplayRouteContext(),
@@ -1322,16 +1332,24 @@ export async function createRustyViewMessageSlot(
       ordinal: 0,
       actor: input.request.actor,
       body: input.request.body,
-      branchId: branch.branch_id,
-      parentMessageId: branch.head_message_id ?? undefined,
-      previousMessageId: branch.head_message_id ?? undefined,
+      branchId: fallbackBranchId,
       metadataJson: variantMetadata,
       blocks: input.request.blocks,
       now,
     }),
-    branch_id: branch.branch_id,
+    branch_id: fallbackBranchId,
     expected_branch_head: { type: "any" },
     updated_at: context.now(),
+    ensure_active_branch: {
+      session_id: input.session.sessionId,
+      branch_id: fallbackBranchId,
+      label: "Default",
+      metadata_json: { source: "rusty_view_chat_default" },
+      created_at: now,
+      updated_at: now,
+    },
+    inherit_branch_head: true,
+    idempotency_key: null,
   })) as {
     slot?: MessageSlotRecord | null;
     branch: ConversationBranchRecord;
@@ -1615,19 +1633,6 @@ function attachmentLinkRecord(input: {
     metadata_json: input.metadataJson,
     created_at: input.createdAt,
   };
-}
-
-function rememberChatMessageReceipt(
-  context: RustyViewChatOperationsContext,
-  key: string,
-  result: SendChatMessageResult,
-): void {
-  context.chatMessageReceipts.set(key, result);
-  if (context.chatMessageReceipts.size <= 500) return;
-  const first = context.chatMessageReceipts.keys().next().value;
-  if (typeof first === "string") {
-    context.chatMessageReceipts.delete(first);
-  }
 }
 
 type ProfileRuntimeToolPolicy = {

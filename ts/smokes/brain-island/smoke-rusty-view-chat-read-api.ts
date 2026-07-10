@@ -19,6 +19,7 @@ const mcpPort = await openPort();
 const token = "rusty-view-chat-token";
 const retainedDeltaCount = 7_300;
 const toolCallDebugStore = new MemoryToolCallDebugStore();
+let wakeInvocationCount = 0;
 writeRuntimeConfig(root, mcpPort);
 const mcpServer = await startMcpServer(mcpPort);
 let host = await startHost();
@@ -151,10 +152,10 @@ try {
   assert.equal(sent.body.ok, true);
   assert.equal(sent.body.data.status, "accepted");
   assert.equal(sent.body.data.message_id, "client-message-1");
-  assert.equal(sent.body.data.slot_id, "slot:client-message-1");
+  assert.equal(sent.body.data.slot_id, "slot:chat-session:chat-send-1");
   assert.equal(
     sent.body.data.primary_variant_id,
-    "variant:slot:client-message-1",
+    "variant:slot:chat-session:chat-send-1",
   );
   assert.equal(typeof sent.body.data.wake_id, "string");
 
@@ -767,6 +768,7 @@ try {
     assert.ok(creationMutationKinds.includes(kind), `missing ${kind} event`);
   }
 
+  const wakeInvocationCountBeforeDuplicate = wakeInvocationCount;
   const duplicate = await post(
     "/v1/chat/sessions/chat-session/messages",
     token,
@@ -779,10 +781,34 @@ try {
   );
   assert.equal(duplicate.status, 202);
   assert.equal(duplicate.body.data.status, "duplicate");
-  assert.equal(duplicate.body.data.wake_id, sent.body.data.wake_id);
+  assert.equal(duplicate.body.data.wake_id, undefined);
+  assert.equal(
+    wakeInvocationCount,
+    wakeInvocationCountBeforeDuplicate,
+    "durable duplicate replay must not dispatch a second wake",
+  );
 
   await host.stop();
   host = await startHost();
+
+  const wakeInvocationCountBeforeRestartReplay = wakeInvocationCount;
+  const persistedDuplicate = await post(
+    "/v1/chat/sessions/chat-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "this persisted duplicate should not dispatch",
+      client_message_id: "client-message-1",
+    },
+    { "Idempotency-Key": "chat-send-1" },
+  );
+  assert.equal(persistedDuplicate.status, 202);
+  assert.equal(persistedDuplicate.body.data.status, "duplicate");
+  assert.equal(
+    wakeInvocationCount,
+    wakeInvocationCountBeforeRestartReplay,
+    "durable duplicate replay after restart must not dispatch a second wake",
+  );
 
   const persistedRetainedReplay = await get(
     "/v1/chat/sessions/chat-retention-session/events?cursor=chat-retention-session:0&limit=10",
@@ -1361,6 +1387,7 @@ function withLiveWakeEventsBridge(
     registerBrainRuntime: async (registration, executor) => {
       const wrappedExecutor: BrainWakeExecutor = {
         wake: async (request, buffers) => {
+          wakeInvocationCount += 1;
           if (request.sessionId === "chat-fail-session") {
             const unsuccessfulDebug = debugStore.start({
               toolCallId: "rusty-view-unsuccessful-tool-call",

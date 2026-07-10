@@ -36,17 +36,25 @@ impl CoordinationStore {
         let tx = conn
             .unchecked_transaction()
             .map_err(|error| persistence_error("begin create chat message slot", error))?;
-        ensure_branch_belongs_to_session_in_tx(&tx, &request.slot.session_id, &request.branch_id)?;
-        let current = current_branch_head_in_tx(&tx, &request.branch_id)?;
+        if let Some(key) = request.idempotency_key.as_deref() {
+            if let Some(receipt) = reserve_chat_slot_receipt_in_tx(&tx, request, key)? {
+                let result = load_chat_slot_receipt_result_in_tx(&tx, &receipt)?;
+                tx.commit().map_err(|error| {
+                    persistence_error("commit duplicate chat message slot", error)
+                })?;
+                return Ok(result);
+            }
+        }
+        let branch = resolve_chat_slot_branch_in_tx(&tx, request)?;
+        let current = current_branch_head_in_tx(&tx, &branch.branch_id)?;
         let expected = match &request.expected_branch_head {
             BranchHeadExpectation::Any => current.clone(),
             BranchHeadExpectation::None => None,
             BranchHeadExpectation::Message(message_id) => Some(message_id.clone()),
         };
         if request.expected_branch_head != BranchHeadExpectation::Any && current != expected {
-            let branch = load_conversation_branch_in_tx(&tx, &request.branch_id)?;
-            tx.commit()
-                .map_err(|error| persistence_error("commit create chat slot conflict", error))?;
+            tx.rollback()
+                .map_err(|error| persistence_error("rollback create chat slot conflict", error))?;
             return Ok(CreateChatMessageSlotResult {
                 slot: None,
                 branch,
@@ -54,10 +62,17 @@ impl CoordinationStore {
                     expected,
                     actual: current,
                 }),
+                duplicate: false,
             });
         }
+        let mut primary_variant = request.primary_variant.clone();
+        if request.inherit_branch_head {
+            primary_variant.message.branch_id = Some(branch.branch_id.clone());
+            primary_variant.message.parent_message_id = current.clone();
+            primary_variant.message.previous_message_id = current;
+        }
         save_message_slot_in_tx(&tx, &request.slot)?;
-        save_message_variant_in_tx(&tx, &request.primary_variant)?;
+        save_message_variant_in_tx(&tx, &primary_variant)?;
         tx.execute(
             "UPDATE conversation_branches
              SET head_message_id = ?2,
@@ -65,20 +80,24 @@ impl CoordinationStore {
                  version = version + 1
              WHERE branch_id = ?1",
             params![
-                request.branch_id.0,
-                request.primary_variant.message.message_id.0,
+                branch.branch_id.0,
+                primary_variant.message.message_id.0,
                 request.updated_at,
             ],
         )
         .map_err(|error| persistence_error("update create chat slot branch head", error))?;
         let slot = load_message_slot_in_tx(&tx, &request.slot.slot_id, true)?;
-        let branch = load_conversation_branch_in_tx(&tx, &request.branch_id)?;
+        let branch = load_conversation_branch_in_tx(&tx, &branch.branch_id)?;
+        if let Some(key) = request.idempotency_key.as_deref() {
+            finish_chat_slot_receipt_in_tx(&tx, request, key, &branch.branch_id)?;
+        }
         tx.commit()
             .map_err(|error| persistence_error("commit create chat message slot", error))?;
         Ok(CreateChatMessageSlotResult {
             slot: Some(slot),
             branch,
             conflict: None,
+            duplicate: false,
         })
     }
 
@@ -876,6 +895,158 @@ fn save_message_variant_in_tx(
     Ok(())
 }
 
+const CHAT_SLOT_RECEIPT_SCOPE_TYPE: &str = "chat_message_ingest";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ChatSlotReceipt {
+    slot_id: MessageSlotId,
+    branch_id: ConversationBranchId,
+}
+
+fn reserve_chat_slot_receipt_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    request: &CreateChatMessageSlotRequest,
+    key: &str,
+) -> CoreResult<Option<ChatSlotReceipt>> {
+    let provisional = ChatSlotReceipt {
+        slot_id: request.slot.slot_id.clone(),
+        branch_id: request.branch_id.clone(),
+    };
+    let inserted = tx
+        .execute(
+            "INSERT OR IGNORE INTO module_simple_kv_entries (
+                scope_type,
+                scope_id,
+                entry_key,
+                value_json,
+                revision,
+                created_at,
+                updated_at,
+                expires_at
+             ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5, NULL)",
+            params![
+                CHAT_SLOT_RECEIPT_SCOPE_TYPE,
+                request.slot.session_id.0,
+                key,
+                to_json_text(&provisional)?,
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("reserve chat message receipt", error))?;
+    if inserted == 1 {
+        return Ok(None);
+    }
+    let value_json = tx
+        .query_row(
+            "SELECT value_json
+             FROM module_simple_kv_entries
+             WHERE scope_type = ?1 AND scope_id = ?2 AND entry_key = ?3",
+            params![CHAT_SLOT_RECEIPT_SCOPE_TYPE, request.slot.session_id.0, key],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| persistence_error("load duplicate chat message receipt", error))?;
+    Ok(Some(parse_json_record(&value_json)?))
+}
+
+fn finish_chat_slot_receipt_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    request: &CreateChatMessageSlotRequest,
+    key: &str,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<()> {
+    let receipt = ChatSlotReceipt {
+        slot_id: request.slot.slot_id.clone(),
+        branch_id: branch_id.clone(),
+    };
+    let updated = tx
+        .execute(
+            "UPDATE module_simple_kv_entries
+             SET value_json = ?4, updated_at = ?5
+             WHERE scope_type = ?1 AND scope_id = ?2 AND entry_key = ?3",
+            params![
+                CHAT_SLOT_RECEIPT_SCOPE_TYPE,
+                request.slot.session_id.0,
+                key,
+                to_json_text(&receipt)?,
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("finish chat message receipt", error))?;
+    if updated != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "reserved chat message receipt disappeared before commit",
+        ));
+    }
+    Ok(())
+}
+
+fn load_chat_slot_receipt_result_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    receipt: &ChatSlotReceipt,
+) -> CoreResult<CreateChatMessageSlotResult> {
+    Ok(CreateChatMessageSlotResult {
+        slot: Some(load_message_slot_in_tx(tx, &receipt.slot_id, true)?),
+        branch: load_conversation_branch_in_tx(tx, &receipt.branch_id)?,
+        conflict: None,
+        duplicate: true,
+    })
+}
+
+fn resolve_chat_slot_branch_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    request: &CreateChatMessageSlotRequest,
+) -> CoreResult<ConversationBranchRecord> {
+    let Some(ensure) = &request.ensure_active_branch else {
+        ensure_branch_belongs_to_session_in_tx(tx, &request.slot.session_id, &request.branch_id)?;
+        return load_conversation_branch_in_tx(tx, &request.branch_id);
+    };
+    if let Some(active_branch_id) = current_active_branch_in_tx(tx, &ensure.session_id)? {
+        ensure_branch_belongs_to_session_in_tx(tx, &ensure.session_id, &active_branch_id)?;
+        return load_conversation_branch_in_tx(tx, &active_branch_id);
+    }
+    let fallback = load_conversation_branch_in_tx(tx, &ensure.branch_id).or_else(|error| {
+        if error.kind != CoreErrorKind::NotFound {
+            return Err(error);
+        }
+        let branch = ConversationBranchWrite {
+            branch_id: ensure.branch_id.clone(),
+            session_id: ensure.session_id.clone(),
+            parent_branch_id: None,
+            parent_message_id: None,
+            origin_message_id: None,
+            head_message_id: None,
+            label: ensure.label.clone(),
+            metadata_json: ensure.metadata_json.clone(),
+            created_at: ensure.created_at.clone(),
+            updated_at: ensure.updated_at.clone(),
+        };
+        save_conversation_branch_in_tx(tx, &branch)?;
+        load_conversation_branch_in_tx(tx, &branch.branch_id)
+    })?;
+    if fallback.session_id != ensure.session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!(
+                "conversation branch {} not found for session {}",
+                ensure.branch_id, ensure.session_id
+            ),
+        ));
+    }
+    tx.execute(
+        "INSERT INTO conversation_branch_state (
+            session_id, active_branch_id, updated_at, version
+         ) VALUES (?1, ?2, ?3, 0)
+         ON CONFLICT(session_id) DO UPDATE SET
+            active_branch_id = excluded.active_branch_id,
+            updated_at = excluded.updated_at,
+            version = conversation_branch_state.version + 1",
+        params![ensure.session_id.0, ensure.branch_id.0, ensure.updated_at],
+    )
+    .map_err(|error| persistence_error("select chat slot active branch", error))?;
+    Ok(fallback)
+}
+
 fn validate_create_chat_message_slot_request(
     request: &CreateChatMessageSlotRequest,
 ) -> CoreResult<()> {
@@ -913,6 +1084,30 @@ fn validate_create_chat_message_slot_request(
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "create chat message slot primary message branch_id must match target branch_id",
+        ));
+    }
+    if let Some(ensure) = &request.ensure_active_branch {
+        if ensure.session_id != request.slot.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "ensured chat branch session_id must match message slot session_id",
+            ));
+        }
+        if ensure.branch_id != request.branch_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "ensured chat branch_id must match message slot target branch_id",
+            ));
+        }
+    }
+    if request
+        .idempotency_key
+        .as_deref()
+        .is_some_and(|key| key.trim().is_empty() || key.len() > 500)
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot idempotency_key must contain 1 to 500 characters",
         ));
     }
     Ok(())
