@@ -1,6 +1,7 @@
 //! Coordination engine composition.
 
 mod body_queue;
+mod bootstrap;
 mod chat_store;
 mod delegation_store;
 mod github_gate_wait;
@@ -12,6 +13,7 @@ mod roleplay_records_store;
 mod runtime_admin_store;
 mod scheduler;
 mod session_store;
+mod sessions;
 
 pub use scheduler::SchedulerTickReport;
 
@@ -166,175 +168,6 @@ struct FanOutValidationGroup {
 }
 
 impl CoreEngine {
-    pub fn initialize(config: EngineConfig) -> CoreResult<Self> {
-        let validation = validate_engine_config(&config);
-        if let Some(diagnostic) = validation.diagnostics.into_iter().next() {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                format!(
-                    "{}{}: {}",
-                    diagnostic.code,
-                    diagnostic
-                        .path
-                        .as_deref()
-                        .map(|path| format!(" at {path}"))
-                        .unwrap_or_default(),
-                    diagnostic.message
-                ),
-            ));
-        }
-        let store =
-            CoreCoordinationStore::open_storage(&config.engine_data_dir, config.storage.as_ref())?;
-        let (persisted_sessions, persisted_events) = load_engine_bootstrap(&store)?;
-        let recorder_store = store.clone();
-        let bus = CoreBus::with_history_and_recorder(
-            persisted_events,
-            Some(Arc::new(move |sequence, event| {
-                save_engine_event(&recorder_store, sequence, event)
-            })),
-        );
-        let sessions = SessionRegistry::from_states(persisted_sessions);
-
-        let engine = Self {
-            handle: EngineHandle::new(NEXT_ENGINE_HANDLE.fetch_add(1, Ordering::Relaxed)),
-            config,
-            body_projector: BodyProjector::new(bus.clone(), sessions.clone()),
-            action_executor: BrainActionExecutor::new(bus.clone(), sessions.clone()),
-            bus,
-            sessions,
-            store,
-            profile_tool_profiles: Arc::new(Mutex::new(HashMap::new())),
-            scheduler_tick_lock: Arc::new(Mutex::new(())),
-            github_gate_lock: Arc::new(Mutex::new(())),
-        };
-        engine.cleanup_orphaned_delegated_sessions()?;
-        engine.expire_delegated_sessions()?;
-        engine.reactivate_active_roleplay_sessions()?;
-        Ok(engine)
-    }
-
-    fn reactivate_active_roleplay_sessions(&self) -> CoreResult<()> {
-        let configs = load_engine_session_configs(&self.store)?
-            .into_iter()
-            .map(|config| (config.session_id.clone(), config))
-            .collect::<HashMap<_, _>>();
-        let active_roleplay_sessions = RoleplayRecordsStore::list_session_metadata(
-            &self.store,
-            &RoleplaySessionMetadataQuery {
-                profile_id: None,
-                archived: Some(false),
-                page: None,
-            },
-        )?;
-        for metadata in active_roleplay_sessions {
-            let session_id = SessionId::new(metadata.session_id.clone());
-            let config = configs.get(&session_id).cloned().ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorKind::PersistenceFailure,
-                    format!(
-                        "active roleplay session {} has no persisted session config",
-                        metadata.session_id
-                    ),
-                )
-            })?;
-            self.ensure_configured_session(config)?;
-        }
-        Ok(())
-    }
-
-    pub fn handle(&self) -> EngineHandle {
-        self.handle
-    }
-
-    pub fn bus(&self) -> &CoreBus {
-        &self.bus
-    }
-
-    pub fn subscribe_events(
-        &self,
-        filter: EventSubscription,
-    ) -> CoreResult<(u64, Receiver<CoreEvent>)> {
-        self.bus.subscribe(filter)
-    }
-
-    pub fn unsubscribe_events(&self, id: u64) -> CoreResult<()> {
-        self.bus.unsubscribe(id)
-    }
-
-    pub fn create_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
-        let state = self.sessions.create_session(config.clone(), self.now())?;
-        save_engine_session_with_config(&self.store, &state, &config)?;
-        self.bus.publish(CoreEvent::SessionCreated {
-            state: Box::new(state.clone()),
-        })?;
-        Ok(state)
-    }
-
-    pub fn ensure_configured_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
-        match self.sessions.get_session(&config.session_id) {
-            Ok(existing) => {
-                if existing.agent_id != config.agent_id
-                    || existing.profile_id != config.profile_id
-                    || existing.kind != config.kind
-                    || existing.delegation != config.delegation
-                {
-                    return Err(CoreError::new(
-                        CoreErrorKind::AlreadyExists,
-                        format!(
-                            "session {} already exists with a different configured identity",
-                            config.session_id
-                        ),
-                    ));
-                }
-                if existing.status == SessionStatus::Archived {
-                    let now = self.now();
-                    self.expire_body_follow_up_messages(&now)?;
-                    self.sessions.apply_config(&config)?;
-                    let state = self.sessions.reactivate_session(&config.session_id, now)?;
-                    save_engine_session(&self.store, &state)?;
-                    return Ok(state);
-                }
-                let state = self.sessions.apply_config(&config)?;
-                save_engine_session(&self.store, &state)?;
-                Ok(state)
-            }
-            Err(error) if error.kind == CoreErrorKind::NotFound => self.create_session(config),
-            Err(error) => Err(error),
-        }
-    }
-
-    pub fn get_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
-        self.sessions.get_session(session_id)
-    }
-
-    pub fn list_sessions(&self) -> CoreResult<Vec<SessionState>> {
-        self.sessions.all_sessions()
-    }
-
-    pub fn archive_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
-        let state = self.sessions.archive_session(session_id, self.now())?;
-        save_engine_session(&self.store, &state)?;
-        self.bus.publish(CoreEvent::SessionArchived {
-            session_id: session_id.clone(),
-        })?;
-        if state.kind == SessionKind::Delegated {
-            if !load_delegated_worker_run_by_session(&self.store, session_id)?
-                .as_ref()
-                .is_some_and(|run| run.status.is_terminal())
-            {
-                update_delegated_worker_run_status_by_session(
-                    &self.store,
-                    session_id,
-                    WorkerRunStatus::Cancelled,
-                    self.now(),
-                )?;
-            }
-        } else {
-            self.cancel_delegated_children_for_parent(session_id)?;
-        }
-        Ok(state)
-    }
-
     pub fn project_body_state(&self, session_id: &SessionId) -> CoreResult<BodyState> {
         let mut state = self.body_projector.project(session_id)?;
         state.child_completions = delegated_completions_for_parent(&self.store, session_id)?;
@@ -2237,49 +2070,6 @@ impl CoreEngine {
             &run.source_wake_id,
             run.source_action_index,
         )
-    }
-
-    pub fn shutdown(self) -> CoreResult<ShutdownSummary> {
-        self.shutdown_with_timeout(0)
-    }
-
-    pub fn shutdown_with_timeout(self, drain_timeout_ms: u32) -> CoreResult<ShutdownSummary> {
-        let active_sessions = self
-            .sessions
-            .all_sessions()?
-            .into_iter()
-            .filter(|session| session.status != SessionStatus::Archived)
-            .collect::<Vec<_>>();
-        let archived_sessions = active_sessions.len() as u32;
-        for session in active_sessions {
-            if self.sessions.get_session(&session.session_id)?.status != SessionStatus::Archived {
-                self.archive_session(&session.session_id)?;
-            }
-        }
-        // Shutdown is currently synchronous: session archive events are
-        // published before subscriber senders are dropped, so there is no
-        // async work to wait for. The timeout becomes meaningful once the
-        // engine owns background tasks that require bounded joins.
-        let _ = drain_timeout_ms;
-        let dropped_subscriptions = self.bus.shutdown_subscribers()?;
-        Ok(ShutdownSummary {
-            engine: self.handle,
-            archived_sessions,
-            dropped_subscriptions,
-        })
-    }
-
-    pub fn diagnostic_now(&self) -> IsoTimestamp {
-        self.now()
-    }
-
-    fn now(&self) -> IsoTimestamp {
-        match &self.config.clock {
-            ClockConfig::System => OffsetDateTime::now_utc()
-                .format(&Rfc3339)
-                .expect("formatting current UTC timestamp as RFC3339 should not fail"),
-            ClockConfig::Fixed { at } => at.clone(),
-        }
     }
 
     fn expire_body_follow_up_messages(
