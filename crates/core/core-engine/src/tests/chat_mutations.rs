@@ -299,6 +299,7 @@ fn create_chat_message_slot_receipt_rolls_back_with_conflict() {
         ))
         .unwrap();
     let mut request = chat_slot_ingest_request("receipt-rollback-session", 2, "request-retry");
+    request.ensure_active_branch = None;
     request.expected_branch_head = BranchHeadExpectation::None;
     let conflict = engine.create_chat_message_slot(&request).unwrap();
     assert!(conflict.conflict.is_some());

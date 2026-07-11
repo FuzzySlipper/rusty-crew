@@ -485,15 +485,33 @@ fn purge_curator_scope(
         .transaction()
         .map_err(|error| persistence_error("start curator purge", error))?;
     let candidate_predicate = format!("{column}=?1");
+    let owned_candidates = format!(
+        "candidate_id IN (SELECT candidate_id FROM module_curator_candidates WHERE {candidate_predicate})"
+    );
+    let approvals =
+        tx.execute(
+            &format!("DELETE FROM module_curator_approvals WHERE {owned_candidates}"),
+            params![value],
+        )
+        .map_err(|error| persistence_error("purge curator approvals", error))? as u64;
+    let snapshots =
+        tx.execute(
+            &format!("DELETE FROM module_curator_snapshot_refs WHERE {owned_candidates}"),
+            params![value],
+        )
+        .map_err(|error| persistence_error("purge curator snapshots", error))? as u64;
+    let mutations =
+        tx.execute(
+            &format!("DELETE FROM module_curator_mutations WHERE {owned_candidates}"),
+            params![value],
+        )
+        .map_err(|error| persistence_error("purge curator mutations", error))? as u64;
     let candidates =
         tx.execute(
             &format!("DELETE FROM module_curator_candidates WHERE {candidate_predicate}"),
             params![value],
         )
         .map_err(|error| persistence_error("purge curator candidates", error))? as u64;
-    let approvals = tx.execute("DELETE FROM module_curator_approvals WHERE candidate_id NOT IN (SELECT candidate_id FROM module_curator_candidates)", []).map_err(|error| persistence_error("purge curator approvals", error))? as u64;
-    let snapshots = tx.execute("DELETE FROM module_curator_snapshot_refs WHERE candidate_id NOT IN (SELECT candidate_id FROM module_curator_candidates)", []).map_err(|error| persistence_error("purge curator snapshots", error))? as u64;
-    let mutations = tx.execute("DELETE FROM module_curator_mutations WHERE candidate_id NOT IN (SELECT candidate_id FROM module_curator_candidates)", []).map_err(|error| persistence_error("purge curator mutations", error))? as u64;
     let audit_receipts =
         tx.execute(
             &format!("DELETE FROM module_curator_audit_receipts WHERE {candidate_predicate}"),
@@ -834,13 +852,41 @@ mod tests {
             vec![1, 2, 3, 4]
         );
 
+        {
+            let conn = store.conn().unwrap();
+            conn.execute(
+                "INSERT INTO module_curator_approvals (
+                    approval_id, receipt_id, candidate_id, actor_id, approved_at, record_json
+                 ) VALUES (?1, ?2, ?3, NULL, ?4, '{}')",
+                params![
+                    "unrelated-orphan-approval",
+                    "unrelated-orphan-receipt",
+                    "unrelated-orphan-candidate",
+                    now(),
+                ],
+            )
+            .unwrap();
+        }
+
         let report = store.purge_curator_profile("profile-one").unwrap();
         assert_eq!(report.candidates, 1);
+        assert_eq!(report.approvals, 0);
         assert_eq!(report.mutations, 1);
         assert!(store
             .get_curator_candidate("candidate-one")
             .unwrap()
             .is_none());
+        let unrelated_approval_count: i64 = store
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM module_curator_approvals
+                 WHERE approval_id = 'unrelated-orphan-approval'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unrelated_approval_count, 1);
         drop(store);
         let _ = std::fs::remove_file(path);
     }

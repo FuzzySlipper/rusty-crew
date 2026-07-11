@@ -3,6 +3,7 @@ use rusty_crew_brain_runtime::{
     BrainRuntimeError, BufferedBrainHostToolResult, BufferedBrainHostToolStatus,
     BufferedBrainTurnCoordinator, BufferedBrainTurnError, BufferedBrainTurnLimits,
     BufferedBrainTurnRegistry, BufferedBrainTurnRun, BufferedNeutralPendingToolRequest,
+    BufferedNeutralToolOutputPoll,
 };
 use rusty_crew_pi_agent_brain::{
     ChatCompletionMessage, ChatCompletionsEvent, FakeChatCompletionsClient,
@@ -295,7 +296,7 @@ fn run_pi_agent_brain_buffered(
                         if run.coordinator.phase().is_terminal() {
                             break;
                         }
-                        if run.coordinator.enqueue_stream_item(item).is_err() {
+                        if run.coordinator.enqueue_provider_stream_item(item).is_err() {
                             break;
                         }
                     }
@@ -516,17 +517,19 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
         loop {
             let result = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
                 if let Some(cancellation) = run.coordinator.cancellation() {
-                    return PiAgentToolOutput::cancelled(format!(
+                    return Some(PiAgentToolOutput::cancelled(format!(
                         "pi-agent buffered wake {} cancelled before tool output {}: {}",
                         self.wake_id, call_id, cancellation.summary
-                    ));
+                    )));
                 }
-                if let Some(output) = run.coordinator.take_submitted_tool_output(&call_id) {
-                    return if output.is_error {
+                if let BufferedNeutralToolOutputPoll::Ready(output) =
+                    run.coordinator.poll_submitted_tool_output(&call_id)
+                {
+                    return Some(if output.is_error {
                         PiAgentToolOutput::error(output.output)
                     } else {
                         PiAgentToolOutput::ok(output.output)
-                    };
+                    });
                 }
                 if run.coordinator.phase().is_terminal() {
                     let summary = run
@@ -534,30 +537,30 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
                         .terminal()
                         .map(|terminal| terminal.summary.as_str())
                         .unwrap_or("turn ended");
-                    return PiAgentToolOutput::error(format!(
+                    return Some(PiAgentToolOutput::error(format!(
                         "pi-agent buffered wake {} ended before tool output {}: {}",
                         self.wake_id, call_id, summary
-                    ));
+                    )));
                 }
                 if run.coordinator.timeout_if_due() {
-                    return PiAgentToolOutput::timed_out(
+                    return Some(PiAgentToolOutput::timed_out(
                         run.coordinator
                             .terminal()
                             .map(|terminal| terminal.summary.clone())
                             .unwrap_or_else(|| "pi-agent buffered wake timed out".to_string()),
-                    );
+                    ));
                 }
-                PiAgentToolOutput::ok("")
+                None
             });
             match result {
-                Ok(output) if !output.output.is_empty() || output.is_error => return output,
+                Ok(Some(output)) => return output,
                 Err(_) => {
                     return PiAgentToolOutput::error(format!(
                         "pi-agent buffered wake {} disappeared before tool output {}",
                         self.wake_id, call_id
                     ));
                 }
-                Ok(_) => {}
+                Ok(None) => {}
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }

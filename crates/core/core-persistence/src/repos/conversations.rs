@@ -1323,6 +1323,12 @@ fn validate_create_chat_message_slot_request(
         ));
     }
     if let Some(ensure) = &request.ensure_active_branch {
+        if request.expected_branch_head != BranchHeadExpectation::Any {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "ensure_active_branch requires expected_branch_head=any",
+            ));
+        }
         if ensure.session_id != request.slot.session_id {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,

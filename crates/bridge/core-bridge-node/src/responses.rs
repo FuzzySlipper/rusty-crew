@@ -3,7 +3,7 @@ use rusty_crew_brain_runtime::{
     BrainRuntimeError, BufferedBrainHostToolResult, BufferedBrainHostToolStatus,
     BufferedBrainTurnCoordinator, BufferedBrainTurnError, BufferedBrainTurnLimits,
     BufferedBrainTurnPhase, BufferedBrainTurnRegistry, BufferedBrainTurnRun,
-    BufferedNeutralPendingToolRequest,
+    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutputPoll,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -388,7 +388,7 @@ fn run_openai_responses_brain_buffered(
             if run.coordinator.phase().is_terminal() {
                 return;
             }
-            let _ = run.coordinator.enqueue_stream_item(item);
+            let _ = run.coordinator.enqueue_provider_stream_item(item);
         });
     };
     let result = run_openai_responses_brain_with_buffered_tools(
@@ -470,19 +470,21 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
         loop {
             let result = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
                 if let Some(cancellation) = run.coordinator.cancellation() {
-                    return NeutralToolOutput {
+                    return Some(NeutralToolOutput {
                         output: format!(
                             "OpenAI Responses buffered wake {} cancelled before tool output {}: {}",
                             self.wake_id, call.call_id, cancellation.summary
                         ),
                         is_error: true,
-                    };
+                    });
                 }
-                if let Some(output) = run.coordinator.take_submitted_tool_output(&call.call_id) {
-                    return NeutralToolOutput {
+                if let BufferedNeutralToolOutputPoll::Ready(output) =
+                    run.coordinator.poll_submitted_tool_output(&call.call_id)
+                {
+                    return Some(NeutralToolOutput {
                         output: output.output,
                         is_error: output.is_error,
-                    };
+                    });
                 }
                 if run.coordinator.phase().is_terminal() {
                     let summary = run
@@ -490,16 +492,16 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         .terminal()
                         .map(|terminal| terminal.summary.as_str())
                         .unwrap_or("turn ended");
-                    return NeutralToolOutput {
+                    return Some(NeutralToolOutput {
                         output: format!(
                             "OpenAI Responses buffered wake {} ended before tool output {}: {}",
                             self.wake_id, call.call_id, summary
                         ),
                         is_error: true,
-                    };
+                    });
                 }
                 if run.coordinator.timeout_if_due() {
-                    return NeutralToolOutput {
+                    return Some(NeutralToolOutput {
                         output: run
                             .coordinator
                             .terminal()
@@ -508,15 +510,12 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                                 "OpenAI Responses buffered wake timed out".to_string()
                             }),
                         is_error: true,
-                    };
+                    });
                 }
-                NeutralToolOutput {
-                    output: String::new(),
-                    is_error: false,
-                }
+                None
             });
             match result {
-                Ok(output) if !output.output.is_empty() || output.is_error => return output,
+                Ok(Some(output)) => return output,
                 Err(_) => {
                     return NeutralToolOutput {
                         output: format!(
@@ -526,7 +525,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         is_error: true,
                     };
                 }
-                Ok(_) => {}
+                Ok(None) => {}
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }

@@ -102,6 +102,23 @@ pub enum CoreErrorKind {
     InternalError,
 }
 
+impl CoreErrorKind {
+    pub const fn reason_code(&self) -> &'static str {
+        match self {
+            Self::InvalidInput => "invalid_input",
+            Self::NotFound => "not_found",
+            Self::AlreadyExists => "already_exists",
+            Self::SessionExpired => "session_expired",
+            Self::TimeoutExpired => "timeout_expired",
+            Self::PersistenceFailure => "persistence_failure",
+            Self::AdapterUnavailable => "adapter_unavailable",
+            Self::BrainUnavailable => "brain_unavailable",
+            Self::ActionRejected => "action_rejected",
+            Self::InternalError => "internal_error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize, JsonSchema)]
 #[error("{kind:?}: {message}")]
 pub struct CoreError {
@@ -1483,6 +1500,25 @@ pub enum PlatformAdapterKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_error_reason_codes_are_stable_snake_case() {
+        let cases = [
+            (CoreErrorKind::InvalidInput, "invalid_input"),
+            (CoreErrorKind::NotFound, "not_found"),
+            (CoreErrorKind::AlreadyExists, "already_exists"),
+            (CoreErrorKind::SessionExpired, "session_expired"),
+            (CoreErrorKind::TimeoutExpired, "timeout_expired"),
+            (CoreErrorKind::PersistenceFailure, "persistence_failure"),
+            (CoreErrorKind::AdapterUnavailable, "adapter_unavailable"),
+            (CoreErrorKind::BrainUnavailable, "brain_unavailable"),
+            (CoreErrorKind::ActionRejected, "action_rejected"),
+            (CoreErrorKind::InternalError, "internal_error"),
+        ];
+        for (kind, expected) in cases {
+            assert_eq!(kind.reason_code(), expected);
+        }
+    }
 
     #[test]
     fn channel_external_event_payload_keeps_flat_tagged_json_shape() {

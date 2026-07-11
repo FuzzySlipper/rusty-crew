@@ -172,15 +172,35 @@ impl PostgresBackendStore {
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start PostgreSQL curator purge", error))?;
+        let owned_candidates = format!(
+            "candidate_id IN (SELECT candidate_id FROM {schema}.module_curator_candidates WHERE {column}=$1)"
+        );
+        let approvals = tx
+            .execute(
+                &format!("DELETE FROM {schema}.module_curator_approvals WHERE {owned_candidates}"),
+                &[&value],
+            )
+            .map_err(|error| postgres_error("purge PostgreSQL curator approvals", error))?;
+        let snapshots = tx
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.module_curator_snapshot_refs WHERE {owned_candidates}"
+                ),
+                &[&value],
+            )
+            .map_err(|error| postgres_error("purge PostgreSQL curator snapshots", error))?;
+        let mutations = tx
+            .execute(
+                &format!("DELETE FROM {schema}.module_curator_mutations WHERE {owned_candidates}"),
+                &[&value],
+            )
+            .map_err(|error| postgres_error("purge PostgreSQL curator mutations", error))?;
         let candidates = tx
             .execute(
                 &format!("DELETE FROM {schema}.module_curator_candidates WHERE {column}=$1"),
                 &[&value],
             )
             .map_err(|error| postgres_error("purge PostgreSQL curator candidates", error))?;
-        let approvals = tx.execute(&format!("DELETE FROM {schema}.module_curator_approvals WHERE candidate_id NOT IN (SELECT candidate_id FROM {schema}.module_curator_candidates)"), &[]).map_err(|error| postgres_error("purge PostgreSQL curator approvals", error))?;
-        let snapshots = tx.execute(&format!("DELETE FROM {schema}.module_curator_snapshot_refs WHERE candidate_id NOT IN (SELECT candidate_id FROM {schema}.module_curator_candidates)"), &[]).map_err(|error| postgres_error("purge PostgreSQL curator snapshots", error))?;
-        let mutations = tx.execute(&format!("DELETE FROM {schema}.module_curator_mutations WHERE candidate_id NOT IN (SELECT candidate_id FROM {schema}.module_curator_candidates)"), &[]).map_err(|error| postgres_error("purge PostgreSQL curator mutations", error))?;
         let audit_receipts = tx
             .execute(
                 &format!("DELETE FROM {schema}.module_curator_audit_receipts WHERE {column}=$1"),
@@ -472,13 +492,37 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1, 2]
         );
-        assert_eq!(
-            store
-                .purge_curator_profile("profile-pg")
-                .unwrap()
-                .candidates,
-            1
-        );
+        let schema = store.quoted_schema();
+        {
+            let mut client = store.client().unwrap();
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO {schema}.module_curator_approvals (
+                            approval_id, receipt_id, candidate_id, actor_id, approved_at, record_json
+                         ) VALUES ('unrelated-orphan-approval', 'unrelated-orphan-receipt',
+                            'unrelated-orphan-candidate', NULL, '2026-07-10T00:00:00Z', '{{}}'::jsonb)"
+                    ),
+                    &[],
+                )
+                .unwrap();
+        }
+        let report = store.purge_curator_profile("profile-pg").unwrap();
+        assert_eq!(report.candidates, 1);
+        assert_eq!(report.approvals, 0);
+        let unrelated_approval_count: i64 = store
+            .client()
+            .unwrap()
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*) FROM {schema}.module_curator_approvals
+                     WHERE approval_id = 'unrelated-orphan-approval'"
+                ),
+                &[],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(unrelated_approval_count, 1);
         store.drop_schema_for_test().unwrap();
     }
 

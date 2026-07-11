@@ -2,7 +2,7 @@ use crate::{
     BrainRuntimeError, BrainRuntimeResult, BufferedBrainHostToolResult,
     BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision,
     BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic, BufferedNeutralCancellation,
-    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput,
+    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput, BufferedNeutralToolOutputPoll,
 };
 use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId};
 use serde::Serialize;
@@ -360,6 +360,24 @@ impl BufferedBrainTurnCoordinator {
         self.enqueue_stream_item_at(item, OffsetDateTime::now_utc())
     }
 
+    pub fn enqueue_provider_stream_item(
+        &mut self,
+        item: BrainWakeStreamItem,
+    ) -> Result<u64, BufferedBrainTurnError> {
+        match self.enqueue_stream_item(item) {
+            Ok(sequence) => Ok(sequence),
+            Err(error) => {
+                if !self.phase.is_terminal() {
+                    let _ = self.fail(
+                        "provider_stream_enqueue_failed",
+                        format!("provider stream item was rejected: {error}"),
+                    );
+                }
+                Err(error)
+            }
+        }
+    }
+
     pub fn enqueue_stream_item_at(
         &mut self,
         item: BrainWakeStreamItem,
@@ -384,7 +402,7 @@ impl BufferedBrainTurnCoordinator {
             BrainWakeStreamItem::Actions { .. } => Some(BufferedBrainTurnPhase::Completed),
             BrainWakeStreamItem::WakeFailed { failure } => {
                 self.terminal = Some(BufferedBrainTurnTerminal {
-                    reason_code: format!("{:?}", failure.kind).to_lowercase(),
+                    reason_code: failure.kind.reason_code().to_string(),
                     summary: failure.message.clone(),
                     occurred_at: format_rfc3339(now),
                 });
@@ -601,6 +619,13 @@ impl BufferedBrainTurnCoordinator {
             self.record_transition_at(OffsetDateTime::now_utc());
         }
         output
+    }
+
+    pub fn poll_submitted_tool_output(&mut self, call_id: &str) -> BufferedNeutralToolOutputPoll {
+        match self.take_submitted_tool_output(call_id) {
+            Some(output) => BufferedNeutralToolOutputPoll::Ready(output),
+            None => BufferedNeutralToolOutputPoll::Pending,
+        }
     }
 
     pub fn set_provider_state_output(
@@ -1064,6 +1089,66 @@ mod tests {
             turn.enqueue_stream_item(event_item("wake-1", "other")),
             Err(BufferedBrainTurnError::SessionIdentityMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn provider_stream_enqueue_failure_is_terminal_and_visible() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        let error = turn
+            .enqueue_provider_stream_item(event_item("other", "session-1"))
+            .expect_err("mismatched provider stream identity must fail");
+        assert!(matches!(
+            error,
+            BufferedBrainTurnError::WakeIdentityMismatch { .. }
+        ));
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Failed);
+        assert_eq!(
+            turn.terminal()
+                .map(|terminal| terminal.reason_code.as_str()),
+            Some("provider_stream_enqueue_failed")
+        );
+        assert!(turn
+            .terminal()
+            .expect("terminal")
+            .summary
+            .contains("wake id mismatch"));
+    }
+
+    #[test]
+    fn empty_successful_tool_output_is_ready_exactly_once() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        turn.queue_tool_request(tool_request("call-empty"))
+            .expect("queue");
+        turn.submit_tool_output("call-empty", tool_output(""))
+            .expect("submit empty output");
+        assert_eq!(
+            turn.poll_submitted_tool_output("call-empty"),
+            BufferedNeutralToolOutputPoll::Ready(tool_output(""))
+        );
+        assert_eq!(
+            turn.poll_submitted_tool_output("call-empty"),
+            BufferedNeutralToolOutputPoll::Pending
+        );
+    }
+
+    #[test]
+    fn wake_failed_terminal_uses_core_error_reason_code() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        turn.enqueue_stream_item(BrainWakeStreamItem::wake_failed(BrainWakeFailure {
+            wake_id: "wake-1".to_string(),
+            session_id: SessionId::new("session-1"),
+            kind: CoreErrorKind::AdapterUnavailable,
+            message: "adapter offline".to_string(),
+        }))
+        .expect("enqueue failure");
+        assert_eq!(
+            turn.terminal()
+                .map(|terminal| terminal.reason_code.as_str()),
+            Some("adapter_unavailable")
+        );
     }
 
     #[test]

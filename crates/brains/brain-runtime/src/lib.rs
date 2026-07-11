@@ -81,6 +81,13 @@ pub struct BufferedNeutralToolOutput {
     pub is_error: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "status", content = "output", rename_all = "snake_case")]
+pub enum BufferedNeutralToolOutputPoll {
+    Pending,
+    Ready(BufferedNeutralToolOutput),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedNeutralCancellation {
     pub reason_code: String,

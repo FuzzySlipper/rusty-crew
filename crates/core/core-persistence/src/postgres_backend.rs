@@ -4993,6 +4993,12 @@ fn validate_create_chat_message_slot_request(
         ));
     }
     if let Some(ensure) = &request.ensure_active_branch {
+        if request.expected_branch_head != BranchHeadExpectation::Any {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "ensure_active_branch requires expected_branch_head=any",
+            ));
+        }
         if ensure.session_id != request.slot.session_id {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
@@ -13151,17 +13157,32 @@ mod tests {
             .unwrap();
         assert_eq!(ingest_slots.len(), 1);
 
-        let conflicted = conversation_chat_slot_ingest_request(
+        let mut conflicted = conversation_chat_slot_ingest_request(
             "session-chat-ingest",
             "ingest-after-conflict",
             BranchHeadExpectation::None,
         );
+        conflicted.ensure_active_branch = None;
         let conflict = store.create_chat_message_slot(&conflicted).unwrap();
         assert!(!conflict.duplicate);
         assert!(conflict.slot.is_none());
         assert_eq!(
             conflict.conflict.unwrap().actual,
             Some(ingest.primary_variant.message.message_id.clone())
+        );
+
+        let ambiguous = conversation_chat_slot_ingest_request(
+            "session-chat-ambiguous",
+            "ingest-ambiguous",
+            BranchHeadExpectation::Message(MessageId::new("missing-head")),
+        );
+        let ambiguous_error = store
+            .create_chat_message_slot(&ambiguous)
+            .expect_err("ensure and compare must be separate operations");
+        assert_eq!(ambiguous_error.kind, CoreErrorKind::InvalidInput);
+        assert_eq!(
+            ambiguous_error.message,
+            "ensure_active_branch requires expected_branch_head=any"
         );
         let mut retry = conflicted;
         retry.expected_branch_head = BranchHeadExpectation::Any;
