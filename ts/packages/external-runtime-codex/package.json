@@ -1,0 +1,22 @@
+{
+  "name": "@rusty-crew/external-runtime-codex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
+    "smoke:live": "tsx smokes/live-compatibility.ts"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
+}

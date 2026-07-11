@@ -1,0 +1,10 @@
+{
+  "protocol": "codex-app-server",
+  "cliVersion": "0.144.1",
+  "experimental": true,
+  "launcherSha256": "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477",
+  "nativeExecutableSha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "tsSha256": "e02a423150b9f224a709411a0fa8b90d66179c738dd3d82391bca5adc538cc2e",
+  "jsonSchemaSha256": "e1a1338a36caa774167f80dec32537e0bd07163494b24b52cfeed2f931d130c1",
+  "protocolSchemaSha256": "8cf5ac0d00a40f85b291ccb684c3fe88cd1534444fb8583757196834f4bfe44e"
+}

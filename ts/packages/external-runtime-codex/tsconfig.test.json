@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "smokes/**/*.ts",
+    "protocol/0.144.1/ts/**/*.ts"
+  ]
+}

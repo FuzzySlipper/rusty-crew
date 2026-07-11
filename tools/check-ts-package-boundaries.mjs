@@ -15,6 +15,14 @@ const adapterPackages = [
   "@rusty-crew/adapter-telegram",
   "@rusty-crew/adapter-tui",
 ];
+const externalRuntimePackage = "@rusty-crew/external-runtime-codex";
+const internalPackagesOutsideExternalRuntime = [
+  "@rusty-crew/brain-island",
+  "@rusty-crew/contracts",
+  "@rusty-crew/native-bridge",
+  "@rusty-crew/service-host",
+  ...adapterPackages,
+];
 const adapterAuthorityAllowedCalls = new Map([
   [
     normalizePath("ts/packages/adapter-den/src/index.ts"),
@@ -112,6 +120,10 @@ expectNoDependencies("@rusty-crew/brain-island", [
   "@rusty-crew/service-host",
   ...adapterPackages,
 ]);
+expectNoDependencies(
+  externalRuntimePackage,
+  internalPackagesOutsideExternalRuntime,
+);
 for (const adapterName of adapterPackages) {
   expectNoDependencies(adapterName, [
     "@rusty-crew/brain-island",
@@ -133,6 +145,10 @@ expectNoSourceImports("@rusty-crew/brain-island", [
   "@rusty-crew/service-host",
   ...adapterPackages,
 ]);
+expectNoSourceImports(
+  externalRuntimePackage,
+  internalPackagesOutsideExternalRuntime,
+);
 expectBrainIslandCompositionRatchets();
 expectNoProductionResidueFilenames("@rusty-crew/brain-island");
 expectNoNewSrcSmokes(
@@ -168,6 +184,12 @@ console.log(
       serviceHostCompositionDependencies: dependenciesFor(
         "@rusty-crew/service-host",
       ),
+      externalRuntimeBoundary: {
+        package: externalRuntimePackage,
+        forbiddenInternalDependencies: internalPackagesOutsideExternalRuntime,
+        shippingTransport: "attached-unix-websocket",
+        stdioFallback: false,
+      },
       adapterAuthorityRatchet: {
         packages: adapterPackages,
         forbiddenCalls: adapterAuthorityForbiddenCalls.length,

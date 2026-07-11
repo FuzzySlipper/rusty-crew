@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "target": "ES2022",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": ["src/**/*.ts", "protocol/0.144.1/ts/**/*.ts"]
+}
