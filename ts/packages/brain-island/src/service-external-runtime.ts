@@ -387,7 +387,7 @@ export class ServiceExternalRuntimeController {
               text_elements: [],
             },
       ),
-      ...(binding.cwd === undefined ? {} : { cwd: binding.cwd }),
+      ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
       approvalPolicy: "never",
       sandboxPolicy: { type: "dangerFullAccess" },
     });
