@@ -17,6 +17,7 @@ import { ServiceExternalRuntimeController } from "../src/service-external-runtim
 class FakeTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
   readonly sent: Array<Record<string, unknown>> = [];
+  #nextTurn = 1;
 
   setHandlers(handlers: CodexTransportHandlers): void {
     this.handlers = handlers;
@@ -39,11 +40,13 @@ class FakeTransport implements CodexJsonRpcTransport {
       });
     }
     if (parsed.method === "turn/start") {
+      const turnId = `native-turn-${this.#nextTurn}`;
+      this.#nextTurn += 1;
       this.emit({
         id: parsed.id,
         result: {
           turn: {
-            id: "native-turn-1",
+            id: turnId,
             items: [],
             itemsView: "full",
             status: "inProgress",
@@ -52,6 +55,51 @@ class FakeTransport implements CodexJsonRpcTransport {
             completedAt: null,
             durationMs: null,
           },
+        },
+      });
+    }
+    if (parsed.method === "thread/resume") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          thread: {
+            id: "native-thread-1",
+            extra: null,
+            sessionId: "native-session-1",
+            forkedFromId: null,
+            parentThreadId: null,
+            preview: "",
+            ephemeral: false,
+            historyMode: "paginated",
+            modelProvider: "openai",
+            createdAt: 1,
+            updatedAt: 1,
+            recencyAt: 1,
+            status: { type: "idle" },
+            path: null,
+            cwd: "/home",
+            cliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
+            source: "unknown",
+            threadSource: null,
+            agentNickname: null,
+            agentRole: null,
+            gitInfo: null,
+            name: null,
+            turns: [],
+          },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: "/home",
+          runtimeWorkspaceRoots: [],
+          instructionSources: [],
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          sandbox: { type: "dangerFullAccess" },
+          activePermissionProfile: null,
+          reasoningEffort: null,
+          multiAgentMode: "explicitRequestOnly",
+          initialTurnsPage: null,
         },
       });
     }
@@ -66,6 +114,12 @@ class FakeTransport implements CodexJsonRpcTransport {
               model: "gpt-5.4",
               reasoning_effort: "medium",
             },
+            {
+              name: "Default",
+              mode: "default",
+              model: null,
+              reasoning_effort: null,
+            },
           ],
         },
       });
@@ -79,7 +133,7 @@ class FakeTransport implements CodexJsonRpcTransport {
   }
 }
 
-test("controller persists and resolves typed app-server interactions", async () => {
+test("controller resolves typed interactions and resets one-shot Plan mode", async () => {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-controller-"),
   );
@@ -117,7 +171,6 @@ test("controller persists and resolves typed app-server interactions", async () 
         updatedAt: now(),
       },
     });
-    await controller.connect("interaction-runtime");
     await bridge.ensureConfiguredSession({
       sessionId: "interaction-session",
       agentId: "interaction-agent",
@@ -140,7 +193,8 @@ test("controller persists and resolves typed app-server interactions", async () 
         updatedAt: now(),
       },
     });
-    await bridge.deliverAgentMessage({
+    await controller.connect("interaction-runtime");
+    const planDelivery = await bridge.deliverAgentMessage({
       caller: { type: "system", senderAgentId: "operator" },
       deliveryId: "interaction-delivery",
       idempotencyKey: "interaction-delivery",
@@ -152,6 +206,7 @@ test("controller persists and resolves typed app-server interactions", async () 
       createdAt: now(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
+    assert.equal(planDelivery.activation?.type, "external_turn_requested");
     await controller.start();
     await waitUntil(
       async () =>
@@ -188,14 +243,14 @@ test("controller persists and resolves typed app-server interactions", async () 
     );
 
     transport.emit({
-      id: "approval-1",
-      method: "item/commandExecution/requestApproval",
+      id: "input-1",
+      method: "item/tool/requestUserInput",
       params: {
         threadId: "native-thread-1",
         turnId: "native-turn-1",
         itemId: "item-1",
-        startedAtMs: 1,
-        environmentId: null,
+        questions: [],
+        autoResolutionMs: null,
       },
     });
     await waitUntil(
@@ -203,24 +258,92 @@ test("controller persists and resolves typed app-server interactions", async () 
       "interaction persistence",
     );
     const interaction = (await bridge.listPendingExternalInteractions())[0];
-    assert.equal(interaction?.kind, "command_approval");
+    assert.equal(interaction?.kind, "request_user_input");
     await controller.resolveInteraction({
       interactionId: interaction?.interactionId ?? "",
       expectedRevision: interaction?.revision ?? 0,
-      idempotencyKey: "approval-resolution-1",
-      result: { decision: "decline" },
+      idempotencyKey: "input-resolution-1",
+      result: { answers: {} },
     });
     await waitUntil(
       async () =>
         transport.sent.some(
           (message) =>
-            message.id === "approval-1" &&
-            JSON.stringify(message.result) ===
-              JSON.stringify({ decision: "decline" }),
+            message.id === "input-1" &&
+            JSON.stringify(message.result) === JSON.stringify({ answers: {} }),
         ),
       "interaction response",
     );
     assert.equal((await bridge.listActiveExternalTurns())[0]?.phase, "active");
+
+    transport.emit({
+      method: "turn/completed",
+      params: {
+        threadId: "native-thread-1",
+        turn: {
+          id: "native-turn-1",
+          items: [],
+          itemsView: "full",
+          status: "completed",
+          error: null,
+          startedAt: 1,
+          completedAt: 2,
+          durationMs: 1_000,
+        },
+      },
+    });
+    await waitUntil(
+      async () => (await bridge.listActiveExternalTurns()).length === 0,
+      "first turn completion",
+    );
+    const defaultDelivery = await bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "default-delivery",
+      idempotencyKey: "default-delivery",
+      messageId: "default-message",
+      toAgentId: "interaction-agent",
+      body: "perform a normal mutation",
+      requireWake: true,
+      createdAt: now(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(defaultDelivery.activation?.type, "external_turn_requested");
+    await controller.tick();
+    assert.equal(
+      transport.sent.filter((message) => message.method === "turn/start")
+        .length,
+      2,
+    );
+    await waitUntil(
+      async () =>
+        (await bridge.listActiveExternalTurns()).some(
+          (turn) => turn.nativeTurnId === "native-turn-2",
+        ),
+      "default turn activation",
+    );
+    const turnStarts = transport.sent.filter(
+      (message) => message.method === "turn/start",
+    );
+    const defaultTurnStart = turnStarts[1];
+    assert.deepEqual(
+      (defaultTurnStart?.params as Record<string, unknown>)?.collaborationMode,
+      {
+        mode: "default",
+        settings: {
+          model: "gpt-5.4",
+          reasoning_effort: null,
+          developer_instructions: null,
+        },
+      },
+    );
+    assert.equal(
+      (defaultTurnStart?.params as Record<string, unknown>)?.approvalPolicy,
+      "never",
+    );
+    assert.deepEqual(
+      (defaultTurnStart?.params as Record<string, unknown>)?.sandboxPolicy,
+      { type: "dangerFullAccess" },
+    );
   } finally {
     await controller.stop().catch(() => undefined);
     await bridge.shutdownEngine({ engine, drainTimeoutMs: 5_000 });

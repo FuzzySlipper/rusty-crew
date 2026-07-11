@@ -419,14 +419,11 @@ export class ServiceExternalRuntimeController {
       ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
       approvalPolicy: "never",
       sandboxPolicy: { type: "dangerFullAccess" },
-      ...(turn.request.collaborationMode === "plan"
-        ? {
-            collaborationMode: await this.#resolvePlanCollaborationMode(
-              controlled,
-              binding,
-            ),
-          }
-        : {}),
+      collaborationMode: await this.#resolveCollaborationMode(
+        controlled,
+        binding,
+        turn.request.collaborationMode ?? "default",
+      ),
     });
     await this.#bridge.transitionExternalTurn({
       controller: this.#controllerContext(controlled),
@@ -437,28 +434,29 @@ export class ServiceExternalRuntimeController {
     });
   }
 
-  async #resolvePlanCollaborationMode(
+  async #resolveCollaborationMode(
     controlled: ControlledRuntime,
     binding: ExternalAgentBinding,
+    mode: CollaborationMode["mode"],
   ) {
     const presets = await controlled.driver.collaborationModeList();
-    const plan = presets.data.find((preset) => preset.mode === "plan");
-    if (plan === undefined) {
+    const preset = presets.data.find((candidate) => candidate.mode === mode);
+    if (preset === undefined) {
       throw new Error(
-        "Codex app-server did not advertise the Plan collaboration preset",
+        `Codex app-server did not advertise the ${mode} collaboration preset`,
       );
     }
     const current = controlled.threadSettings.get(binding.nativeThreadId ?? "");
-    const model = plan.model ?? current?.model;
+    const model = preset.model ?? current?.model;
     if (model === undefined) {
-      throw new Error("Codex Plan mode could not resolve the thread model");
+      throw new Error(`Codex ${mode} mode could not resolve the thread model`);
     }
     return {
-      mode: "plan" as const,
+      mode,
       settings: {
         model,
         reasoning_effort:
-          plan.reasoning_effort ?? current?.reasoning_effort ?? null,
+          preset.reasoning_effort ?? current?.reasoning_effort ?? null,
         developer_instructions: null,
       },
     };
