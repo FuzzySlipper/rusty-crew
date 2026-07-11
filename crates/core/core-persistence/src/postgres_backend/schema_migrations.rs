@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 21;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 22;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -119,6 +119,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 21,
         description: "add runtime-neutral agent delivery and correlated round records",
         apply: Some(apply_postgres_agent_coordination),
+    },
+    PostgresSchemaMigration {
+        version: 22,
+        description: "add typed bounded chat message ingest receipts",
+        apply: Some(apply_postgres_chat_message_ingest_receipts),
     },
 ];
 
@@ -1173,6 +1178,35 @@ fn apply_postgres_roleplay_records(tx: &mut Transaction<'_>, schema: &str) -> Co
             ON {schema}.module_roleplay_imports(session_id, imported_at DESC, import_id);"
     ))
     .map_err(|error| postgres_error("apply PostgreSQL typed roleplay record migration", error))
+}
+
+fn apply_postgres_chat_message_ingest_receipts(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.message_slots
+            ADD COLUMN IF NOT EXISTS ingest_idempotency_key TEXT;
+         CREATE UNIQUE INDEX IF NOT EXISTS message_slots_session_ingest_key_idx
+            ON {schema}.message_slots(session_id, ingest_idempotency_key)
+            WHERE ingest_idempotency_key IS NOT NULL;
+         CREATE TABLE IF NOT EXISTS {schema}.chat_message_ingest_receipts (
+            session_id TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            slot_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('reserved', 'finalized')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            PRIMARY KEY(session_id, idempotency_key)
+         );
+         CREATE INDEX IF NOT EXISTS chat_message_ingest_receipts_expiry_idx
+            ON {schema}.chat_message_ingest_receipts(state, expires_at);
+         CREATE INDEX IF NOT EXISTS chat_message_ingest_receipts_slot_idx
+            ON {schema}.chat_message_ingest_receipts(slot_id);"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL chat message ingest receipts", error))
 }
 
 fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {

@@ -14,6 +14,11 @@ pub(crate) trait ChatConversationStore {
         &self,
         request: &CreateChatMessageSlotRequest,
     ) -> CoreResult<CreateChatMessageSlotResult>;
+    fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64>;
+    fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64>;
     fn create_chat_message_variant(
         &self,
         request: &CreateChatMessageVariantRequest,
@@ -183,6 +188,18 @@ impl ChatConversationStore for CoreCoordinationStore {
         request: &CreateChatMessageSlotRequest,
     ) -> CoreResult<CreateChatMessageSlotResult> {
         self.conversation().create_chat_message_slot(request)
+    }
+
+    fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64> {
+        self.conversation().prune_chat_message_ingest_receipts(now)
+    }
+
+    fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64> {
+        self.conversation()
+            .purge_chat_message_ingest_receipts_for_session(session_id)
     }
 
     fn create_chat_message_variant(

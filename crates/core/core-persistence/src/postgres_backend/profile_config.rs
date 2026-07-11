@@ -560,6 +560,13 @@ impl PostgresBackendStore {
                 ),
             ),
             (
+                "chat_message_ingest_receipts",
+                format!(
+                    "DELETE FROM {schema}.chat_message_ingest_receipts
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
                 "message_slots",
                 format!(
                     "DELETE FROM {schema}.message_slots

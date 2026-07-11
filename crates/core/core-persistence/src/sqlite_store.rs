@@ -1373,6 +1373,29 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.prune_chat_message_ingest_receipts(now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.prune_chat_message_ingest_receipts(now),
+        }
+    }
+
+    pub fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.purge_chat_message_ingest_receipts_for_session(session_id)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.purge_chat_message_ingest_receipts_for_session(session_id)
+            }
+        }
+    }
+
     pub fn create_chat_message_variant(
         &self,
         request: &CreateChatMessageVariantRequest,
@@ -2469,6 +2492,18 @@ impl ConversationRepositorySet<'_> {
         request: &CreateChatMessageSlotRequest,
     ) -> CoreResult<CreateChatMessageSlotResult> {
         self.store.create_chat_message_slot(request)
+    }
+
+    pub fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64> {
+        self.store.prune_chat_message_ingest_receipts(now)
+    }
+
+    pub fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64> {
+        self.store
+            .purge_chat_message_ingest_receipts_for_session(session_id)
     }
 
     pub fn create_chat_message_variant(

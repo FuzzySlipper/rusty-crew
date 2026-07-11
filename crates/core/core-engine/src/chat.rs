@@ -19,6 +19,20 @@ impl CoreEngine {
         ChatConversationStore::create_chat_message_slot(&self.store, request)
     }
 
+    pub fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64> {
+        ChatConversationStore::prune_chat_message_ingest_receipts(&self.store, now)
+    }
+
+    pub fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64> {
+        ChatConversationStore::purge_chat_message_ingest_receipts_for_session(
+            &self.store,
+            session_id,
+        )
+    }
+
     pub fn create_chat_message_variant(
         &self,
         request: &CreateChatMessageVariantRequest,

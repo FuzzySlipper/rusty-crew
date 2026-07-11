@@ -523,6 +523,14 @@ fn purge_profile_in_tx(
     purge_delete(
         tx,
         &mut counts,
+        "chat_message_ingest_receipts",
+        "DELETE FROM chat_message_ingest_receipts
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
         "message_slots",
         "DELETE FROM message_slots
          WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
@@ -2036,6 +2044,22 @@ mod tests {
         assert_eq!(mcps[0].server_names, vec!["den".to_string()]);
         assert!(!mcps[0].endpoint_ref.contains("secret"));
 
+        store
+            .create_chat_message_slot(&chat_ingest_request("session-runner", "profile-purge"))
+            .unwrap();
+        let purge = store
+            .purge_profile(&ProfileId::new("runner-profile"))
+            .unwrap();
+        assert!(purge.table_counts.iter().any(|count| {
+            count.table == "chat_message_ingest_receipts" && count.rows_deleted == 1
+        }));
+        assert_eq!(
+            store
+                .purge_chat_message_ingest_receipts_for_session(&SessionId::new("session-runner"))
+                .unwrap(),
+            0
+        );
+
         drop(store);
         let _ = std::fs::remove_file(db_path);
     }
@@ -2068,6 +2092,61 @@ mod tests {
                 metadata_json: json!({}),
             },
             now: now.to_string(),
+        }
+    }
+
+    fn chat_ingest_request(session_id: &str, key: &str) -> CreateChatMessageSlotRequest {
+        let branch_id = ConversationBranchId::new(format!("branch:{session_id}:default"));
+        let slot_id = MessageSlotId::new(format!("slot:{session_id}:{key}"));
+        let variant_id = MessageVariantId::new(format!("variant:{session_id}:{key}"));
+        let now = "2026-07-02T00:03:00Z".to_string();
+        CreateChatMessageSlotRequest {
+            slot: MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: SessionId::new(session_id),
+                primary_variant_id: variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+            primary_variant: MessageVariantWrite {
+                variant_id,
+                slot_id,
+                source: MessageVariantSource::Primary,
+                ordinal: 0,
+                status: MessageVariantStatus::Active,
+                message: DurableMessageWrite {
+                    message_id: MessageId::new(format!("message:{session_id}:{key}")),
+                    session_id: SessionId::new(session_id),
+                    branch_id: Some(branch_id.clone()),
+                    parent_message_id: None,
+                    previous_message_id: None,
+                    author_id: "user".to_string(),
+                    author_role: "user".to_string(),
+                    status: DurableMessageStatus::Completed,
+                    body: "profile purge receipt".to_string(),
+                    metadata_json: json!({}),
+                    created_at: now.clone(),
+                    blocks: Vec::new(),
+                },
+                metadata_json: json!({}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+            branch_id: branch_id.clone(),
+            expected_branch_head: BranchHeadExpectation::Any,
+            updated_at: now.clone(),
+            ensure_active_branch: Some(EnsureActiveChatConversationBranchRequest {
+                session_id: SessionId::new(session_id),
+                branch_id,
+                label: Some("Default".to_string()),
+                metadata_json: json!({}),
+                created_at: now.clone(),
+                updated_at: now,
+            }),
+            inherit_branch_head: true,
+            idempotency_key: Some(key.to_string()),
         }
     }
 

@@ -1,15 +1,70 @@
 //! PostgreSQL conversation, message-variant, attachment, and data-bank repositories.
 
 use super::*;
-use crate::repos::conversations::inherit_alternate_lineage;
+use crate::repos::conversations::{
+    chat_message_ingest_receipt_expires_at, inherit_alternate_lineage,
+    validate_chat_message_ingest_timestamp,
+};
 use crate::{ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult};
 
-const CHAT_SLOT_RECEIPT_SCOPE_TYPE: &str = "chat_message_ingest";
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ChatSlotReceipt {
     slot_id: MessageSlotId,
     branch_id: ConversationBranchId,
+}
+
+fn prune_expired_chat_slot_receipts_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    now: &str,
+) -> CoreResult<u64> {
+    tx.execute(
+        &format!(
+            "DELETE FROM {schema}.chat_message_ingest_receipts
+             WHERE session_id = $1
+               AND state = 'finalized'
+               AND expires_at::timestamptz <= $2::text::timestamptz"
+        ),
+        &[&session_id.0, &now],
+    )
+    .map_err(|error| postgres_error("prune PostgreSQL chat message receipts", error))
+}
+
+fn load_durable_chat_slot_receipt_by_key_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    key: &str,
+) -> CoreResult<Option<ChatSlotReceipt>> {
+    let row = tx
+        .query_opt(
+            &format!(
+                "SELECT slot_id FROM {schema}.message_slots
+                 WHERE session_id = $1 AND ingest_idempotency_key = $2"
+            ),
+            &[&session_id.0, &key],
+        )
+        .map_err(|error| {
+            postgres_error(
+                "load PostgreSQL durable chat message idempotency key",
+                error,
+            )
+        })?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let slot = load_message_slot_in_tx(tx, schema, &MessageSlotId(row.get::<_, String>(0)), true)?;
+    let branch_id = slot.primary.message.branch_id.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "idempotent PostgreSQL chat message slot has no conversation branch",
+        )
+    })?;
+    Ok(Some(ChatSlotReceipt {
+        slot_id: slot.slot_id,
+        branch_id,
+    }))
 }
 
 fn reserve_chat_slot_receipt_in_tx(
@@ -18,6 +73,18 @@ fn reserve_chat_slot_receipt_in_tx(
     request: &CreateChatMessageSlotRequest,
     key: &str,
 ) -> CoreResult<Option<ChatSlotReceipt>> {
+    let expires_at = chat_message_ingest_receipt_expires_at(&request.updated_at)?;
+    prune_expired_chat_slot_receipts_in_tx(
+        tx,
+        schema,
+        &request.slot.session_id,
+        &request.updated_at,
+    )?;
+    if let Some(receipt) =
+        load_durable_chat_slot_receipt_by_key_in_tx(tx, schema, &request.slot.session_id, key)?
+    {
+        return Ok(Some(receipt));
+    }
     let provisional = ChatSlotReceipt {
         slot_id: request.slot.slot_id.clone(),
         branch_id: request.branch_id.clone(),
@@ -25,18 +92,19 @@ fn reserve_chat_slot_receipt_in_tx(
     let inserted = tx
         .execute(
             &format!(
-                "INSERT INTO {schema}.module_simple_kv_entries (
-                    scope_type, scope_id, entry_key, value_json, revision,
+                "INSERT INTO {schema}.chat_message_ingest_receipts (
+                    session_id, idempotency_key, slot_id, branch_id, state,
                     created_at, updated_at, expires_at
-                 ) VALUES ($1, $2, $3, $4, 1, $5, $5, NULL)
-                 ON CONFLICT(scope_type, scope_id, entry_key) DO NOTHING"
+                 ) VALUES ($1, $2, $3, $4, 'reserved', $5, $5, $6)
+                 ON CONFLICT(session_id, idempotency_key) DO NOTHING"
             ),
             &[
-                &CHAT_SLOT_RECEIPT_SCOPE_TYPE,
                 &request.slot.session_id.0,
                 &key,
-                &to_json_text(&provisional)?,
+                &provisional.slot_id.0,
+                &provisional.branch_id.0,
                 &request.updated_at,
+                &expires_at,
             ],
         )
         .map_err(|error| postgres_error("reserve PostgreSQL chat message receipt", error))?;
@@ -46,25 +114,48 @@ fn reserve_chat_slot_receipt_in_tx(
     let row = tx
         .query_one(
             &format!(
-                "SELECT value_json
-                 FROM {schema}.module_simple_kv_entries
-                 WHERE scope_type = $1 AND scope_id = $2 AND entry_key = $3"
+                "SELECT slot_id, branch_id, state
+                 FROM {schema}.chat_message_ingest_receipts
+                 WHERE session_id = $1 AND idempotency_key = $2"
             ),
-            &[
-                &CHAT_SLOT_RECEIPT_SCOPE_TYPE,
-                &request.slot.session_id.0,
-                &key,
-            ],
+            &[&request.slot.session_id.0, &key],
         )
         .map_err(|error| postgres_error("load duplicate PostgreSQL chat receipt", error))?;
-    let value_json = row.get::<_, String>(0);
-    let receipt = from_json_text(&value_json).map_err(|error| {
-        CoreError::new(
+    let state = row.get::<_, String>(2);
+    if state != "finalized" {
+        return Err(CoreError::new(
             CoreErrorKind::PersistenceFailure,
-            format!("decode duplicate PostgreSQL chat receipt: {error}"),
+            "duplicate PostgreSQL chat message receipt was not finalized",
+        ));
+    }
+    Ok(Some(ChatSlotReceipt {
+        slot_id: MessageSlotId(row.get(0)),
+        branch_id: ConversationBranchId(row.get(1)),
+    }))
+}
+
+fn attach_chat_slot_idempotency_key_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    request: &CreateChatMessageSlotRequest,
+    key: &str,
+) -> CoreResult<()> {
+    let updated = tx
+        .execute(
+            &format!(
+                "UPDATE {schema}.message_slots
+                 SET ingest_idempotency_key = $2 WHERE slot_id = $1"
+            ),
+            &[&request.slot.slot_id.0, &key],
         )
-    })?;
-    Ok(Some(receipt))
+        .map_err(|error| postgres_error("attach PostgreSQL chat message idempotency key", error))?;
+    if updated != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "PostgreSQL chat message slot disappeared before idempotency key attachment",
+        ));
+    }
+    Ok(())
 }
 
 fn finish_chat_slot_receipt_in_tx(
@@ -81,15 +172,15 @@ fn finish_chat_slot_receipt_in_tx(
     let updated = tx
         .execute(
             &format!(
-                "UPDATE {schema}.module_simple_kv_entries
-                 SET value_json = $4, updated_at = $5
-                 WHERE scope_type = $1 AND scope_id = $2 AND entry_key = $3"
+                "UPDATE {schema}.chat_message_ingest_receipts
+                 SET slot_id = $3, branch_id = $4, state = 'finalized', updated_at = $5
+                 WHERE session_id = $1 AND idempotency_key = $2 AND state = 'reserved'"
             ),
             &[
-                &CHAT_SLOT_RECEIPT_SCOPE_TYPE,
                 &request.slot.session_id.0,
                 &key,
-                &to_json_text(&receipt)?,
+                &receipt.slot_id.0,
+                &receipt.branch_id.0,
                 &request.updated_at,
             ],
         )
@@ -184,6 +275,36 @@ fn resolve_chat_slot_branch_in_tx(
 }
 
 impl PostgresBackendStore {
+    pub fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64> {
+        validate_chat_message_ingest_timestamp(now)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        client
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.chat_message_ingest_receipts
+                     WHERE state = 'finalized'
+                       AND expires_at::timestamptz <= $1::text::timestamptz"
+                ),
+                &[&now],
+            )
+            .map_err(|error| postgres_error("prune PostgreSQL chat message receipts", error))
+    }
+
+    pub fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        client
+            .execute(
+                &format!("DELETE FROM {schema}.chat_message_ingest_receipts WHERE session_id = $1"),
+                &[&session_id.0],
+            )
+            .map_err(|error| postgres_error("purge PostgreSQL session chat receipts", error))
+    }
+
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
@@ -638,6 +759,9 @@ impl PostgresBackendStore {
             primary_variant.message.previous_message_id = current;
         }
         save_message_slot_in_tx(&mut tx, &schema, &request.slot)?;
+        if let Some(key) = request.idempotency_key.as_deref() {
+            attach_chat_slot_idempotency_key_in_tx(&mut tx, &schema, request, key)?;
+        }
         save_message_variant_in_tx(&mut tx, &schema, &primary_variant)?;
         tx.execute(
             &format!(

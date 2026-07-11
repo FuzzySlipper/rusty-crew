@@ -275,6 +275,44 @@ fn create_chat_message_slot_ensures_branch_and_replays_durable_receipt() {
     assert!(duplicate.conflict.is_none());
     assert_eq!(duplicate.slot.unwrap().slot_id, created_slot.slot_id);
     assert_eq!(duplicate.branch.branch_id, created.branch.branch_id);
+
+    assert_eq!(
+        engine
+            .prune_chat_message_ingest_receipts("2026-08-01T00:00:00Z")
+            .unwrap(),
+        1
+    );
+
+    let mut after_receipt_ttl = chat_slot_ingest_request("ingest-session", 99, "request-alpha");
+    after_receipt_ttl.updated_at = "2026-08-01T00:00:00Z".to_string();
+    let after_receipt_ttl = engine.create_chat_message_slot(&after_receipt_ttl).unwrap();
+    assert!(after_receipt_ttl.duplicate);
+    assert_eq!(
+        after_receipt_ttl.slot.unwrap().slot_id,
+        created_slot.slot_id,
+        "expired receipt must fall back to the durable slot key instead of resurrecting the request"
+    );
+
+    let second_request = chat_slot_ingest_request("ingest-session", 2, "request-beta");
+    let second_slot = engine
+        .create_chat_message_slot(&second_request)
+        .unwrap()
+        .slot
+        .unwrap();
+    assert_eq!(
+        engine
+            .purge_chat_message_ingest_receipts_for_session(&SessionId::new("ingest-session"))
+            .unwrap(),
+        1
+    );
+    let second_after_session_receipt_purge =
+        engine.create_chat_message_slot(&second_request).unwrap();
+    assert!(second_after_session_receipt_purge.duplicate);
+    assert_eq!(
+        second_after_session_receipt_purge.slot.unwrap().slot_id,
+        second_slot.slot_id,
+        "receipt cleanup must not make an existing message key reusable"
+    );
     assert_eq!(
         engine
             .query_message_slots(&MessageSlotQuery {
@@ -284,7 +322,7 @@ fn create_chat_message_slot_ensures_branch_and_replays_durable_receipt() {
             })
             .unwrap()
             .len(),
-        1
+        2
     );
 }
 

@@ -1549,6 +1549,10 @@ impl PostgresBackendStore {
                     rows: self.provider_wire_state_rows()?,
                 },
                 RuntimeStorageTableCount {
+                    table: "chat_message_ingest_receipts".to_string(),
+                    rows: self.table_rows("chat_message_ingest_receipts")?,
+                },
+                RuntimeStorageTableCount {
                     table: "message_slots".to_string(),
                     rows: self.table_rows("message_slots")?,
                 },
@@ -11170,6 +11174,23 @@ mod tests {
             context.diagnostics.character_estimate.div_ceil(4)
         );
 
+        let mut receipt_session = backend_session_state();
+        receipt_session.session_id = SessionId::new("runner-profile-chat-session");
+        receipt_session.profile_id = ProfileId::new("runner_profile");
+        let mut receipt_config = backend_session_config();
+        receipt_config.session_id = receipt_session.session_id.clone();
+        receipt_config.profile_id = receipt_session.profile_id.clone();
+        store
+            .save_session_with_config(&receipt_session, &receipt_config)
+            .unwrap();
+        store
+            .create_chat_message_slot(&conversation_chat_slot_ingest_request(
+                "runner-profile-chat-session",
+                "profile-purge-receipt",
+                BranchHeadExpectation::Any,
+            ))
+            .unwrap();
+
         let diagnostics = store.storage_diagnostics().unwrap();
         assert!(diagnostics
             .table_counts
@@ -11188,6 +11209,17 @@ mod tests {
             .purge_profile(&ProfileId::new("runner_profile"))
             .unwrap();
         assert!(purge.profile_registry_deleted);
+        assert!(purge.table_counts.iter().any(|count| {
+            count.table == "chat_message_ingest_receipts" && count.rows_deleted == 1
+        }));
+        assert_eq!(
+            store
+                .purge_chat_message_ingest_receipts_for_session(&SessionId::new(
+                    "runner-profile-chat-session"
+                ))
+                .unwrap(),
+            0
+        );
         assert_eq!(
             store
                 .get_profile_registry_record(&ProfileId::new("runner_profile"))

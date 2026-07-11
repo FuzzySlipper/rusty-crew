@@ -1,6 +1,63 @@
 use super::super::*;
 
+const CHAT_MESSAGE_INGEST_RECEIPT_TTL_DAYS: i64 = 30;
+
+pub(crate) fn migrate_v37_add_chat_message_ingest_receipts(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "ALTER TABLE message_slots ADD COLUMN ingest_idempotency_key TEXT;
+         CREATE UNIQUE INDEX idx_message_slots_session_ingest_key
+            ON message_slots(session_id, ingest_idempotency_key)
+            WHERE ingest_idempotency_key IS NOT NULL;
+         CREATE TABLE chat_message_ingest_receipts (
+            session_id TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            slot_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('reserved', 'finalized')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            PRIMARY KEY(session_id, idempotency_key)
+         );
+         CREATE INDEX idx_chat_message_ingest_receipts_expiry
+            ON chat_message_ingest_receipts(state, expires_at);
+         CREATE INDEX idx_chat_message_ingest_receipts_slot
+            ON chat_message_ingest_receipts(slot_id);",
+    )
+    .map_err(|error| persistence_error("add chat message ingest receipts", error))
+}
+
 impl CoordinationStore {
+    pub fn prune_chat_message_ingest_receipts(&self, now: &str) -> CoreResult<u64> {
+        validate_chat_message_ingest_timestamp(now)?;
+        let conn = self.conn()?;
+        let deleted = conn
+            .execute(
+                "DELETE FROM chat_message_ingest_receipts
+                 WHERE state = 'finalized'
+                   AND julianday(expires_at) <= julianday(?1)",
+                params![now],
+            )
+            .map_err(|error| persistence_error("prune chat message ingest receipts", error))?;
+        Ok(deleted as u64)
+    }
+
+    pub fn purge_chat_message_ingest_receipts_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<u64> {
+        let conn = self.conn()?;
+        let deleted = conn
+            .execute(
+                "DELETE FROM chat_message_ingest_receipts WHERE session_id = ?1",
+                params![session_id.0],
+            )
+            .map_err(|error| persistence_error("purge session chat message receipts", error))?;
+        Ok(deleted as u64)
+    }
+
     pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
         let conn = self.conn()?;
         let tx = conn
@@ -72,6 +129,9 @@ impl CoordinationStore {
             primary_variant.message.previous_message_id = current;
         }
         save_message_slot_in_tx(&tx, &request.slot)?;
+        if let Some(key) = request.idempotency_key.as_deref() {
+            attach_chat_slot_idempotency_key_in_tx(&tx, request, key)?;
+        }
         save_message_variant_in_tx(&tx, &primary_variant)?;
         tx.execute(
             "UPDATE conversation_branches
@@ -1131,12 +1191,92 @@ fn save_message_variant_in_tx(
     Ok(())
 }
 
-const CHAT_SLOT_RECEIPT_SCOPE_TYPE: &str = "chat_message_ingest";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ChatSlotReceipt {
     slot_id: MessageSlotId,
     branch_id: ConversationBranchId,
+}
+
+pub(crate) fn chat_message_ingest_receipt_expires_at(updated_at: &str) -> CoreResult<String> {
+    use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
+
+    let timestamp = OffsetDateTime::parse(updated_at, &Rfc3339)
+        .map_err(|error| invalid_chat_message_ingest_timestamp(error.to_string()))?;
+    timestamp
+        .checked_add(Duration::days(CHAT_MESSAGE_INGEST_RECEIPT_TTL_DAYS))
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "chat message receipt expiry exceeds the supported timestamp range",
+            )
+        })?
+        .format(&Rfc3339)
+        .map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("format chat message receipt expiry: {error}"),
+            )
+        })
+}
+
+pub(crate) fn validate_chat_message_ingest_timestamp(value: &str) -> CoreResult<()> {
+    use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map(|_| ())
+        .map_err(|error| invalid_chat_message_ingest_timestamp(error.to_string()))
+}
+
+fn invalid_chat_message_ingest_timestamp(error: String) -> CoreError {
+    CoreError::new(
+        CoreErrorKind::InvalidInput,
+        format!("chat message ingest timestamp must be RFC 3339: {error}"),
+    )
+}
+
+fn prune_expired_chat_slot_receipts_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    now: &str,
+) -> CoreResult<usize> {
+    tx.execute(
+        "DELETE FROM chat_message_ingest_receipts
+         WHERE session_id = ?1
+           AND state = 'finalized'
+           AND julianday(expires_at) <= julianday(?2)",
+        params![session_id.0, now],
+    )
+    .map_err(|error| persistence_error("prune expired chat message receipts", error))
+}
+
+fn load_durable_chat_slot_receipt_by_key_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    key: &str,
+) -> CoreResult<Option<ChatSlotReceipt>> {
+    let slot_id = tx
+        .query_row(
+            "SELECT slot_id FROM message_slots
+             WHERE session_id = ?1 AND ingest_idempotency_key = ?2",
+            params![session_id.0, key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| persistence_error("load durable chat message idempotency key", error))?;
+    let Some(slot_id) = slot_id else {
+        return Ok(None);
+    };
+    let slot = load_message_slot_in_tx(tx, &MessageSlotId(slot_id), true)?;
+    let branch_id = slot.primary.message.branch_id.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "idempotent chat message slot has no conversation branch",
+        )
+    })?;
+    Ok(Some(ChatSlotReceipt {
+        slot_id: slot.slot_id,
+        branch_id,
+    }))
 }
 
 fn reserve_chat_slot_receipt_in_tx(
@@ -1144,44 +1284,86 @@ fn reserve_chat_slot_receipt_in_tx(
     request: &CreateChatMessageSlotRequest,
     key: &str,
 ) -> CoreResult<Option<ChatSlotReceipt>> {
+    let expires_at = chat_message_ingest_receipt_expires_at(&request.updated_at)?;
+    prune_expired_chat_slot_receipts_in_tx(tx, &request.slot.session_id, &request.updated_at)?;
+    if let Some(receipt) =
+        load_durable_chat_slot_receipt_by_key_in_tx(tx, &request.slot.session_id, key)?
+    {
+        return Ok(Some(receipt));
+    }
     let provisional = ChatSlotReceipt {
         slot_id: request.slot.slot_id.clone(),
         branch_id: request.branch_id.clone(),
     };
     let inserted = tx
         .execute(
-            "INSERT OR IGNORE INTO module_simple_kv_entries (
-                scope_type,
-                scope_id,
-                entry_key,
-                value_json,
-                revision,
+            "INSERT OR IGNORE INTO chat_message_ingest_receipts (
+                session_id,
+                idempotency_key,
+                slot_id,
+                branch_id,
+                state,
                 created_at,
                 updated_at,
                 expires_at
-             ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5, NULL)",
+             ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?5, ?6)",
             params![
-                CHAT_SLOT_RECEIPT_SCOPE_TYPE,
                 request.slot.session_id.0,
                 key,
-                to_json_text(&provisional)?,
+                provisional.slot_id.0,
+                provisional.branch_id.0,
                 request.updated_at,
+                expires_at,
             ],
         )
         .map_err(|error| persistence_error("reserve chat message receipt", error))?;
     if inserted == 1 {
         return Ok(None);
     }
-    let value_json = tx
+    let receipt = tx
         .query_row(
-            "SELECT value_json
-             FROM module_simple_kv_entries
-             WHERE scope_type = ?1 AND scope_id = ?2 AND entry_key = ?3",
-            params![CHAT_SLOT_RECEIPT_SCOPE_TYPE, request.slot.session_id.0, key],
-            |row| row.get::<_, String>(0),
+            "SELECT slot_id, branch_id, state
+             FROM chat_message_ingest_receipts
+             WHERE session_id = ?1 AND idempotency_key = ?2",
+            params![request.slot.session_id.0, key],
+            |row| {
+                Ok((
+                    ChatSlotReceipt {
+                        slot_id: MessageSlotId(row.get(0)?),
+                        branch_id: ConversationBranchId(row.get(1)?),
+                    },
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .map_err(|error| persistence_error("load duplicate chat message receipt", error))?;
-    Ok(Some(parse_json_record(&value_json)?))
+    if receipt.1 != "finalized" {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "duplicate chat message receipt was not finalized",
+        ));
+    }
+    Ok(Some(receipt.0))
+}
+
+fn attach_chat_slot_idempotency_key_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    request: &CreateChatMessageSlotRequest,
+    key: &str,
+) -> CoreResult<()> {
+    let updated = tx
+        .execute(
+            "UPDATE message_slots SET ingest_idempotency_key = ?2 WHERE slot_id = ?1",
+            params![request.slot.slot_id.0, key],
+        )
+        .map_err(|error| persistence_error("attach chat message idempotency key", error))?;
+    if updated != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "chat message slot disappeared before idempotency key attachment",
+        ));
+    }
+    Ok(())
 }
 
 fn finish_chat_slot_receipt_in_tx(
@@ -1196,14 +1378,14 @@ fn finish_chat_slot_receipt_in_tx(
     };
     let updated = tx
         .execute(
-            "UPDATE module_simple_kv_entries
-             SET value_json = ?4, updated_at = ?5
-             WHERE scope_type = ?1 AND scope_id = ?2 AND entry_key = ?3",
+            "UPDATE chat_message_ingest_receipts
+             SET slot_id = ?3, branch_id = ?4, state = 'finalized', updated_at = ?5
+             WHERE session_id = ?1 AND idempotency_key = ?2 AND state = 'reserved'",
             params![
-                CHAT_SLOT_RECEIPT_SCOPE_TYPE,
                 request.slot.session_id.0,
                 key,
-                to_json_text(&receipt)?,
+                receipt.slot_id.0,
+                receipt.branch_id.0,
                 request.updated_at,
             ],
         )

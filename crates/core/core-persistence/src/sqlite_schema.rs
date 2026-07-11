@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 36;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 37;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -198,6 +198,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 36,
         description: "add runtime-neutral agent delivery and correlated round records",
         apply: repos::external_runtime::migrate_v36_add_agent_coordination,
+    },
+    SchemaMigration {
+        version: 37,
+        description: "add typed bounded chat message ingest receipts",
+        apply: repos::conversations::migrate_v37_add_chat_message_ingest_receipts,
     },
 ];
 
@@ -2243,6 +2248,20 @@ mod tests {
     }
 
     #[test]
+    fn chat_ingest_receipts_do_not_return_to_generic_simple_kv() {
+        let forbidden = ["module_simple", "_kv_entries"].concat();
+        for source in [
+            include_str!("repos/conversations.rs"),
+            include_str!("postgres_backend/conversation_attachment.rs"),
+        ] {
+            assert!(
+                !source.contains(&forbidden),
+                "chat repository must use its typed receipt table"
+            );
+        }
+    }
+
+    #[test]
     fn fresh_database_applies_all_schema_migrations() {
         let db_path = temp_db_path("fresh-schema");
         let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -2264,6 +2283,7 @@ mod tests {
         assert!(table_exists(&db_path, "module_roleplay_lore_records_fts"));
         assert!(table_exists(&db_path, "module_curator_candidates"));
         assert!(table_exists(&db_path, "module_curator_audit_receipts"));
+        assert!(table_exists(&db_path, "chat_message_ingest_receipts"));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_scope_key"
@@ -2286,6 +2306,14 @@ mod tests {
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_expires_at"
+        ));
+        assert!(index_exists(
+            &db_path,
+            "idx_message_slots_session_ingest_key"
+        ));
+        assert!(index_exists(
+            &db_path,
+            "idx_chat_message_ingest_receipts_expiry"
         ));
         let installed = store.installed_module_schemas().unwrap();
         assert_eq!(installed.len(), 3);
@@ -2352,6 +2380,7 @@ mod tests {
             "module_roleplay_lore_layer_config",
             "module_roleplay_lore_records_fts",
             "module_simple_kv_entries",
+            "chat_message_ingest_receipts",
         ] {
             assert!(table_exists(&db_path, table), "missing table {table}");
         }
@@ -2365,6 +2394,9 @@ mod tests {
             "idx_mcp_bindings_agent_profile",
             "idx_module_simple_kv_entries_scope_key",
             "idx_module_simple_kv_entries_expires_at",
+            "idx_message_slots_session_ingest_key",
+            "idx_chat_message_ingest_receipts_expiry",
+            "idx_chat_message_ingest_receipts_slot",
             "idx_memory_proposals_dedupe",
             "idx_memory_governance_decisions_proposal",
             "idx_profile_registry_lifecycle",
