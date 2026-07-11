@@ -185,7 +185,8 @@
     "@types/node": "^22.0.0",
     "prettier": "^3.0.0",
     "tsx": "^4.22.1",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "ws": "^8.21.0"
   },
   "allowScripts": {
     "@google/genai@1.52.0": true,

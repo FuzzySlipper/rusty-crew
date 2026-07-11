@@ -20,6 +20,7 @@
     "smoke:new-session-config-transaction": "tsx smokes/new-session-config-transaction.ts",
     "smoke:rusty-view-chat-read-api": "tsx ../../smokes/brain-island/smoke-rusty-view-chat-read-api.ts",
     "smoke:service-background-loops": "node --import tsx --test test/background-loop-timers.test.ts",
+    "smoke:codex-app-server-live-spike": "node ../../../tools/codex-app-server-live-spike.mjs",
     "smoke:service-host": "tsx smokes/service-host.ts",
     "smoke:service-postgres-startup": "tsx ../../smokes/brain-island/smoke-service-postgres-startup.ts",
     "smoke:telegram-service-connector": "tsx ../../smokes/brain-island/smoke-telegram-service-connector.ts"
