@@ -135,6 +135,7 @@
     "smoke:brain-catalog": "tsx smokes/smoke-brain-catalog.ts",
     "smoke:openai-responses-tool-bridge": "tsx smokes/smoke-openai-responses-tool-bridge.ts",
     "smoke:pi-agent-rust-bridge": "tsx smokes/smoke-pi-agent-rust-bridge.ts",
+    "smoke:pi-agent-silent-upstream": "tsx smokes/smoke-pi-agent-silent-upstream.ts",
     "smoke:openai-responses-cancellation": "tsx smokes/smoke-openai-responses-cancellation.ts",
     "smoke:responses-event-loop": "tsx ../../smokes/brain-island/smoke-responses-event-loop.ts",
     "smoke:responses-concurrency-capacity": "tsx ../../smokes/brain-island/smoke-responses-concurrency-capacity.ts",

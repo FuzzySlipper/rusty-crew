@@ -14,6 +14,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::error::Error as StdError;
 use std::io::Read;
 use std::time::Duration;
 
@@ -1331,13 +1332,7 @@ pub fn parse_sse_reader<R: Read>(
     let mut buffer = [0_u8; 8192];
 
     loop {
-        let read = reader.read(&mut buffer).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::TimedOut {
-                ChatCompletionsStreamError::IdleTimeout
-            } else {
-                ChatCompletionsStreamError::Transport(error.to_string())
-            }
-        })?;
+        let read = reader.read(&mut buffer).map_err(io_transport_error)?;
         if read == 0 {
             break;
         }
@@ -1346,6 +1341,32 @@ pub fn parse_sse_reader<R: Read>(
     }
 
     parser.finish(on_event)
+}
+
+fn io_transport_error(error: std::io::Error) -> ChatCompletionsStreamError {
+    if error_chain_is_timeout(&error) {
+        ChatCompletionsStreamError::IdleTimeout
+    } else {
+        ChatCompletionsStreamError::Transport(error.to_string())
+    }
+}
+
+fn error_chain_is_timeout(error: &(dyn StdError + 'static)) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("timed out") || message.contains("timeout") {
+        return true;
+    }
+    if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
+        if io_error.kind() == std::io::ErrorKind::TimedOut {
+            return true;
+        }
+    }
+    if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
+        if reqwest_error.is_timeout() {
+            return true;
+        }
+    }
+    error.source().is_some_and(error_chain_is_timeout)
 }
 
 #[derive(Default)]

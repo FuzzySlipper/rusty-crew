@@ -39,17 +39,17 @@ The service should be ready enough for admin/profile work. During the
 architecture remediation window, it is acceptable to restart the service or
 reset local service data before this setup.
 
-Production hosts always run the live Rust brain path. An optional longer idle
-timeout is useful during live certification:
+Production hosts always run the live Rust brain path. Keep the provider stream
+idle timeout explicit in live certification environments:
 
 ```bash
-RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
+RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=30000
 ```
 
-These values belong in the local debug service environment file, normally
+This value belongs in the local debug service environment file, normally
 `/home/system/rusty-crew-debug/config/service.env`, and require a debug service
-restart. The idle timeout is intentionally long for live certification because
-real providers can spend meaningful time in reasoning or tool loops.
+restart. It bounds one silent provider HTTP stream; it does not cap a healthy
+long turn or the time spent across multiple provider/tool rounds.
 
 ## 2. Create The Default Live Chat Provider
 

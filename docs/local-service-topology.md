@@ -55,11 +55,12 @@ modelId: deepseek-flash
 baseUrl: http://127.0.0.1:18082/v1
 ```
 
-Production pi-agent hosts always use the live Rust provider path. The debug
-service may raise its provider idle budget for long certification turns:
+Production pi-agent hosts always use the live Rust provider path. A silent
+provider request fails visibly after 30 seconds by default; this is an HTTP
+stream-idle ceiling, not a whole-turn or tool-loop ceiling:
 
 ```text
-RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
+RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=30000
 ```
 
 Deterministic provider clients are available only through explicit smoke/test

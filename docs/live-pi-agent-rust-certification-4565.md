@@ -21,7 +21,7 @@ toggle that no longer exists. Production hosts now always use the live Rust
 path. Only the long idle budget remains relevant:
 
 ```text
-RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
+RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=30000
 ```
 
 After setting them in `/home/system/rusty-crew-debug/config/service.env`, the

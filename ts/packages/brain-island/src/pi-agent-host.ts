@@ -191,7 +191,7 @@ function rustPiAgentStreamIdleTimeoutMs(
   if (Number.isFinite(configured) && configured > 0) {
     return configured;
   }
-  return 300_000;
+  return 30_000;
 }
 
 function rustPiAgentMessages(
