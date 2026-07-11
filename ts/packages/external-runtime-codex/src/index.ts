@@ -13,6 +13,8 @@ export type * from "./types.js";
 export type { DynamicToolCallParams } from "../protocol/0.144.1/ts/v2/DynamicToolCallParams.js";
 export type { DynamicToolCallResponse } from "../protocol/0.144.1/ts/v2/DynamicToolCallResponse.js";
 export type { DynamicToolSpec } from "../protocol/0.144.1/ts/v2/DynamicToolSpec.js";
+export type { CollaborationMode } from "../protocol/0.144.1/ts/CollaborationMode.js";
+export type { CollaborationModeListResponse } from "../protocol/0.144.1/ts/v2/CollaborationModeListResponse.js";
 export type { ThreadResumeParams } from "../protocol/0.144.1/ts/v2/ThreadResumeParams.js";
 export type { ThreadStartParams } from "../protocol/0.144.1/ts/v2/ThreadStartParams.js";
 export type { TurnStartParams } from "../protocol/0.144.1/ts/v2/TurnStartParams.js";

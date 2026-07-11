@@ -224,6 +224,12 @@ pub enum TurnInputProvenanceKind {
     Control,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalCollaborationMode {
+    Plan,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnInputProvenance {
@@ -250,6 +256,8 @@ pub struct SessionTurnRequested {
     pub run_id: Option<RunId>,
     pub binding_id: ExternalBindingId,
     pub input: Vec<ExternalTurnInputPart>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_mode: Option<ExternalCollaborationMode>,
     pub provenance: TurnInputProvenance,
     pub created_at: IsoTimestamp,
     pub expires_at: Option<IsoTimestamp>,
@@ -501,6 +509,8 @@ pub struct AgentMessageDeliveryRequest {
     pub from_agent_id: AgentId,
     pub to_agent_id: AgentId,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_mode: Option<ExternalCollaborationMode>,
     pub correlation_id: Option<String>,
     pub require_wake: bool,
     pub created_at: IsoTimestamp,
@@ -542,6 +552,8 @@ pub struct AgentMessageCommand {
     pub message_id: String,
     pub to_agent_id: AgentId,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_mode: Option<ExternalCollaborationMode>,
     pub correlation_id: Option<String>,
     pub require_wake: bool,
     pub created_at: IsoTimestamp,

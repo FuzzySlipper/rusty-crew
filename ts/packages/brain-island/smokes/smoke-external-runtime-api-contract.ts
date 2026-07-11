@@ -69,6 +69,11 @@ assert.ok(schema("ExternalRuntimeRegistration").properties?.runtimeId);
 assert.ok(schema("AgentMessageDeliveryReceipt").properties?.request);
 assert.ok(schema("AgentCorrelatedRound").properties?.status);
 assert.ok(schema("ExternalInteractionRecord").properties?.allowedResponses);
+assert.deepEqual(schema("ExternalCollaborationMode").enum, ["plan"]);
+assert.deepEqual(
+  schema("ExternalBindingMessageWrite").properties?.collaborationMode,
+  { $ref: "#/components/schemas/ExternalCollaborationMode" },
+);
 assert.equal(
   contract["x-rusty-crew-generated"].native_payload_policy,
   "bounded_raw_detail_only",
@@ -119,6 +124,7 @@ interface Operation {
 }
 
 interface JsonSchema {
+  enum?: string[];
   required?: string[];
   properties?: Record<string, unknown>;
 }

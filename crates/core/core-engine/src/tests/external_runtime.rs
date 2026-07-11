@@ -3,12 +3,13 @@ use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
     AgentMessageDeliveryStatus, AgentRoundCommand, AgentRoundId, AgentRoundStatus,
     ExternalAgentBinding, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
-    ExternalControlId, ExternalControlKind, ExternalControlRequest, ExternalControllerContext,
-    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
-    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
-    ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
-    ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
-    TurnInputProvenance, TurnInputProvenanceKind,
+    ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlRequest,
+    ExternalControllerContext, ExternalControllerLease, ExternalEndpoint,
+    ExternalEndpointTransport, ExternalProcessOwnership, ExternalRuntimeDesiredState,
+    ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
+    ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalRuntimeRegistration,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
+    TurnInputProvenanceKind,
 };
 use serde_json::json;
 
@@ -226,6 +227,7 @@ fn durable_agent_round_resolves_reply_without_second_wake() {
             message_id: "reply-message-1".into(),
             to_agent_id: sender.agent_id,
             body: "inspection complete".into(),
+            collaboration_mode: None,
             correlation_id: Some("round-correlation-1".into()),
             require_wake: true,
             created_at: "2026-06-19T00:00:01Z".into(),
@@ -300,6 +302,7 @@ fn active_external_recipient_queues_without_brain_wake() {
         message_id: "message-busy".into(),
         to_agent_id: codex.agent_id.clone(),
         body: "queue for later".into(),
+        collaboration_mode: None,
         correlation_id: None,
         require_wake: true,
         created_at: "2026-06-19T00:00:00Z".into(),
@@ -322,7 +325,10 @@ fn active_external_recipient_queues_without_brain_wake() {
         .unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].message.body, "queue for later");
-    assert_eq!(engine.deliver_agent_message(command).unwrap(), receipt);
+    assert_eq!(
+        engine.deliver_agent_message(command.clone()).unwrap(),
+        receipt
+    );
     let queued_after_replay = CoordinationStore::open(engine.config.engine_data_dir.clone())
         .unwrap()
         .load_queued_messages(&QueuedMessageFilter {
@@ -333,6 +339,18 @@ fn active_external_recipient_queues_without_brain_wake() {
         })
         .unwrap();
     assert_eq!(queued_after_replay.len(), 1);
+
+    let mut plan_command = command.clone();
+    plan_command.delivery_id = AgentMessageDeliveryId::new("delivery-busy-plan");
+    plan_command.idempotency_key = "delivery-busy-plan-key".into();
+    plan_command.message_id = "message-busy-plan".into();
+    plan_command.collaboration_mode = Some(ExternalCollaborationMode::Plan);
+    let rejected = engine.deliver_agent_message(plan_command).unwrap();
+    assert_eq!(rejected.status, AgentMessageDeliveryStatus::Rejected);
+    assert_eq!(
+        rejected.reason_code.as_deref(),
+        Some("external_collaboration_mode_turn_already_active")
+    );
 
     let active_request = ExternalTurnRequestId::new("already-active");
     engine
@@ -391,6 +409,58 @@ fn active_external_recipient_queues_without_brain_wake() {
 }
 
 #[test]
+fn external_collaboration_mode_is_persisted_on_the_requested_turn() {
+    let engine = test_engine();
+    let sender = engine
+        .create_session(session_config(
+            "sender-session",
+            "sender-agent",
+            "sender-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+
+    let receipt = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::DirectBrain {
+                session_id: sender.session_id,
+                wake_id: "sender-wake".into(),
+                tool_call_id: "send-call".into(),
+            },
+            delivery_id: AgentMessageDeliveryId::new("delivery-plan"),
+            idempotency_key: "delivery-plan-key".into(),
+            message_id: "message-plan".into(),
+            to_agent_id: AgentId::new("codex-agent"),
+            body: "ask an operator question".into(),
+            collaboration_mode: Some(ExternalCollaborationMode::Plan),
+            correlation_id: None,
+            require_wake: true,
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(receipt.status, AgentMessageDeliveryStatus::Accepted);
+    let turn = engine
+        .get_external_turn(&ExternalTurnRequestId::new("agent-message:message-plan"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        turn.request.collaboration_mode,
+        Some(ExternalCollaborationMode::Plan)
+    );
+}
+
+#[test]
 fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
     let engine = test_engine();
     let codex = engine
@@ -417,6 +487,7 @@ fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
             message_id: "message-expiring".into(),
             to_agent_id: codex.agent_id.clone(),
             body: "do not resurrect".into(),
+            collaboration_mode: None,
             correlation_id: None,
             require_wake: true,
             created_at: "2026-06-19T00:00:00Z".into(),
@@ -547,6 +618,7 @@ fn codex_caller_requires_current_controller_and_active_native_turn() {
         message_id: "codex-message".into(),
         to_agent_id: direct.agent_id,
         body: "message from Codex".into(),
+        collaboration_mode: None,
         correlation_id: None,
         require_wake: true,
         created_at: "2026-06-19T00:00:03Z".into(),
@@ -760,6 +832,7 @@ fn activation(agent_id: &str, request_id: &str) -> AgentActivationRequest {
         input: vec![ExternalTurnInputPart::Text {
             text: "inspect the project".into(),
         }],
+        collaboration_mode: None,
         provenance: TurnInputProvenance {
             kind: TurnInputProvenanceKind::Operator,
             source_id: None,

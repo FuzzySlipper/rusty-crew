@@ -15000,6 +15000,7 @@ mod tests {
                 input: vec![rusty_crew_core_protocol::ExternalTurnInputPart::Text {
                     text: "inspect".into(),
                 }],
+                collaboration_mode: None,
                 provenance: rusty_crew_core_protocol::TurnInputProvenance {
                     kind: rusty_crew_core_protocol::TurnInputProvenanceKind::Operator,
                     source_id: None,
@@ -15049,6 +15050,7 @@ mod tests {
                 from_agent_id: session.agent_id.clone(),
                 to_agent_id: recipient.agent_id.clone(),
                 body: "inspect".into(),
+                collaboration_mode: None,
                 correlation_id: Some("correlation-a".into()),
                 require_wake: true,
                 created_at: "2026-07-10T00:00:00Z".into(),

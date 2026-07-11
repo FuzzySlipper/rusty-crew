@@ -127,19 +127,31 @@ test("driver authorizes exact handshake before exposing typed requests", async (
     nextCursor: null,
     backwardsCursor: null,
   }));
+  transport.responders.set("collaborationMode/list", () => ({
+    data: [
+      {
+        name: "Plan",
+        mode: "plan",
+        model: null,
+        reasoning_effort: "medium",
+      },
+    ],
+  }));
   const driver = new CodexAppServerDriver(transport, authority);
 
   const initialized = await driver.connect();
   const listed = await driver.threadList({ limit: 5 });
+  const collaborationModes = await driver.collaborationModeList();
 
   assert.equal(initialized.userAgent, "codex_cli_rs/0.144.1");
   assert.deepEqual(listed.data, []);
+  assert.equal(collaborationModes.data[0]?.mode, "plan");
   assert.equal(driver.state, "ready");
   assert.deepEqual(
     transport.sent
       .filter((message) => "method" in message)
       .map((message) => message.method),
-    ["initialize", "thread/list"],
+    ["initialize", "thread/list", "collaborationMode/list"],
   );
   await driver.close();
 });

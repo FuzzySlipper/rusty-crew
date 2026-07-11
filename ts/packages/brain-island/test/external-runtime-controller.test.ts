@@ -55,6 +55,21 @@ class FakeTransport implements CodexJsonRpcTransport {
         },
       });
     }
+    if (parsed.method === "collaborationMode/list") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          data: [
+            {
+              name: "Plan",
+              mode: "plan",
+              model: "gpt-5.4",
+              reasoning_effort: "medium",
+            },
+          ],
+        },
+      });
+    }
   }
 
   async close(): Promise<void> {}
@@ -132,6 +147,7 @@ test("controller persists and resolves typed app-server interactions", async () 
       messageId: "interaction-message",
       toAgentId: "interaction-agent",
       body: "request approval",
+      collaborationMode: "plan",
       requireWake: true,
       createdAt: now(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -143,6 +159,32 @@ test("controller persists and resolves typed app-server interactions", async () 
           (turn) => turn.nativeTurnId === "native-turn-1",
         ),
       "turn activation",
+    );
+    const collaborationList = transport.sent.find(
+      (message) => message.method === "collaborationMode/list",
+    );
+    assert.equal(collaborationList?.method, "collaborationMode/list");
+    const turnStart = transport.sent.find(
+      (message) => message.method === "turn/start",
+    );
+    assert.deepEqual(
+      (turnStart?.params as Record<string, unknown>)?.collaborationMode,
+      {
+        mode: "plan",
+        settings: {
+          model: "gpt-5.4",
+          reasoning_effort: "medium",
+          developer_instructions: null,
+        },
+      },
+    );
+    assert.equal(
+      (turnStart?.params as Record<string, unknown>)?.approvalPolicy,
+      "never",
+    );
+    assert.deepEqual(
+      (turnStart?.params as Record<string, unknown>)?.sandboxPolicy,
+      { type: "dangerFullAccess" },
     );
 
     transport.emit({

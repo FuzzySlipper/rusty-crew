@@ -18,6 +18,7 @@ import {
   CodexAppServerDriver,
   UnixWebSocketTransport,
   captureBoundedRawDetail,
+  type CollaborationMode,
   type CodexControllerAuthority,
   type CodexInitializeIdentity,
   type CodexProtocolFault,
@@ -43,6 +44,7 @@ interface ControlledRuntime {
   lease: ExternalControllerLease;
   driver: CodexAppServerDriver;
   rawDetails: Map<string, ExternalRuntimeRawDetail>;
+  threadSettings: Map<string, CollaborationMode["settings"]>;
 }
 
 interface PendingInteractionResolution {
@@ -179,6 +181,7 @@ export class ServiceExternalRuntimeController {
       lease,
       driver: undefined as unknown as CodexAppServerDriver,
       rawDetails: new Map(),
+      threadSettings: new Map(),
     };
     const authority = this.#authority(controlled);
     controlled.driver = this.#driverFactory(registration, authority);
@@ -376,12 +379,17 @@ export class ServiceExternalRuntimeController {
       ) {
         continue;
       }
-      await controlled.driver.threadResume({
+      const resumed = await controlled.driver.threadResume({
         threadId: binding.nativeThreadId,
         ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         excludeTurns: true,
+      });
+      controlled.threadSettings.set(binding.nativeThreadId, {
+        model: resumed.model,
+        reasoning_effort: resumed.reasoningEffort,
+        developer_instructions: null,
       });
     }
   }
@@ -411,6 +419,14 @@ export class ServiceExternalRuntimeController {
       ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
       approvalPolicy: "never",
       sandboxPolicy: { type: "dangerFullAccess" },
+      ...(turn.request.collaborationMode === "plan"
+        ? {
+            collaborationMode: await this.#resolvePlanCollaborationMode(
+              controlled,
+              binding,
+            ),
+          }
+        : {}),
     });
     await this.#bridge.transitionExternalTurn({
       controller: this.#controllerContext(controlled),
@@ -421,6 +437,33 @@ export class ServiceExternalRuntimeController {
     });
   }
 
+  async #resolvePlanCollaborationMode(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding,
+  ) {
+    const presets = await controlled.driver.collaborationModeList();
+    const plan = presets.data.find((preset) => preset.mode === "plan");
+    if (plan === undefined) {
+      throw new Error(
+        "Codex app-server did not advertise the Plan collaboration preset",
+      );
+    }
+    const current = controlled.threadSettings.get(binding.nativeThreadId ?? "");
+    const model = plan.model ?? current?.model;
+    if (model === undefined) {
+      throw new Error("Codex Plan mode could not resolve the thread model");
+    }
+    return {
+      mode: "plan" as const,
+      settings: {
+        model,
+        reasoning_effort:
+          plan.reasoning_effort ?? current?.reasoning_effort ?? null,
+        developer_instructions: null,
+      },
+    };
+  }
+
   async #applyControl(
     controlled: ControlledRuntime,
     binding: ExternalAgentBinding,
@@ -429,10 +472,16 @@ export class ServiceExternalRuntimeController {
     switch (request.kind) {
       case "start_or_resume_thread": {
         if (typeof binding.nativeThreadId === "string") {
-          return controlled.driver.threadResume({
+          const resumed = await controlled.driver.threadResume({
             threadId: binding.nativeThreadId,
             ...(isRecord(request.payload) ? request.payload : {}),
           });
+          controlled.threadSettings.set(binding.nativeThreadId, {
+            model: resumed.model,
+            reasoning_effort: resumed.reasoningEffort,
+            developer_instructions: null,
+          });
+          return resumed;
         }
         const started = await controlled.driver.threadStart({
           cwd: binding.cwd ?? "/home",
@@ -441,6 +490,11 @@ export class ServiceExternalRuntimeController {
           ephemeral: false,
           dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
           ...(isRecord(request.payload) ? request.payload : {}),
+        });
+        controlled.threadSettings.set(started.thread.id, {
+          model: started.model,
+          reasoning_effort: started.reasoningEffort,
+          developer_instructions: null,
         });
         await this.#bridge.bindExternalAgent({
           binding: {

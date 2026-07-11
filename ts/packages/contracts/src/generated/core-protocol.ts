@@ -128,6 +128,7 @@ export type AgentMessage = {
 export type AgentMessageCommand = {
   body: string;
   caller: AgentCoordinationCaller;
+  collaborationMode?: ExternalCollaborationMode | null;
   correlationId?: string | null;
   createdAt: string;
   deliveryId: string;
@@ -151,6 +152,7 @@ export type AgentMessageDeliveryReceipt = {
 
 export type AgentMessageDeliveryRequest = {
   body: string;
+  collaborationMode?: ExternalCollaborationMode | null;
   correlationId?: string | null;
   createdAt: string;
   deliveryId: string;
@@ -550,6 +552,8 @@ export type ExternalAgentBinding = {
 export type ExternalBindingPurpose = "crew_agent" | "imported_observer";
 
 export type ExternalBindingStatus = "active" | "paused" | "archived";
+
+export type ExternalCollaborationMode = "plan";
 
 export type ExternalControlKind = "start_or_resume_thread" | "start_turn" | "steer_turn" | "interrupt_turn" | "compact_thread" | "resolve_interaction" | "reconcile_runtime" | "archive_binding";
 
@@ -1045,6 +1049,7 @@ export type SessionStatus = "active" | "idle" | "archived";
 
 export type SessionTurnRequested = {
   bindingId: string;
+  collaborationMode?: ExternalCollaborationMode | null;
   createdAt: string;
   expiresAt?: string | null;
   idempotencyKey: string;

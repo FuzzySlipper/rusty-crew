@@ -340,6 +340,16 @@
         "caller": {
           "$ref": "#/$defs/AgentCoordinationCaller"
         },
+        "collaborationMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalCollaborationMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "correlationId": {
           "type": [
             "string",
@@ -442,6 +452,16 @@
       "properties": {
         "body": {
           "type": "string"
+        },
+        "collaborationMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalCollaborationMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "correlationId": {
           "type": [
@@ -2235,6 +2255,12 @@
         "active",
         "paused",
         "archived"
+      ],
+      "type": "string"
+    },
+    "ExternalCollaborationMode": {
+      "enum": [
+        "plan"
       ],
       "type": "string"
     },
@@ -4338,6 +4364,16 @@
       "properties": {
         "bindingId": {
           "type": "string"
+        },
+        "collaborationMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalCollaborationMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "createdAt": {
           "type": "string"

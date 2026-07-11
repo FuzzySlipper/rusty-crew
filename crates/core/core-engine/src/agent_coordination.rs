@@ -23,6 +23,7 @@ impl CoreEngine {
             from_agent_id: sender_agent_id.clone(),
             to_agent_id: command.to_agent_id.clone(),
             body: command.body.clone(),
+            collaboration_mode: command.collaboration_mode,
             correlation_id: command.correlation_id.clone(),
             require_wake: command.require_wake,
             created_at: command.created_at.clone(),
@@ -52,7 +53,7 @@ impl CoreEngine {
                 Some("agent_message_expired".into()),
             );
         }
-        match self.sessions.get_session_by_agent(&command.to_agent_id) {
+        let session = match self.sessions.get_session_by_agent(&command.to_agent_id) {
             Ok(session) if session.status != SessionStatus::Archived => session,
             Ok(_) => {
                 return self.finish_agent_message_delivery(
@@ -76,6 +77,23 @@ impl CoreEngine {
             }
             Err(error) => return Err(error),
         };
+        if command.collaboration_mode.is_some()
+            && self
+                .store
+                .list_nonterminal_external_turns()?
+                .iter()
+                .any(|turn| turn.request.session_id == session.session_id)
+        {
+            return self.finish_agent_message_delivery(
+                pending,
+                AgentMessageDeliveryStatus::Rejected,
+                None,
+                None,
+                None,
+                Some("external_collaboration_mode_turn_already_active".into()),
+            );
+        }
+
         let message = AgentMessage {
             from: sender_agent_id.clone(),
             to: command.to_agent_id.clone(),
@@ -117,6 +135,7 @@ impl CoreEngine {
             request_id: ExternalTurnRequestId::new(format!("agent-message:{}", command.message_id)),
             idempotency_key: format!("agent-message-turn:{}", command.message_id),
             input: vec![ExternalTurnInputPart::Text { text: command.body }],
+            collaboration_mode: command.collaboration_mode,
             provenance: TurnInputProvenance {
                 kind: TurnInputProvenanceKind::RoutedAgentMessage,
                 source_id: Some(command.message_id.clone()),
@@ -212,6 +231,7 @@ impl CoreEngine {
             message_id: command.message_id,
             to_agent_id: command.to_agent_id,
             body: command.body,
+            collaboration_mode: None,
             correlation_id: Some(command.correlation_id),
             require_wake: true,
             created_at: command.created_at,

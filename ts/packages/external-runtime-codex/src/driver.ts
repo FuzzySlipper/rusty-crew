@@ -2,6 +2,8 @@ import type { InitializeParams } from "../protocol/0.144.1/ts/InitializeParams.j
 import type { InitializeResponse } from "../protocol/0.144.1/ts/InitializeResponse.js";
 import type { ThreadCompactStartParams } from "../protocol/0.144.1/ts/v2/ThreadCompactStartParams.js";
 import type { ThreadCompactStartResponse } from "../protocol/0.144.1/ts/v2/ThreadCompactStartResponse.js";
+import type { CollaborationModeListParams } from "../protocol/0.144.1/ts/v2/CollaborationModeListParams.js";
+import type { CollaborationModeListResponse } from "../protocol/0.144.1/ts/v2/CollaborationModeListResponse.js";
 import type { ThreadItemsListParams } from "../protocol/0.144.1/ts/v2/ThreadItemsListParams.js";
 import type { ThreadItemsListResponse } from "../protocol/0.144.1/ts/v2/ThreadItemsListResponse.js";
 import type { ThreadListParams } from "../protocol/0.144.1/ts/v2/ThreadListParams.js";
@@ -176,6 +178,13 @@ export class CodexAppServerDriver {
     signal?: AbortSignal,
   ): Promise<ThreadListResponse> {
     return this.#request("thread/list", params, signal);
+  }
+
+  collaborationModeList(
+    params: CollaborationModeListParams = {},
+    signal?: AbortSignal,
+  ): Promise<CollaborationModeListResponse> {
+    return this.#request("collaborationMode/list", params, signal);
   }
 
   loadedThreadList(

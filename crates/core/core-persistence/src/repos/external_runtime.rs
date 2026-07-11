@@ -1689,6 +1689,7 @@ mod tests {
                 input: vec![ExternalTurnInputPart::Text {
                     text: "inspect the repository".into(),
                 }],
+                collaboration_mode: None,
                 provenance: TurnInputProvenance {
                     kind: TurnInputProvenanceKind::Operator,
                     source_id: None,

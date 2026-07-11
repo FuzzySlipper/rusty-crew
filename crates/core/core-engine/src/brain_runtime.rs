@@ -56,6 +56,7 @@ impl CoreEngine {
             message_id: format!("message-{key}"),
             to_agent_id: message.to,
             body: message.body,
+            collaboration_mode: None,
             correlation_id: message.correlation_id,
             require_wake: true,
             created_at: now,

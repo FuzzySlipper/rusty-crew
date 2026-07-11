@@ -995,6 +995,12 @@
         "properties": {
           "body": { "type": "string" },
           "caller": { "$ref": "#/components/schemas/AgentCoordinationCaller" },
+          "collaborationMode": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalCollaborationMode" },
+              { "type": "null" }
+            ]
+          },
           "correlationId": { "type": ["string", "null"] },
           "createdAt": { "type": "string" },
           "deliveryId": { "type": "string" },
@@ -1047,6 +1053,12 @@
       "AgentMessageDeliveryRequest": {
         "properties": {
           "body": { "type": "string" },
+          "collaborationMode": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalCollaborationMode" },
+              { "type": "null" }
+            ]
+          },
           "correlationId": { "type": ["string", "null"] },
           "createdAt": { "type": "string" },
           "deliveryId": { "type": "string" },
@@ -2036,6 +2048,7 @@
         "enum": ["active", "paused", "archived"],
         "type": "string"
       },
+      "ExternalCollaborationMode": { "enum": ["plan"], "type": "string" },
       "ExternalControlKind": {
         "enum": [
           "start_or_resume_thread",
@@ -3274,6 +3287,12 @@
       "SessionTurnRequested": {
         "properties": {
           "bindingId": { "type": "string" },
+          "collaborationMode": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalCollaborationMode" },
+              { "type": "null" }
+            ]
+          },
           "createdAt": { "type": "string" },
           "expiresAt": { "type": ["string", "null"] },
           "idempotencyKey": { "type": "string" },
@@ -3548,6 +3567,9 @@
           "idempotencyKey": { "type": "string" },
           "messageId": { "type": "string" },
           "correlationId": { "type": "string" },
+          "collaborationMode": {
+            "$ref": "#/components/schemas/ExternalCollaborationMode"
+          },
           "ttlMs": {
             "type": "integer",
             "minimum": 1,

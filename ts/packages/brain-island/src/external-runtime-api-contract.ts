@@ -566,6 +566,9 @@ function routeSchemas(): Record<string, JsonSchema> {
         idempotencyKey: { type: "string" },
         messageId: { type: "string" },
         correlationId: { type: "string" },
+        collaborationMode: {
+          $ref: "#/components/schemas/ExternalCollaborationMode",
+        },
         ttlMs: { type: "integer", minimum: 1, maximum: 60000, default: 5000 },
       },
       additionalProperties: false,

@@ -2967,6 +2967,16 @@ export const bridgeWireSchemaArtifact = {
               "bindingId": {
                 "type": "string"
               },
+              "collaborationMode": {
+                "enum": [
+                  "plan",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "createdAt": {
                 "type": "string"
               },
@@ -4263,6 +4273,16 @@ export const bridgeWireSchemaArtifact = {
             "body": {
               "type": "string"
             },
+            "collaborationMode": {
+              "enum": [
+                "plan",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "correlationId": {
               "type": [
                 "string",
@@ -4591,6 +4611,16 @@ export const bridgeWireSchemaArtifact = {
           "properties": {
             "bindingId": {
               "type": "string"
+            },
+            "collaborationMode": {
+              "enum": [
+                "plan",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "createdAt": {
               "type": "string"
@@ -15482,6 +15512,16 @@ export const bridgeWireSchemaArtifact = {
             "body": {
               "type": "string"
             },
+            "collaborationMode": {
+              "enum": [
+                "plan",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "correlationId": {
               "type": [
                 "string",
@@ -15674,6 +15714,16 @@ export const bridgeWireSchemaArtifact = {
               "properties": {
                 "body": {
                   "type": "string"
+                },
+                "collaborationMode": {
+                  "enum": [
+                    "plan",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "correlationId": {
                   "type": [
@@ -16442,6 +16492,16 @@ export const bridgeWireSchemaArtifact = {
           "properties": {
             "bindingId": {
               "type": "string"
+            },
+            "collaborationMode": {
+              "enum": [
+                "plan",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "createdAt": {
               "type": "string"

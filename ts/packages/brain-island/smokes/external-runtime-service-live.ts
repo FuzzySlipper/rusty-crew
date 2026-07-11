@@ -288,6 +288,80 @@ try {
   await waitForTerminalEvent(queueSecondTurn.nativeTurnId);
   assert.notEqual(queueSecondTurn.nativeTurnId, queueFirstTurn.nativeTurnId);
 
+  const planCursor = await latestRuntimeSequence();
+  const planDelivery = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-plan-input",
+    [
+      "Use request_user_input exactly once.",
+      "Ask which certification color to use and offer blue and green.",
+      "After the answer, reply with exactly PLAN_MODE_INPUT_OK:<answer>.",
+    ].join(" "),
+    true,
+    "plan",
+  );
+  assert.equal(planDelivery.activation?.type, "external_turn_requested");
+  const planInteraction = await waitForPendingInteraction(baseUrl);
+  assert.equal(planInteraction.kind, "request_user_input");
+  const questionId = interactionQuestionId(planInteraction.prompt);
+  const waitingTurn = (await bridge.listActiveExternalTurns()).find(
+    (turn) => turn.request.requestId === planInteraction.requestId,
+  );
+  assert.equal(waitingTurn?.phase, "waiting_interaction");
+  const beforeResolution = await bridge.queryExternalRuntimeEvents({
+    runtimeId,
+    afterSequence: planCursor,
+    limit: 1_000,
+  });
+  assert.equal(
+    beforeResolution.some(
+      (event) =>
+        event.nativeTurnId === planInteraction.nativeTurnId &&
+        isNativeTerminalEvent(event.payload),
+    ),
+    false,
+  );
+  const resolveResponse = await fetch(
+    `${baseUrl}/v1/external-interactions/${encodeURIComponent(planInteraction.interactionId)}/resolve`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedRevision: planInteraction.revision,
+        idempotencyKey: "external-service-live-plan-input-resolution",
+        result: { answers: { [questionId]: { answers: ["blue"] } } },
+      }),
+    },
+  );
+  assert.equal(resolveResponse.status, 200);
+  const resolvedInteraction = (await resolveResponse.json()) as {
+    ok: boolean;
+    data: { status: string };
+  };
+  assert.equal(resolvedInteraction.ok, true);
+  assert.equal(resolvedInteraction.data.status, "resolved");
+  await waitForTerminalEvent(planInteraction.nativeTurnId);
+  const planEvents = await bridge.queryExternalRuntimeEvents({
+    runtimeId,
+    afterSequence: planCursor,
+    limit: 1_000,
+  });
+  const planAnswer = planEvents
+    .filter(
+      (event) =>
+        event.nativeTurnId === planInteraction.nativeTurnId &&
+        event.kind === "assistant_text_delta",
+    )
+    .map((event) =>
+      typeof event.payload === "object" &&
+      event.payload !== null &&
+      "text" in event.payload
+        ? String(event.payload.text)
+        : "",
+    )
+    .join("");
+  assert.match(planAnswer, /PLAN_MODE_INPUT_OK:blue/i);
+
   const coordinationCursor = await latestRuntimeSequence();
   const coordinationId = `codex-codex-${Date.now()}`;
   const coordinationDelivery = await deliverLiveMessage(
@@ -480,6 +554,14 @@ try {
           dynamicToolIds,
           roundId,
         },
+        planInteraction: {
+          interactionId: planInteraction.interactionId,
+          nativeTurnId: planInteraction.nativeTurnId,
+          questionId,
+          selectedAnswer: "blue",
+          blockedBeforeResolution: true,
+          finalAnswer: planAnswer,
+        },
         sseReplay: true,
         browserControls: ["steer_turn", "interrupt_turn"],
       },
@@ -633,6 +715,7 @@ async function deliverLiveMessage(
   label: string,
   body: string,
   tick = true,
+  collaborationMode?: "plan",
 ) {
   const response = await fetch(
     `${baseUrl}/v1/external-bindings/${bindingId}/messages`,
@@ -644,6 +727,7 @@ async function deliverLiveMessage(
         idempotencyKey: `${label}-delivery`,
         messageId: `${label}-message`,
         body,
+        ...(collaborationMode === undefined ? {} : { collaborationMode }),
         ttlMs: 60_000,
       }),
     },
@@ -656,6 +740,60 @@ async function deliverLiveMessage(
   assert.equal(envelope.ok, true);
   if (tick) await controller.tick();
   return envelope.data;
+}
+
+interface PendingInteraction {
+  interactionId: string;
+  requestId: string;
+  nativeTurnId: string;
+  kind: string;
+  prompt: unknown;
+  revision: number;
+}
+
+async function waitForPendingInteraction(
+  baseUrl: string,
+): Promise<PendingInteraction> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await controller.tick();
+    const response = await fetch(`${baseUrl}/v1/external-interactions`);
+    assert.equal(response.status, 200);
+    const envelope = (await response.json()) as {
+      ok: boolean;
+      data: { interactions: PendingInteraction[] };
+    };
+    const interaction = envelope.data.interactions.find(
+      (candidate) => candidate.kind === "request_user_input",
+    );
+    if (interaction !== undefined) return interaction;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Plan collaboration turn did not request user input after ${timeoutMs}ms`,
+  );
+}
+
+function interactionQuestionId(prompt: unknown): string {
+  if (
+    typeof prompt === "object" &&
+    prompt !== null &&
+    "questions" in prompt &&
+    Array.isArray(prompt.questions)
+  ) {
+    const question = prompt.questions[0];
+    if (
+      typeof question === "object" &&
+      question !== null &&
+      "id" in question &&
+      typeof question.id === "string"
+    ) {
+      return question.id;
+    }
+  }
+  throw new Error(
+    `request_user_input prompt has no question id: ${JSON.stringify(prompt)}`,
+  );
 }
 
 async function postControl(

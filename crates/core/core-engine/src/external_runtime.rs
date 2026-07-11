@@ -3,13 +3,14 @@
 use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentMessageDeliveryStatus, AgentRoundStatus, ExternalAgentBinding,
-    ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus, ExternalControlId,
-    ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
-    ExternalControllerContext, ExternalControllerLease, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
-    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
-    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
-    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode,
+    ExternalControlId, ExternalControlKind, ExternalControlReceipt, ExternalControlRequest,
+    ExternalControlStatus, ExternalControllerContext, ExternalControllerLease,
+    ExternalInteractionRecord, ExternalInteractionStatus, ExternalRuntimeDesiredState,
+    ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
+    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, SessionTurnRequested, TurnInputProvenance,
 };
 use sha2::{Digest, Sha256};
@@ -20,6 +21,7 @@ pub struct AgentActivationRequest {
     pub request_id: ExternalTurnRequestId,
     pub idempotency_key: String,
     pub input: Vec<ExternalTurnInputPart>,
+    pub collaboration_mode: Option<ExternalCollaborationMode>,
     pub provenance: TurnInputProvenance,
     pub run_id: Option<RunId>,
     pub capacity_lease_id: String,
@@ -546,6 +548,7 @@ impl CoreEngine {
                 run_id: request.run_id,
                 binding_id: binding.binding_id.clone(),
                 input: request.input,
+                collaboration_mode: request.collaboration_mode,
                 provenance: request.provenance,
                 created_at: request.created_at.clone(),
                 expires_at: request.expires_at,
@@ -628,6 +631,7 @@ impl CoreEngine {
             input: vec![ExternalTurnInputPart::Text {
                 text: queued.message.body.clone(),
             }],
+            collaboration_mode: None,
             provenance: TurnInputProvenance {
                 kind: rusty_crew_core_protocol::TurnInputProvenanceKind::RoutedAgentMessage,
                 source_id: Some(queued.message_id.clone()),

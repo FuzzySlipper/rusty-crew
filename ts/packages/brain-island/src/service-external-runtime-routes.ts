@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   ExternalAgentBinding,
+  ExternalCollaborationMode,
   ExternalControlRequest,
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
@@ -195,13 +196,15 @@ export async function handleExternalRuntimeRequest(
       optionalString(body.idempotencyKey) ?? `operator-message:${deliveryId}`;
     const messageId = optionalString(body.messageId) ?? `message:${deliveryId}`;
     const messageBody = requiredString(body.body);
+    const collaborationMode = optionalCollaborationMode(body.collaborationMode);
     const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
     if (
       existing !== undefined &&
       existing.request.idempotencyKey === idempotencyKey &&
       existing.request.messageId === messageId &&
       existing.request.toAgentId === binding.agentId &&
-      existing.request.body === messageBody
+      existing.request.body === messageBody &&
+      existing.request.collaborationMode === collaborationMode
     ) {
       return successRoute(requestId, existing);
     }
@@ -219,6 +222,7 @@ export async function handleExternalRuntimeRequest(
         messageId,
         toAgentId: binding.agentId,
         body: messageBody,
+        ...(collaborationMode === undefined ? {} : { collaborationMode }),
         ...(optionalString(body.correlationId) === undefined
           ? {}
           : { correlationId: optionalString(body.correlationId) }),
@@ -306,6 +310,14 @@ export async function handleExternalRuntimeRequest(
     message: `unknown external runtime route ${url.pathname}`,
     retryable: false,
   });
+}
+
+function optionalCollaborationMode(
+  value: unknown,
+): ExternalCollaborationMode | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === "plan") return value;
+  throw new Error("collaborationMode must be plan when provided");
 }
 
 function externalRuntimeStream(
