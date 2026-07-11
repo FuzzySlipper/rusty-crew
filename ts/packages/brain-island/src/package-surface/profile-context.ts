@@ -2,6 +2,7 @@ export {
   loadProfileConfig,
   loadProfileConfigWithSource,
   loadProfileContext,
+  loadProfileCuratorDiscoveryContext,
   loadSkill,
   profilePromptAssetConfigPaths,
   profileRuntimeGraphWireFieldPaths,
@@ -9,6 +10,7 @@ export {
 } from "../profile-loading.js";
 export type {
   LoadedProfileContext,
+  LoadedProfileCuratorDiscoveryContext,
   LoadedProfileConfigSource,
   LoadedSkill,
   LoadProfileContextInput,

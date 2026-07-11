@@ -292,6 +292,12 @@ export interface LoadProfileContextInput {
   externalMemoryAvailability?: ExternalMemoryToolAvailability;
 }
 
+export interface LoadedProfileCuratorDiscoveryContext {
+  readonly profile: ProfileConfig;
+  readonly skills: LoadedSkill[];
+  readonly missingSkillSlugs: string[];
+}
+
 export async function loadProfileContext(
   input: LoadProfileContextInput,
 ): Promise<LoadedProfileContext> {
@@ -367,6 +373,43 @@ export async function loadProfileContext(
     profile,
     skills,
     toolSelection,
+  };
+}
+
+export async function loadProfileCuratorDiscoveryContext(input: {
+  profilesDir: string;
+  skillsDir?: string;
+  profileId: ProfileId;
+}): Promise<LoadedProfileCuratorDiscoveryContext> {
+  const profile = await loadProfileConfig(input.profilesDir, input.profileId);
+  const roots = skillRoots(
+    profile,
+    input.skillsDir ?? join(input.profilesDir, "skills"),
+  );
+  const slugs =
+    profile.skillsMode === "all"
+      ? await listSkillSlugsAcrossRoots(roots)
+      : (profile.skills ?? []);
+  const skills: LoadedSkill[] = [];
+  const missingSkillSlugs: string[] = [];
+  for (const slug of slugs) {
+    try {
+      skills.push(await loadSkillFromRoots(roots, slug));
+    } catch (error) {
+      if (
+        error instanceof ProfileLoadError &&
+        error.code === "skill_not_found"
+      ) {
+        missingSkillSlugs.push(slug);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return {
+    profile,
+    skills,
+    missingSkillSlugs,
   };
 }
 

@@ -86,6 +86,7 @@
     "smoke:runtime-health": "tsx smokes/smoke-runtime-health.ts",
     "smoke:background-memory-skill-review": "tsx smokes/smoke-background-memory-skill-review.ts",
     "smoke:curator-candidates": "tsx smokes/smoke-curator-candidates.ts",
+    "smoke:curator-missing-skill-discovery": "tsx smokes/smoke-curator-missing-skill-discovery.ts",
     "smoke:curator-mutations": "tsx smokes/smoke-curator-mutations.ts",
     "smoke:curator-observation": "tsx smokes/smoke-curator-observation.ts",
     "smoke:curator-lifecycle": "tsx smokes/smoke-curator-lifecycle.ts",

@@ -194,6 +194,7 @@ import {
 import {
   loadProfileConfig,
   loadProfileContext,
+  loadProfileCuratorDiscoveryContext,
   type ProfileConfig,
   type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
@@ -2897,12 +2898,10 @@ async function scanServiceCuratorCandidates(
   request: CuratorExecuteRequest,
 ): Promise<CuratorCandidateBatch> {
   const profileId = curatorProfileId(input.runtimeConfig, request);
-  const profile = await loadProfileContext({
+  const profile = await loadProfileCuratorDiscoveryContext({
     profilesDir: input.runtimeConfig.profilesDir,
     skillsDir: input.runtimeConfig.skillsDir,
     profileId,
-    modelProviderResolver: (alias) =>
-      resolveModelProviderForBrain(input.bridge, alias),
   });
   const denseProfileMemory = await input.bridge
     .listProfileMemory({ profileId })
