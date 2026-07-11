@@ -450,6 +450,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn append_external_runtime_event_allocated(
+        &self,
+        input: &ExternalRuntimeEventInput,
+    ) -> CoreResult<NormalizedExternalRuntimeEvent> {
+        match self {
+            Self::Sqlite(store) => store.append_external_runtime_event_allocated(input),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.append_external_runtime_event_allocated(input),
+        }
+    }
+
     pub fn query_external_runtime_events(
         &self,
         runtime_id: &ExternalRuntimeId,
@@ -509,6 +520,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(store) => store.get_agent_correlated_round(round_id),
             #[cfg(feature = "postgres")]
             Self::Postgres(store) => store.get_agent_correlated_round(round_id),
+        }
+    }
+
+    pub fn get_agent_message_delivery(
+        &self,
+        delivery_id: &rusty_crew_core_protocol::AgentMessageDeliveryId,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.get_agent_message_delivery(delivery_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_agent_message_delivery(delivery_id),
         }
     }
 

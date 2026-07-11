@@ -3,11 +3,144 @@ use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
     AgentMessageDeliveryStatus, AgentRoundCommand, AgentRoundId, AgentRoundStatus,
     ExternalAgentBinding, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
+    ExternalControlId, ExternalControlKind, ExternalControlRequest, ExternalControllerContext,
     ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
-    ExternalRuntimeDesiredState, ExternalRuntimeId, ExternalRuntimeKind,
-    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalTurnInputPart,
-    ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
+    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
+    ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    TurnInputProvenance, TurnInputProvenanceKind,
 };
+use serde_json::json;
+
+#[test]
+fn handshake_and_runtime_event_replay_require_current_controller_authority() {
+    let engine = test_engine();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let lease = engine
+        .acquire_external_runtime_controller(
+            &ExternalControllerLease {
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                holder_instance_id: "controller-a".into(),
+                generation: 0,
+                acquired_at: "2026-06-19T00:00:00Z".into(),
+                renewed_at: "2026-06-19T00:00:00Z".into(),
+                expires_at: "2026-06-19T00:10:00Z".into(),
+                revision: 0,
+            },
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+    let controller = ExternalControllerContext {
+        holder_instance_id: "controller-a".into(),
+        generation: lease.generation,
+    };
+    let accepted = engine
+        .authorize_external_runtime_handshake(&ExternalRuntimeHandshakeObservation {
+            runtime_id: ExternalRuntimeId::new("codex-local"),
+            controller: controller.clone(),
+            cli_version: "0.144.1".into(),
+            executable_sha256: "a".repeat(64),
+            protocol_schema_sha256: "b".repeat(64),
+            observed_at: "2026-06-19T00:00:01Z".into(),
+        })
+        .unwrap();
+    assert!(accepted.accepted);
+
+    let first = engine
+        .record_external_runtime_event(
+            &controller,
+            &ExternalRuntimeEventInput {
+                event_id: "connection-1:event-1".into(),
+                session_id: None,
+                created_at: "2026-06-19T00:00:02Z".into(),
+                kind: "runtime_status".into(),
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                native_thread_id: None,
+                native_turn_id: None,
+                item_id: None,
+                request_id: None,
+                payload: json!({"transportSequence": 1}),
+                raw_detail_ref: None,
+            },
+        )
+        .unwrap();
+    let after_reconnect = engine
+        .record_external_runtime_event(
+            &controller,
+            &ExternalRuntimeEventInput {
+                event_id: "connection-2:event-1".into(),
+                session_id: None,
+                created_at: "2026-06-19T00:00:03Z".into(),
+                kind: "runtime_status".into(),
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                native_thread_id: None,
+                native_turn_id: None,
+                item_id: None,
+                request_id: None,
+                payload: json!({"transportSequence": 1}),
+                raw_detail_ref: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(first.sequence_id, 1);
+    assert_eq!(after_reconnect.sequence_id, 2);
+
+    let stale = ExternalControllerContext {
+        holder_instance_id: "controller-a".into(),
+        generation: lease.generation + 1,
+    };
+    assert_eq!(
+        engine
+            .record_external_runtime_event(
+                &stale,
+                &ExternalRuntimeEventInput {
+                    event_id: "stale:event".into(),
+                    session_id: None,
+                    created_at: "2026-06-19T00:00:04Z".into(),
+                    kind: "runtime_status".into(),
+                    runtime_id: ExternalRuntimeId::new("codex-local"),
+                    native_thread_id: None,
+                    native_turn_id: None,
+                    item_id: None,
+                    request_id: None,
+                    payload: json!({}),
+                    raw_detail_ref: None,
+                },
+            )
+            .unwrap_err()
+            .kind,
+        CoreErrorKind::ActionRejected
+    );
+}
+
+#[test]
+fn mid_turn_controls_require_exact_native_turn_identity() {
+    let engine = test_engine();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+    let request = ExternalControlRequest {
+        control_id: ExternalControlId::new("steer-without-turn"),
+        idempotency_key: "steer-without-turn".into(),
+        binding_id: ExternalBindingId::new("codex-binding"),
+        expected_binding_revision: 1,
+        expected_native_turn_id: None,
+        kind: ExternalControlKind::SteerTurn,
+        payload: json!({}),
+        requested_at: "2026-06-19T00:00:00Z".into(),
+    };
+    assert_eq!(
+        engine.submit_external_control(request).unwrap_err().kind,
+        CoreErrorKind::InvalidInput
+    );
+}
 
 #[test]
 fn durable_agent_round_resolves_reply_without_second_wake() {

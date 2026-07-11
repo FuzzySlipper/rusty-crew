@@ -243,6 +243,13 @@ impl CoreEngine {
         Ok(Some(expired))
     }
 
+    pub fn get_agent_message_delivery(
+        &self,
+        delivery_id: &rusty_crew_core_protocol::AgentMessageDeliveryId,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        self.store.get_agent_message_delivery(delivery_id)
+    }
+
     fn resolve_coordination_caller(
         &self,
         caller: &AgentCoordinationCaller,

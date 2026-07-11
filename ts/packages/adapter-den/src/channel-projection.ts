@@ -220,6 +220,26 @@ function activitySummary(event: CoreEvent): {
         text: `Message routed ${event.message.from} -> ${event.message.to}`,
         severity: "info",
       };
+    case "agent_message_delivery_observed":
+      return {
+        text: `Message delivery ${event.receipt.status} to ${event.receipt.request.toAgentId}`,
+        severity:
+          event.receipt.status === "accepted"
+            ? "success"
+            : event.receipt.status === "pending"
+              ? "info"
+              : "warning",
+      };
+    case "agent_round_observed":
+      return {
+        text: `Agent round ${event.round.status} for ${event.round.recipientAgentId}`,
+        severity:
+          event.round.status === "replied"
+            ? "success"
+            : event.round.status === "pending"
+              ? "info"
+              : "warning",
+      };
     case "delegation_lifecycle_observed":
       return {
         text: `Delegation ${event.lifecycle.phase} for ${event.lifecycle.delegatedSessionId}`,

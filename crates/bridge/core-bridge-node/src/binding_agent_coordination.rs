@@ -21,6 +21,13 @@ impl NativeBridge {
     ) -> CoreResult<Option<AgentCorrelatedRound>> {
         self.engine()?.get_agent_round(round_id)
     }
+
+    pub fn get_agent_message_delivery(
+        &self,
+        delivery_id: &AgentMessageDeliveryId,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        self.engine()?.get_agent_message_delivery(delivery_id)
+    }
 }
 
 #[napi_derive::napi]
@@ -56,6 +63,22 @@ impl NativeBridgeBinding {
             .map_err(to_napi_error)?
             .map(|round| {
                 serde_json::to_string(&round).map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })
+            })
+            .transpose()
+    }
+
+    #[napi]
+    pub fn get_agent_message_delivery_json(
+        &self,
+        delivery_id: String,
+    ) -> napi::Result<Option<String>> {
+        self.bridge()?
+            .get_agent_message_delivery(&AgentMessageDeliveryId::new(delivery_id))
+            .map_err(to_napi_error)?
+            .map(|receipt| {
+                serde_json::to_string(&receipt).map_err(|error| {
                     napi::Error::new(napi::Status::GenericFailure, error.to_string())
                 })
             })

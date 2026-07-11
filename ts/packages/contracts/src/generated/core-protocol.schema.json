@@ -2082,6 +2082,23 @@
       ],
       "type": "object"
     },
+    "DenRuntimeReference": {
+      "properties": {
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "EventReceipt": {
       "properties": {
         "accepted": {
@@ -2130,6 +2147,272 @@
         "event_kinds"
       ],
       "type": "object"
+    },
+    "ExternalAgentBinding": {
+      "properties": {
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveConfigFingerprint": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purpose": {
+          "$ref": "#/$defs/ExternalBindingPurpose"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ExternalBindingStatus"
+        },
+        "taskRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenRuntimeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "runtimeId",
+        "purpose",
+        "effectiveConfigFingerprint",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalBindingPurpose": {
+      "enum": [
+        "crew_agent",
+        "imported_observer"
+      ],
+      "type": "string"
+    },
+    "ExternalBindingStatus": {
+      "enum": [
+        "active",
+        "paused",
+        "archived"
+      ],
+      "type": "string"
+    },
+    "ExternalControlKind": {
+      "enum": [
+        "start_or_resume_thread",
+        "start_turn",
+        "steer_turn",
+        "interrupt_turn",
+        "compact_thread",
+        "resolve_interaction",
+        "reconcile_runtime",
+        "archive_binding"
+      ],
+      "type": "string"
+    },
+    "ExternalControlReceipt": {
+      "properties": {
+        "outcome": true,
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/ExternalControlRequest"
+        },
+        "requestFingerprint": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ExternalControlStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "requestFingerprint",
+        "status",
+        "revision",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalControlRequest": {
+      "properties": {
+        "bindingId": {
+          "type": "string"
+        },
+        "controlId": {
+          "type": "string"
+        },
+        "expectedBindingRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expectedNativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExternalControlKind"
+        },
+        "payload": true,
+        "requestedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "controlId",
+        "idempotencyKey",
+        "bindingId",
+        "expectedBindingRevision",
+        "kind",
+        "payload",
+        "requestedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalControlStatus": {
+      "enum": [
+        "pending",
+        "applied",
+        "rejected",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ExternalControllerContext": {
+      "properties": {
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "holderInstanceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "holderInstanceId",
+        "generation"
+      ],
+      "type": "object"
+    },
+    "ExternalControllerLease": {
+      "properties": {
+        "acquiredAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "holderInstanceId": {
+          "type": "string"
+        },
+        "renewedAt": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "holderInstanceId",
+        "generation",
+        "acquiredAt",
+        "renewedAt",
+        "expiresAt",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "ExternalEndpoint": {
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "transport": {
+          "$ref": "#/$defs/ExternalEndpointTransport"
+        }
+      },
+      "required": [
+        "transport",
+        "address"
+      ],
+      "type": "object"
+    },
+    "ExternalEndpointTransport": {
+      "enum": [
+        "unix_web_socket"
+      ],
+      "type": "string"
     },
     "ExternalEvent": {
       "properties": {
@@ -2287,6 +2570,502 @@
           "type": "object"
         }
       ]
+    },
+    "ExternalInteractionKind": {
+      "enum": [
+        "command_approval",
+        "file_approval",
+        "request_user_input",
+        "permission_request",
+        "mcp_elicitation",
+        "unsupported"
+      ],
+      "type": "string"
+    },
+    "ExternalInteractionRecord": {
+      "properties": {
+        "allowedResponses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "interactionId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExternalInteractionKind"
+        },
+        "nativeRequestId": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": "string"
+        },
+        "nativeTurnId": {
+          "type": "string"
+        },
+        "outcome": true,
+        "prompt": true,
+        "rawDetailRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "resolutionIdempotencyKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ExternalInteractionStatus"
+        }
+      },
+      "required": [
+        "interactionId",
+        "runtimeId",
+        "bindingId",
+        "requestId",
+        "nativeThreadId",
+        "nativeTurnId",
+        "nativeRequestId",
+        "kind",
+        "prompt",
+        "allowedResponses",
+        "status",
+        "requestedAt",
+        "expiresAt",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "ExternalInteractionStatus": {
+      "enum": [
+        "pending",
+        "resolved",
+        "expired",
+        "lost"
+      ],
+      "type": "string"
+    },
+    "ExternalProcessOwnership": {
+      "enum": [
+        "attached",
+        "managed"
+      ],
+      "type": "string"
+    },
+    "ExternalRuntimeDesiredState": {
+      "enum": [
+        "enabled",
+        "disabled"
+      ],
+      "type": "string"
+    },
+    "ExternalRuntimeEventInput": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": true,
+        "rawDetailRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "eventId",
+        "createdAt",
+        "kind",
+        "runtimeId",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeHandshakeDecision": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registration": {
+          "$ref": "#/$defs/ExternalRuntimeRegistration"
+        }
+      },
+      "required": [
+        "accepted",
+        "registration"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeHandshakeObservation": {
+      "properties": {
+        "cliVersion": {
+          "type": "string"
+        },
+        "controller": {
+          "$ref": "#/$defs/ExternalControllerContext"
+        },
+        "executableSha256": {
+          "type": "string"
+        },
+        "observedAt": {
+          "type": "string"
+        },
+        "protocolSchemaSha256": {
+          "type": "string"
+        },
+        "runtimeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "controller",
+        "cliVersion",
+        "executableSha256",
+        "protocolSchemaSha256",
+        "observedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeKind": {
+      "enum": [
+        "codex_app_server"
+      ],
+      "type": "string"
+    },
+    "ExternalRuntimeObservedState": {
+      "enum": [
+        "disconnected",
+        "connecting",
+        "ready",
+        "degraded",
+        "incompatible"
+      ],
+      "type": "string"
+    },
+    "ExternalRuntimeRegistration": {
+      "properties": {
+        "codexHomeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "desiredState": {
+          "$ref": "#/$defs/ExternalRuntimeDesiredState"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/ExternalEndpoint"
+        },
+        "executableSha256": {
+          "type": "string"
+        },
+        "expectedCliVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExternalRuntimeKind"
+        },
+        "observedReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedState": {
+          "$ref": "#/$defs/ExternalRuntimeObservedState"
+        },
+        "processOwnership": {
+          "$ref": "#/$defs/ExternalProcessOwnership"
+        },
+        "protocolSchemaSha256": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "kind",
+        "endpoint",
+        "processOwnership",
+        "expectedCliVersion",
+        "executableSha256",
+        "protocolSchemaSha256",
+        "desiredState",
+        "observedState",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeStateObservation": {
+      "properties": {
+        "controller": {
+          "$ref": "#/$defs/ExternalControllerContext"
+        },
+        "observedAt": {
+          "type": "string"
+        },
+        "observedState": {
+          "$ref": "#/$defs/ExternalRuntimeObservedState"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "controller",
+        "observedState",
+        "observedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalTurnCorrelation": {
+      "properties": {
+        "capacityLeaseId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeThreadId": {
+          "type": "string"
+        },
+        "nativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "$ref": "#/$defs/ExternalTurnPhase"
+        },
+        "request": {
+          "$ref": "#/$defs/SessionTurnRequested"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "taskRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenRuntimeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminalReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "runtimeId",
+        "nativeThreadId",
+        "phase",
+        "revision",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalTurnInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "image",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "skill",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "payload": true,
+            "type": {
+              "const": "machine_fact",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind",
+            "payload"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExternalTurnPhase": {
+      "enum": [
+        "accepted",
+        "starting",
+        "active",
+        "waiting_interaction",
+        "completed",
+        "failed",
+        "interrupted",
+        "outcome_unknown"
+      ],
+      "type": "string"
     },
     "FanOutFailurePolicy": {
       "enum": [
@@ -3107,6 +3886,73 @@
       ],
       "type": "string"
     },
+    "NormalizedExternalRuntimeEvent": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": true,
+        "rawDetailRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "sequenceId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "eventId",
+        "sequenceId",
+        "createdAt",
+        "kind",
+        "runtimeId",
+        "payload"
+      ],
+      "type": "object"
+    },
     "ParentConsumptionPolicy": {
       "enum": [
         "await_completion",
@@ -3488,6 +4334,56 @@
       ],
       "type": "string"
     },
+    "SessionTurnRequested": {
+      "properties": {
+        "bindingId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/$defs/ExternalTurnInputPart"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/TurnInputProvenance"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "idempotencyKey",
+        "sessionId",
+        "bindingId",
+        "input",
+        "provenance",
+        "createdAt"
+      ],
+      "type": "object"
+    },
     "ToolCallMetadata": {
       "properties": {
         "adapter_id": {
@@ -3641,6 +4537,39 @@
       ],
       "type": "object"
     },
+    "TurnInputProvenance": {
+      "properties": {
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/TurnInputProvenanceKind"
+        },
+        "sourceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TurnInputProvenanceKind": {
+      "enum": [
+        "operator",
+        "routed_agent_message",
+        "scheduled_wake",
+        "external_wait_result",
+        "control"
+      ],
+      "type": "string"
+    },
     "WorkerPoolCapacityFallbackPolicy": {
       "enum": [
         "reject_on_no_capacity",
@@ -3765,8 +4694,44 @@
     "event_subscription": {
       "$ref": "#/$defs/EventSubscription"
     },
+    "external_agent_binding": {
+      "$ref": "#/$defs/ExternalAgentBinding"
+    },
+    "external_control_receipt": {
+      "$ref": "#/$defs/ExternalControlReceipt"
+    },
+    "external_control_request": {
+      "$ref": "#/$defs/ExternalControlRequest"
+    },
+    "external_controller_context": {
+      "$ref": "#/$defs/ExternalControllerContext"
+    },
+    "external_controller_lease": {
+      "$ref": "#/$defs/ExternalControllerLease"
+    },
     "external_event": {
       "$ref": "#/$defs/ExternalEvent"
+    },
+    "external_interaction_record": {
+      "$ref": "#/$defs/ExternalInteractionRecord"
+    },
+    "external_runtime_event_input": {
+      "$ref": "#/$defs/ExternalRuntimeEventInput"
+    },
+    "external_runtime_handshake_decision": {
+      "$ref": "#/$defs/ExternalRuntimeHandshakeDecision"
+    },
+    "external_runtime_handshake_observation": {
+      "$ref": "#/$defs/ExternalRuntimeHandshakeObservation"
+    },
+    "external_runtime_registration": {
+      "$ref": "#/$defs/ExternalRuntimeRegistration"
+    },
+    "external_runtime_state_observation": {
+      "$ref": "#/$defs/ExternalRuntimeStateObservation"
+    },
+    "external_turn_correlation": {
+      "$ref": "#/$defs/ExternalTurnCorrelation"
     },
     "memory_governance_decision_input": {
       "$ref": "#/$defs/MemoryGovernanceDecisionInput"
@@ -3785,6 +4750,9 @@
     },
     "memory_space_descriptor": {
       "$ref": "#/$defs/MemorySpaceDescriptor"
+    },
+    "normalized_external_runtime_event": {
+      "$ref": "#/$defs/NormalizedExternalRuntimeEvent"
     },
     "platform_adapter_handle": {
       "format": "uint64",
@@ -3891,7 +4859,20 @@
     "agent_message_delivery_receipt",
     "agent_round_command",
     "agent_round_start_receipt",
-    "agent_correlated_round"
+    "agent_correlated_round",
+    "external_runtime_registration",
+    "external_controller_context",
+    "external_runtime_handshake_observation",
+    "external_runtime_handshake_decision",
+    "external_runtime_state_observation",
+    "external_controller_lease",
+    "external_agent_binding",
+    "external_turn_correlation",
+    "external_control_request",
+    "external_control_receipt",
+    "external_interaction_record",
+    "external_runtime_event_input",
+    "normalized_external_runtime_event"
   ],
   "title": "ProtocolContractRoots",
   "type": "object"

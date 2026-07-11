@@ -388,6 +388,204 @@ errors = "core_protocol::CoreError"
 summary = "Read durable correlated-round state without process-memory subscriptions or reply matching."
 
 [[operation]]
+name = "get_agent_message_delivery"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentMessageDeliveryId"
+output = "option<core_protocol::AgentMessageDeliveryReceipt>"
+errors = "core_protocol::CoreError"
+summary = "Read durable cross-runtime message delivery and activation state."
+
+[[operation]]
+name = "register_external_runtime"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeRegistration + expected_revision"
+output = "core_protocol::ExternalRuntimeRegistration"
+errors = "core_protocol::CoreError"
+summary = "Register or revise a version-pinned external agent runtime through Rust lifecycle authority."
+
+[[operation]]
+name = "authorize_external_runtime_handshake"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeHandshakeObservation"
+output = "core_protocol::ExternalRuntimeHandshakeDecision"
+errors = "core_protocol::CoreError"
+summary = "Authorize an observed external runtime handshake against Rust-owned exact-version requirements."
+
+[[operation]]
+name = "record_external_runtime_state"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeStateObservation"
+output = "core_protocol::ExternalRuntimeRegistration"
+errors = "core_protocol::CoreError"
+summary = "Record a controller-observed non-ready runtime state through Rust lease and transition authority."
+
+[[operation]]
+name = "list_external_runtimes"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::ExternalRuntimeRegistration>"
+errors = "core_protocol::CoreError"
+summary = "List durable external runtime registrations and observed compatibility state."
+
+[[operation]]
+name = "get_external_runtime"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeId"
+output = "option<core_protocol::ExternalRuntimeRegistration>"
+errors = "core_protocol::CoreError"
+summary = "Read one durable external runtime registration."
+
+[[operation]]
+name = "acquire_external_controller"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalControllerLease + now"
+output = "core_protocol::ExternalControllerLease"
+errors = "core_protocol::CoreError"
+summary = "Acquire or renew the exclusive generation-fenced controller lease for an external runtime."
+
+[[operation]]
+name = "release_external_controller"
+surface = "stable"
+direction = "ts_to_rust"
+input = "runtime_id + holder_instance_id + generation + now"
+output = "core_protocol::ExternalControllerLease"
+errors = "core_protocol::CoreError"
+summary = "Release the current external runtime controller lease without permitting stale generations."
+
+[[operation]]
+name = "bind_external_agent"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalAgentBinding + expected_revision"
+output = "core_protocol::ExternalAgentBinding"
+errors = "core_protocol::CoreError"
+summary = "Bind an explicitly routable Crew agent or observer to a native external thread."
+
+[[operation]]
+name = "list_external_bindings"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::ExternalAgentBinding>"
+errors = "core_protocol::CoreError"
+summary = "List durable Crew-to-native external runtime bindings."
+
+[[operation]]
+name = "get_external_binding"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalBindingId"
+output = "option<core_protocol::ExternalAgentBinding>"
+errors = "core_protocol::CoreError"
+summary = "Read one durable external runtime binding."
+
+[[operation]]
+name = "get_external_turn"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalTurnRequestId"
+output = "option<core_protocol::ExternalTurnCorrelation>"
+errors = "core_protocol::CoreError"
+summary = "Read one Crew/native external turn correlation."
+
+[[operation]]
+name = "list_active_external_turns"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::ExternalTurnCorrelation>"
+errors = "core_protocol::CoreError"
+summary = "List nonterminal external turns for controller reconciliation and fleet attention."
+
+[[operation]]
+name = "transition_external_turn"
+surface = "stable"
+direction = "ts_to_rust"
+input = "request_id + phase + native_turn_id + terminal_reason_code + now"
+output = "core_protocol::ExternalTurnCorrelation"
+errors = "core_protocol::CoreError"
+summary = "Apply a validated monotonic Crew/native external turn lifecycle transition."
+
+[[operation]]
+name = "submit_external_control"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalControlRequest"
+output = "core_protocol::ExternalControlReceipt"
+errors = "core_protocol::CoreError"
+summary = "Validate binding revision and expected native turn before a controller performs an external side effect."
+
+[[operation]]
+name = "complete_external_control"
+surface = "stable"
+direction = "ts_to_rust"
+input = "control_id + terminal status + outcome + reason_code + now"
+output = "core_protocol::ExternalControlReceipt"
+errors = "core_protocol::CoreError"
+summary = "Persist the immutable terminal result of a validated external control."
+
+[[operation]]
+name = "record_external_interaction"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalInteractionRecord"
+output = "core_protocol::ExternalInteractionRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist an external approval, input, permission, or MCP elicitation after validating native turn identity."
+
+[[operation]]
+name = "resolve_external_interaction"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalInteractionRecord + expected_revision"
+output = "core_protocol::ExternalInteractionRecord"
+errors = "core_protocol::CoreError"
+summary = "Resolve an external interaction once under revision fencing."
+
+[[operation]]
+name = "list_pending_external_interactions"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::ExternalInteractionRecord>"
+errors = "core_protocol::CoreError"
+summary = "List durable pending external interactions for browser attention and restart reconciliation."
+
+[[operation]]
+name = "terminalize_external_interaction"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalControllerContext + core_protocol::ExternalInteractionRecord + expected_revision"
+output = "core_protocol::ExternalInteractionRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a controller-observed expired or lost interaction through lease and revision authority."
+
+[[operation]]
+name = "record_external_runtime_event"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeEventInput"
+output = "core_protocol::NormalizedExternalRuntimeEvent"
+errors = "core_protocol::CoreError"
+summary = "Append one normalized low-volume external runtime event with a Rust-allocated durable replay sequence."
+
+[[operation]]
+name = "query_external_runtime_events"
+surface = "stable"
+direction = "ts_to_rust"
+input = "runtime_id + after_sequence + limit"
+output = "vec<core_protocol::NormalizedExternalRuntimeEvent>"
+errors = "core_protocol::CoreError"
+summary = "Read cursor-ordered normalized external runtime events for SSE replay."
+
+[[operation]]
 name = "suspend_for_github_gate"
 surface = "stable"
 direction = "ts_to_rust"

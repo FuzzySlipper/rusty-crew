@@ -73,12 +73,14 @@ pub enum ExternalRuntimeObservedState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalEndpoint {
     pub transport: ExternalEndpointTransport,
     pub address: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalRuntimeRegistration {
     pub runtime_id: ExternalRuntimeId,
     pub kind: ExternalRuntimeKind,
@@ -97,6 +99,43 @@ pub struct ExternalRuntimeRegistration {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalControllerContext {
+    pub holder_instance_id: String,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeHandshakeObservation {
+    pub runtime_id: ExternalRuntimeId,
+    pub controller: ExternalControllerContext,
+    pub cli_version: String,
+    pub executable_sha256: String,
+    pub protocol_schema_sha256: String,
+    pub observed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeHandshakeDecision {
+    pub accepted: bool,
+    pub reason_code: Option<String>,
+    pub registration: ExternalRuntimeRegistration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeStateObservation {
+    pub runtime_id: ExternalRuntimeId,
+    pub controller: ExternalControllerContext,
+    pub observed_state: ExternalRuntimeObservedState,
+    pub reason_code: Option<String>,
+    pub observed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalControllerLease {
     pub runtime_id: ExternalRuntimeId,
     pub holder_instance_id: String,
@@ -123,6 +162,7 @@ pub enum ExternalBindingStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalAgentBinding {
     pub binding_id: ExternalBindingId,
     pub runtime_id: ExternalRuntimeId,
@@ -185,6 +225,7 @@ pub enum TurnInputProvenanceKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnInputProvenance {
     pub kind: TurnInputProvenanceKind,
     pub source_id: Option<String>,
@@ -201,6 +242,7 @@ pub enum ExternalTurnInputPart {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionTurnRequested {
     pub request_id: ExternalTurnRequestId,
     pub idempotency_key: String,
@@ -257,6 +299,7 @@ impl ExternalTurnPhase {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalTurnCorrelation {
     pub request: SessionTurnRequested,
     pub runtime_id: ExternalRuntimeId,
@@ -309,6 +352,7 @@ pub enum ExternalControlKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalControlRequest {
     pub control_id: ExternalControlId,
     pub idempotency_key: String,
@@ -336,6 +380,7 @@ impl ExternalControlStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalControlReceipt {
     pub request: ExternalControlRequest,
     pub request_fingerprint: String,
@@ -367,6 +412,7 @@ pub enum ExternalInteractionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalInteractionRecord {
     pub interaction_id: ExternalInteractionId,
     pub runtime_id: ExternalRuntimeId,
@@ -389,10 +435,27 @@ pub struct ExternalInteractionRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct NormalizedExternalRuntimeEvent {
     pub event_id: String,
     pub session_id: Option<SessionId>,
     pub sequence_id: u64,
+    pub created_at: IsoTimestamp,
+    pub kind: String,
+    pub runtime_id: ExternalRuntimeId,
+    pub native_thread_id: Option<String>,
+    pub native_turn_id: Option<String>,
+    pub item_id: Option<String>,
+    pub request_id: Option<String>,
+    pub payload: Value,
+    pub raw_detail_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeEventInput {
+    pub event_id: String,
+    pub session_id: Option<SessionId>,
     pub created_at: IsoTimestamp,
     pub kind: String,
     pub runtime_id: ExternalRuntimeId,

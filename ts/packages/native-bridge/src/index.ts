@@ -58,6 +58,7 @@ import { toSessionState, type RawSessionState } from "./session-wire.js";
 import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
 import { createNativeBridgeBrainCatalogMethods } from "./brain-wrappers.js";
+import { createNativeBridgeExternalRuntimeMethods } from "./external-runtime-wrappers.js";
 import {
   assertCanonicalBrainRunModule,
   piAgentTransportMetricsFromRaw,
@@ -674,6 +675,34 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     deliverAgentMessage: unavailable("deliver_agent_message"),
     beginAgentRound: unavailable("begin_agent_round"),
     getAgentRound: unavailable("get_agent_round"),
+    getAgentMessageDelivery: unavailable("get_agent_message_delivery"),
+    registerExternalRuntime: unavailable("register_external_runtime"),
+    authorizeExternalRuntimeHandshake: unavailable(
+      "authorize_external_runtime_handshake",
+    ),
+    recordExternalRuntimeState: unavailable("record_external_runtime_state"),
+    listExternalRuntimes: unavailable("list_external_runtimes"),
+    getExternalRuntime: unavailable("get_external_runtime"),
+    acquireExternalController: unavailable("acquire_external_controller"),
+    releaseExternalController: unavailable("release_external_controller"),
+    bindExternalAgent: unavailable("bind_external_agent"),
+    listExternalBindings: unavailable("list_external_bindings"),
+    getExternalBinding: unavailable("get_external_binding"),
+    getExternalTurn: unavailable("get_external_turn"),
+    listActiveExternalTurns: unavailable("list_active_external_turns"),
+    transitionExternalTurn: unavailable("transition_external_turn"),
+    submitExternalControl: unavailable("submit_external_control"),
+    completeExternalControl: unavailable("complete_external_control"),
+    recordExternalInteraction: unavailable("record_external_interaction"),
+    resolveExternalInteraction: unavailable("resolve_external_interaction"),
+    terminalizeExternalInteraction: unavailable(
+      "terminalize_external_interaction",
+    ),
+    listPendingExternalInteractions: unavailable(
+      "list_pending_external_interactions",
+    ),
+    recordExternalRuntimeEvent: unavailable("record_external_runtime_event"),
+    queryExternalRuntimeEvents: unavailable("query_external_runtime_events"),
     buildBrainWakeRequest: unavailable("wake_brain"),
     buildBrainWakeRequestForSession: unavailable("wake_brain"),
     diagnosticProjectBodyStateJson: unavailable("wake_brain"),
@@ -1468,6 +1497,15 @@ function createNativeBridgeModule(
             ReturnType<NativeBridgeModule["getAgentRound"]>
           >);
     },
+    getAgentMessageDelivery: async (deliveryId) => {
+      const value = binding.getAgentMessageDeliveryJson(deliveryId);
+      return value === null || value === undefined
+        ? undefined
+        : (JSON.parse(value) as Awaited<
+            ReturnType<NativeBridgeModule["getAgentMessageDelivery"]>
+          >);
+    },
+    ...createNativeBridgeExternalRuntimeMethods(binding),
     enqueueBodyFollowUpMessage: async (input) =>
       binding.enqueueBodyFollowUpMessage(
         input.sessionId,

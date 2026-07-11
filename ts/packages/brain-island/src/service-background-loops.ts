@@ -4,6 +4,7 @@ export interface ServiceBackgroundLoopIntervals {
   readonly denRuntimeHeartbeatIntervalMs: number;
   readonly denDeliveryPollIntervalMs: number;
   readonly telegramOutboundDrainIntervalMs?: number;
+  readonly externalRuntimeControllerTickIntervalMs: number;
 }
 
 export interface ServiceBackgroundLoopFailure {
@@ -20,6 +21,7 @@ export interface ServiceBackgroundLoopCallbacks {
   heartbeatDenRuntimeInstances(): Promise<unknown>;
   pollDenDeliveryIntents(): Promise<unknown>;
   drainTelegramOutboundMessages(): Promise<unknown>;
+  tickExternalRuntimeController(): Promise<unknown>;
   recordFailure(failure: ServiceBackgroundLoopFailure): void;
   errorMessage(error: unknown, fallback: string): string;
 }

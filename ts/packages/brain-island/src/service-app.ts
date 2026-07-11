@@ -260,6 +260,8 @@ import {
   isBrowserCorsRoute,
   matchServiceApiRoute,
 } from "./service-route-table.js";
+import { ServiceExternalRuntimeController } from "./service-external-runtime.js";
+import { handleExternalRuntimeRequest } from "./service-external-runtime-routes.js";
 import {
   controlUrlForSlashCommand,
   executeRustyViewChatCommand,
@@ -452,6 +454,7 @@ interface ServiceState {
   readonly toolCallDebugStore: ToolCallDebugStore;
   readonly providerRequestDebugStore: ProviderRequestDebugStore;
   readonly browserResources: ServiceBrowserResources;
+  readonly externalRuntimeController: ServiceExternalRuntimeController;
   readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
@@ -907,6 +910,10 @@ export async function createRustyCrewServiceApp(
       createServiceBrowserResources({
         resourcePolicy: await bridge.planWebBrowserResourcePolicy({}),
       });
+    const externalRuntimeController = new ServiceExternalRuntimeController({
+      bridge,
+      now: () => new Date((options.now ?? (() => new Date().toISOString()))()),
+    });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
@@ -965,6 +972,7 @@ export async function createRustyCrewServiceApp(
       toolCallDebugStore,
       providerRequestDebugStore,
       browserResources,
+      externalRuntimeController,
       responsesWakeMetrics: [],
       suppressedWakeEvents: new Map(),
       recentEvents: [],
@@ -978,6 +986,7 @@ export async function createRustyCrewServiceApp(
       stopping: false,
     };
     liveState = state;
+    await state.externalRuntimeController.start();
     state.denGatewayStartupReport = await connectDenSuccessorGatewayFromModule(
       adapterLifecycleContext(state),
     );
@@ -998,6 +1007,7 @@ export async function createRustyCrewServiceApp(
         denDeliveryPollIntervalMs:
           state.config.background.denDeliveryPollIntervalMs,
         telegramOutboundDrainIntervalMs: state.config.telegram.pollIntervalMs,
+        externalRuntimeControllerTickIntervalMs: 5_000,
       },
       denGatewayAvailable: state.denGatewayClient !== undefined,
       telegramConnectorAvailable: state.telegramConnector !== undefined,
@@ -1019,6 +1029,8 @@ export async function createRustyCrewServiceApp(
           drainTelegramOutboundMessagesFromModule(
             adapterLifecycleContext(state),
           ),
+        tickExternalRuntimeController: () =>
+          state.externalRuntimeController.tick(),
         recordFailure: (failureRecord) =>
           recordServiceEvent(state, failureRecord),
         errorMessage,
@@ -1143,7 +1155,9 @@ async function handleHttpRequest(
       ? withChatCors(unauthorized, request)
       : isRoleplayBrowserRoute(url.pathname)
         ? withChatCors(unauthorized, request)
-        : unauthorized;
+        : isBrowserCorsRoute(url.pathname)
+          ? withChatCors(unauthorized, request)
+          : unauthorized;
   }
 
   const route = matchServiceApiRoute(url.pathname, "after_auth");
@@ -1264,6 +1278,29 @@ async function handleHttpRequest(
       requestId,
       headers,
     });
+  }
+
+  if (route?.id === "external_runtime") {
+    return withChatCors(
+      await handleExternalRuntimeRequest(request, url, {
+        bridge: state.bridge,
+        controller: state.externalRuntimeController,
+        startInterval: (callback, intervalMs) => {
+          const timer = setInterval(callback, intervalMs);
+          state.timers.add(timer);
+          return timer;
+        },
+        stopInterval: (timer) => {
+          clearInterval(timer);
+          state.timers.delete(timer);
+        },
+        now: state.now,
+        requestId,
+        readJsonBody,
+        corsHeaders: chatCorsHeaders,
+      }),
+      request,
+    );
   }
 
   if (route?.id === "debug") {
@@ -5455,6 +5492,7 @@ async function stopService(state: ServiceState): Promise<void> {
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);
     await state.mcpManager.shutdown();
+    await state.externalRuntimeController.stop();
     const browserCleanup = await closeAllServiceBrowserSessionsForLifecycle({
       resources: state.browserResources,
       reason: "service_shutdown",

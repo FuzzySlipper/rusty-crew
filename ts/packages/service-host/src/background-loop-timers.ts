@@ -71,6 +71,22 @@ function startTimers(runtime: ServiceHostBackgroundLoopRuntime): void {
     }, runtime.intervals.denRuntimeHeartbeatIntervalMs);
     runtime.timers.add(timer);
   }
+  if (runtime.intervals.externalRuntimeControllerTickIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void runtime.callbacks.tickExternalRuntimeController().catch((error) =>
+        runtime.callbacks.recordFailure({
+          source: "external-runtime-controller",
+          eventType: "external_runtime_controller_tick_failed",
+          severity: "error",
+          summary: runtime.callbacks.errorMessage(
+            error,
+            "external runtime controller tick failed",
+          ),
+        }),
+      );
+    }, runtime.intervals.externalRuntimeControllerTickIntervalMs);
+    runtime.timers.add(timer);
+  }
 
   if (
     runtime.denGatewayAvailable &&

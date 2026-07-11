@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
-import Ajv, { type ValidateFunction } from "ajv";
-import type { ServerNotification } from "../protocol/0.144.1/ts/ServerNotification";
-import type { ServerRequest } from "../protocol/0.144.1/ts/ServerRequest";
+import AjvModule, { type ValidateFunction } from "ajv";
+import type { ServerNotification } from "../protocol/0.144.1/ts/ServerNotification.js";
+import type { ServerRequest } from "../protocol/0.144.1/ts/ServerRequest.js";
 import type { JsonRpcId } from "./types.js";
 
 export interface JsonRpcResponseMessage {
@@ -78,7 +78,7 @@ export class CodexProtocolError extends Error {
 }
 
 export class CodexProtocolCodec {
-  readonly #ajv = new Ajv({ allErrors: true, strict: false });
+  readonly #ajv = new AjvConstructor({ allErrors: true, strict: false });
   readonly #validators = new Map<string, ValidateFunction>();
   readonly #knownRequestMethods: ReadonlySet<string>;
   readonly #knownNotificationMethods: ReadonlySet<string>;
@@ -232,8 +232,9 @@ export class CodexProtocolCodec {
   ): void {
     let validator = this.#validators.get(path);
     if (validator === undefined) {
-      validator = this.#ajv.compile(this.#readSchema(path));
-      this.#validators.set(path, validator);
+      const compiled = this.#ajv.compile(this.#readSchema(path));
+      this.#validators.set(path, compiled);
+      validator = compiled;
     }
     if (!validator(value)) {
       throw new CodexProtocolError(
@@ -253,6 +254,15 @@ export class CodexProtocolCodec {
     ) as object;
   }
 }
+
+const AjvConstructor = AjvModule as unknown as new (options: {
+  allErrors: boolean;
+  strict: boolean;
+}) => {
+  addFormat(name: string, format: true): void;
+  compile(schema: object): ValidateFunction;
+  errorsText(errors: ValidateFunction["errors"]): string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

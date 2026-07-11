@@ -97,8 +97,9 @@ owns = [
   "external_control_receipts",
   "external_interactions",
   "external_runtime_events",
+  "external_correlated_rounds",
 ]
-notes = "External runtime registrations, exclusive controller generations, Crew/native identity correlation, idempotent turn/control/interaction state, and normalized replay events."
+notes = "External runtime registrations, exclusive controller generations, Crew/native identity correlation, idempotent turn/control/interaction state, normalized replay events, and the retired pre-runtime-neutral round migration table."
 
 [[scope]]
 id = "profile_registry"

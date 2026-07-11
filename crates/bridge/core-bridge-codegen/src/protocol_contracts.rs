@@ -58,6 +58,19 @@ struct ProtocolContractRoots {
     agent_round_command: AgentRoundCommand,
     agent_round_start_receipt: AgentRoundStartReceipt,
     agent_correlated_round: AgentCorrelatedRound,
+    external_runtime_registration: ExternalRuntimeRegistration,
+    external_controller_context: ExternalControllerContext,
+    external_runtime_handshake_observation: ExternalRuntimeHandshakeObservation,
+    external_runtime_handshake_decision: ExternalRuntimeHandshakeDecision,
+    external_runtime_state_observation: ExternalRuntimeStateObservation,
+    external_controller_lease: ExternalControllerLease,
+    external_agent_binding: ExternalAgentBinding,
+    external_turn_correlation: ExternalTurnCorrelation,
+    external_control_request: ExternalControlRequest,
+    external_control_receipt: ExternalControlReceipt,
+    external_interaction_record: ExternalInteractionRecord,
+    external_runtime_event_input: ExternalRuntimeEventInput,
+    normalized_external_runtime_event: NormalizedExternalRuntimeEvent,
 }
 
 const STRING_BRANDS: &[&str] = &[

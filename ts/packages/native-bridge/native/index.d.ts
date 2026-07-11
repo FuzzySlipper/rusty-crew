@@ -4,6 +4,7 @@ export declare class NativeBridgeBinding {
   deliverAgentMessageJson(commandJson: string): string
   beginAgentRoundJson(commandJson: string): string
   getAgentRoundJson(roundId: string): string | null
+  getAgentMessageDeliveryJson(deliveryId: string): string | null
   startBrainRunJson(moduleId: string, inputJson: string): string
   drainBrainRunJson(moduleId: string, wakeId: string, maxItems?: number | undefined | null): string
   submitBrainHostResultJson(moduleId: string, inputJson: string): string
@@ -94,6 +95,27 @@ export declare class NativeBridgeBinding {
   unsubscribeEvents(handle: number): void
   drainSubscriptionEvents(handle: number, maxEvents: number): Array<string>
   submitBrainEvent(wakeId: string, sessionId: string, eventType: string, text?: string | undefined | null, toolName?: string | undefined | null, isError?: boolean | undefined | null, metadataJson?: string | undefined | null): JsEventReceipt
+  registerExternalRuntimeJson(inputJson: string): string
+  authorizeExternalRuntimeHandshakeJson(inputJson: string): string
+  recordExternalRuntimeStateJson(inputJson: string): string
+  listExternalRuntimesJson(): string
+  getExternalRuntimeJson(runtimeId: string): string
+  acquireExternalControllerJson(inputJson: string): string
+  releaseExternalControllerJson(inputJson: string): string
+  bindExternalAgentJson(inputJson: string): string
+  listExternalBindingsJson(): string
+  getExternalBindingJson(bindingId: string): string
+  getExternalTurnJson(requestId: string): string
+  listActiveExternalTurnsJson(): string
+  transitionExternalTurnJson(inputJson: string): string
+  submitExternalControlJson(inputJson: string): string
+  completeExternalControlJson(inputJson: string): string
+  recordExternalInteractionJson(inputJson: string): string
+  resolveExternalInteractionJson(inputJson: string): string
+  terminalizeExternalInteractionJson(inputJson: string): string
+  listPendingExternalInteractionsJson(): string
+  recordExternalRuntimeEventJson(inputJson: string): string
+  queryExternalRuntimeEventsJson(inputJson: string): string
   get manifestVersion(): number
   get operationNames(): Array<string>
   get wireShapeFingerprint(): string

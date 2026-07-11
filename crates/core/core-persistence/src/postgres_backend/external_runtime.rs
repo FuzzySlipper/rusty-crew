@@ -6,8 +6,9 @@ use rusty_crew_core_protocol::{
     AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
     AgentRoundStatus, ExternalAgentBinding, ExternalBindingId, ExternalControlId,
     ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
-    ExternalTurnCorrelation, ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
+    ExternalInteractionStatus, ExternalRuntimeEventInput, ExternalRuntimeId,
+    ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnRequestId,
+    NormalizedExternalRuntimeEvent,
 };
 
 impl PostgresBackendStore {
@@ -797,6 +798,79 @@ impl PostgresBackendStore {
         Ok(())
     }
 
+    pub fn append_external_runtime_event_allocated(
+        &self,
+        input: &ExternalRuntimeEventInput,
+    ) -> CoreResult<NormalizedExternalRuntimeEvent> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start allocated PostgreSQL external runtime event", error)
+        })?;
+        tx.query_one(
+            &format!(
+                "SELECT runtime_id FROM {schema}.external_runtime_registrations
+                 WHERE runtime_id = $1 FOR UPDATE"
+            ),
+            &[&input.runtime_id.0],
+        )
+        .map_err(|error| postgres_error("lock external runtime event sequence", error))?;
+        let existing = load_optional::<NormalizedExternalRuntimeEvent>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_events WHERE event_id = $1"
+            ),
+            &[&input.event_id],
+            "load allocated PostgreSQL external runtime event",
+        )?;
+        if let Some(existing) = existing {
+            if external_event_matches_input(&existing, input) {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "external runtime event id conflicts with a different payload",
+            ));
+        }
+        let next_sequence = tx
+            .query_one(
+                &format!(
+                    "SELECT COALESCE(MAX(sequence_id), 0) + 1
+                     FROM {schema}.external_runtime_events WHERE runtime_id = $1"
+                ),
+                &[&input.runtime_id.0],
+            )
+            .map_err(|error| {
+                postgres_error("allocate PostgreSQL external runtime event sequence", error)
+            })?
+            .get::<_, i64>(0) as u64;
+        let event = normalized_event_from_input(input, next_sequence);
+        let session_id = event.session_id.as_ref().map(|value| value.0.as_str());
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_runtime_events
+                    (event_id, runtime_id, session_id, sequence_id, kind, created_at, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+            ),
+            &[
+                &event.event_id,
+                &event.runtime_id.0,
+                &session_id,
+                &(event.sequence_id as i64),
+                &event.kind,
+                &event.created_at,
+                &to_json_text(&event)?,
+            ],
+        )
+        .map_err(|error| {
+            postgres_error("append allocated PostgreSQL external runtime event", error)
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit allocated PostgreSQL external runtime event", error)
+        })?;
+        Ok(event)
+    }
+
     pub fn query_external_runtime_events(
         &self,
         runtime_id: &ExternalRuntimeId,
@@ -1006,6 +1080,22 @@ impl PostgresBackendStore {
         )
     }
 
+    pub fn get_agent_message_delivery(
+        &self,
+        delivery_id: &rusty_crew_core_protocol::AgentMessageDeliveryId,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE delivery_id = $1"
+            ),
+            &[&delivery_id.0],
+            "load PostgreSQL agent message delivery",
+        )
+    }
+
     pub fn list_pending_agent_message_deliveries(
         &self,
     ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
@@ -1095,6 +1185,33 @@ impl PostgresBackendStore {
             "list PostgreSQL pending external rounds",
         )
     }
+}
+
+fn normalized_event_from_input(
+    input: &ExternalRuntimeEventInput,
+    sequence_id: u64,
+) -> NormalizedExternalRuntimeEvent {
+    NormalizedExternalRuntimeEvent {
+        event_id: input.event_id.clone(),
+        session_id: input.session_id.clone(),
+        sequence_id,
+        created_at: input.created_at.clone(),
+        kind: input.kind.clone(),
+        runtime_id: input.runtime_id.clone(),
+        native_thread_id: input.native_thread_id.clone(),
+        native_turn_id: input.native_turn_id.clone(),
+        item_id: input.item_id.clone(),
+        request_id: input.request_id.clone(),
+        payload: input.payload.clone(),
+        raw_detail_ref: input.raw_detail_ref.clone(),
+    }
+}
+
+fn external_event_matches_input(
+    event: &NormalizedExternalRuntimeEvent,
+    input: &ExternalRuntimeEventInput,
+) -> bool {
+    normalized_event_from_input(input, event.sequence_id) == *event
 }
 
 fn enum_json<T: serde::Serialize>(value: &T) -> CoreResult<String> {

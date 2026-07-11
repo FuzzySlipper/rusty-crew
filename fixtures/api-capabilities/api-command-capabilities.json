@@ -127,6 +127,193 @@
     ],
     "capabilities": [
       {
+        "id": "external.runtimes.list",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes",
+        "description": "List Rust-owned external runtime registrations and live controller status.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.register",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes",
+        "description": "Register or revise an exact-version external agent runtime.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "config"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.read",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}",
+        "description": "Read one external runtime and its controller status.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.connect",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/connect",
+        "description": "Acquire the Rust controller lease and connect the external runtime.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.threads.list",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads",
+        "description": "List native external-runtime threads through the Crew controller.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.threads.read",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/read",
+        "description": "Read one native thread through a bounded runtime-neutral envelope.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.events.list",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/events",
+        "description": "Replay normalized Rust-sequenced external runtime events.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.events.stream",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/stream",
+        "description": "Stream normalized external runtime events with cursor replay.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.raw_details.read",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
+        "description": "Read one bounded redacted in-memory native protocol detail.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.bindings.list",
+        "method": "GET",
+        "path_template": "/v1/external-bindings",
+        "description": "List Crew-owned external agent bindings.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "profile"],
+        "public": true
+      },
+      {
+        "id": "external.bindings.write",
+        "method": "POST",
+        "path_template": "/v1/external-bindings",
+        "description": "Create or revise a Crew-owned external agent binding.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "profile"],
+        "public": true
+      },
+      {
+        "id": "external.bindings.control",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/controls",
+        "description": "Submit an idempotent Rust-validated external runtime control.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "external.bindings.messages.create",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/messages",
+        "description": "Send an operator-authored TTL-bound message through Rust activation or queue-next-turn policy.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "external.interactions.list",
+        "method": "GET",
+        "path_template": "/v1/external-interactions",
+        "description": "List pending external runtime interactions requiring operator attention.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "external.interactions.resolve",
+        "method": "POST",
+        "path_template": "/v1/external-interactions/{interaction_id}/resolve",
+        "description": "Resolve a typed pending external runtime interaction.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "agent.rounds.read",
+        "method": "GET",
+        "path_template": "/v1/agent-rounds/{round_id}",
+        "description": "Read durable cross-runtime correlated round state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "agent.deliveries.read",
+        "method": "GET",
+        "path_template": "/v1/agent-deliveries/{delivery_id}",
+        "description": "Read durable cross-runtime message delivery and activation state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
         "id": "admin.storage.schema",
         "method": "GET",
         "path_template": "/v1/admin/storage/schema",
@@ -1683,6 +1870,125 @@
   },
   "route_coverage": {
     "capability_routes": [
+      {
+        "capability_id": "external.runtimes.list",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.register",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.read",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.connect",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/connect",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.threads.list",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.threads.read",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/read",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.events.list",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/events",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.events.stream",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/stream",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.raw_details.read",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.list",
+        "method": "GET",
+        "path_template": "/v1/external-bindings",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.write",
+        "method": "POST",
+        "path_template": "/v1/external-bindings",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.control",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/controls",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.messages.create",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/messages",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.interactions.list",
+        "method": "GET",
+        "path_template": "/v1/external-interactions",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.interactions.resolve",
+        "method": "POST",
+        "path_template": "/v1/external-interactions/{interaction_id}/resolve",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "agent.rounds.read",
+        "method": "GET",
+        "path_template": "/v1/agent-rounds/{round_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "agent.deliveries.read",
+        "method": "GET",
+        "path_template": "/v1/agent-deliveries/{delivery_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
       {
         "capability_id": "admin.storage.schema",
         "method": "GET",

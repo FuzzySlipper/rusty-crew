@@ -81,6 +81,27 @@ function canonicalizeJsonTree(path) {
   }
 }
 
+function makeGeneratedTsNodeNextCompatible(path) {
+  for (const file of filesUnder(path).filter((candidate) =>
+    candidate.endsWith(".ts"),
+  )) {
+    const source = readFileSync(file, "utf8");
+    const rewritten = source.replace(
+      /(\bfrom\s+["'])(\.{1,2}\/[^"']+?)(["'])/g,
+      (match, prefix, specifier, suffix) => {
+        if (/\.(?:js|json|node)$/.test(specifier)) return match;
+        const sourceTarget = resolve(dirname(file), specifier);
+        const runtimeSpecifier =
+          existsSync(sourceTarget) && statSync(sourceTarget).isDirectory()
+            ? `${specifier}/index.js`
+            : `${specifier}.js`;
+        return `${prefix}${runtimeSpecifier}${suffix}`;
+      },
+    );
+    if (rewritten !== source) writeFileSync(file, rewritten);
+  }
+}
+
 function findNativeExecutable(launcherPath) {
   const codexPackageRoot = resolve(dirname(realpathSync(launcherPath)), "..");
   const platformPackage = {
@@ -153,6 +174,7 @@ function generateInto(destination) {
     ],
     { stdio: "inherit" },
   );
+  makeGeneratedTsNodeNextCompatible(tsOut);
   execFileSync(
     codexCommand,
     ["app-server", "generate-json-schema", "--experimental", "--out", jsonOut],

@@ -83,6 +83,8 @@ import type {
   Unit,
 } from "@rusty-crew/contracts";
 
+import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
+
 export interface NativeSessionConfigInput {
   sessionId: string;
   agentId: string;
@@ -1974,7 +1976,7 @@ export interface NativeChatSessionReadResult {
   message_slots: NativeExactPage<unknown>;
 }
 
-export interface NativeBridgeModule {
+export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;
@@ -2110,6 +2112,9 @@ export interface NativeBridgeModule {
   ): Promise<AgentMessageDeliveryReceipt>;
   beginAgentRound(command: AgentRoundCommand): Promise<AgentRoundStartReceipt>;
   getAgentRound(roundId: string): Promise<AgentCorrelatedRound | undefined>;
+  getAgentMessageDelivery(
+    deliveryId: string,
+  ): Promise<AgentMessageDeliveryReceipt | undefined>;
   enqueueBodyFollowUpMessage(input: {
     sessionId: SessionId;
     from: AgentId;

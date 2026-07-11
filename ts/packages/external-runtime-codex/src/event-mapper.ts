@@ -1,4 +1,4 @@
-import type { ServerNotification } from "../protocol/0.144.1/ts/ServerNotification";
+import type { ServerNotification } from "../protocol/0.144.1/ts/ServerNotification.js";
 import { captureBoundedRawDetail } from "./raw-detail.js";
 import type {
   JsonRpcId,

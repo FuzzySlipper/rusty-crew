@@ -9,6 +9,7 @@ test("service-host owns and cancels background loop timers", async () => {
   let denHeartbeatTicks = 0;
   let denDeliveryTicks = 0;
   let telegramDrainTicks = 0;
+  let externalRuntimeTicks = 0;
 
   const controller = startServiceHostBackgroundLoopTimers({
     intervals: {
@@ -17,6 +18,7 @@ test("service-host owns and cancels background loop timers", async () => {
       denRuntimeHeartbeatIntervalMs: 5,
       denDeliveryPollIntervalMs: 5,
       telegramOutboundDrainIntervalMs: 5,
+      externalRuntimeControllerTickIntervalMs: 5,
     },
     denGatewayAvailable: true,
     telegramConnectorAvailable: true,
@@ -37,19 +39,23 @@ test("service-host owns and cancels background loop timers", async () => {
       drainTelegramOutboundMessages: async () => {
         telegramDrainTicks += 1;
       },
+      tickExternalRuntimeController: async () => {
+        externalRuntimeTicks += 1;
+      },
       recordFailure: () => undefined,
       errorMessage: (error, fallback) =>
         error instanceof Error ? error.message : fallback,
     },
   });
 
-  assert.equal(controller.timerCount, 5);
+  assert.equal(controller.timerCount, 6);
   await delay(30);
   assert.ok(schedulerTicks > 0);
   assert.ok(wakeDispatchTicks > 0);
   assert.ok(denHeartbeatTicks > 0);
   assert.ok(denDeliveryTicks > 0);
   assert.equal(telegramDrainTicks, 0);
+  assert.ok(externalRuntimeTicks > 0);
 
   controller.stop();
   assert.equal(controller.timerCount, 0);
@@ -59,6 +65,7 @@ test("service-host owns and cancels background loop timers", async () => {
     denHeartbeatTicks,
     denDeliveryTicks,
     telegramDrainTicks,
+    externalRuntimeTicks,
   };
   await delay(30);
   assert.deepEqual(
@@ -68,6 +75,7 @@ test("service-host owns and cancels background loop timers", async () => {
       denHeartbeatTicks,
       denDeliveryTicks,
       telegramDrainTicks,
+      externalRuntimeTicks,
     },
     ticksAfterStop,
   );
@@ -80,6 +88,7 @@ test("service-host skips disabled or unavailable background loops", () => {
       wakeDispatchIntervalMs: 0,
       denRuntimeHeartbeatIntervalMs: 5,
       denDeliveryPollIntervalMs: 5,
+      externalRuntimeControllerTickIntervalMs: 0,
     },
     denGatewayAvailable: false,
     telegramConnectorAvailable: false,
@@ -90,6 +99,7 @@ test("service-host skips disabled or unavailable background loops", () => {
       heartbeatDenRuntimeInstances: async () => undefined,
       pollDenDeliveryIntents: async () => undefined,
       drainTelegramOutboundMessages: async () => undefined,
+      tickExternalRuntimeController: async () => undefined,
       recordFailure: () => undefined,
       errorMessage: (error, fallback) =>
         error instanceof Error ? error.message : fallback,

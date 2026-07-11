@@ -1,0 +1,142 @@
+import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
+import type { NativeBridgeModule } from "./public-api.js";
+
+type ExternalRuntimeMethodName =
+  | "registerExternalRuntime"
+  | "authorizeExternalRuntimeHandshake"
+  | "recordExternalRuntimeState"
+  | "listExternalRuntimes"
+  | "getExternalRuntime"
+  | "acquireExternalController"
+  | "releaseExternalController"
+  | "bindExternalAgent"
+  | "listExternalBindings"
+  | "getExternalBinding"
+  | "getExternalTurn"
+  | "listActiveExternalTurns"
+  | "transitionExternalTurn"
+  | "submitExternalControl"
+  | "completeExternalControl"
+  | "recordExternalInteraction"
+  | "resolveExternalInteraction"
+  | "terminalizeExternalInteraction"
+  | "listPendingExternalInteractions"
+  | "recordExternalRuntimeEvent"
+  | "queryExternalRuntimeEvents";
+
+export function createNativeBridgeExternalRuntimeMethods(
+  binding: NativeBridgeBinding,
+): Pick<NativeBridgeModule, ExternalRuntimeMethodName> {
+  return {
+    registerExternalRuntime: async (input) =>
+      JSON.parse(
+        binding.registerExternalRuntimeJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["registerExternalRuntime"]>>,
+    listExternalRuntimes: async () =>
+      JSON.parse(binding.listExternalRuntimesJson()) as Awaited<
+        ReturnType<NativeBridgeModule["listExternalRuntimes"]>
+      >,
+    authorizeExternalRuntimeHandshake: async (observation) =>
+      JSON.parse(
+        binding.authorizeExternalRuntimeHandshakeJson(
+          JSON.stringify(observation),
+        ),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["authorizeExternalRuntimeHandshake"]>
+      >,
+    recordExternalRuntimeState: async (observation) =>
+      JSON.parse(
+        binding.recordExternalRuntimeStateJson(JSON.stringify(observation)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["recordExternalRuntimeState"]>
+      >,
+    getExternalRuntime: async (runtimeId) => {
+      const value = binding.getExternalRuntimeJson(runtimeId);
+      return value === null || value === undefined
+        ? undefined
+        : (JSON.parse(value) as Awaited<
+            ReturnType<NativeBridgeModule["getExternalRuntime"]>
+          >);
+    },
+    acquireExternalController: async (input) =>
+      JSON.parse(
+        binding.acquireExternalControllerJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["acquireExternalController"]>>,
+    releaseExternalController: async (input) =>
+      JSON.parse(
+        binding.releaseExternalControllerJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["releaseExternalController"]>>,
+    bindExternalAgent: async (input) =>
+      JSON.parse(
+        binding.bindExternalAgentJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["bindExternalAgent"]>>,
+    listExternalBindings: async () =>
+      JSON.parse(binding.listExternalBindingsJson()) as Awaited<
+        ReturnType<NativeBridgeModule["listExternalBindings"]>
+      >,
+    getExternalBinding: async (bindingId) => {
+      const value = binding.getExternalBindingJson(bindingId);
+      return value === null || value === undefined
+        ? undefined
+        : (JSON.parse(value) as Awaited<
+            ReturnType<NativeBridgeModule["getExternalBinding"]>
+          >);
+    },
+    getExternalTurn: async (requestId) => {
+      const value = binding.getExternalTurnJson(requestId);
+      return value === null || value === undefined
+        ? undefined
+        : (JSON.parse(value) as Awaited<
+            ReturnType<NativeBridgeModule["getExternalTurn"]>
+          >);
+    },
+    listActiveExternalTurns: async () =>
+      JSON.parse(binding.listActiveExternalTurnsJson()) as Awaited<
+        ReturnType<NativeBridgeModule["listActiveExternalTurns"]>
+      >,
+    transitionExternalTurn: async (input) =>
+      JSON.parse(
+        binding.transitionExternalTurnJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["transitionExternalTurn"]>>,
+    submitExternalControl: async (request) =>
+      JSON.parse(
+        binding.submitExternalControlJson(JSON.stringify(request)),
+      ) as Awaited<ReturnType<NativeBridgeModule["submitExternalControl"]>>,
+    completeExternalControl: async (input) =>
+      JSON.parse(
+        binding.completeExternalControlJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["completeExternalControl"]>>,
+    recordExternalInteraction: async (input) =>
+      JSON.parse(
+        binding.recordExternalInteractionJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["recordExternalInteraction"]>>,
+    resolveExternalInteraction: async (input) =>
+      JSON.parse(
+        binding.resolveExternalInteractionJson(JSON.stringify(input)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["resolveExternalInteraction"]>
+      >,
+    terminalizeExternalInteraction: async (input) =>
+      JSON.parse(
+        binding.terminalizeExternalInteractionJson(JSON.stringify(input)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["terminalizeExternalInteraction"]>
+      >,
+    listPendingExternalInteractions: async () =>
+      JSON.parse(binding.listPendingExternalInteractionsJson()) as Awaited<
+        ReturnType<NativeBridgeModule["listPendingExternalInteractions"]>
+      >,
+    recordExternalRuntimeEvent: async (input) =>
+      JSON.parse(
+        binding.recordExternalRuntimeEventJson(JSON.stringify(input)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["recordExternalRuntimeEvent"]>
+      >,
+    queryExternalRuntimeEvents: async (input) =>
+      JSON.parse(
+        binding.queryExternalRuntimeEventsJson(JSON.stringify(input)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["queryExternalRuntimeEvents"]>
+      >,
+  };
+}

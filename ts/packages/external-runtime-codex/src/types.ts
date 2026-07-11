@@ -1,4 +1,4 @@
-import type { ServerRequest } from "../protocol/0.144.1/ts/ServerRequest";
+import type { ServerRequest } from "../protocol/0.144.1/ts/ServerRequest.js";
 
 export type JsonRpcId = string | number;
 

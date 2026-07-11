@@ -2624,6 +2624,616 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_SessionMemoryRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>": {
+      "items": {
+        "properties": {
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bindingId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effectiveConfigFingerprint": {
+            "type": "string"
+          },
+          "nativeThreadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "purpose": {
+            "enum": [
+              "crew_agent",
+              "imported_observer"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtimeId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "active",
+              "paused",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "taskRef": {
+            "properties": {
+              "project_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "task_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingId",
+          "runtimeId",
+          "purpose",
+          "effectiveConfigFingerprint",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ExternalAgentBinding",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord>": {
+      "items": {
+        "properties": {
+          "allowedResponses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bindingId": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "interactionId": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "command_approval",
+              "file_approval",
+              "request_user_input",
+              "permission_request",
+              "mcp_elicitation",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "nativeRequestId": {
+            "type": "string"
+          },
+          "nativeThreadId": {
+            "type": "string"
+          },
+          "nativeTurnId": {
+            "type": "string"
+          },
+          "outcome": true,
+          "prompt": true,
+          "rawDetailRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "resolutionIdempotencyKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtimeId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "resolved",
+              "expired",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "interactionId",
+          "runtimeId",
+          "bindingId",
+          "requestId",
+          "nativeThreadId",
+          "nativeTurnId",
+          "nativeRequestId",
+          "kind",
+          "prompt",
+          "allowedResponses",
+          "status",
+          "requestedAt",
+          "expiresAt",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ExternalInteractionRecord",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>": {
+      "items": {
+        "properties": {
+          "codexHomeRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "desiredState": {
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "type": "string"
+          },
+          "endpoint": {
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "transport": {
+                "enum": [
+                  "unix_web_socket"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "transport",
+              "address"
+            ],
+            "type": "object"
+          },
+          "executableSha256": {
+            "type": "string"
+          },
+          "expectedCliVersion": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "codex_app_server"
+            ],
+            "type": "string"
+          },
+          "observedReasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observedState": {
+            "enum": [
+              "disconnected",
+              "connecting",
+              "ready",
+              "degraded",
+              "incompatible"
+            ],
+            "type": "string"
+          },
+          "processOwnership": {
+            "enum": [
+              "attached",
+              "managed"
+            ],
+            "type": "string"
+          },
+          "protocolSchemaSha256": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtimeId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtimeId",
+          "kind",
+          "endpoint",
+          "processOwnership",
+          "expectedCliVersion",
+          "executableSha256",
+          "protocolSchemaSha256",
+          "desiredState",
+          "observedState",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ExternalRuntimeRegistration",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>": {
+      "items": {
+        "properties": {
+          "capacityLeaseId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nativeThreadId": {
+            "type": "string"
+          },
+          "nativeTurnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "accepted",
+              "starting",
+              "active",
+              "waiting_interaction",
+              "completed",
+              "failed",
+              "interrupted",
+              "outcome_unknown"
+            ],
+            "type": "string"
+          },
+          "request": {
+            "properties": {
+              "bindingId": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "input": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "const": "text",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "type": {
+                          "const": "image",
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "url"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "type": {
+                          "const": "skill",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "kind": {
+                          "type": "string"
+                        },
+                        "payload": true,
+                        "type": {
+                          "const": "machine_fact",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "kind",
+                        "payload"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "provenance": {
+                "properties": {
+                  "correlationId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "operator",
+                      "routed_agent_message",
+                      "scheduled_wake",
+                      "external_wait_result",
+                      "control"
+                    ],
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "requestId",
+              "idempotencyKey",
+              "sessionId",
+              "bindingId",
+              "input",
+              "provenance",
+              "createdAt"
+            ],
+            "type": "object"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtimeId": {
+            "type": "string"
+          },
+          "taskRef": {
+            "properties": {
+              "project_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "task_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "terminalReasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request",
+          "runtimeId",
+          "nativeThreadId",
+          "phase",
+          "revision",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ExternalTurnCorrelation",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent>": {
+      "items": {
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "nativeThreadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nativeTurnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": true,
+          "rawDetailRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeId": {
+            "type": "string"
+          },
+          "sequenceId": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "eventId",
+          "sequenceId",
+          "createdAt",
+          "kind",
+          "runtimeId",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_NormalizedExternalRuntimeEvent",
+      "type": "array"
+    },
     "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>": {
       "properties": {
         "claim_deadline_at": {
@@ -3544,6 +4154,636 @@ export const bridgeWireSchemaArtifact = {
         "revision"
       ],
       "title": "Nullable_AgentCorrelatedRound",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt>": {
+      "properties": {
+        "activation": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "direct_brain_wake_requested",
+                      "type": "string"
+                    },
+                    "wakeId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "wakeId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "bindingId": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "external_turn_requested",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "requestId",
+                    "bindingId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "queueId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "queued_for_next_turn",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "queueId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "reasonCode": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "rejected",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "reasonCode"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "correlationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "deliveryId": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "fromAgentId": {
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "requireWake": {
+              "type": "boolean"
+            },
+            "toAgentId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "deliveryId",
+            "idempotencyKey",
+            "messageId",
+            "fromAgentId",
+            "toAgentId",
+            "body",
+            "requireWake",
+            "createdAt",
+            "expiresAt"
+          ],
+          "type": "object"
+        },
+        "resolvedRoundId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "accepted",
+            "rejected",
+            "expired"
+          ],
+          "type": "string"
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "request",
+        "status",
+        "revision"
+      ],
+      "title": "Nullable_AgentMessageDeliveryReceipt",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>": {
+      "properties": {
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveConfigFingerprint": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "crew_agent",
+            "imported_observer"
+          ],
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "archived"
+          ],
+          "type": "string"
+        },
+        "taskRef": {
+          "properties": {
+            "project_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "runtimeId",
+        "purpose",
+        "effectiveConfigFingerprint",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Nullable_ExternalAgentBinding",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>": {
+      "properties": {
+        "codexHomeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "desiredState": {
+          "enum": [
+            "enabled",
+            "disabled"
+          ],
+          "type": "string"
+        },
+        "endpoint": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "transport": {
+              "enum": [
+                "unix_web_socket"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "transport",
+            "address"
+          ],
+          "type": "object"
+        },
+        "executableSha256": {
+          "type": "string"
+        },
+        "expectedCliVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "codex_app_server"
+          ],
+          "type": "string"
+        },
+        "observedReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedState": {
+          "enum": [
+            "disconnected",
+            "connecting",
+            "ready",
+            "degraded",
+            "incompatible"
+          ],
+          "type": "string"
+        },
+        "processOwnership": {
+          "enum": [
+            "attached",
+            "managed"
+          ],
+          "type": "string"
+        },
+        "protocolSchemaSha256": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "kind",
+        "endpoint",
+        "processOwnership",
+        "expectedCliVersion",
+        "executableSha256",
+        "protocolSchemaSha256",
+        "desiredState",
+        "observedState",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Nullable_ExternalRuntimeRegistration",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>": {
+      "properties": {
+        "capacityLeaseId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeThreadId": {
+          "type": "string"
+        },
+        "nativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "accepted",
+            "starting",
+            "active",
+            "waiting_interaction",
+            "completed",
+            "failed",
+            "interrupted",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        },
+        "request": {
+          "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "input": {
+              "items": {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "text",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "type": {
+                        "const": "image",
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "url"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "type": {
+                        "const": "skill",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "payload": true,
+                      "type": {
+                        "const": "machine_fact",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "properties": {
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "operator",
+                    "routed_agent_message",
+                    "scheduled_wake",
+                    "external_wait_result",
+                    "control"
+                  ],
+                  "type": "string"
+                },
+                "sourceId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "runId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "sessionId",
+            "bindingId",
+            "input",
+            "provenance",
+            "createdAt"
+          ],
+          "type": "object"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "taskRef": {
+          "properties": {
+            "project_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "terminalReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "runtimeId",
+        "nativeThreadId",
+        "phase",
+        "revision",
+        "updatedAt"
+      ],
+      "title": "Nullable_ExternalTurnCorrelation",
       "type": [
         "object",
         "null"
@@ -14618,6 +15858,853 @@ export const bridgeWireSchemaArtifact = {
       "title": "AgentRoundStartReceipt",
       "type": "object"
     },
+    "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding": {
+      "properties": {
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveConfigFingerprint": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "crew_agent",
+            "imported_observer"
+          ],
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "archived"
+          ],
+          "type": "string"
+        },
+        "taskRef": {
+          "properties": {
+            "project_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "runtimeId",
+        "purpose",
+        "effectiveConfigFingerprint",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ExternalAgentBinding",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt": {
+      "properties": {
+        "outcome": true,
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "controlId": {
+              "type": "string"
+            },
+            "expectedBindingRevision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expectedNativeTurnId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "start_or_resume_thread",
+                "start_turn",
+                "steer_turn",
+                "interrupt_turn",
+                "compact_thread",
+                "resolve_interaction",
+                "reconcile_runtime",
+                "archive_binding"
+              ],
+              "type": "string"
+            },
+            "payload": true,
+            "requestedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "controlId",
+            "idempotencyKey",
+            "bindingId",
+            "expectedBindingRevision",
+            "kind",
+            "payload",
+            "requestedAt"
+          ],
+          "type": "object"
+        },
+        "requestFingerprint": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "applied",
+            "rejected",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "requestFingerprint",
+        "status",
+        "revision",
+        "updatedAt"
+      ],
+      "title": "ExternalControlReceipt",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::ExternalControllerLease": {
+      "properties": {
+        "acquiredAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "holderInstanceId": {
+          "type": "string"
+        },
+        "renewedAt": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "holderInstanceId",
+        "generation",
+        "acquiredAt",
+        "renewedAt",
+        "expiresAt",
+        "revision"
+      ],
+      "title": "ExternalControllerLease",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord": {
+      "properties": {
+        "allowedResponses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "interactionId": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "command_approval",
+            "file_approval",
+            "request_user_input",
+            "permission_request",
+            "mcp_elicitation",
+            "unsupported"
+          ],
+          "type": "string"
+        },
+        "nativeRequestId": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": "string"
+        },
+        "nativeTurnId": {
+          "type": "string"
+        },
+        "outcome": true,
+        "prompt": true,
+        "rawDetailRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "resolutionIdempotencyKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "resolved",
+            "expired",
+            "lost"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "interactionId",
+        "runtimeId",
+        "bindingId",
+        "requestId",
+        "nativeThreadId",
+        "nativeTurnId",
+        "nativeRequestId",
+        "kind",
+        "prompt",
+        "allowedResponses",
+        "status",
+        "requestedAt",
+        "expiresAt",
+        "revision"
+      ],
+      "title": "ExternalInteractionRecord",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::ExternalRuntimeHandshakeDecision": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registration": {
+          "properties": {
+            "codexHomeRef": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "desiredState": {
+              "enum": [
+                "enabled",
+                "disabled"
+              ],
+              "type": "string"
+            },
+            "endpoint": {
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "transport": {
+                  "enum": [
+                    "unix_web_socket"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "transport",
+                "address"
+              ],
+              "type": "object"
+            },
+            "executableSha256": {
+              "type": "string"
+            },
+            "expectedCliVersion": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "codex_app_server"
+              ],
+              "type": "string"
+            },
+            "observedReasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observedState": {
+              "enum": [
+                "disconnected",
+                "connecting",
+                "ready",
+                "degraded",
+                "incompatible"
+              ],
+              "type": "string"
+            },
+            "processOwnership": {
+              "enum": [
+                "attached",
+                "managed"
+              ],
+              "type": "string"
+            },
+            "protocolSchemaSha256": {
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "runtimeId": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtimeId",
+            "kind",
+            "endpoint",
+            "processOwnership",
+            "expectedCliVersion",
+            "executableSha256",
+            "protocolSchemaSha256",
+            "desiredState",
+            "observedState",
+            "revision",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "accepted",
+        "registration"
+      ],
+      "title": "ExternalRuntimeHandshakeDecision",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration": {
+      "properties": {
+        "codexHomeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "desiredState": {
+          "enum": [
+            "enabled",
+            "disabled"
+          ],
+          "type": "string"
+        },
+        "endpoint": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "transport": {
+              "enum": [
+                "unix_web_socket"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "transport",
+            "address"
+          ],
+          "type": "object"
+        },
+        "executableSha256": {
+          "type": "string"
+        },
+        "expectedCliVersion": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "codex_app_server"
+          ],
+          "type": "string"
+        },
+        "observedReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedState": {
+          "enum": [
+            "disconnected",
+            "connecting",
+            "ready",
+            "degraded",
+            "incompatible"
+          ],
+          "type": "string"
+        },
+        "processOwnership": {
+          "enum": [
+            "attached",
+            "managed"
+          ],
+          "type": "string"
+        },
+        "protocolSchemaSha256": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "kind",
+        "endpoint",
+        "processOwnership",
+        "expectedCliVersion",
+        "executableSha256",
+        "protocolSchemaSha256",
+        "desiredState",
+        "observedState",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ExternalRuntimeRegistration",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation": {
+      "properties": {
+        "capacityLeaseId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeThreadId": {
+          "type": "string"
+        },
+        "nativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "accepted",
+            "starting",
+            "active",
+            "waiting_interaction",
+            "completed",
+            "failed",
+            "interrupted",
+            "outcome_unknown"
+          ],
+          "type": "string"
+        },
+        "request": {
+          "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "input": {
+              "items": {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "text",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "type": {
+                        "const": "image",
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "url"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "type": {
+                        "const": "skill",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "payload": true,
+                      "type": {
+                        "const": "machine_fact",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "kind",
+                      "payload"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "provenance": {
+              "properties": {
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "operator",
+                    "routed_agent_message",
+                    "scheduled_wake",
+                    "external_wait_result",
+                    "control"
+                  ],
+                  "type": "string"
+                },
+                "sourceId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "runId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "requestId",
+            "idempotencyKey",
+            "sessionId",
+            "bindingId",
+            "input",
+            "provenance",
+            "createdAt"
+          ],
+          "type": "object"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "taskRef": {
+          "properties": {
+            "project_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "terminalReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "runtimeId",
+        "nativeThreadId",
+        "phase",
+        "revision",
+        "updatedAt"
+      ],
+      "title": "ExternalTurnCorrelation",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": true,
+        "rawDetailRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "sequenceId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "eventId",
+        "sequenceId",
+        "createdAt",
+        "kind",
+        "runtimeId",
+        "payload"
+      ],
+      "title": "NormalizedExternalRuntimeEvent",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::memory_space::BackgroundMemoryAutoMutationPlan": {
       "properties": {
         "accepted_count": {
@@ -17577,19 +19664,23 @@ export const bridgeWireSchemaArtifact = {
     }
   },
   "operationSchemaKeys": {
+    "acquire_external_controller": "rusty_crew_core_protocol::external_runtime::ExternalControllerLease",
     "add_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
     "advance_roleplay_narrator_turn": "rusty_crew_roleplay_core::RoleplayNarratorTurnReceipt",
     "append_chat_event": "rusty_crew_core_persistence::contracts::ChatEventLogEvent",
     "apply_roleplay_alternative": "rusty_crew_core_persistence::contracts::ApplyRoleplayAlternativeResult",
     "apply_roleplay_session_projection": "rusty_crew_core_persistence::contracts::RoleplaySessionProjectionRecord",
     "archive_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
+    "authorize_external_runtime_handshake": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeHandshakeDecision",
     "begin_agent_round": "rusty_crew_core_protocol::external_runtime::AgentRoundStartReceipt",
+    "bind_external_agent": "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding",
     "brain_catalog": "rusty_crew_brain_runtime::catalog::BrainCatalog",
     "build_roleplay_prompt_context": "rusty_crew_roleplay_core::RoleplayPromptContextOutput",
     "build_session_memory_prompt_context": "rusty_crew_core_persistence::contracts::SessionMemoryPromptContext",
     "capture_lore_fact": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "chat_read_model_page": "rusty_crew_core_persistence::contracts::ChatReadModelPage",
     "claim_scheduled_host_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "complete_external_control": "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt",
     "create_chat_attachment": "rusty_crew_core_persistence::contracts::CreateChatAttachmentResult",
     "create_chat_conversation_branch": "rusty_crew_core_persistence::contracts::ConversationBranchRecord",
     "create_chat_conversation_snapshot": "rusty_crew_core_persistence::contracts::CreateChatConversationSnapshotResult",
@@ -17601,9 +19692,13 @@ export const bridgeWireSchemaArtifact = {
     "delete_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
     "deliver_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "ensure_active_chat_conversation_branch": "rusty_crew_core_persistence::contracts::EnsureActiveChatConversationBranchResult",
+    "get_agent_message_delivery": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt>",
     "get_agent_round": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentCorrelatedRound>",
     "get_chat_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayChatLayerRecord>",
     "get_conversation_branch_state": "rusty_crew_core_persistence::contracts::ConversationBranchStateRecord",
+    "get_external_binding": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
+    "get_external_runtime": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",
+    "get_external_turn": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "get_lore_entry": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreRecord>",
     "get_lore_layer": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
     "get_lore_layer_config": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreLayerConfigRecord>",
@@ -17612,8 +19707,12 @@ export const bridgeWireSchemaArtifact = {
     "get_roleplay_import": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayImportRecord>",
     "get_roleplay_player_persona": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>",
     "get_roleplay_session_metadata": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
+    "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "list_entries_by_layer": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin>",
+    "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
+    "list_external_runtimes": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",
     "list_lore_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
+    "list_pending_external_interactions": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord>",
     "list_recall_traces": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::LoreRecallTraceRecord>",
     "list_roleplay_characters": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayCharacterRecord>",
     "list_roleplay_imports": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayImportRecord>",
@@ -17659,6 +19758,7 @@ export const bridgeWireSchemaArtifact = {
     "query_conversation_snapshots": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::ConversationSnapshotRecord>",
     "query_data_bank_scopes": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::DataBankScopeRecord>",
     "query_data_bank_scopes_page": "rusty_crew_core_persistence::contracts::ExactPage<rusty_crew_core_persistence::contracts::DataBankScopeRecord>",
+    "query_external_runtime_events": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent>",
     "query_lore_entries": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreRecord>",
     "query_message_slots": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageSlotRecord>",
     "query_message_slots_page": "rusty_crew_core_persistence::contracts::ExactPage<rusty_crew_core_persistence::contracts::MessageSlotRecord>",
@@ -17669,8 +19769,13 @@ export const bridgeWireSchemaArtifact = {
     "read_conversation_tree": "rusty_crew_core_persistence::contracts::ConversationTreeReadResult",
     "read_roleplay_scene_state": "rusty_crew_roleplay_core::RoleplaySceneStateReadOutput",
     "recall_lore": "rusty_crew_core_persistence::contracts::LoreRecallResult",
+    "record_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
+    "record_external_runtime_event": "rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent",
+    "record_external_runtime_state": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration",
+    "register_external_runtime": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration",
     "register_scheduled_host_job": "rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput",
     "register_scheduled_wake_job": "rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput",
+    "release_external_controller": "rusty_crew_core_protocol::external_runtime::ExternalControllerLease",
     "remove_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
     "remove_chat_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
     "remove_chat_data_bank_scope": "rusty_crew_core_persistence::contracts::DataBankScopeRecord",
@@ -17681,6 +19786,7 @@ export const bridgeWireSchemaArtifact = {
     "request_scheduled_host_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "request_scheduled_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "resolve_conversation_jump": "rusty_crew_core_persistence::contracts::ConversationJumpResult",
+    "resolve_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
     "roleplay_speaker_identity": "rusty_crew_roleplay_core::RoleplaySpeakerIdentitySnapshot",
     "run_scheduler_tick": "rusty_crew_core_bridge_api::scheduler_wire::SchedulerTickWireOutput",
     "save_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
@@ -17695,8 +19801,11 @@ export const bridgeWireSchemaArtifact = {
     "select_active_message_variant": "rusty_crew_core_persistence::contracts::SelectActiveVariantResult",
     "set_lore_layer_config": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerConfigRecord",
     "start_roleplay_narrator_turn": "rusty_crew_roleplay_core::RoleplayNarratorTurnReceipt",
+    "submit_external_control": "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt",
     "supersede_lore_entry": "(rusty_crew_core_persistence::contracts::RoleplayLoreRecord, rusty_crew_core_persistence::contracts::RoleplayLoreRecord)",
+    "terminalize_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
     "tombstone_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
+    "transition_external_turn": "rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation",
     "update_conversation_branch_head": "rusty_crew_core_persistence::contracts::UpdateBranchHeadResult",
     "update_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "validate_runtime_config_draft": "rusty_crew_core_config::RuntimeConfigValidationResult",

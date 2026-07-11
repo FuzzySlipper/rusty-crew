@@ -514,6 +514,11 @@ export type DenDataUpdate = {
   revision?: string;
 };
 
+export type DenRuntimeReference = {
+  projectId?: ProjectId;
+  taskId?: TaskId;
+};
+
 export type EventReceipt = {
   accepted: boolean;
   sequence: number;
@@ -525,6 +530,73 @@ export type EventSubscription = {
   eventKinds: Array<CoreEventKind>;
   sessionId?: SessionId;
 };
+
+export type ExternalAgentBinding = {
+  agentId?: string;
+  bindingId: string;
+  createdAt: string;
+  cwd?: string;
+  effectiveConfigFingerprint: string;
+  nativeThreadId?: string;
+  purpose: ExternalBindingPurpose;
+  revision: number;
+  runtimeId: string;
+  sessionId?: string;
+  status: ExternalBindingStatus;
+  taskRef?: DenRuntimeReference;
+  updatedAt: string;
+};
+
+export type ExternalBindingPurpose = "crew_agent" | "imported_observer";
+
+export type ExternalBindingStatus = "active" | "paused" | "archived";
+
+export type ExternalControlKind = "start_or_resume_thread" | "start_turn" | "steer_turn" | "interrupt_turn" | "compact_thread" | "resolve_interaction" | "reconcile_runtime" | "archive_binding";
+
+export type ExternalControlReceipt = {
+  outcome?: unknown;
+  reasonCode?: string;
+  request: ExternalControlRequest;
+  requestFingerprint: string;
+  revision: number;
+  status: ExternalControlStatus;
+  updatedAt: string;
+};
+
+export type ExternalControlRequest = {
+  bindingId: string;
+  controlId: string;
+  expectedBindingRevision: number;
+  expectedNativeTurnId?: string;
+  idempotencyKey: string;
+  kind: ExternalControlKind;
+  payload: unknown;
+  requestedAt: string;
+};
+
+export type ExternalControlStatus = "pending" | "applied" | "rejected" | "failed";
+
+export type ExternalControllerContext = {
+  generation: number;
+  holderInstanceId: string;
+};
+
+export type ExternalControllerLease = {
+  acquiredAt: string;
+  expiresAt: string;
+  generation: number;
+  holderInstanceId: string;
+  renewedAt: string;
+  revision: number;
+  runtimeId: string;
+};
+
+export type ExternalEndpoint = {
+  address: string;
+  transport: ExternalEndpointTransport;
+};
+
+export type ExternalEndpointTransport = "unix_web_socket";
 
 export type ExternalEvent = {
   adapterId: AdapterId;
@@ -560,6 +632,124 @@ export type ExternalEventPayload = {
   json: string;
   type: "raw_json";
 };
+
+export type ExternalInteractionKind = "command_approval" | "file_approval" | "request_user_input" | "permission_request" | "mcp_elicitation" | "unsupported";
+
+export type ExternalInteractionRecord = {
+  allowedResponses: Array<string>;
+  bindingId: string;
+  expiresAt: string;
+  interactionId: string;
+  kind: ExternalInteractionKind;
+  nativeRequestId: string;
+  nativeThreadId: string;
+  nativeTurnId: string;
+  outcome?: unknown;
+  prompt: unknown;
+  rawDetailRef?: string;
+  requestId: string;
+  requestedAt: string;
+  resolutionIdempotencyKey?: string;
+  resolvedAt?: string;
+  revision: number;
+  runtimeId: string;
+  status: ExternalInteractionStatus;
+};
+
+export type ExternalInteractionStatus = "pending" | "resolved" | "expired" | "lost";
+
+export type ExternalProcessOwnership = "attached" | "managed";
+
+export type ExternalRuntimeDesiredState = "enabled" | "disabled";
+
+export type ExternalRuntimeEventInput = {
+  createdAt: string;
+  eventId: string;
+  itemId?: string;
+  kind: string;
+  nativeThreadId?: string;
+  nativeTurnId?: string;
+  payload: unknown;
+  rawDetailRef?: string;
+  requestId?: string;
+  runtimeId: string;
+  sessionId?: string;
+};
+
+export type ExternalRuntimeHandshakeDecision = {
+  accepted: boolean;
+  reasonCode?: string;
+  registration: ExternalRuntimeRegistration;
+};
+
+export type ExternalRuntimeHandshakeObservation = {
+  cliVersion: string;
+  controller: ExternalControllerContext;
+  executableSha256: string;
+  observedAt: string;
+  protocolSchemaSha256: string;
+  runtimeId: string;
+};
+
+export type ExternalRuntimeKind = "codex_app_server";
+
+export type ExternalRuntimeObservedState = "disconnected" | "connecting" | "ready" | "degraded" | "incompatible";
+
+export type ExternalRuntimeRegistration = {
+  codexHomeRef?: string;
+  createdAt: string;
+  desiredState: ExternalRuntimeDesiredState;
+  endpoint: ExternalEndpoint;
+  executableSha256: string;
+  expectedCliVersion: string;
+  kind: ExternalRuntimeKind;
+  observedReasonCode?: string;
+  observedState: ExternalRuntimeObservedState;
+  processOwnership: ExternalProcessOwnership;
+  protocolSchemaSha256: string;
+  revision: number;
+  runtimeId: string;
+  updatedAt: string;
+};
+
+export type ExternalRuntimeStateObservation = {
+  controller: ExternalControllerContext;
+  observedAt: string;
+  observedState: ExternalRuntimeObservedState;
+  reasonCode?: string;
+  runtimeId: string;
+};
+
+export type ExternalTurnCorrelation = {
+  capacityLeaseId?: string;
+  nativeThreadId: string;
+  nativeTurnId?: string;
+  phase: ExternalTurnPhase;
+  request: SessionTurnRequested;
+  revision: number;
+  runtimeId: string;
+  taskRef?: DenRuntimeReference;
+  terminalReasonCode?: string;
+  updatedAt: string;
+};
+
+export type ExternalTurnInputPart = {
+  text: string;
+  type: "text";
+} | {
+  type: "image";
+  url: string;
+} | {
+  name: string;
+  path?: string;
+  type: "skill";
+} | {
+  kind: string;
+  payload: unknown;
+  type: "machine_fact";
+};
+
+export type ExternalTurnPhase = "accepted" | "starting" | "active" | "waiting_interaction" | "completed" | "failed" | "interrupted" | "outcome_unknown";
 
 export type FanOutFailurePolicy = "fail_fast" | "fail_soft";
 
@@ -747,6 +937,21 @@ export type MemoryWritePolicy = {
 
 export type MidTurnDeltaMode = "frozen_snapshot_next_wake";
 
+export type NormalizedExternalRuntimeEvent = {
+  createdAt: string;
+  eventId: string;
+  itemId?: string;
+  kind: string;
+  nativeThreadId?: string;
+  nativeTurnId?: string;
+  payload: unknown;
+  rawDetailRef?: string;
+  requestId?: string;
+  runtimeId: string;
+  sequenceId: number;
+  sessionId?: string;
+};
+
 export type ParentConsumptionPolicy = "await_completion" | "observe_only";
 
 export type PlatformAdapterKind = "den" | "telegram" | "mcp" | "tui" | "cli";
@@ -838,6 +1043,18 @@ export type SessionState = {
 
 export type SessionStatus = "active" | "idle" | "archived";
 
+export type SessionTurnRequested = {
+  bindingId: string;
+  createdAt: string;
+  expiresAt?: string;
+  idempotencyKey: string;
+  input: Array<ExternalTurnInputPart>;
+  provenance: TurnInputProvenance;
+  requestId: string;
+  runId?: string;
+  sessionId: string;
+};
+
 export type ToolCallMetadata = {
   adapterId?: AdapterId;
   bindingId?: string;
@@ -870,6 +1087,14 @@ export type ToolDescriptor = {
 export type ToolProfile = {
   tools: Array<ToolDescriptor>;
 };
+
+export type TurnInputProvenance = {
+  correlationId?: string;
+  kind: TurnInputProvenanceKind;
+  sourceId?: string;
+};
+
+export type TurnInputProvenanceKind = "operator" | "routed_agent_message" | "scheduled_wake" | "external_wait_result" | "control";
 
 export type WorkerPoolCapacityFallbackPolicy = "reject_on_no_capacity" | "direct_on_no_capacity";
 

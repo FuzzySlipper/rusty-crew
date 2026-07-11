@@ -83,16 +83,21 @@ use rusty_crew_core_persistence::{
 use rusty_crew_core_protocol::{
     plan_background_memory_auto_mutations, plan_capture_memory_proposals,
     plan_curator_governance_transition, plan_curator_lifecycle_transition, AgentCorrelatedRound,
-    AgentMessageCommand, AgentMessageDeliveryReceipt, AgentRoundCommand, AgentRoundId,
-    AgentRoundStartReceipt, AttachmentId, BackgroundMemoryAutoMutationPlanInput, BodyState,
-    BrainWakeProviderStateInput, BrainWakeStreamItem, CaptureMemoryProposalPlanInput,
+    AgentMessageCommand, AgentMessageDeliveryId, AgentMessageDeliveryReceipt, AgentRoundCommand,
+    AgentRoundId, AgentRoundStartReceipt, AttachmentId, BackgroundMemoryAutoMutationPlanInput,
+    BodyState, BrainWakeProviderStateInput, BrainWakeStreamItem, CaptureMemoryProposalPlanInput,
     ContextCompactionArtifact, ContextCompactionArtifactQuery, CuratorGovernancePlanInput,
-    CuratorLifecyclePlanInput, DataBankScopeId, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
-    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
-    MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
-    ModelProviderRefreshPlanRequest, ModelProviderWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    CuratorLifecyclePlanInput, DataBankScopeId, ExternalAgentBinding, ExternalBindingId,
+    ExternalControlId, ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
+    ExternalControllerLease, ExternalInteractionRecord, ExternalRuntimeEventInput,
+    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeRegistration,
+    ExternalRuntimeStateObservation, ExternalTurnPhase, ExternalTurnRequestId,
+    GitHubGateSuspendRequest, GitHubGateTerminalEvent, MemoryGovernanceDecisionInput,
+    MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
+    MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
+    ModelProviderQuery, ModelProviderRefreshImpactRequest, ModelProviderRefreshPlanRequest,
+    ModelProviderWrite, ProfileRegistryLifecycleStatus, ProfileRegistryUpdate,
+    ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_core_tool_registry::{
     plan_local_code_resource_policy, plan_tool_availability, plan_web_browser_resource_policy,
@@ -126,6 +131,7 @@ mod binding_config_profiles;
 mod binding_conversation;
 mod binding_delegation;
 mod binding_events;
+mod binding_external_runtime;
 mod binding_manifest;
 mod binding_memory;
 mod binding_responses;

@@ -870,6 +870,59 @@ impl CoordinationStore {
         Ok(())
     }
 
+    pub fn append_external_runtime_event_allocated(
+        &self,
+        input: &ExternalRuntimeEventInput,
+    ) -> CoreResult<NormalizedExternalRuntimeEvent> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start allocated external runtime event", error))?;
+        let existing = load_json_optional::<NormalizedExternalRuntimeEvent, _>(
+            &tx,
+            "SELECT record_json FROM external_runtime_events WHERE event_id = ?1",
+            params![input.event_id.as_str()],
+            "load allocated external runtime event",
+        )?;
+        if let Some(existing) = existing {
+            if external_event_matches_input(&existing, input) {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "external runtime event id conflicts with a different payload",
+            ));
+        }
+        let next_sequence = tx
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_id), 0) + 1 FROM external_runtime_events
+                 WHERE runtime_id = ?1",
+                params![input.runtime_id.0.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("allocate external runtime event sequence", error))?
+            as u64;
+        let event = normalized_event_from_input(input, next_sequence);
+        tx.execute(
+            "INSERT INTO external_runtime_events
+                (event_id, runtime_id, session_id, sequence_id, kind, created_at, record_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                event.event_id,
+                event.runtime_id.0,
+                event.session_id.as_ref().map(|value| value.0.as_str()),
+                event.sequence_id as i64,
+                event.kind,
+                event.created_at,
+                to_json_text(&event)?,
+            ],
+        )
+        .map_err(|error| persistence_error("append allocated external runtime event", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit allocated external runtime event", error))?;
+        Ok(event)
+    }
+
     pub fn query_external_runtime_events(
         &self,
         runtime_id: &ExternalRuntimeId,
@@ -1042,6 +1095,19 @@ impl CoordinationStore {
         Ok(saved)
     }
 
+    pub fn get_agent_message_delivery(
+        &self,
+        delivery_id: &rusty_crew_core_protocol::AgentMessageDeliveryId,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM agent_message_delivery_receipts WHERE delivery_id = ?1",
+            params![delivery_id.0.as_str()],
+            "load agent message delivery",
+        )
+    }
+
     pub fn get_agent_correlated_round(
         &self,
         round_id: &rusty_crew_core_protocol::AgentRoundId,
@@ -1133,6 +1199,33 @@ impl CoordinationStore {
             "list pending external correlated rounds",
         )
     }
+}
+
+fn normalized_event_from_input(
+    input: &ExternalRuntimeEventInput,
+    sequence_id: u64,
+) -> NormalizedExternalRuntimeEvent {
+    NormalizedExternalRuntimeEvent {
+        event_id: input.event_id.clone(),
+        session_id: input.session_id.clone(),
+        sequence_id,
+        created_at: input.created_at.clone(),
+        kind: input.kind.clone(),
+        runtime_id: input.runtime_id.clone(),
+        native_thread_id: input.native_thread_id.clone(),
+        native_turn_id: input.native_turn_id.clone(),
+        item_id: input.item_id.clone(),
+        request_id: input.request_id.clone(),
+        payload: input.payload.clone(),
+        raw_detail_ref: input.raw_detail_ref.clone(),
+    }
+}
+
+fn external_event_matches_input(
+    event: &NormalizedExternalRuntimeEvent,
+    input: &ExternalRuntimeEventInput,
+) -> bool {
+    normalized_event_from_input(input, event.sequence_id) == *event
 }
 
 fn enum_json<T: Serialize>(value: &T) -> CoreResult<String> {

@@ -13,7 +13,6 @@
     "smoke:live": "tsx smokes/live-compatibility.ts"
   },
   "dependencies": {
-    "@rusty-crew/contracts": "0.1.0",
     "ajv": "^8.17.1",
     "ws": "^8.21.0"
   },

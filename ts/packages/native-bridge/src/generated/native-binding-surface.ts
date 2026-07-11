@@ -4,6 +4,7 @@ export interface NativeBridgeBinding {
   deliverAgentMessageJson(commandJson: string): string
   beginAgentRoundJson(commandJson: string): string
   getAgentRoundJson(roundId: string): string | null
+  getAgentMessageDeliveryJson(deliveryId: string): string | null
   startBrainRunJson(moduleId: string, inputJson: string): string
   drainBrainRunJson(moduleId: string, wakeId: string, maxItems?: number | undefined | null): string
   submitBrainHostResultJson(moduleId: string, inputJson: string): string
@@ -94,6 +95,27 @@ export interface NativeBridgeBinding {
   unsubscribeEvents(handle: number): void
   drainSubscriptionEvents(handle: number, maxEvents: number): Array<string>
   submitBrainEvent(wakeId: string, sessionId: string, eventType: string, text?: string | undefined | null, toolName?: string | undefined | null, isError?: boolean | undefined | null, metadataJson?: string | undefined | null): JsEventReceipt
+  registerExternalRuntimeJson(inputJson: string): string
+  authorizeExternalRuntimeHandshakeJson(inputJson: string): string
+  recordExternalRuntimeStateJson(inputJson: string): string
+  listExternalRuntimesJson(): string
+  getExternalRuntimeJson(runtimeId: string): string
+  acquireExternalControllerJson(inputJson: string): string
+  releaseExternalControllerJson(inputJson: string): string
+  bindExternalAgentJson(inputJson: string): string
+  listExternalBindingsJson(): string
+  getExternalBindingJson(bindingId: string): string
+  getExternalTurnJson(requestId: string): string
+  listActiveExternalTurnsJson(): string
+  transitionExternalTurnJson(inputJson: string): string
+  submitExternalControlJson(inputJson: string): string
+  completeExternalControlJson(inputJson: string): string
+  recordExternalInteractionJson(inputJson: string): string
+  resolveExternalInteractionJson(inputJson: string): string
+  terminalizeExternalInteractionJson(inputJson: string): string
+  listPendingExternalInteractionsJson(): string
+  recordExternalRuntimeEventJson(inputJson: string): string
+  queryExternalRuntimeEventsJson(inputJson: string): string
   readonly manifestVersion: number
   readonly operationNames: Array<string>
   readonly wireShapeFingerprint: string
@@ -753,7 +775,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 209,
+  "manifestOperationCount": 231,
   "methods": [
     {
       "name": "deliverAgentMessageJson",
@@ -778,6 +800,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string | null",
       "returnKind": "string",
       "operationName": "get_agent_round"
+    },
+    {
+      "name": "getAgentMessageDeliveryJson",
+      "parameterSource": "deliveryId: string",
+      "parameterCount": 1,
+      "returnType": "string | null",
+      "returnKind": "string",
+      "operationName": "get_agent_message_delivery"
     },
     {
       "name": "startBrainRunJson",
@@ -1498,6 +1528,174 @@ export const nativeBridgeBindingSurface = {
       "returnType": "JsEventReceipt",
       "returnKind": "object",
       "operationName": "submit_brain_event"
+    },
+    {
+      "name": "registerExternalRuntimeJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "register_external_runtime"
+    },
+    {
+      "name": "authorizeExternalRuntimeHandshakeJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "authorize_external_runtime_handshake"
+    },
+    {
+      "name": "recordExternalRuntimeStateJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "record_external_runtime_state"
+    },
+    {
+      "name": "listExternalRuntimesJson",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_external_runtimes"
+    },
+    {
+      "name": "getExternalRuntimeJson",
+      "parameterSource": "runtimeId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_external_runtime"
+    },
+    {
+      "name": "acquireExternalControllerJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "acquire_external_controller"
+    },
+    {
+      "name": "releaseExternalControllerJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "release_external_controller"
+    },
+    {
+      "name": "bindExternalAgentJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "bind_external_agent"
+    },
+    {
+      "name": "listExternalBindingsJson",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_external_bindings"
+    },
+    {
+      "name": "getExternalBindingJson",
+      "parameterSource": "bindingId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_external_binding"
+    },
+    {
+      "name": "getExternalTurnJson",
+      "parameterSource": "requestId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_external_turn"
+    },
+    {
+      "name": "listActiveExternalTurnsJson",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_active_external_turns"
+    },
+    {
+      "name": "transitionExternalTurnJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "transition_external_turn"
+    },
+    {
+      "name": "submitExternalControlJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "submit_external_control"
+    },
+    {
+      "name": "completeExternalControlJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "complete_external_control"
+    },
+    {
+      "name": "recordExternalInteractionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "record_external_interaction"
+    },
+    {
+      "name": "resolveExternalInteractionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "resolve_external_interaction"
+    },
+    {
+      "name": "terminalizeExternalInteractionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "terminalize_external_interaction"
+    },
+    {
+      "name": "listPendingExternalInteractionsJson",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_pending_external_interactions"
+    },
+    {
+      "name": "recordExternalRuntimeEventJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "record_external_runtime_event"
+    },
+    {
+      "name": "queryExternalRuntimeEventsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "query_external_runtime_events"
     },
     {
       "name": "applyCuratorGovernanceWriteJson",

@@ -144,6 +144,7 @@
     "smoke:service-config": "tsx smokes/smoke-service-config.ts",
     "smoke:pi-agent-brain-events": "tsx smokes/smoke-pi-agent-brain-events.ts",
     "smoke:brain-island-entrypoint-surface": "tsx smokes/smoke-brain-island-entrypoint-surface.ts",
+    "smoke:external-runtime-service-live": "tsx smokes/external-runtime-service-live.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
     "cron": "tsx src/cron-cli.ts",
@@ -151,6 +152,7 @@
   },
   "dependencies": {
     "@rusty-crew/native-bridge": "0.1.0",
-    "@rusty-crew/contracts": "0.1.0"
+    "@rusty-crew/contracts": "0.1.0",
+    "@rusty-crew/external-runtime-codex": "0.1.0"
   }
 }

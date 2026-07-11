@@ -187,6 +187,10 @@ function summarizeCoreEvent(event: CoreEvent): string {
         return `delegation checkpoint routed to ${event.message.to}`;
       }
       return `agent message routed ${event.message.from} -> ${event.message.to}`;
+    case "agent_message_delivery_observed":
+      return `agent message delivery ${event.receipt.status} to ${event.receipt.request.toAgentId}`;
+    case "agent_round_observed":
+      return `agent round ${event.round.status} for ${event.round.recipientAgentId}`;
     case "delegation_lifecycle_observed":
       return summarizeDelegationLifecycle(event.lifecycle);
     case "external_event_injected":

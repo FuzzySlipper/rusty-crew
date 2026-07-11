@@ -2363,6 +2363,58 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/agent-deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "agentDeliveriesRead",
+        "summary": "Read durable cross-runtime message delivery and activation state.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "agent.deliveries.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/agent-rounds/{round_id}": {
+      "get": {
+        "operationId": "agentRoundsRead",
+        "summary": "Read durable cross-runtime correlated round state.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "agent.rounds.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/chat/commands": {
       "get": {
         "operationId": "listChatCommands",
@@ -3331,6 +3383,358 @@
         "x-rusty-crew-stability": "stable",
         "x-rusty-crew-contract-detail": "capability"
       }
+    },
+    "/v1/external-bindings": {
+      "get": {
+        "operationId": "externalBindingsList",
+        "summary": "List Crew-owned external agent bindings.",
+        "tags": ["session", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "externalBindingsWrite",
+        "summary": "Create or revise a Crew-owned external agent binding.",
+        "tags": ["session", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.write",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-bindings/{binding_id}/controls": {
+      "post": {
+        "operationId": "externalBindingsControl",
+        "summary": "Submit an idempotent Rust-validated external runtime control.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.control",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-bindings/{binding_id}/messages": {
+      "post": {
+        "operationId": "externalBindingsMessagesCreate",
+        "summary": "Send an operator-authored TTL-bound message through Rust activation or queue-next-turn policy.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.messages.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-interactions": {
+      "get": {
+        "operationId": "externalInteractionsList",
+        "summary": "List pending external runtime interactions requiring operator attention.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.interactions.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-interactions/{interaction_id}/resolve": {
+      "post": {
+        "operationId": "externalInteractionsResolve",
+        "summary": "Resolve a typed pending external runtime interaction.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.interactions.resolve",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes": {
+      "get": {
+        "operationId": "externalRuntimesList",
+        "summary": "List Rust-owned external runtime registrations and live controller status.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "externalRuntimesRegister",
+        "summary": "Register or revise an exact-version external agent runtime.",
+        "tags": ["service", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.register",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}": {
+      "get": {
+        "operationId": "externalRuntimesRead",
+        "summary": "Read one external runtime and its controller status.",
+        "tags": ["service", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/connect": {
+      "post": {
+        "operationId": "externalRuntimesConnect",
+        "summary": "Acquire the Rust controller lease and connect the external runtime.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.connect",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/events": {
+      "get": {
+        "operationId": "externalRuntimesEventsList",
+        "summary": "Replay normalized Rust-sequenced external runtime events.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.events.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}": {
+      "get": {
+        "operationId": "externalRuntimesRawDetailsRead",
+        "summary": "Read one bounded redacted in-memory native protocol detail.",
+        "tags": ["diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "detail_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.raw_details.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/stream": {
+      "get": {
+        "operationId": "externalRuntimesEventsStream",
+        "summary": "Stream normalized external runtime events with cursor replay.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.events.stream",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/threads": {
+      "get": {
+        "operationId": "externalRuntimesThreadsList",
+        "summary": "List native external-runtime threads through the Crew controller.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.threads.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/threads/read": {
+      "post": {
+        "operationId": "externalRuntimesThreadsRead",
+        "summary": "Read one native thread through a bounded runtime-neutral envelope.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.threads.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
     }
   },
   "components": {
@@ -3588,7 +3992,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 137,
+    "capability_count": 154,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

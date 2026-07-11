@@ -1,12 +1,14 @@
 import { isChatRoute } from "./service-chat-stream-routes.js";
 import { isProfileRegistryWriteRoute } from "./service-profile-registry-routes.js";
 import { isRoleplayBrowserRoute } from "./service-roleplay-routes.js";
+import { isExternalRuntimeRoute } from "./service-external-runtime-routes.js";
 
 export type ServiceApiRouteId =
   | "admin.healthz"
   | "browser.cors"
   | "admin.control"
   | "chat"
+  | "external_runtime"
   | "debug"
   | "admin.scheduler"
   | "admin.mcp.catalog"
@@ -58,6 +60,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     (path) => path.startsWith("/v1/admin/control/"),
   ),
   route("chat", 110, "after_auth", "Rusty View chat routes", isChatRoute),
+  route(
+    "external_runtime",
+    115,
+    "after_auth",
+    "External agent runtime observation and controls",
+    isExternalRuntimeRoute,
+  ),
   route(
     "debug",
     120,
@@ -164,7 +173,11 @@ export function matchServiceApiRoute(
 }
 
 export function isBrowserCorsRoute(pathname: string): boolean {
-  return isChatRoute(pathname) || isRoleplayBrowserRoute(pathname);
+  return (
+    isChatRoute(pathname) ||
+    isRoleplayBrowserRoute(pathname) ||
+    isExternalRuntimeRoute(pathname)
+  );
 }
 
 function route(
