@@ -14,14 +14,12 @@ import {
   CODEX_APP_SERVER_PROTOCOL,
   CodexAppServerDriver,
   UnixWebSocketTransport,
-  type CodexControllerAuthority,
-  type CodexProtocolFault,
   type NeutralExternalRuntimeEvent,
-  type ServerRequestResolution,
 } from "@rusty-crew/external-runtime-codex";
 
 import {
   CAPABILITY_EVIDENCE_SCHEMA_VERSION,
+  RecordingCodexAuthority,
   buildEvidenceComparison,
   expandedCapabilityScenarios,
   writeCapabilityArtifacts,
@@ -60,56 +58,10 @@ interface RuntimeRun {
   raw: unknown;
 }
 
-class RecordingAuthority implements CodexControllerAuthority {
-  readonly events: NeutralExternalRuntimeEvent[] = [];
-  readonly faults: CodexProtocolFault[] = [];
-  readonly interactions: Array<Record<string, unknown>> = [];
-
-  async authorizeHandshake(identity: {
-    userAgent: string;
-    codexHome: string;
-  }): Promise<{ accepted: boolean; message?: string }> {
-    const accepted =
-      identity.userAgent.includes(CODEX_APP_SERVER_PROTOCOL.cliVersion) &&
-      identity.codexHome.length > 0;
-    return accepted
-      ? { accepted }
-      : { accepted, message: `unexpected identity ${identity.userAgent}` };
-  }
-
-  hasControllerLease(): boolean {
-    return true;
-  }
-
-  onEvent(event: NeutralExternalRuntimeEvent): void {
-    this.events.push(event);
-  }
-
-  resolveServerRequest(
-    context: Parameters<CodexControllerAuthority["resolveServerRequest"]>[0],
-  ): Promise<ServerRequestResolution> {
-    this.interactions.push({
-      method: context.request.method,
-      transportSequence: context.transportSequence,
-    });
-    return Promise.resolve({
-      type: "error",
-      code: -32000,
-      message: `capability harness does not permit ${context.request.method}`,
-    });
-  }
-
-  onProtocolFault(fault: CodexProtocolFault): void {
-    this.faults.push(fault);
-  }
-
-  onDisconnected(): void {}
-}
-
 mkdirSync(artifactRoot, { recursive: true });
 const codexFixture = createFixture("codex");
 const responsesFixture = createFixture("responses");
-const codexAuthority = new RecordingAuthority();
+const codexAuthority = new RecordingCodexAuthority();
 const codex = new CodexAppServerDriver(
   new UnixWebSocketTransport(socketPath),
   codexAuthority,
@@ -204,7 +156,7 @@ try {
 async function runCodexScenario(
   scenario: CapabilityScenario,
   driver: CodexAppServerDriver,
-  authority: RecordingAuthority,
+  authority: RecordingCodexAuthority,
   threadId: string,
   fixture: string,
 ): Promise<RuntimeRun> {
@@ -438,7 +390,7 @@ async function readResponsesEventsUntilTerminal(
 }
 
 async function waitForCodexTerminal(
-  authority: RecordingAuthority,
+  authority: RecordingCodexAuthority,
   turnId: string,
 ): Promise<void> {
   const deadline = Date.now() + turnTimeoutMs;

@@ -121,3 +121,32 @@ The multi-file scenario independently verified both changed files with
 inspection, and delegation require both the expected response marker and a
 matching observed tool/capability signal. No scenario uses response prose
 equality as its comparison metric.
+
+## Lifecycle And Recovery Run (#5657)
+
+Run ID: `lifecycle-1783765641318-04735625`
+
+Artifact root: `/tmp/rusty-crew-capability-5657`
+
+Codex thread: `019f50b7-aa2a-7910-9976-4468fa10c46d`
+
+The lifecycle suite uses the same evidence packet and artifact writer:
+
+- Codex plan mode emitted a real `item/tool/requestUserInput` server request;
+  the controller selected `blue`, recorded native request ID `1`, and the turn
+  completed with `CAPABILITY_INPUT_OK:blue`.
+- Explicit `thread/compact/start` created a native compaction turn. After that
+  turn completed, a second turn recalled the pre-compaction marker.
+- `turn/steer` used the exact active turn ID and changed the terminal response;
+  a separate `turn/interrupt` stopped a live command turn.
+- The supervised app-server process was replaced, a fresh driver reconnected,
+  and `thread/resume` returned the exact original thread before marker recall.
+- `rusty-crew-debug.service` was restarted, and the direct Responses profile
+  resumed the exact existing session with its pre-restart marker intact.
+- Approval/MCP elicitation is explicitly unsupported in this deployment:
+  approval policy is `never` and no configured MCP server advertises an
+  elicitation flow. Neither runtime receives synthetic success for it.
+
+The restart evidence populates `restart.exercised`, `restart.recovered`, and a
+specific thread/session evidence string. Control and structured-input calls are
+recorded in `interactions` with their native identities.

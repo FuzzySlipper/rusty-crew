@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   CAPABILITY_EVIDENCE_SCHEMA_VERSION,
+  RecordingCodexAuthority,
   buildEvidenceComparison,
   expandedCapabilityScenarios,
   redactCapabilityEvidence,
@@ -16,6 +17,7 @@ import {
   type CapabilityScenario,
   type RuntimeEvidence,
 } from "../src/index.js";
+import type { CodexServerRequestContext } from "@rusty-crew/external-runtime-codex";
 
 const scenario: CapabilityScenario = {
   id: "focused_code_edit",
@@ -56,6 +58,42 @@ test("expanded catalog declares runtime applicability without hiding gaps", () =
     status: "unsupported",
     reason: "certification profile has no MCP binding",
   });
+});
+
+test("recording authority preserves structured interaction resolution", async () => {
+  const authority = new RecordingCodexAuthority(() => ({
+    type: "success",
+    result: { answers: { color: { answers: ["blue"] } } },
+  }));
+  const resolution = await authority.resolveServerRequest({
+    transportSequence: 7,
+    request: {
+      method: "item/tool/requestUserInput",
+      id: 3,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        questions: [],
+        autoResolutionMs: null,
+      },
+    },
+    rawDetail: {
+      json: "{}",
+      originalSha256: "sha256:test",
+      truncated: false,
+      redactedKeys: [],
+    },
+  } satisfies CodexServerRequestContext);
+  assert.equal(resolution.type, "success");
+  assert.deepEqual(authority.interactions, [
+    {
+      method: "item/tool/requestUserInput",
+      transportSequence: 7,
+      nativeRequestId: 3,
+      resolutionType: "success",
+    },
+  ]);
 });
 
 test("evidence redaction is bounded and preserves non-secret diagnostics", () => {
