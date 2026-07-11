@@ -28,6 +28,9 @@ const runtimeId = "codex-service-live";
 const sessionId = "codex-service-live-session";
 const agentId = "codex-service-live-agent";
 const bindingId = "codex-service-live-binding";
+const peerSessionId = "codex-service-live-peer-session";
+const peerAgentId = "codex-service-live-peer-agent";
+const peerBindingId = "codex-service-live-peer-binding";
 const now = (): string => new Date().toISOString();
 
 const bridge = await loadNativeBridge();
@@ -70,6 +73,14 @@ try {
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
   });
+  await bridge.ensureConfiguredSession({
+    sessionId: peerSessionId,
+    agentId: peerAgentId,
+    profileId: "codex-service-live-peer-profile",
+    kind: "full",
+    resourceLimits: { workdir: dataDir },
+    toolProfile: { tools: [] },
+  });
   const binding = await bridge.bindExternalAgent({
     binding: {
       bindingId,
@@ -79,6 +90,21 @@ try {
       purpose: "crew_agent",
       cwd: dataDir,
       effectiveConfigFingerprint: "external-service-live-v1",
+      status: "active",
+      revision: 0,
+      createdAt: now(),
+      updatedAt: now(),
+    },
+  });
+  const peerBinding = await bridge.bindExternalAgent({
+    binding: {
+      bindingId: peerBindingId,
+      runtimeId,
+      sessionId: peerSessionId,
+      agentId: peerAgentId,
+      purpose: "crew_agent",
+      cwd: dataDir,
+      effectiveConfigFingerprint: "external-service-live-peer-v1",
       status: "active",
       revision: 0,
       createdAt: now(),
@@ -99,6 +125,19 @@ try {
     requestedAt: now(),
   });
   assert.equal(threadControl.status, "applied");
+  const peerThreadControl = await controller.executeControl({
+    controlId: "external-service-live-peer-thread",
+    idempotencyKey: "external-service-live-peer-thread",
+    bindingId: peerBindingId,
+    expectedBindingRevision: peerBinding.revision,
+    kind: "start_or_resume_thread",
+    payload: {
+      baseInstructions:
+        "You are the peer in a Rusty Crew correlated-round acceptance test. Follow explicit coordination-tool instructions exactly.",
+    },
+    requestedAt: now(),
+  });
+  assert.equal(peerThreadControl.status, "applied");
 
   const delivery = await bridge.deliverAgentMessage({
     caller: { type: "system", senderAgentId: "external-service-live-operator" },
@@ -191,6 +230,57 @@ try {
   await waitForTerminalEvent(queueSecondTurn.nativeTurnId);
   assert.notEqual(queueSecondTurn.nativeTurnId, queueFirstTurn.nativeTurnId);
 
+  const coordinationCursor = await latestRuntimeSequence();
+  const coordinationId = `codex-codex-${Date.now()}`;
+  const coordinationDelivery = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-codex-round",
+    [
+      "Call rusty_crew.agent_round exactly once.",
+      `Use recipient ${peerAgentId}.`,
+      `Use correlationId ${coordinationId}.`,
+      "Use timeoutMs 120000.",
+      `Use this body exactly: Call rusty_crew.send_agent_message exactly once with recipient ${agentId}, body CODEX_CODEX_REPLY_OK, and correlationId ${coordinationId}. Then reply PEER_DONE.`,
+      "After the round tool returns, reply with exactly CODEX_CODEX_ROUND_OK.",
+    ].join("\n"),
+  );
+  assert.equal(
+    coordinationDelivery.activation?.type,
+    "external_turn_requested",
+  );
+  const coordinationTurn = await waitForActiveTurn();
+  await waitForTerminalEvent(coordinationTurn.nativeTurnId);
+  const coordinationEvents =
+    await waitForCoordinationEvidence(coordinationCursor);
+  const peerThreadId = (await bridge.getExternalBinding(peerBindingId))
+    ?.nativeThreadId;
+  assert.equal(typeof peerThreadId, "string");
+  const peerTerminal = coordinationEvents.find(
+    (event) =>
+      event.nativeThreadId === peerThreadId &&
+      isNativeTerminalEvent(event.payload),
+  );
+  assert(peerTerminal !== undefined);
+  const dynamicToolIds = [
+    ...new Set(
+      coordinationEvents
+        .filter((event) => event.kind === "dynamic_tool_activity")
+        .map((event) => event.itemId ?? event.requestId)
+        .filter((value): value is string => typeof value === "string"),
+    ),
+  ];
+  assert(dynamicToolIds.length >= 2);
+  const roundId = [
+    "codex-round",
+    bindingId,
+    coordinationTurn.nativeThreadId,
+    coordinationTurn.nativeTurnId,
+    dynamicToolIds[0],
+  ].join(":");
+  const correlatedRound = await bridge.getAgentRound(roundId);
+  assert.equal(correlatedRound?.status, "replied");
+  assert.equal(correlatedRound?.correlationId, coordinationId);
+
   const steerDelivery = await deliverLiveMessage(
     baseUrl,
     "external-service-live-steer",
@@ -269,6 +359,14 @@ try {
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
   });
+  await bridge.ensureConfiguredSession({
+    sessionId: peerSessionId,
+    agentId: peerAgentId,
+    profileId: "codex-service-live-peer-profile",
+    kind: "full",
+    resourceLimits: { workdir: dataDir },
+    toolProfile: { tools: [] },
+  });
   controller = new ServiceExternalRuntimeController({ bridge });
   await waitForControllerReady();
   const bindingAfterRestart = await bridge.getExternalBinding(bindingId);
@@ -323,6 +421,14 @@ try {
           queueSecondTurn.nativeTurnId,
         ],
         duplicateQueuedDeliveryWasIdempotent: true,
+        codexToCodexRound: {
+          correlationId: coordinationId,
+          senderTurnId: coordinationTurn.nativeTurnId,
+          peerThreadId,
+          peerTurnId: peerTerminal.nativeTurnId,
+          dynamicToolIds,
+          roundId,
+        },
         sseReplay: true,
         browserControls: ["steer_turn", "interrupt_turn"],
       },
@@ -419,6 +525,55 @@ async function waitForControllerReady(): Promise<void> {
   }
   throw new Error(
     `external runtime controller did not recover after ${timeoutMs}ms`,
+  );
+}
+
+async function latestRuntimeSequence(): Promise<number> {
+  const events = await bridge.queryExternalRuntimeEvents({
+    runtimeId,
+    afterSequence: 0,
+    limit: 1_000,
+  });
+  return events.at(-1)?.sequenceId ?? 0;
+}
+
+async function waitForCoordinationEvidence(afterSequence: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await controller.tick();
+    const events = await bridge.queryExternalRuntimeEvents({
+      runtimeId,
+      afterSequence,
+      limit: 1_000,
+    });
+    const peerThreadId = (await bridge.getExternalBinding(peerBindingId))
+      ?.nativeThreadId;
+    if (
+      typeof peerThreadId === "string" &&
+      events.some(
+        (event) =>
+          event.nativeThreadId === peerThreadId &&
+          isNativeTerminalEvent(event.payload),
+      ) &&
+      events.filter((event) => event.kind === "dynamic_tool_activity").length >=
+        2
+    ) {
+      return events;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Codex-to-Codex coordination evidence did not complete after ${timeoutMs}ms`,
+  );
+}
+
+function isNativeTerminalEvent(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "nativeMethod" in payload &&
+    (payload.nativeMethod === "turn/completed" ||
+      payload.nativeMethod === "turn/interrupted")
   );
 }
 

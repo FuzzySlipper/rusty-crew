@@ -199,6 +199,66 @@ test("known dynamic tools are resolved through the leased Rust callback", async 
   await driver.close();
 });
 
+test("pending server requests do not block client responses on the same socket", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport);
+  let resolveTool: ((value: ServerRequestResolution) => void) | undefined;
+  authority.resolver = () =>
+    new Promise<ServerRequestResolution>((resolve) => {
+      resolveTool = resolve;
+    });
+  const driver = new CodexAppServerDriver(transport, authority);
+  await driver.connect();
+
+  transport.emit({
+    id: "tool-blocked",
+    method: "item/tool/call",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-blocked",
+      namespace: "rusty_crew",
+      tool: "agent_round",
+      arguments: { recipient: "agent-b", body: "wait for reply" },
+    },
+  });
+  await settle();
+  assert.equal(typeof resolveTool, "function");
+
+  const listed = driver.threadList({ limit: 5 });
+  await settle();
+  const listRequest = transport.sent.find(
+    (message) => message.method === "thread/list",
+  );
+  assert.notEqual(listRequest?.id, undefined);
+  transport.emit({
+    id: listRequest?.id,
+    result: { data: [], nextCursor: null, backwardsCursor: null },
+  });
+  assert.deepEqual((await listed).data, []);
+  assert.equal(
+    transport.sent.some((message) => message.id === "tool-blocked"),
+    false,
+  );
+
+  resolveTool?.({
+    type: "success",
+    result: {
+      contentItems: [{ type: "inputText", text: "round reply" }],
+      success: true,
+    },
+  });
+  await settle();
+  assert.equal(
+    transport.sent.some(
+      (message) => message.id === "tool-blocked" && "result" in message,
+    ),
+    true,
+  );
+  await driver.close();
+});
+
 test("unknown requests fail closed while unknown notifications remain evidence", async () => {
   const transport = new FakeTransport();
   const authority = new FakeAuthority();

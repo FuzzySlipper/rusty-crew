@@ -38,6 +38,28 @@ The 2026-07-11 acceptance run proved:
 - deterministic Rust coverage proves expired queued follow-ups become terminal
   expired records and never materialize an external turn.
 
+A second live run then proved a Codex-to-Codex correlated round over two bound
+threads on the same controller:
+
+- correlation: `codex-codex-1783757467934`;
+- sender thread: `019f503a-cfbc-7620-bbe0-154938d667c8`;
+- sender turn: `019f503a-f123-70c3-ab56-ec077cce43db`;
+- peer thread: `019f503a-d275-7c20-a91a-b23cf1b6c4db`;
+- peer turn: `019f503b-3490-7c21-8691-fbb1540fc133`;
+- `agent_round` tool call:
+  `exec-53ab706e-8847-4359-b3e3-c694e55a626a`;
+- peer `send_agent_message` call:
+  `exec-e1c4912c-75fb-4bc2-a2a1-060a5e1ea0ad`;
+- durable Crew round:
+  `codex-round:codex-service-live-binding:019f503a-cfbc-7620-bbe0-154938d667c8:019f503a-f123-70c3-ab56-ec077cce43db:exec-53ab706e-8847-4359-b3e3-c694e55a626a`,
+  terminal status `replied`.
+
+This run found and fixed receive-head-of-line blocking in the Codex driver.
+Known server requests now resolve concurrently with response and notification
+decoding, so a pending `agent_round` callback cannot prevent the same socket
+from receiving the response that starts the recipient turn. Unit coverage holds
+a server request open while a client `thread/list` response completes.
+
 The HTTP replay defect found during this run was fixed at the service boundary:
 server-generated timestamps no longer make a semantically identical retry
 conflict with its durable request fingerprint. Conflicting reuse still reaches
@@ -81,8 +103,8 @@ the evidence above:
 - Capability follow-up #5657 still owns service/browser interaction,
   compaction, and broader restart scenarios.
 - Capability follow-up #5658 still owns live direct-brain-to-Codex,
-  Codex-to-direct-brain, Codex-to-Codex, and pending-round restart evidence with
-  exact Crew/native IDs.
+  Codex-to-direct-brain, and pending-round restart evidence. Codex-to-Codex is
+  now proven above and should be reused rather than rerun as a separate format.
 - The current run did not deliberately inject an incompatible live server
   fingerprint; generated protocol drift checks and deterministic fail-closed
   handshake tests pass, but the northstar asks for a live diagnostic capture.

@@ -325,7 +325,7 @@ export class CodexAppServerDriver {
         await this.#handleResponse(decoded.response, raw);
         return;
       case "request":
-        await this.#handleServerRequest(decoded.request, sequence);
+        void this.#handleDetachedServerRequest(decoded.request, sequence, raw);
         return;
       case "unknown_request":
         await this.#authority.onEvent(
@@ -471,6 +471,20 @@ export class CodexAppServerDriver {
     await this.#transport.send(
       JSON.stringify({ id: request.id, result: resolution.result }),
     );
+  }
+
+  async #handleDetachedServerRequest(
+    request: Parameters<
+      CodexControllerAuthority["resolveServerRequest"]
+    >[0]["request"],
+    sequence: number,
+    raw: string,
+  ): Promise<void> {
+    try {
+      await this.#handleServerRequest(request, sequence);
+    } catch (error) {
+      await this.#handleReceiveFailure(error, raw);
+    }
   }
 
   async #sendError(
