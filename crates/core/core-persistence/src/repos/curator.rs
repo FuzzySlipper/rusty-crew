@@ -572,10 +572,19 @@ pub(crate) fn validate_candidate_transition(
     let valid = current == next
         || matches!(
             (current, next),
-            (CuratorCandidateStatus::Proposed, CuratorCandidateStatus::Previewed)
-                | (CuratorCandidateStatus::Proposed, CuratorCandidateStatus::Approved)
-                | (CuratorCandidateStatus::Previewed, CuratorCandidateStatus::Approved)
-                | (CuratorCandidateStatus::Approved, CuratorCandidateStatus::Applied)
+            (
+                CuratorCandidateStatus::Proposed,
+                CuratorCandidateStatus::Previewed
+            ) | (
+                CuratorCandidateStatus::Proposed,
+                CuratorCandidateStatus::Approved
+            ) | (
+                CuratorCandidateStatus::Previewed,
+                CuratorCandidateStatus::Approved
+            ) | (
+                CuratorCandidateStatus::Approved,
+                CuratorCandidateStatus::Applied
+            )
         );
     if valid {
         Ok(())
@@ -591,19 +600,28 @@ pub(crate) fn validate_mutation_transition(
     let valid = current == next
         || matches!(
             (current, next),
-            (CuratorMutationStatus::Prepared, CuratorMutationStatus::Applied)
-                | (CuratorMutationStatus::Prepared, CuratorMutationStatus::Failed)
-                | (CuratorMutationStatus::Applied, CuratorMutationStatus::RollbackPrepared)
-                | (CuratorMutationStatus::Applied, CuratorMutationStatus::RolledBack)
-                | (CuratorMutationStatus::Applied, CuratorMutationStatus::RollbackFailed)
-                | (
-                    CuratorMutationStatus::RollbackPrepared,
-                    CuratorMutationStatus::RolledBack
-                )
-                | (
-                    CuratorMutationStatus::RollbackPrepared,
-                    CuratorMutationStatus::RollbackFailed
-                )
+            (
+                CuratorMutationStatus::Prepared,
+                CuratorMutationStatus::Applied
+            ) | (
+                CuratorMutationStatus::Prepared,
+                CuratorMutationStatus::Failed
+            ) | (
+                CuratorMutationStatus::Applied,
+                CuratorMutationStatus::RollbackPrepared
+            ) | (
+                CuratorMutationStatus::Applied,
+                CuratorMutationStatus::RolledBack
+            ) | (
+                CuratorMutationStatus::Applied,
+                CuratorMutationStatus::RollbackFailed
+            ) | (
+                CuratorMutationStatus::RollbackPrepared,
+                CuratorMutationStatus::RolledBack
+            ) | (
+                CuratorMutationStatus::RollbackPrepared,
+                CuratorMutationStatus::RollbackFailed
+            )
         );
     if valid {
         Ok(())

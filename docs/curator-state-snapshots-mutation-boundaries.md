@@ -17,7 +17,8 @@ Rust owns:
 
 - scheduler/job/run records;
 - runtime/session coordination;
-- audit-grade state if curator candidates become Rust-persistent records;
+- typed candidate, approval, mutation, snapshot-reference, and audit-receipt
+  persistence;
 - action validation when curator work affects runtime state.
 
 TypeScript owns:
@@ -99,11 +100,17 @@ bodies in scheduler records.
 Acceptable snapshot refs:
 
 - content hash plus file path for a skill file;
-- copied snapshot path inside a curator-owned snapshot directory;
+- a path relative to the configured curator snapshot root for a copied
+  snapshot;
 - Den document revision or memory revision id;
 - runtime search row/ref for immutable runtime facts.
 
 Snapshots should be taken before mutation, not after.
+
+Admin and bridge readback must never expose deployment-absolute filesystem
+paths. Skill paths are relative to the configured skills root and snapshot
+paths are relative to the configured curator snapshot root. The service
+resolves those refs only at the mutation boundary.
 
 ### Mutation Record
 
@@ -222,13 +229,20 @@ Curator reports should include:
 Reports should avoid full skill bodies or memory contents. Use refs and bounded
 snippets.
 
-## First Implementation Sequence
+## Implementation Status
 
-1. Candidate discovery/report generation over skills.
-2. In-memory or file-backed candidate batch store for smokes.
-3. Preview/diff generation for skill candidates.
-4. Approval state and receipt flow through `curator_execute`.
-5. Snapshot-before-write and archive/patch application via safe skill
-   primitives.
-6. Admin routes and observation/audit projection.
-7. End-to-end proof with dry-run, approval, apply, and rollback evidence.
+The initial sequence is complete. Production curator governance records now use
+typed Rust repositories for SQLite and PostgreSQL. The native bridge exposes
+bounded candidate, mutation, and audit-receipt queries; the service exposes the
+same history under `/v1/admin/curator/*`. Filesystem snapshots remain bounded
+skill-storage artifacts, referenced by safe relative paths rather than embedded
+or deployment-absolute paths.
+
+Accepted and rejected governance transitions produce sequenced neutral audit
+receipts. The Den observation adapter projects those receipts without becoming
+coordination or persistence authority. Projection failure is bounded and does
+not roll back an accepted curator transition.
+
+Live debug-service evidence for discovery, preview, approval, apply, rollback,
+restart hydration, and readback is recorded in
+`curator-governance-live-certification-5407.md`.

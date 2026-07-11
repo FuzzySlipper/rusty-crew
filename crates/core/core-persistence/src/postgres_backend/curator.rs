@@ -250,10 +250,7 @@ fn put_mutation(
 ) -> CoreResult<CuratorMutationRecord> {
     let current: Option<CuratorMutationRecord> = tx.query_opt(&format!("SELECT record_json::text FROM {schema}.module_curator_mutations WHERE mutation_id=$1 FOR UPDATE"), &[&write.record.mutation_id]).map_err(|error| postgres_error("lock PostgreSQL curator mutation", error))?.map(parse_row).transpose()?;
     if let Some(current) = &current {
-        crate::repos::curator::validate_mutation_transition(
-            &current.status,
-            &write.record.status,
-        )?;
+        crate::repos::curator::validate_mutation_transition(&current.status, &write.record.status)?;
     }
     let mut record = write.record.clone();
     record.revision = next_revision(

@@ -80,21 +80,22 @@ Rollback restores from the snapshot record:
 - sidecar directories or sidecar files are restored or removed according to
   their snapshot state.
 
-Rollback is recorded on the governance mutation record as `rolled_back` or
-`rollback_failed`. In the running service this record is persisted through the
-Rust-owned native `simple_kv` module, while the filesystem snapshot itself
-remains a skill-storage artifact under the configured backup/snapshot root.
+Rollback is recorded on the typed governance mutation record as `rolled_back`
+or `rollback_failed`. The running service persists candidates, approvals,
+mutations, snapshot references, and sequenced audit receipts through dedicated
+Rust repositories for SQLite and PostgreSQL. The filesystem snapshot itself
+remains a skill-storage artifact under the configured backup/snapshot root and
+is exposed only through safe root-relative references.
 
 ## Current Limits
 
 `MemoryCuratorGovernanceStore` and `FileCuratorGovernanceStore` are smoke/test
-and local compatibility scaffolds. The running service uses
-`NativeCuratorGovernanceStore`, which loads and saves candidate, approval,
-mutation, rollback, and audit snapshot metadata through Rust-owned Crew
-storage. A future task may replace the whole-snapshot simple-kv representation
-with narrower curator-specific repository tables, but the service no longer
-depends on TypeScript JSON files as production truth.
+scaffolds only. The running service uses `NativeCuratorGovernanceStore`, which
+loads and writes typed records through the native bridge. There is no
+production `simple_kv` or TypeScript JSON fallback for curator governance
+truth.
 
-The executor does not emit observation activity directly yet. Observation and
-admin/control integration remain follow-up tasks so that display projection does
-not become the coordination authority.
+The executor persists a neutral activity receipt with each governance result.
+The service projects that receipt through the observation adapter after the
+Rust write succeeds. Projection failures are reported in curator diagnostics
+and do not block or undo the governance transition.

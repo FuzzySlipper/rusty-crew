@@ -1053,6 +1053,29 @@ assert.equal(
   2,
 );
 
+const curatorAuditPage = {
+  items: [
+    {
+      sequence: 9,
+      receiptId: "receipt-9",
+      activityKind: "rollback_completed",
+    },
+  ],
+  total: 1,
+  limit: 50,
+  offset: 0,
+  next_offset: null,
+};
+const curatorAuditRoute = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/curator/audit-receipts" },
+  { diagnostics, curatorAuditReceipts: curatorAuditPage },
+);
+assert.equal(curatorAuditRoute.status, 200);
+assert.equal(
+  okData<typeof curatorAuditPage>(curatorAuditRoute).items[0]?.receiptId,
+  "receipt-9",
+);
+
 const wrongMethod = handleAdminDiagnosticsRequest(
   { method: "POST", url: "/v1/admin/diagnostics" },
   { diagnostics },

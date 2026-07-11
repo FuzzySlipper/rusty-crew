@@ -113,7 +113,16 @@ assert.match(
   readFileSync(join(skillsDir, "archived-skill.md"), "utf8"),
   /Archived body/,
 );
-assert.equal(auditSink.events.length, 10);
+
+const candidateId = "curator:profile:create";
+const previewed = await post(
+  `/v1/admin/control/curator/candidates/${encodeURIComponent(candidateId)}/preview`,
+  {},
+);
+assert.equal(previewed.command.name, "curator_preview_candidate");
+assert.equal(previewed.command.target.candidateId, candidateId);
+assert.equal(previewed.outcome.result?.candidateId, candidateId);
+assert.equal(auditSink.events.length, 12);
 
 console.log("curator admin control smoke passed");
 

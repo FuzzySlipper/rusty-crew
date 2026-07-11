@@ -1073,6 +1073,39 @@
         "public": true
       },
       {
+        "id": "admin.curator.candidates.list",
+        "method": "GET",
+        "path_template": "/v1/admin/curator/candidates",
+        "description": "List typed curator candidates with bounded paging and lifecycle filters.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["curator", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.curator.mutations.list",
+        "method": "GET",
+        "path_template": "/v1/admin/curator/mutations",
+        "description": "List typed curator mutation and rollback history with bounded paging.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["curator", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.curator.audit_receipts.list",
+        "method": "GET",
+        "path_template": "/v1/admin/curator/audit-receipts",
+        "description": "List sequenced neutral curator audit receipts with bounded paging.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["curator", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "admin.diagnostics.metrics",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/metrics",
@@ -2249,6 +2282,27 @@
         "capability_id": "admin.diagnostics.config",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/config",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.curator.candidates.list",
+        "method": "GET",
+        "path_template": "/v1/admin/curator/candidates",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.curator.mutations.list",
+        "method": "GET",
+        "path_template": "/v1/admin/curator/mutations",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.curator.audit_receipts.list",
+        "method": "GET",
+        "path_template": "/v1/admin/curator/audit-receipts",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

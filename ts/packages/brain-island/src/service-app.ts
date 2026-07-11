@@ -1123,6 +1123,7 @@ async function handleHttpRequest(
       },
       await buildDiagnosticsContext(state, {
         includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
+        curatorUrl: isCuratorAdminReadRoute(url.pathname) ? url : undefined,
       }),
     );
   }
@@ -1508,6 +1509,7 @@ async function handleHttpRequest(
       },
       await buildDiagnosticsContext(state, {
         includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
+        curatorUrl: isCuratorAdminReadRoute(url.pathname) ? url : undefined,
       }),
     );
   }
@@ -1708,7 +1710,7 @@ function modelProviderRefreshCommandName(
 
 async function buildDiagnosticsContext(
   state: ServiceState,
-  options: { includeProfileRegistry?: boolean } = {},
+  options: { includeProfileRegistry?: boolean; curatorUrl?: URL } = {},
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
   const [
@@ -1742,6 +1744,9 @@ async function buildDiagnosticsContext(
         runtimeConfig: state.runtimeConfig,
         now,
       }).catch(() => undefined)
+    : undefined;
+  const curatorReadback = options.curatorUrl
+    ? await buildCuratorAdminReadback(state, options.curatorUrl)
     : undefined;
   const sessionDefaults = await effectiveSessionDefaultsById(state, sessions);
   const diagnostics = buildRuntimeDiagnosticsProjection({
@@ -1778,6 +1783,9 @@ async function buildDiagnosticsContext(
     storage,
     memorySpaces,
     profileRegistry,
+    curatorCandidates: curatorReadback?.candidates,
+    curatorMutations: curatorReadback?.mutations,
+    curatorAuditReceipts: curatorReadback?.auditReceipts,
     configValidation: await preflightRustyCrewRuntimeConfig({
       serviceConfig: state.config,
       bridge: state.bridge,
@@ -1856,6 +1864,68 @@ function isProfileRegistryAdminRoute(pathname: string): boolean {
     pathname === "/v1/admin/profiles/registry" ||
     pathname.startsWith("/v1/admin/profiles/registry/")
   );
+}
+
+function isCuratorAdminReadRoute(pathname: string): boolean {
+  return pathname.startsWith("/v1/admin/curator/");
+}
+
+async function buildCuratorAdminReadback(
+  state: ServiceState,
+  url: URL,
+): Promise<{
+  candidates?: unknown;
+  mutations?: unknown;
+  auditReceipts?: unknown;
+}> {
+  const page = {
+    limit: optionalUnsignedInteger(url.searchParams.get("limit")),
+    offset: optionalUnsignedInteger(url.searchParams.get("offset")),
+  };
+  switch (url.pathname) {
+    case "/v1/admin/curator/candidates":
+      return {
+        candidates: await state.bridge.listCuratorCandidates({
+          profile_id: optionalQueryValue(url, "profile_id"),
+          session_id: optionalQueryValue(url, "session_id"),
+          status: optionalQueryValue(url, "status"),
+          lifecycle_state: optionalQueryValue(url, "lifecycle_state"),
+          page,
+        }),
+      };
+    case "/v1/admin/curator/mutations":
+      return {
+        mutations: await state.bridge.listCuratorMutations({
+          candidate_id: optionalQueryValue(url, "candidate_id"),
+          status: optionalQueryValue(url, "status"),
+          page,
+        }),
+      };
+    case "/v1/admin/curator/audit-receipts":
+      return {
+        auditReceipts: await state.bridge.listCuratorAuditReceipts({
+          profile_id: optionalQueryValue(url, "profile_id"),
+          session_id: optionalQueryValue(url, "session_id"),
+          candidate_id: optionalQueryValue(url, "candidate_id"),
+          mutation_id: optionalQueryValue(url, "mutation_id"),
+          activity_kind: optionalQueryValue(url, "activity_kind"),
+          page,
+        }),
+      };
+    default:
+      return {};
+  }
+}
+
+function optionalQueryValue(url: URL, name: string): string | undefined {
+  const value = url.searchParams.get(name)?.trim();
+  return value ? value : undefined;
+}
+
+function optionalUnsignedInteger(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 async function buildMemorySpaceDiagnostics(

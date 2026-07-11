@@ -429,7 +429,7 @@ function parseControlCommand(
     };
   }
 
-  const parts = url.pathname.split("/").filter(Boolean);
+  const parts = url.pathname.split("/").filter(Boolean).map(decodePathPart);
   const commandBase = {
     actor,
     requestId,
@@ -1027,6 +1027,14 @@ function parseControlCommand(
       retryable: false,
     }),
   };
+}
+
+function decodePathPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function executorForCommand(

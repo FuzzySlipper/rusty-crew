@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   CuratorExecuteReceipt,
   CuratorExecuteRequest,
@@ -422,6 +422,7 @@ export class NativeCuratorGovernanceStore
       store.mutationRevisions.set(record.mutationId, record.revision);
       store.mutationHashes.set(record.mutationId, stableHash(mutation));
     }
+    store.lastActivityReceipt = await latestCuratorAuditReceipt(input.bridge);
     return store;
   }
 
@@ -608,6 +609,7 @@ export class NativeCuratorGovernanceStore
   }
 
   private mutationWrite(record: CuratorMutationRecord): unknown {
+    const management = safeSkillManagement(record.management, this.skillsDir);
     return {
       record: {
         mutationId: record.mutationId,
@@ -619,7 +621,7 @@ export class NativeCuratorGovernanceStore
         reason: record.reason,
         snapshotId: record.snapshot.snapshotId,
         mutationPayload: {
-          management: record.management,
+          management,
           error: record.error,
           snapshotManifest: snapshotManifest(
             record.snapshot,
@@ -627,8 +629,10 @@ export class NativeCuratorGovernanceStore
             this.snapshotRoot,
           ),
         },
-        changedPaths: record.changedPaths,
-        management: record.management,
+        changedPaths: record.changedPaths.map((path) =>
+          safeRelative(this.skillsDir, path),
+        ),
+        management,
         status: record.status,
         errorReasonCode: record.error,
         revision: this.mutationRevisions.get(record.mutationId) ?? 0,
@@ -705,6 +709,7 @@ type CuratorPersistenceBridge = Pick<
   | "applyCuratorGovernanceWrite"
   | "listCuratorCandidates"
   | "listCuratorMutations"
+  | "listCuratorAuditReceipts"
 >;
 
 interface NativeCandidatePayload {
@@ -739,7 +744,22 @@ interface NativeMutationRecord {
 
 interface NativePage<T> {
   items: T[];
+  total: number;
   next_offset?: number | null;
+}
+
+async function latestCuratorAuditReceipt(
+  bridge: CuratorPersistenceBridge,
+): Promise<CuratorActivityReceipt | undefined> {
+  const first = (await bridge.listCuratorAuditReceipts({
+    page: { limit: 1, offset: 0 },
+  })) as NativePage<CuratorActivityReceipt>;
+  if (first.total === 0) return undefined;
+  if (first.total === 1) return first.items[0];
+  const last = (await bridge.listCuratorAuditReceipts({
+    page: { limit: 1, offset: first.total - 1 },
+  })) as NativePage<CuratorActivityReceipt>;
+  return last.items[0];
 }
 
 interface NativeGovernanceWriteResult {
@@ -1016,12 +1036,46 @@ function snapshotFromManifest(
 }
 
 function safeRelative(root: string, target: string): string {
-  const ref = relative(resolve(root), resolve(target));
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = isAbsolute(target)
+    ? resolve(target)
+    : resolve(resolvedRoot, target);
+  const ref = relative(resolvedRoot, resolvedTarget);
   if (!ref || ref === "." || ref.startsWith(`..${sep}`) || ref === "..") {
     if (ref === ".") return "snapshot";
     throw new CuratorExecuteError("curator_snapshot_ref_invalid");
   }
   return ref;
+}
+
+function safeSkillManagement(
+  management: SkillManagementResult | undefined,
+  skillsDir: string,
+): SkillManagementResult | undefined {
+  if (!management) return undefined;
+  return {
+    ...management,
+    ...(management.skillPath
+      ? { skillPath: safeRelative(skillsDir, management.skillPath) }
+      : {}),
+    ...(management.sidecarPath
+      ? { sidecarPath: safeRelative(skillsDir, management.sidecarPath) }
+      : {}),
+    ...(management.filePath
+      ? { filePath: safeRelative(skillsDir, management.filePath) }
+      : {}),
+    ...(management.archivePath
+      ? { archivePath: safeRelative(skillsDir, management.archivePath) }
+      : {}),
+    ...(management.sidecarArchivePath
+      ? {
+          sidecarArchivePath: safeRelative(
+            skillsDir,
+            management.sidecarArchivePath,
+          ),
+        }
+      : {}),
+  };
 }
 
 export function createCuratorGovernanceExecutor(

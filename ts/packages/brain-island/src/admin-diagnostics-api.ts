@@ -84,6 +84,9 @@ export interface AdminDiagnosticsContext {
   storage?: StorageDiagnosticsProjection;
   memorySpaces?: MemorySpaceDiagnosticsProjection;
   profileRegistry?: AdminProfileRegistryDiagnostics;
+  curatorCandidates?: unknown;
+  curatorMutations?: unknown;
+  curatorAuditReceipts?: unknown;
 }
 
 export interface MemorySpaceCompatibilityStatus {
@@ -253,6 +256,15 @@ export function handleAdminDiagnosticsRequest(
       return success(requestId, context.background ?? null);
     case "/v1/admin/diagnostics/config":
       return success(requestId, context.configValidation ?? null);
+    case "/v1/admin/curator/candidates":
+      return success(requestId, context.curatorCandidates ?? emptyAdminPage());
+    case "/v1/admin/curator/mutations":
+      return success(requestId, context.curatorMutations ?? emptyAdminPage());
+    case "/v1/admin/curator/audit-receipts":
+      return success(
+        requestId,
+        context.curatorAuditReceipts ?? emptyAdminPage(),
+      );
     case "/v1/admin/diagnostics/metrics":
       return success(requestId, page(health.metrics, url, 100, 250));
     case "/v1/admin/events/recent":
@@ -318,6 +330,10 @@ export function handleAdminDiagnosticsRequest(
         retryable: false,
       });
   }
+}
+
+function emptyAdminPage(): AdminPage<never> {
+  return { items: [], total: 0, limit: 50, offset: 0 };
 }
 
 function parseAdminUrl(url: string): URL {

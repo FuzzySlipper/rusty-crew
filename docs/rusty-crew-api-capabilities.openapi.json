@@ -1183,6 +1183,60 @@
         "x-rusty-crew-command-name": "shutdown"
       }
     },
+    "/v1/admin/curator/audit-receipts": {
+      "get": {
+        "operationId": "adminCuratorAuditReceiptsList",
+        "summary": "List sequenced neutral curator audit receipts with bounded paging.",
+        "tags": ["curator", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.curator.audit_receipts.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/curator/candidates": {
+      "get": {
+        "operationId": "adminCuratorCandidatesList",
+        "summary": "List typed curator candidates with bounded paging and lifecycle filters.",
+        "tags": ["curator", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.curator.candidates.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/curator/mutations": {
+      "get": {
+        "operationId": "adminCuratorMutationsList",
+        "summary": "List typed curator mutation and rollback history with bounded paging.",
+        "tags": ["curator", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.curator.mutations.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/diagnostics": {
       "get": {
         "operationId": "adminDiagnostics",
@@ -3534,7 +3588,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 134,
+    "capability_count": 137,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

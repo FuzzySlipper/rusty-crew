@@ -40,3 +40,15 @@ Expected proof points:
 - background diagnostics health is `ok`;
 - observation events include background review checkpoint and curator
   completion.
+
+## Durable Governance Follow-Up
+
+This smoke remains the deterministic discovery/background-review proof. It is
+no longer the only persistence evidence: typed SQLite and PostgreSQL repository
+tests cover governance writes and exact paging, while
+`curator-governance-live-certification-5407.md` records a running debug-service
+apply/rollback/restart cycle. Admin readback is available at:
+
+- `GET /v1/admin/curator/candidates`
+- `GET /v1/admin/curator/mutations`
+- `GET /v1/admin/curator/audit-receipts`
