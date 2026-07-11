@@ -414,7 +414,8 @@ mod tests {
     #[test]
     #[ignore = "requires local PostgreSQL dev database env"]
     fn postgres_curator_repository_matches_typed_revision_and_idempotency_contract() {
-        let database_url = std::env::var("RUSTY_CREW_TEST_POSTGRES_URL")
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_POSTGRES_URL"))
             .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
             .expect("PostgreSQL test database URL");
         let schema = format!(
