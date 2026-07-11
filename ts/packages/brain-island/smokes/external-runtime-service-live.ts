@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,14 +31,15 @@ const bindingId = "codex-service-live-binding";
 const now = (): string => new Date().toISOString();
 
 const bridge = await loadNativeBridge();
-const engine = await bridge.initializeEngine({
+const engineConfig = {
   engineDataDir: dataDir,
   clock: "system",
   defaultTurnBudget: 16,
   defaultIdleTimeoutMs: 30_000,
-  storage: { backend: "sqlite" },
-});
-const controller = new ServiceExternalRuntimeController({ bridge });
+  storage: { backend: "sqlite" as const },
+};
+let engine = await bridge.initializeEngine(engineConfig);
+let controller = new ServiceExternalRuntimeController({ bridge });
 const timers = new Set<NodeJS.Timeout>();
 
 let server: ReturnType<typeof createServer> | undefined;
@@ -161,6 +163,34 @@ try {
   assert.match(sse, /EXTERNAL_SERVICE_LIVE_OK/);
   assert.match(sse, /event: turn_lifecycle/);
 
+  const queueFirst = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-queue-first",
+    "Reply with exactly QUEUE_FIRST_OK.",
+    false,
+  );
+  assert.equal(queueFirst.activation?.type, "external_turn_requested");
+  const queueSecond = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-queue-second",
+    "Reply with exactly QUEUE_SECOND_OK.",
+    false,
+  );
+  assert.equal(queueSecond.activation?.type, "queued_for_next_turn");
+  const queueSecondReplay = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-queue-second",
+    "Reply with exactly QUEUE_SECOND_OK.",
+    false,
+  );
+  assert.deepEqual(queueSecondReplay, queueSecond);
+  await controller.tick();
+  const queueFirstTurn = await waitForActiveTurn();
+  await waitForTerminalEvent(queueFirstTurn.nativeTurnId);
+  const queueSecondTurn = await waitForActiveTurn();
+  await waitForTerminalEvent(queueSecondTurn.nativeTurnId);
+  assert.notEqual(queueSecondTurn.nativeTurnId, queueFirstTurn.nativeTurnId);
+
   const steerDelivery = await deliverLiveMessage(
     baseUrl,
     "external-service-live-steer",
@@ -213,6 +243,63 @@ try {
     "interrupted",
   );
 
+  const bindingBeforeRestart = await bridge.getExternalBinding(bindingId);
+  assert.equal(typeof bindingBeforeRestart?.nativeThreadId, "string");
+  const controllerGenerationBeforeRestart =
+    controller.statuses()[0]?.controllerGeneration;
+  await controller.stop();
+  await bridge.shutdownEngine({ engine, drainTimeoutMs: 5_000 });
+
+  const appServerRestarted =
+    process.env.CODEX_APP_SERVER_RESTART_SERVICE === "1";
+  if (appServerRestarted) {
+    execFileSync("systemctl", [
+      "--user",
+      "restart",
+      "codex-app-server.service",
+    ]);
+  }
+
+  engine = await bridge.initializeEngine(engineConfig);
+  await bridge.ensureConfiguredSession({
+    sessionId,
+    agentId,
+    profileId: "codex-service-live-profile",
+    kind: "full",
+    resourceLimits: { workdir: dataDir },
+    toolProfile: { tools: [] },
+  });
+  controller = new ServiceExternalRuntimeController({ bridge });
+  await waitForControllerReady();
+  const bindingAfterRestart = await bridge.getExternalBinding(bindingId);
+  assert.equal(
+    bindingAfterRestart?.nativeThreadId,
+    bindingBeforeRestart?.nativeThreadId,
+  );
+  const controllerGenerationAfterRestart =
+    controller.statuses()[0]?.controllerGeneration;
+  assert.notEqual(
+    controllerGenerationAfterRestart,
+    controllerGenerationBeforeRestart,
+  );
+
+  const restartDelivery = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-restart",
+    "Reply with exactly EXTERNAL_RESTART_RESUME_OK.",
+  );
+  assert.equal(
+    restartDelivery.activation?.type,
+    "external_turn_requested",
+    JSON.stringify(restartDelivery),
+  );
+  const restartTurn = await waitForActiveTurn();
+  const restartTerminal = await waitForTerminalEvent(restartTurn.nativeTurnId);
+  assert.equal(
+    restartTerminal.nativeThreadId,
+    bindingBeforeRestart?.nativeThreadId,
+  );
+
   console.log(
     JSON.stringify(
       {
@@ -224,6 +311,18 @@ try {
         terminalSequenceId: terminal.sequenceId,
         steerTurnId: steerTerminal.nativeTurnId,
         interruptedTurnId: interrupted.nativeTurnId,
+        restartTurnId: restartTerminal.nativeTurnId,
+        exactThreadRestartResume: true,
+        appServerRestarted,
+        controllerGenerations: [
+          controllerGenerationBeforeRestart,
+          controllerGenerationAfterRestart,
+        ],
+        queuedTurnIds: [
+          queueFirstTurn.nativeTurnId,
+          queueSecondTurn.nativeTurnId,
+        ],
+        duplicateQueuedDeliveryWasIdempotent: true,
         sseReplay: true,
         browserControls: ["steer_turn", "interrupt_turn"],
       },
@@ -247,6 +346,7 @@ async function waitForTerminalEvent(nativeTurnId?: string) {
   const deadline = Date.now() + timeoutMs;
   let cursor = 0;
   while (Date.now() < deadline) {
+    await controller.tick();
     const events = await bridge.queryExternalRuntimeEvents({
       runtimeId,
       afterSequence: cursor,
@@ -275,6 +375,7 @@ async function waitForTerminalEvent(nativeTurnId?: string) {
 async function waitForActiveTurn() {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    await controller.tick();
     const active = (await bridge.listActiveExternalTurns()).find(
       (turn) =>
         turn.request.sessionId === sessionId &&
@@ -309,10 +410,23 @@ async function waitForActiveTurn() {
   );
 }
 
+async function waitForControllerReady(): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await controller.start().catch(() => undefined);
+    if (controller.statuses()[0]?.driverState === "ready") return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `external runtime controller did not recover after ${timeoutMs}ms`,
+  );
+}
+
 async function deliverLiveMessage(
   baseUrl: string,
   label: string,
   body: string,
+  tick = true,
 ) {
   const response = await fetch(
     `${baseUrl}/v1/external-bindings/${bindingId}/messages`,
@@ -334,7 +448,7 @@ async function deliverLiveMessage(
     data: Awaited<ReturnType<typeof bridge.deliverAgentMessage>>;
   };
   assert.equal(envelope.ok, true);
-  await controller.tick();
+  if (tick) await controller.tick();
   return envelope.data;
 }
 

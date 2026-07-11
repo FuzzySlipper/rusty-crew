@@ -327,12 +327,152 @@ fn active_external_recipient_queues_without_brain_wake() {
         .unwrap()
         .load_queued_messages(&QueuedMessageFilter {
             state: Some(QueuedMessageState::Pending),
-            owner_session_id: Some(codex.session_id),
+            owner_session_id: Some(codex.session_id.clone()),
             owner_agent_id: None,
             limit: None,
         })
         .unwrap();
     assert_eq!(queued_after_replay.len(), 1);
+
+    let active_request = ExternalTurnRequestId::new("already-active");
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:01Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Active,
+            Some("native-active".into()),
+            None,
+            "2026-06-19T00:00:02Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Completed,
+            None,
+            None,
+            "2026-06-19T00:00:03Z".into(),
+        )
+        .unwrap();
+    let promoted = CoordinationStore::open(engine.config.engine_data_dir.clone())
+        .unwrap()
+        .get_external_turn(&ExternalTurnRequestId::new(format!(
+            "external-follow-up:{}",
+            queued[0].message_id
+        )))
+        .unwrap()
+        .unwrap();
+    assert_eq!(promoted.phase, ExternalTurnPhase::Accepted);
+    assert_eq!(
+        promoted.request.input,
+        vec![ExternalTurnInputPart::Text {
+            text: "queue for later".into()
+        }]
+    );
+    let delivered = CoordinationStore::open(engine.config.engine_data_dir.clone())
+        .unwrap()
+        .load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Delivered),
+            owner_session_id: Some(codex.session_id),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0].delivery_attempts, 1);
+}
+
+#[test]
+fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
+    let engine = test_engine();
+    let codex = engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+    let active_request = ExternalTurnRequestId::new("active-before-expiry");
+    engine
+        .activate_agent_execution(activation("codex-agent", &active_request.0))
+        .unwrap();
+    let receipt = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::System {
+                sender_agent_id: AgentId::new("operator"),
+            },
+            delivery_id: AgentMessageDeliveryId::new("delivery-expiring"),
+            idempotency_key: "delivery-expiring".into(),
+            message_id: "message-expiring".into(),
+            to_agent_id: codex.agent_id.clone(),
+            body: "do not resurrect".into(),
+            correlation_id: None,
+            require_wake: true,
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert!(matches!(
+        receipt.activation,
+        Some(AgentActivation::QueuedForNextTurn { .. })
+    ));
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:01Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Active,
+            Some("native-active".into()),
+            None,
+            "2026-06-19T00:00:02Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Completed,
+            None,
+            None,
+            "2026-06-20T00:00:00Z".into(),
+        )
+        .unwrap();
+
+    let store = CoordinationStore::open(engine.config.engine_data_dir.clone()).unwrap();
+    let expired = store
+        .load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Expired),
+            owner_session_id: Some(codex.session_id),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap();
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].message.body, "do not resurrect");
+    assert!(store
+        .get_external_turn(&ExternalTurnRequestId::new(format!(
+            "external-follow-up:{}",
+            expired[0].message_id
+        )))
+        .unwrap()
+        .is_none());
 }
 
 #[test]

@@ -589,10 +589,72 @@ impl CoreEngine {
         }
         next.terminal_reason_code = terminal_reason_code;
         next.updated_at = now;
+        let became_terminal = !current.phase.is_terminal() && next.phase.is_terminal();
         if next.phase.is_terminal() {
             next.capacity_lease_id = None;
         }
-        self.store.update_external_turn(&next, current.revision)
+        let saved = self.store.update_external_turn(&next, current.revision)?;
+        if became_terminal {
+            self.promote_next_external_follow_up(&saved.request.session_id, &saved.updated_at)?;
+        }
+        Ok(saved)
+    }
+
+    fn promote_next_external_follow_up(
+        &self,
+        session_id: &SessionId,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Option<ExternalTurnCorrelation>> {
+        self.store.expire_queued_messages_at(now)?;
+        let Some(mut queued) = self
+            .store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(session_id.clone()),
+                owner_agent_id: None,
+                limit: Some(1),
+            })?
+            .into_iter()
+            .next()
+        else {
+            return Ok(None);
+        };
+        let request_id =
+            ExternalTurnRequestId::new(format!("external-follow-up:{}", queued.message_id));
+        let activation = self.activate_agent_execution(AgentActivationRequest {
+            agent_id: queued.message.to.clone(),
+            request_id: request_id.clone(),
+            idempotency_key: format!("external-follow-up:{}", queued.message_id),
+            input: vec![ExternalTurnInputPart::Text {
+                text: queued.message.body.clone(),
+            }],
+            provenance: TurnInputProvenance {
+                kind: rusty_crew_core_protocol::TurnInputProvenanceKind::RoutedAgentMessage,
+                source_id: Some(queued.message_id.clone()),
+                correlation_id: queued.message.correlation_id.clone(),
+            },
+            run_id: None,
+            capacity_lease_id: format!("external-follow-up-capacity:{}", queued.message_id),
+            direct_wake_id: format!("external-follow-up-wake:{}", queued.message_id),
+            queued_message_id: format!("external-follow-up-queue:{}", queued.message_id),
+            created_at: now.clone(),
+            expires_at: Some(queued.expires_at.clone()),
+        })?;
+        if !matches!(activation, AgentActivation::ExternalTurnRequested { .. }) {
+            return Ok(None);
+        }
+        let turn = self.store.get_external_turn(&request_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                format!("promoted external turn {} was not persisted", request_id.0),
+            )
+        })?;
+        queued.state = QueuedMessageState::Delivered;
+        queued.delivery_attempts += 1;
+        queued.terminal_at = Some(now.clone());
+        queued.state_reason = Some(format!("promoted_to_external_turn:{}", request_id.0));
+        self.store.save_queued_message(&queued)?;
+        Ok(Some(turn))
     }
 
     pub fn transition_external_turn_from_controller(

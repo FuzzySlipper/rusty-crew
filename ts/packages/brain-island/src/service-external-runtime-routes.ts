@@ -191,6 +191,20 @@ export async function handleExternalRuntimeRequest(
     const body = requireRecord(await context.readJsonBody(request));
     const deliveryId =
       optionalString(body.deliveryId) ?? `operator:${randomUUID()}`;
+    const idempotencyKey =
+      optionalString(body.idempotencyKey) ?? `operator-message:${deliveryId}`;
+    const messageId = optionalString(body.messageId) ?? `message:${deliveryId}`;
+    const messageBody = requiredString(body.body);
+    const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
+    if (
+      existing !== undefined &&
+      existing.request.idempotencyKey === idempotencyKey &&
+      existing.request.messageId === messageId &&
+      existing.request.toAgentId === binding.agentId &&
+      existing.request.body === messageBody
+    ) {
+      return successRoute(requestId, existing);
+    }
     const ttlMs = Math.min(
       Math.max(numberValue(body.ttlMs) ?? 5_000, 1),
       60_000,
@@ -201,12 +215,10 @@ export async function handleExternalRuntimeRequest(
       await context.bridge.deliverAgentMessage({
         caller: { type: "system", senderAgentId: "rusty-view-operator" },
         deliveryId,
-        idempotencyKey:
-          optionalString(body.idempotencyKey) ??
-          `operator-message:${deliveryId}`,
-        messageId: optionalString(body.messageId) ?? `message:${deliveryId}`,
+        idempotencyKey,
+        messageId,
         toAgentId: binding.agentId,
-        body: requiredString(body.body),
+        body: messageBody,
         ...(optionalString(body.correlationId) === undefined
           ? {}
           : { correlationId: optionalString(body.correlationId) }),
