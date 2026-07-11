@@ -61,6 +61,16 @@ function validateJsonOutput(
   value: unknown,
   env: BridgeValidationEnv,
 ): void {
+  if (value === null) {
+    validateBridgeJsonText({
+      operation,
+      direction: "rust_to_ts",
+      schema,
+      text: "null",
+      env,
+    });
+    return;
+  }
   if (typeof value !== "string") {
     throw new TypeError(
       `generated bridge output validation expected JSON text for ${operation}`,

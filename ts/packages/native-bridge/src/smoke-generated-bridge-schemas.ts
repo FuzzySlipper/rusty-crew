@@ -79,6 +79,18 @@ assert.throws(
   "raw binding chokepoint must reject invalid generated-schema output",
 );
 
+const nullableBinding = withGeneratedBridgeOutputValidation(
+  {
+    getAgentMessageDeliveryJson: () => null,
+  },
+  { RUSTY_CREW_BRIDGE_VALIDATE: "1" },
+);
+assert.equal(
+  nullableBinding.getAgentMessageDeliveryJson(),
+  null,
+  "generated optional-output schema must validate napi Option::None as null",
+);
+
 for (const operation of [
   "plan_brain_selection",
   "plan_runtime_graph",
