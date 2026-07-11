@@ -154,6 +154,11 @@ npm run smoke:bridge-fingerprint-drift
 npm run smoke:bridge-validation
 ```
 
+The offline lane builds the native addon once before these checks. For a
+standalone build plus declaration-surface check, use
+`npm run verify:bridge-native-surface`; direct native smokes expect the addon to
+already be built.
+
 Native bridge runtime artifacts are build output. Fresh checkouts build them
 with `npm run build:native`; the repo commits
 `ts/packages/native-bridge/native/index.d.ts` as the declaration surface but

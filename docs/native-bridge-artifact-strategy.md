@@ -27,15 +27,20 @@ review while treating the loader and binary as reproducible build artifacts.
 
 ## Validation
 
-`npm run smoke:bridge-native-surface` builds the addon and checks the generated
-declaration surface against the Rust bridge manifest/codegen expectation.
+`npm run smoke:bridge-native-surface` checks the generated declaration surface
+against the Rust bridge manifest/codegen expectation using an already-built
+addon. Use `npm run verify:bridge-native-surface` for the one-step local command
+that builds the addon and then runs the surface check. The full
+`npm run verify:offline` lane builds once before all native checks, avoiding a
+second incremental native build inside the smoke itself.
 
 `npm run smoke:native-artifact-tracking` asserts that the declaration file is
 the only tracked file under `ts/packages/native-bridge/native/` and that the
 loader/binary outputs are ignored.
 
 `npm run smoke:bridge-validation` loads the built addon and validates runtime
-bridge fixtures. Run `npm run build:native` first when invoking it directly.
+bridge fixtures. Run `npm run build:native` first when invoking native smokes
+directly.
 
 ## Agent Guidance
 

@@ -98,3 +98,48 @@ test("rejects new root smoke aliases above the frozen ceiling", () => {
   assert.equal(audit.violations.length, 1);
   assert.match(audit.violations[0]?.reason ?? "", /root package exposes 132/);
 });
+
+test("requires one top-level native build and a prebuilt native surface smoke", () => {
+  const accepted = auditSmokeValidation({
+    packageJson: {
+      scripts: {
+        "verify:ts":
+          "npm run build:native && npm run smoke:bridge-native-surface",
+        "smoke:bridge-native-surface": "node check-native-surface.mjs",
+      },
+    },
+    catalog: [
+      {
+        name: "bridge-native-surface",
+        scope: "root-alias",
+        lane: "native-offline",
+        category: "native-bridge",
+        requirements: ["native-build"],
+      },
+    ],
+  });
+  assert.equal(accepted.nativeBuildInvocations, 1);
+  assert.deepEqual(accepted.violations, []);
+
+  const duplicate = auditSmokeValidation({
+    packageJson: {
+      scripts: {
+        "verify:ts":
+          "npm run build:native && npm run smoke:bridge-native-surface",
+        "smoke:bridge-native-surface":
+          "npm run build:native && node check-native-surface.mjs",
+      },
+    },
+    catalog: [
+      {
+        name: "bridge-native-surface",
+        scope: "root-alias",
+        lane: "native-offline",
+        category: "native-bridge",
+        requirements: ["native-build"],
+      },
+    ],
+  });
+  assert.equal(duplicate.violations.length, 1);
+  assert.match(duplicate.violations[0]?.reason ?? "", /without rebuilding/);
+});

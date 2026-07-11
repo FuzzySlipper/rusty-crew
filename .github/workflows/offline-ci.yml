@@ -20,7 +20,7 @@ jobs:
       RUSTY_CREW_BRIDGE_VALIDATE: "1"
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.96.0
@@ -31,7 +31,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -68,7 +68,7 @@ jobs:
       RUSTY_CREW_POSTGRES_HARNESS_NO_CONTAINER: "1"
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.96.0
@@ -79,7 +79,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
 

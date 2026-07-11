@@ -64,6 +64,12 @@ export function auditSmokeValidation({
   catalog = buildCatalog(),
 } = {}) {
   const verifyTs = packageJson.scripts?.["verify:ts"] ?? "";
+  const nativeSurfaceSmoke =
+    packageJson.scripts?.["smoke:bridge-native-surface"];
+  const nativeBuildInvocations = countCommand(
+    verifyTs,
+    /npm\s+run\s+build:native(?=\s|$|[&|;])/g,
+  );
   const verifySmokeNames = extractSmokeScriptNames(verifyTs);
   const violations = [];
   const checked = [];
@@ -74,6 +80,22 @@ export function auditSmokeValidation({
       name: "root-smoke-alias-ceiling",
       reason: `root package exposes ${rootAliases.length} smoke aliases; add package-local scripts discoverable by npm run smoke -- --list instead of exceeding the ceiling ${rootSmokeAliasCeiling}`,
     });
+  }
+
+  if (nativeSurfaceSmoke !== undefined) {
+    if (nativeBuildInvocations !== 1) {
+      violations.push({
+        name: "verify-native-build-count",
+        reason: `verify:ts must build the native addon exactly once; found ${nativeBuildInvocations} build:native invocations`,
+      });
+    }
+    if (/npm\s+run\s+build:native(?=\s|$|[&|;])/.test(nativeSurfaceSmoke)) {
+      violations.push({
+        name: "bridge-native-surface-nested-build",
+        reason:
+          "smoke:bridge-native-surface must validate the prebuilt addon without rebuilding it",
+      });
+    }
   }
 
   for (const name of verifySmokeNames) {
@@ -109,10 +131,15 @@ export function auditSmokeValidation({
 
   return {
     checked,
+    nativeBuildInvocations,
     summary: summarizeCatalog(catalog),
     verifySmokeNames,
     violations,
   };
+}
+
+function countCommand(command, pattern) {
+  return [...command.matchAll(pattern)].length;
 }
 
 function printAudit(audit) {
@@ -121,6 +148,9 @@ function printAudit(audit) {
   );
   console.log(
     `[smoke-validation] verify:ts smokes=${audit.checked.map((entry) => `${entry.name}:${entry.lane}`).join(", ")}`,
+  );
+  console.log(
+    `[smoke-validation] verify:ts native-builds=${audit.nativeBuildInvocations}`,
   );
   if (audit.violations.length === 0) {
     console.log(
