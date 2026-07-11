@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 19;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 20;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -109,6 +109,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 19,
         description: "add typed curator governance records and audit receipts",
         apply: Some(apply_postgres_curator_governance),
+    },
+    PostgresSchemaMigration {
+        version: 20,
+        description: "add managed external agent runtime lifecycle records",
+        apply: Some(apply_postgres_external_runtime),
     },
 ];
 
@@ -995,6 +1000,80 @@ fn apply_postgres_curator_governance(tx: &mut Transaction<'_>, schema: &str) -> 
          CREATE INDEX IF NOT EXISTS module_curator_audit_time_idx ON {schema}.module_curator_audit_receipts(occurred_at, sequence);"
     ))
     .map_err(|error| postgres_error("create typed PostgreSQL curator governance tables", error))
+}
+
+fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.external_runtime_registrations (
+            runtime_id TEXT PRIMARY KEY, observed_state TEXT NOT NULL,
+            revision BIGINT NOT NULL, record_json TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS {schema}.external_controller_leases (
+            runtime_id TEXT PRIMARY KEY REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            holder_instance_id TEXT NOT NULL, generation BIGINT NOT NULL,
+            expires_at TEXT NOT NULL, revision BIGINT NOT NULL, record_json TEXT NOT NULL);
+         CREATE INDEX IF NOT EXISTS external_controller_leases_expiry_idx
+            ON {schema}.external_controller_leases(expires_at, runtime_id);
+         CREATE TABLE IF NOT EXISTS {schema}.external_agent_bindings (
+            binding_id TEXT PRIMARY KEY,
+            runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            session_id TEXT REFERENCES {schema}.sessions(session_id), agent_id TEXT,
+            purpose TEXT NOT NULL, status TEXT NOT NULL, native_thread_id TEXT,
+            revision BIGINT NOT NULL, record_json TEXT NOT NULL);
+         CREATE UNIQUE INDEX IF NOT EXISTS external_agent_bindings_active_agent_idx
+            ON {schema}.external_agent_bindings(agent_id)
+            WHERE purpose = 'crew_agent' AND status = 'active';
+         CREATE UNIQUE INDEX IF NOT EXISTS external_agent_bindings_runtime_thread_idx
+            ON {schema}.external_agent_bindings(runtime_id, native_thread_id)
+            WHERE native_thread_id IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS external_agent_bindings_session_idx
+            ON {schema}.external_agent_bindings(session_id, status);
+         CREATE TABLE IF NOT EXISTS {schema}.external_turns (
+            request_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+            runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            binding_id TEXT NOT NULL REFERENCES {schema}.external_agent_bindings(binding_id),
+            session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            native_thread_id TEXT NOT NULL, native_turn_id TEXT, phase TEXT NOT NULL,
+            revision BIGINT NOT NULL, updated_at TEXT NOT NULL, record_json TEXT NOT NULL);
+         CREATE UNIQUE INDEX IF NOT EXISTS external_turns_native_turn_idx
+            ON {schema}.external_turns(runtime_id, native_turn_id)
+            WHERE native_turn_id IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS external_turns_active_session_idx
+            ON {schema}.external_turns(session_id, phase, updated_at);
+         CREATE TABLE IF NOT EXISTS {schema}.external_control_receipts (
+            control_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+            binding_id TEXT NOT NULL REFERENCES {schema}.external_agent_bindings(binding_id),
+            request_fingerprint TEXT NOT NULL, status TEXT NOT NULL,
+            revision BIGINT NOT NULL, record_json TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS {schema}.external_interactions (
+            interaction_id TEXT PRIMARY KEY,
+            runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            binding_id TEXT NOT NULL REFERENCES {schema}.external_agent_bindings(binding_id),
+            request_id TEXT NOT NULL REFERENCES {schema}.external_turns(request_id),
+            native_request_id TEXT NOT NULL, status TEXT NOT NULL, expires_at TEXT NOT NULL,
+            revision BIGINT NOT NULL, record_json TEXT NOT NULL,
+            UNIQUE(runtime_id, native_request_id));
+         CREATE INDEX IF NOT EXISTS external_interactions_pending_idx
+            ON {schema}.external_interactions(status, expires_at);
+         CREATE TABLE IF NOT EXISTS {schema}.external_runtime_events (
+            event_id TEXT PRIMARY KEY,
+            runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            session_id TEXT REFERENCES {schema}.sessions(session_id),
+            sequence_id BIGINT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL,
+            record_json TEXT NOT NULL, UNIQUE(runtime_id, sequence_id));
+         CREATE INDEX IF NOT EXISTS external_runtime_events_session_cursor_idx
+            ON {schema}.external_runtime_events(session_id, sequence_id);
+         CREATE TABLE IF NOT EXISTS {schema}.external_correlated_rounds (
+            round_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+            sender_agent_id TEXT NOT NULL,
+            sender_session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            recipient_agent_id TEXT NOT NULL,
+            recipient_session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            status TEXT NOT NULL, expires_at TEXT NOT NULL,
+            revision BIGINT NOT NULL, record_json TEXT NOT NULL);
+         CREATE INDEX IF NOT EXISTS external_correlated_rounds_pending_idx
+            ON {schema}.external_correlated_rounds(status, expires_at, recipient_agent_id);"
+    ))
+    .map_err(|error| postgres_error("apply PostgreSQL external runtime migration", error))
 }
 
 fn apply_postgres_chat_event_log(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {

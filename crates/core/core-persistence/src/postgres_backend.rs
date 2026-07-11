@@ -8,6 +8,7 @@ mod capabilities;
 mod chat_events;
 mod conversation_attachment;
 mod curator;
+mod external_runtime;
 mod memory_lore;
 mod pool;
 mod profile_config;
@@ -1465,7 +1466,7 @@ impl PostgresBackendStore {
             backend_label: "PostgreSQL durable backend".to_string(),
             schema: self.schema.clone(),
             repository_coverage:
-                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers,external_agent_runtime"
                     .to_string(),
             schema_version: self.schema_version()?,
             supported_schema_version: POSTGRES_SCHEMA_VERSION,
@@ -1646,6 +1647,38 @@ impl PostgresBackendStore {
                 RuntimeStorageTableCount {
                     table: "module_roleplay_lore_layer_config".to_string(),
                     rows: self.table_rows("module_roleplay_lore_layer_config")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_runtime_registrations".to_string(),
+                    rows: self.table_rows("external_runtime_registrations")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_controller_leases".to_string(),
+                    rows: self.table_rows("external_controller_leases")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_agent_bindings".to_string(),
+                    rows: self.table_rows("external_agent_bindings")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_turns".to_string(),
+                    rows: self.table_rows("external_turns")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_control_receipts".to_string(),
+                    rows: self.table_rows("external_control_receipts")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_interactions".to_string(),
+                    rows: self.table_rows("external_interactions")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_runtime_events".to_string(),
+                    rows: self.table_rows("external_runtime_events")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_correlated_rounds".to_string(),
+                    rows: self.table_rows("external_correlated_rounds")?,
                 },
             ],
             capabilities: postgres_backend_capabilities(),
@@ -14807,6 +14840,137 @@ mod tests {
                 body: "tie search alpha".to_string(),
             },
         ]
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_external_runtime_lifecycle_matches_sqlite_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL external runtime backend; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_external_runtime");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let session = SessionState {
+            handle: SessionHandle::new(1),
+            session_id: SessionId::new("codex-session"),
+            agent_id: AgentId::new("codex-agent"),
+            profile_id: ProfileId::new("codex-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile { tools: Vec::new() },
+            history_window: None,
+            status: SessionStatus::Idle,
+            brain_turn_count: 0,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            last_active_at: "2026-07-10T00:00:00Z".into(),
+        };
+        store.save_session(&session).unwrap();
+        let runtime = rusty_crew_core_protocol::ExternalRuntimeRegistration {
+            runtime_id: rusty_crew_core_protocol::ExternalRuntimeId::new("codex-local"),
+            kind: rusty_crew_core_protocol::ExternalRuntimeKind::CodexAppServer,
+            endpoint: rusty_crew_core_protocol::ExternalEndpoint {
+                transport: rusty_crew_core_protocol::ExternalEndpointTransport::UnixWebSocket,
+                address: "/run/user/1001/codex.sock".into(),
+            },
+            process_ownership: rusty_crew_core_protocol::ExternalProcessOwnership::Attached,
+            codex_home_ref: Some("/home/agent/.codex".into()),
+            expected_cli_version: "0.144.1".into(),
+            executable_sha256: "a".repeat(64),
+            protocol_schema_sha256: "b".repeat(64),
+            desired_state: rusty_crew_core_protocol::ExternalRuntimeDesiredState::Enabled,
+            observed_state: rusty_crew_core_protocol::ExternalRuntimeObservedState::Ready,
+            observed_reason_code: None,
+            revision: 0,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            updated_at: "2026-07-10T00:00:00Z".into(),
+        };
+        assert_eq!(
+            store
+                .put_external_runtime_registration(&runtime, None)
+                .unwrap()
+                .revision,
+            1
+        );
+        let lease = rusty_crew_core_protocol::ExternalControllerLease {
+            runtime_id: runtime.runtime_id.clone(),
+            holder_instance_id: "controller-a".into(),
+            generation: 0,
+            acquired_at: "2026-07-10T00:00:00Z".into(),
+            renewed_at: "2026-07-10T00:00:00Z".into(),
+            expires_at: "2026-07-10T00:10:00Z".into(),
+            revision: 0,
+        };
+        assert_eq!(
+            store
+                .acquire_external_controller_lease(&lease, &"2026-07-10T00:00:00Z".into())
+                .unwrap()
+                .generation,
+            1
+        );
+        let binding = rusty_crew_core_protocol::ExternalAgentBinding {
+            binding_id: rusty_crew_core_protocol::ExternalBindingId::new("codex-binding"),
+            runtime_id: runtime.runtime_id.clone(),
+            session_id: Some(session.session_id.clone()),
+            agent_id: Some(session.agent_id.clone()),
+            purpose: rusty_crew_core_protocol::ExternalBindingPurpose::CrewAgent,
+            native_thread_id: Some("native-thread".into()),
+            cwd: None,
+            task_ref: None,
+            effective_config_fingerprint: "config".into(),
+            status: rusty_crew_core_protocol::ExternalBindingStatus::Active,
+            revision: 0,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            updated_at: "2026-07-10T00:00:00Z".into(),
+        };
+        store.put_external_agent_binding(&binding, None).unwrap();
+        assert!(store
+            .get_external_binding_for_agent(&session.agent_id)
+            .unwrap()
+            .is_some());
+        let turn = rusty_crew_core_protocol::ExternalTurnCorrelation {
+            request: rusty_crew_core_protocol::SessionTurnRequested {
+                request_id: rusty_crew_core_protocol::ExternalTurnRequestId::new("request-a"),
+                idempotency_key: "turn-key".into(),
+                session_id: session.session_id,
+                run_id: None,
+                binding_id: binding.binding_id,
+                input: vec![rusty_crew_core_protocol::ExternalTurnInputPart::Text {
+                    text: "inspect".into(),
+                }],
+                provenance: rusty_crew_core_protocol::TurnInputProvenance {
+                    kind: rusty_crew_core_protocol::TurnInputProvenanceKind::Operator,
+                    source_id: None,
+                    correlation_id: None,
+                },
+                created_at: "2026-07-10T00:00:00Z".into(),
+                expires_at: None,
+            },
+            runtime_id: runtime.runtime_id,
+            native_thread_id: "native-thread".into(),
+            native_turn_id: None,
+            task_ref: None,
+            phase: rusty_crew_core_protocol::ExternalTurnPhase::Accepted,
+            capacity_lease_id: Some("capacity-a".into()),
+            terminal_reason_code: None,
+            revision: 1,
+            updated_at: "2026-07-10T00:00:00Z".into(),
+        };
+        assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
+        assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
+        assert_eq!(store.list_nonterminal_external_turns().unwrap().len(), 1);
+        assert!(store
+            .storage_diagnostics()
+            .unwrap()
+            .repository_groups
+            .iter()
+            .any(|group| group.group_id == "external_agent_runtime"));
+        store.drop_schema_for_test().unwrap();
     }
 
     fn postgres_test_database_url() -> Option<String> {

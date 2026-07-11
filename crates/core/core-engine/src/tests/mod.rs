@@ -38,6 +38,7 @@ mod chat_mutations;
 mod chat_read;
 mod delegation_fanout;
 mod delegation_lifecycle;
+mod external_runtime;
 mod profile_admin;
 mod restart_hydration;
 mod scheduler;

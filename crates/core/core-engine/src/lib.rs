@@ -9,6 +9,7 @@ mod chat_store;
 mod curator;
 mod delegation;
 mod delegation_store;
+mod external_runtime;
 mod github_gate;
 mod github_gate_wait;
 mod maintenance;
@@ -29,6 +30,7 @@ mod sessions;
 
 pub(crate) use body::{add_millis_to_iso, sanitized_clock_key};
 pub use delegation::{delegated_agent_id, delegated_session_id};
+pub use external_runtime::{ExternalActivationRequest, ExternalRuntimeHydrationReport};
 pub use scheduler::SchedulerTickReport;
 
 use body_queue::{

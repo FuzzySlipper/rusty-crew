@@ -206,6 +206,289 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn put_external_runtime_registration(
+        &self,
+        record: &ExternalRuntimeRegistration,
+        expected_revision: Option<u64>,
+    ) -> CoreResult<ExternalRuntimeRegistration> {
+        match self {
+            Self::Sqlite(store) => {
+                store.put_external_runtime_registration(record, expected_revision)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.put_external_runtime_registration(record, expected_revision)
+            }
+        }
+    }
+
+    pub fn get_external_runtime_registration(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalRuntimeRegistration>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_runtime_registration(runtime_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_runtime_registration(runtime_id),
+        }
+    }
+
+    pub fn list_external_runtime_registrations(
+        &self,
+    ) -> CoreResult<Vec<ExternalRuntimeRegistration>> {
+        match self {
+            Self::Sqlite(store) => store.list_external_runtime_registrations(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_external_runtime_registrations(),
+        }
+    }
+
+    pub fn acquire_external_controller_lease(
+        &self,
+        candidate: &ExternalControllerLease,
+        now: &IsoTimestamp,
+    ) -> CoreResult<ExternalControllerLease> {
+        match self {
+            Self::Sqlite(store) => store.acquire_external_controller_lease(candidate, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.acquire_external_controller_lease(candidate, now),
+        }
+    }
+
+    pub fn release_external_controller_lease(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        holder_instance_id: &str,
+        generation: u64,
+        now: &IsoTimestamp,
+    ) -> CoreResult<ExternalControllerLease> {
+        match self {
+            Self::Sqlite(store) => store.release_external_controller_lease(
+                runtime_id,
+                holder_instance_id,
+                generation,
+                now,
+            ),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.release_external_controller_lease(
+                runtime_id,
+                holder_instance_id,
+                generation,
+                now,
+            ),
+        }
+    }
+
+    pub fn put_external_agent_binding(
+        &self,
+        record: &ExternalAgentBinding,
+        expected_revision: Option<u64>,
+    ) -> CoreResult<ExternalAgentBinding> {
+        match self {
+            Self::Sqlite(store) => store.put_external_agent_binding(record, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_external_agent_binding(record, expected_revision),
+        }
+    }
+
+    pub fn get_external_binding_for_agent(
+        &self,
+        agent_id: &AgentId,
+    ) -> CoreResult<Option<ExternalAgentBinding>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_binding_for_agent(agent_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_binding_for_agent(agent_id),
+        }
+    }
+
+    pub fn get_external_agent_binding(
+        &self,
+        binding_id: &ExternalBindingId,
+    ) -> CoreResult<Option<ExternalAgentBinding>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_agent_binding(binding_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_agent_binding(binding_id),
+        }
+    }
+
+    pub fn list_external_agent_bindings(&self) -> CoreResult<Vec<ExternalAgentBinding>> {
+        match self {
+            Self::Sqlite(store) => store.list_external_agent_bindings(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_external_agent_bindings(),
+        }
+    }
+
+    pub fn create_external_turn(
+        &self,
+        record: &ExternalTurnCorrelation,
+    ) -> CoreResult<ExternalTurnCorrelation> {
+        match self {
+            Self::Sqlite(store) => store.create_external_turn(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.create_external_turn(record),
+        }
+    }
+
+    pub fn update_external_turn(
+        &self,
+        next: &ExternalTurnCorrelation,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalTurnCorrelation> {
+        match self {
+            Self::Sqlite(store) => store.update_external_turn(next, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.update_external_turn(next, expected_revision),
+        }
+    }
+
+    pub fn get_external_turn(
+        &self,
+        request_id: &ExternalTurnRequestId,
+    ) -> CoreResult<Option<ExternalTurnCorrelation>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_turn(request_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_turn(request_id),
+        }
+    }
+
+    pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        match self {
+            Self::Sqlite(store) => store.list_nonterminal_external_turns(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_nonterminal_external_turns(),
+        }
+    }
+
+    pub fn put_external_control_receipt(
+        &self,
+        receipt: &ExternalControlReceipt,
+    ) -> CoreResult<ExternalControlReceipt> {
+        match self {
+            Self::Sqlite(store) => store.put_external_control_receipt(receipt),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_external_control_receipt(receipt),
+        }
+    }
+
+    pub fn get_external_control_receipt(
+        &self,
+        control_id: &ExternalControlId,
+    ) -> CoreResult<Option<ExternalControlReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_control_receipt(control_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_control_receipt(control_id),
+        }
+    }
+
+    pub fn update_external_control_receipt(
+        &self,
+        next: &ExternalControlReceipt,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalControlReceipt> {
+        match self {
+            Self::Sqlite(store) => store.update_external_control_receipt(next, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.update_external_control_receipt(next, expected_revision),
+        }
+    }
+
+    pub fn put_external_interaction(
+        &self,
+        record: &ExternalInteractionRecord,
+    ) -> CoreResult<ExternalInteractionRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_external_interaction(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_external_interaction(record),
+        }
+    }
+
+    pub fn update_external_interaction(
+        &self,
+        next: &ExternalInteractionRecord,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalInteractionRecord> {
+        match self {
+            Self::Sqlite(store) => store.update_external_interaction(next, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.update_external_interaction(next, expected_revision),
+        }
+    }
+
+    pub fn list_pending_external_interactions(&self) -> CoreResult<Vec<ExternalInteractionRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_pending_external_interactions(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_pending_external_interactions(),
+        }
+    }
+
+    pub fn append_external_runtime_event(
+        &self,
+        event: &NormalizedExternalRuntimeEvent,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(store) => store.append_external_runtime_event(event),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.append_external_runtime_event(event),
+        }
+    }
+
+    pub fn query_external_runtime_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        match self {
+            Self::Sqlite(store) => {
+                store.query_external_runtime_events(runtime_id, after_sequence, limit)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.query_external_runtime_events(runtime_id, after_sequence, limit)
+            }
+        }
+    }
+
+    pub fn create_external_correlated_round(
+        &self,
+        record: &ExternalCorrelatedRound,
+    ) -> CoreResult<ExternalCorrelatedRound> {
+        match self {
+            Self::Sqlite(store) => store.create_external_correlated_round(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.create_external_correlated_round(record),
+        }
+    }
+
+    pub fn update_external_correlated_round(
+        &self,
+        next: &ExternalCorrelatedRound,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalCorrelatedRound> {
+        match self {
+            Self::Sqlite(store) => store.update_external_correlated_round(next, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.update_external_correlated_round(next, expected_revision)
+            }
+        }
+    }
+
+    pub fn list_pending_external_rounds(&self) -> CoreResult<Vec<ExternalCorrelatedRound>> {
+        match self {
+            Self::Sqlite(store) => store.list_pending_external_rounds(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_pending_external_rounds(),
+        }
+    }
+
     pub fn delegated_completions_for_parent(
         &self,
         parent_session_id: &SessionId,

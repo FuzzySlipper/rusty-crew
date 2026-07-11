@@ -160,6 +160,16 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         ],
     },
     RepositoryGroupDescriptor {
+        group_id: "external_agent_runtime",
+        label: "External Agent Runtime",
+        correctness_sensitive: true,
+        backend_requirements: &[TXN, JSON, ROW_CLAIMS, SIZE, PLAN],
+        notes: &[
+            "Owns runtime registrations, controller leases, agent bindings, turns, controls, interactions, replay cursors, and correlated rounds.",
+            "Lease generations, idempotency receipts, terminal-state immutability, and expiry must match on SQLite and PostgreSQL.",
+        ],
+    },
+    RepositoryGroupDescriptor {
         group_id: "tool_telemetry",
         label: "Tool Telemetry",
         correctness_sensitive: false,

@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 34;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 35;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -188,6 +188,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 34,
         description: "add typed curator governance records and audit receipts",
         apply: repos::curator::migrate_v34_add_curator_governance,
+    },
+    SchemaMigration {
+        version: 35,
+        description: "add managed external agent runtime lifecycle records",
+        apply: repos::external_runtime::migrate_v35_add_external_runtime,
     },
 ];
 

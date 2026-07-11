@@ -85,6 +85,21 @@ owns = [
 notes = "Provider wire-state payloads, expiry, invalidation, and diagnostics."
 
 [[scope]]
+id = "external_agent_runtime"
+label = "External Agent Runtime"
+owns = [
+  "external_runtime_registrations",
+  "external_controller_leases",
+  "external_agent_bindings",
+  "external_turns",
+  "external_control_receipts",
+  "external_interactions",
+  "external_runtime_events",
+  "external_correlated_rounds",
+]
+notes = "External runtime registrations, exclusive controller generations, Crew/native identity correlation, idempotent turn/control/interaction state, normalized replay events, and correlated direct-message rounds."
+
+[[scope]]
 id = "profile_registry"
 label = "Profile Registry And Config"
 owns = [

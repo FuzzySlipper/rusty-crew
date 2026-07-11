@@ -2926,6 +2926,14 @@ pub enum DiagnosticTable {
     WorkerPoolLeases,
     WorkerPoolEvents,
     ToolCallHistory,
+    ExternalRuntimeRegistrations,
+    ExternalControllerLeases,
+    ExternalAgentBindings,
+    ExternalTurns,
+    ExternalControlReceipts,
+    ExternalInteractions,
+    ExternalRuntimeEvents,
+    ExternalCorrelatedRounds,
 }
 
 impl DiagnosticTable {
@@ -2984,6 +2992,14 @@ impl DiagnosticTable {
         Self::WorkerPoolLeases,
         Self::WorkerPoolEvents,
         Self::ToolCallHistory,
+        Self::ExternalRuntimeRegistrations,
+        Self::ExternalControllerLeases,
+        Self::ExternalAgentBindings,
+        Self::ExternalTurns,
+        Self::ExternalControlReceipts,
+        Self::ExternalInteractions,
+        Self::ExternalRuntimeEvents,
+        Self::ExternalCorrelatedRounds,
     ];
 
     pub(crate) fn parse(raw: &str) -> CoreResult<Self> {
@@ -3042,6 +3058,14 @@ impl DiagnosticTable {
             "worker_pool_leases" => Ok(Self::WorkerPoolLeases),
             "worker_pool_events" => Ok(Self::WorkerPoolEvents),
             "tool_call_history" => Ok(Self::ToolCallHistory),
+            "external_runtime_registrations" => Ok(Self::ExternalRuntimeRegistrations),
+            "external_controller_leases" => Ok(Self::ExternalControllerLeases),
+            "external_agent_bindings" => Ok(Self::ExternalAgentBindings),
+            "external_turns" => Ok(Self::ExternalTurns),
+            "external_control_receipts" => Ok(Self::ExternalControlReceipts),
+            "external_interactions" => Ok(Self::ExternalInteractions),
+            "external_runtime_events" => Ok(Self::ExternalRuntimeEvents),
+            "external_correlated_rounds" => Ok(Self::ExternalCorrelatedRounds),
             _ => Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
                 format!("unsupported persistence table {raw}"),
@@ -3105,6 +3129,14 @@ impl DiagnosticTable {
             Self::WorkerPoolLeases => "worker_pool_leases",
             Self::WorkerPoolEvents => "worker_pool_events",
             Self::ToolCallHistory => "tool_call_history",
+            Self::ExternalRuntimeRegistrations => "external_runtime_registrations",
+            Self::ExternalControllerLeases => "external_controller_leases",
+            Self::ExternalAgentBindings => "external_agent_bindings",
+            Self::ExternalTurns => "external_turns",
+            Self::ExternalControlReceipts => "external_control_receipts",
+            Self::ExternalInteractions => "external_interactions",
+            Self::ExternalRuntimeEvents => "external_runtime_events",
+            Self::ExternalCorrelatedRounds => "external_correlated_rounds",
         }
     }
 }
