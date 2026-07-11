@@ -15,6 +15,7 @@
     "smoke:generated-bridge-schemas": "tsx src/smoke-generated-bridge-schemas.ts",
     "smoke:native-admin-validation": "tsx src/smoke-native-admin-validation.ts",
     "smoke:native-direct-validation": "tsx src/smoke-native-direct-validation.ts",
+    "smoke:native-external-nullability": "tsx src/smoke-native-external-nullability.ts",
     "smoke:native-module-boundaries": "tsx src/smoke-native-module-boundaries.ts",
     "smoke:native-mapping-inventory": "tsx src/smoke-native-mapping-inventory.ts"
   },

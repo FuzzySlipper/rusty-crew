@@ -299,13 +299,7 @@ fn render_object(schema: &Value, path: &str) -> Result<String> {
     for (wire_name, property) in properties.expect("checked above") {
         let is_required = required.contains(wire_name.as_str());
         let property_type = ergonomic_type_override(path, wire_name).map_or_else(
-            || {
-                render_schema(
-                    property,
-                    &format!("{path}.properties.{wire_name}"),
-                    !is_required,
-                )
-            },
+            || render_schema(property, &format!("{path}.properties.{wire_name}"), false),
             |value| Ok(value.to_owned()),
         )?;
         let property_name = if preserves_rust_wire_names(path) {
@@ -433,5 +427,25 @@ mod tests {
         assert!(preserves_rust_wire_names(
             "$defs.MemorySpaceDescriptor.properties.space_id"
         ));
+    }
+
+    #[test]
+    fn optional_rust_values_remain_nullable_in_typescript() {
+        let generated = protocol_contracts_ts().expect("generate protocol contracts");
+        assert!(generated.contains("nativeThreadId?: string | null;"));
+        assert!(generated.contains("nativeTurnId?: string | null;"));
+
+        let schema = protocol_contract_schema_value().expect("generate protocol schema");
+        let binding = &schema["$defs"]["ExternalAgentBinding"];
+        assert!(!binding["required"]
+            .as_array()
+            .expect("binding required fields")
+            .iter()
+            .any(|field| field.as_str() == Some("nativeThreadId")));
+        assert!(binding["properties"]["nativeThreadId"]["type"]
+            .as_array()
+            .expect("nativeThreadId type union")
+            .iter()
+            .any(|kind| kind.as_str() == Some("null")));
     }
 }

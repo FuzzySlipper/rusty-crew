@@ -186,7 +186,7 @@ export function toNativeProviderStateInput(
     provider_fingerprint: state.providerFingerprint,
     payload_version: state.payloadVersion,
     payload: state.payload,
-    expires_at: state.expiresAt,
+    expires_at: state.expiresAt ?? undefined,
   };
 }
 
@@ -387,7 +387,7 @@ export function toRawBrainWakeProviderStateOutput(
           provider_fingerprint: output.state.providerFingerprint,
           payload_version: output.state.payloadVersion,
           payload: output.state.payload,
-          ttl_ms: output.state.ttlMs,
+          ttl_ms: output.state.ttlMs ?? undefined,
         },
       };
     case "clear":

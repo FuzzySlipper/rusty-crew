@@ -52,8 +52,8 @@ export async function wakeBrainFromBridgeRequest(
         state: parseBodyStateBuffer(bodyStateView),
         systemPrompt: decodeBuffer(systemPromptView),
         roleAssembly: parseJsonBuffer<BrainRoleAssembly>(roleAssemblyView),
-        providerState: request.providerState,
-        providerStateAbsence: request.providerStateAbsence,
+        providerState: request.providerState ?? undefined,
+        providerStateAbsence: request.providerStateAbsence ?? undefined,
       },
       options,
     );

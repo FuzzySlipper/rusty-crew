@@ -402,7 +402,7 @@ async function appendCoreEventsToChatLog(
       await appendBrainEventToChatLog(
         context,
         session,
-        event.wakeId,
+        event.wakeId ?? undefined,
         event.event,
       );
     } else if (
@@ -490,7 +490,11 @@ async function appendBrainEventToChatLog(
         kind: "tool_call_started",
         payload: {
           wake_id: wakeId,
-          tool_call_id: chatToolCallId(wakeId, event.toolName, event.metadata),
+          tool_call_id: chatToolCallId(
+            wakeId,
+            event.toolName,
+            event.metadata ?? undefined,
+          ),
           tool_name: event.toolName,
           debug_detail_id: event.metadata?.debugDetailId,
           metadata: event.metadata,
@@ -502,7 +506,11 @@ async function appendBrainEventToChatLog(
         kind: event.isError ? "tool_call_failed" : "tool_call_completed",
         payload: {
           wake_id: wakeId,
-          tool_call_id: chatToolCallId(wakeId, event.toolName, event.metadata),
+          tool_call_id: chatToolCallId(
+            wakeId,
+            event.toolName,
+            event.metadata ?? undefined,
+          ),
           tool_name: event.toolName,
           is_error: event.isError,
           debug_detail_id: event.metadata?.debugDetailId,

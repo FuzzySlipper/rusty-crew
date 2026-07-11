@@ -961,7 +961,7 @@ function observeProviderStateWake(
   if (!strategy) return;
   const state = request.providerState;
   const status =
-    state === undefined
+    state == null
       ? providerStateStatusFromAbsence(
           request.providerStateAbsence,
           strategy.providerState.mode,
@@ -973,12 +973,12 @@ function observeProviderStateWake(
     strategyId: strategy.strategyId,
     status,
     lastWakeId: request.wakeId,
-    ...(state === undefined
+    ...(state == null
       ? {}
       : {
           payloadVersion: state.payloadVersion,
           payloadBytes: Buffer.byteLength(JSON.stringify(state.payload)),
-          expiresAt: state.expiresAt,
+          expiresAt: state.expiresAt ?? undefined,
         }),
   };
   observations.set(providerStateDiagnosticKey(diagnostic), diagnostic);
@@ -1202,7 +1202,7 @@ function createNativeBridgeModule(
       tools: registration.toolProfile.tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: tool.inputSchema ?? undefined,
       })),
     },
     modelConfig: {
@@ -1227,6 +1227,28 @@ function createNativeBridgeModule(
           providerFingerprint:
             registration.providerStateScope.providerFingerprint,
         }
+      : undefined,
+  });
+  const nativeSessionConfig = (config: NativeSessionConfigInput) => ({
+    ...config,
+    resourceLimits: config.resourceLimits
+      ? {
+          workdir: config.resourceLimits.workdir ?? undefined,
+          maxDurationMs: config.resourceLimits.maxDurationMs ?? undefined,
+          maxDelegationDepth:
+            config.resourceLimits.maxDelegationDepth ?? undefined,
+        }
+      : undefined,
+    toolProfile: config.toolProfile
+      ? {
+          tools: config.toolProfile.tools.map((tool) => ({
+            ...tool,
+            inputSchema: tool.inputSchema ?? undefined,
+          })),
+        }
+      : undefined,
+    historyWindow: config.historyWindow
+      ? { maxMessages: config.historyWindow.maxMessages ?? undefined }
       : undefined,
   });
   const module: NativeBridgeModule = {
@@ -1475,9 +1497,10 @@ function createNativeBridgeModule(
       binding
         .drainSubscriptionEvents(handle, maxEvents)
         .map((eventJson) => toCoreEvent(JSON.parse(eventJson) as RawCoreEvent)),
-    createSession: async (config) => binding.createSession(config),
+    createSession: async (config) =>
+      binding.createSession(nativeSessionConfig(config)),
     ensureConfiguredSession: async (config) =>
-      binding.ensureConfiguredSession(config),
+      binding.ensureConfiguredSession(nativeSessionConfig(config)),
     archiveSession: async (sessionId) => binding.archiveSession(sessionId),
     routeAgentMessage: async (from, to, body, correlationId) =>
       binding.routeAgentMessage(from, to, body, correlationId),

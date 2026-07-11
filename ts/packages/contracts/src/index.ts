@@ -711,7 +711,7 @@ export function validateMemorySpaceDescriptor(
   ) {
     errors.push("memory space schema_version must be greater than zero");
   }
-  if (descriptor.module_id !== undefined) {
+  if (descriptor.module_id != null) {
     validateIdentifier("memory module id", descriptor.module_id, errors);
   }
   if (descriptor.record_shapes.length === 0) {
@@ -755,7 +755,7 @@ export function validateMemorySpaceDescriptor(
         `memory operation policy references unsupported operation ${policy.operation}`,
       );
     }
-    if (policy.min_confidence !== undefined) {
+    if (policy.min_confidence != null) {
       validateConfidence(policy.min_confidence, errors);
     }
   }

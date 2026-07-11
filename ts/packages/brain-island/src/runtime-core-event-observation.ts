@@ -258,7 +258,7 @@ function projectedAgentMessageObservation(
   message: AgentMessage,
 ): AgentActivityEventInput | undefined {
   const projection = message.projection;
-  if (projection === undefined) return undefined;
+  if (projection == null) return undefined;
   return {
     eventType: "work_checkpoint",
     identity: {
@@ -272,11 +272,11 @@ function projectedAgentMessageObservation(
     surface: "conversation",
     reasonCode: "projected_agent_message",
     workRef: workRefFromProjectionRefs(
-      projection.targetRef,
-      projection.workRef,
+      projection.targetRef ?? undefined,
+      projection.workRef ?? undefined,
     ),
     resultRef: {
-      message_id: message.correlationId,
+      message_id: message.correlationId ?? undefined,
     },
   };
 }

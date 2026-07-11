@@ -4950,7 +4950,7 @@ function createServiceCoordinationRuntime(
       const activation = receipt.activation;
       return {
         accepted: receipt.status === "accepted",
-        sequence: receipt.sequence,
+        sequence: receipt.sequence ?? undefined,
         wake:
           activation?.type === "rejected" || receipt.status === "rejected"
             ? {
@@ -4959,7 +4959,7 @@ function createServiceCoordinationRuntime(
                 reasonCode:
                   activation?.type === "rejected"
                     ? activation.reasonCode
-                    : receipt.reasonCode,
+                    : (receipt.reasonCode ?? undefined),
               }
             : activation?.type === "queued_for_next_turn"
               ? {
@@ -5004,7 +5004,7 @@ function createServiceCoordinationRuntime(
         if (round === undefined || round.status === "expired") {
           return {
             accepted: started.delivery.status === "accepted",
-            sequence: started.delivery.sequence,
+            sequence: started.delivery.sequence ?? undefined,
             timedOut: true,
           };
         }
@@ -5019,7 +5019,7 @@ function createServiceCoordinationRuntime(
             | undefined;
           return {
             accepted: true,
-            sequence: started.delivery.sequence,
+            sequence: started.delivery.sequence ?? undefined,
             reply: {
               from: outcome?.from ?? input.toAgentId,
               to: outcome?.to ?? input.fromAgentId,
@@ -5031,7 +5031,7 @@ function createServiceCoordinationRuntime(
         if (round.status === "failed" || round.status === "cancelled") {
           return {
             accepted: false,
-            sequence: started.delivery.sequence,
+            sequence: started.delivery.sequence ?? undefined,
           };
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 25));

@@ -333,7 +333,7 @@ function sessionSummary(
     createdAt: session.createdAt,
     lastActiveAt: session.lastActiveAt,
     toolCount: session.toolProfile.tools.length,
-    workdir: session.resourceLimits.workdir,
+    workdir: session.resourceLimits.workdir ?? undefined,
     effectiveDefaults: diagnostics?.effectiveDefaults,
   };
 }
@@ -432,7 +432,7 @@ function messageSummary(
   return {
     from: message.from,
     to: message.to,
-    correlationId: message.correlationId,
+    correlationId: message.correlationId ?? undefined,
     bodyChars: message.body.length,
     bodySha256: sha256(message.body),
     bodyPreview: includeBody

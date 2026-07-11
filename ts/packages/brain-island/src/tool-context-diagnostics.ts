@@ -641,10 +641,10 @@ function resourceSummary(
   ].filter((note): note is string => Boolean(note));
 
   return {
-    workdir: limits?.workdir,
+    workdir: limits?.workdir ?? undefined,
     workdirScoped: Boolean(limits?.workdir),
-    maxDurationMs: limits?.maxDurationMs,
-    maxDelegationDepth: limits?.maxDelegationDepth,
+    maxDurationMs: limits?.maxDurationMs ?? undefined,
+    maxDelegationDepth: limits?.maxDelegationDepth ?? undefined,
     notes,
   };
 }

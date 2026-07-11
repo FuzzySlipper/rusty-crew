@@ -502,7 +502,7 @@ export class ServiceExternalRuntimeController {
     controlled.registration = decision.registration;
     return {
       accepted: decision.accepted,
-      ...(decision.reasonCode === undefined
+      ...(decision.reasonCode == null
         ? {}
         : {
             reasonCode: decision.reasonCode,

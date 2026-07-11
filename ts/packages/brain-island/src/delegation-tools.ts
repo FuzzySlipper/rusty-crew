@@ -481,7 +481,7 @@ function childResourceLimits(
   const parent = context.parentResourceLimits ?? {};
   const parentDepth = parent.maxDelegationDepth;
   const inheritedDepth =
-    parentDepth === undefined ? undefined : Math.max(0, parentDepth - 1);
+    parentDepth == null ? undefined : Math.max(0, parentDepth - 1);
   return {
     workdir: requested?.workdir ?? parent.workdir,
     maxDurationMs: requested?.maxDurationMs ?? parent.maxDurationMs,

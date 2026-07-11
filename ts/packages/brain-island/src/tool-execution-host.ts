@@ -319,7 +319,10 @@ export function withBrainHostToolDebugReference(
       ...item.event,
       event: {
         ...event,
-        metadata: withToolCallDebugReference(event.metadata, debugDetailId),
+        metadata: withToolCallDebugReference(
+          event.metadata ?? undefined,
+          debugDetailId,
+        ),
       },
     },
   };

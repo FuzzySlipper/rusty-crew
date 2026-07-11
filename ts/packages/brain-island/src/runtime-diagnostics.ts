@@ -871,7 +871,7 @@ function delegationDiagnostics(
     sessionId: status.session.sessionId,
     parentSessionId: status.parentSessionId,
     runId: status.runId,
-    runStatus: status.runStatus,
+    runStatus: status.runStatus ?? undefined,
     terminal: status.terminal,
     blocked,
   };

@@ -50,7 +50,9 @@ export function projectAgentMessageToChannel(
   bindings: readonly ChannelBindingRecord[],
   options: ChannelProjectionOptions = {},
 ): ChannelOutboundProjectionResult {
-  const correlationBindingId = bindingIdFromCorrelation(message.correlationId);
+  const correlationBindingId = bindingIdFromCorrelation(
+    message.correlationId ?? undefined,
+  );
   const targetBindingId = bindingIdFromChannelTarget(message.to);
   const bindingId = correlationBindingId ?? targetBindingId;
 
@@ -95,7 +97,7 @@ export function projectAgentMessageToChannel(
       },
       providerRefs: providerRefsFromBinding(binding),
       body: boundedText(message.body, options.maxBodyChars),
-      correlationId: message.correlationId,
+      correlationId: message.correlationId ?? undefined,
       idempotencyKey: outboundIdempotencyKey(binding, message),
       visibility: "conversation",
       deliveryPolicy: "best_effort",

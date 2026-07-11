@@ -106,29 +106,29 @@ export type AgentCorrelatedRound = {
   outcome?: unknown;
   recipientAgentId: string;
   recipientSessionId: string;
-  replyMessageId?: string;
+  replyMessageId?: string | null;
   revision: number;
   roundId: string;
   senderAgentId: string;
-  senderRequestId?: string;
+  senderRequestId?: string | null;
   senderSessionId: string;
   status: AgentRoundStatus;
-  terminalAt?: string;
-  terminalReasonCode?: string;
+  terminalAt?: string | null;
+  terminalReasonCode?: string | null;
 };
 
 export type AgentMessage = {
   body: string;
-  correlationId?: string;
+  correlationId?: string | null;
   from: AgentId;
-  projection?: AgentMessageProjectionHint;
+  projection?: AgentMessageProjectionHint | null;
   to: AgentId;
 };
 
 export type AgentMessageCommand = {
   body: string;
   caller: AgentCoordinationCaller;
-  correlationId?: string;
+  correlationId?: string | null;
   createdAt: string;
   deliveryId: string;
   expiresAt: string;
@@ -139,19 +139,19 @@ export type AgentMessageCommand = {
 };
 
 export type AgentMessageDeliveryReceipt = {
-  activation?: AgentActivation;
-  reasonCode?: string;
+  activation?: AgentActivation | null;
+  reasonCode?: string | null;
   request: AgentMessageDeliveryRequest;
-  resolvedRoundId?: string;
+  resolvedRoundId?: string | null;
   revision: number;
-  sequence?: number;
+  sequence?: number | null;
   status: AgentMessageDeliveryStatus;
-  terminalAt?: string;
+  terminalAt?: string | null;
 };
 
 export type AgentMessageDeliveryRequest = {
   body: string;
-  correlationId?: string;
+  correlationId?: string | null;
   createdAt: string;
   deliveryId: string;
   expiresAt: string;
@@ -165,10 +165,10 @@ export type AgentMessageDeliveryRequest = {
 export type AgentMessageDeliveryStatus = "pending" | "accepted" | "rejected" | "expired";
 
 export type AgentMessageProjectionHint = {
-  reason?: string;
-  targetRef?: ProjectionRef;
+  reason?: string | null;
+  targetRef?: ProjectionRef | null;
   visibility: ProjectionVisibility;
-  workRef?: ProjectionRef;
+  workRef?: ProjectionRef | null;
 };
 
 export type AgentRoundCommand = {
@@ -210,19 +210,19 @@ export type BrainAction = {
   message: AgentMessage;
   type: "send_message";
 } | {
-  capacityRequest?: WorkerPoolCapacityRequest;
-  correlationId?: string;
-  expectedOutput?: string;
-  fanOutFailurePolicy?: FanOutFailurePolicy;
-  fanOutGroupId?: string;
-  fanOutMaxConcurrency?: number;
-  parentConsumption?: ParentConsumptionPolicy;
-  priority?: DelegationPriority;
+  capacityRequest?: WorkerPoolCapacityRequest | null;
+  correlationId?: string | null;
+  expectedOutput?: string | null;
+  fanOutFailurePolicy?: FanOutFailurePolicy | null;
+  fanOutGroupId?: string | null;
+  fanOutMaxConcurrency?: number | null;
+  parentConsumption?: ParentConsumptionPolicy | null;
+  priority?: DelegationPriority | null;
   profileId: ProfileId;
   prompt: string;
-  resourceLimits?: ResourceLimits;
+  resourceLimits?: ResourceLimits | null;
   taskId?: TaskId;
-  timeoutMs?: number;
+  timeoutMs?: number | null;
   type: "request_delegation";
 } | {
   packet: CompletionPacket;
@@ -241,26 +241,26 @@ export type BrainEvent = {
   text: string;
   type: "text_delta";
 } | {
-  format?: string;
+  format?: string | null;
   text: string;
   type: "reasoning_delta";
 } | {
-  message?: string;
+  message?: string | null;
   phase: BrainPhase;
   type: "phase_change";
 } | {
-  metadata?: ToolCallMetadata;
+  metadata?: ToolCallMetadata | null;
   toolName: string;
   type: "tool_call_started";
 } | {
   isError: boolean;
-  metadata?: ToolCallMetadata;
+  metadata?: ToolCallMetadata | null;
   toolName: string;
   type: "tool_call_finished";
 } | {
   level: BrainProviderStatusLevel;
   message: string;
-  metadataJson?: string;
+  metadataJson?: string | null;
   type: "provider_status";
 } | {
   type: "finished";
@@ -304,7 +304,7 @@ export type BrainWakeFailure = {
 };
 
 export type BrainWakeProviderStateInput = {
-  expiresAt?: string;
+  expiresAt?: string | null;
   moduleId: string;
   payload: unknown;
   payloadVersion: string;
@@ -330,14 +330,14 @@ export type BrainWakeProviderStateUpdate = {
   profileFingerprint: string;
   providerFingerprint: string;
   strategyId: string;
-  ttlMs?: number;
+  ttlMs?: number | null;
 };
 
 export type BrainWakeRequest = {
   bodyState: RuntimeBufferHandle;
   brain: BrainImplementationHandle;
-  providerState?: BrainWakeProviderStateInput;
-  providerStateAbsence?: ProviderStateAbsenceReason;
+  providerState?: BrainWakeProviderStateInput | null;
+  providerStateAbsence?: ProviderStateAbsenceReason | null;
   roleAssembly: RuntimeBufferHandle;
   sessionId: SessionId;
   systemPrompt: RuntimeBufferHandle;
@@ -382,12 +382,12 @@ export type ContextCompactionArtifact = {
 
 export type ContextCompactionArtifactQuery = {
   branch_id?: ConversationBranchId;
-  enters_future_context?: boolean;
+  enters_future_context?: boolean | null;
   latest_only: boolean;
-  limit?: number;
-  offset?: number;
+  limit?: number | null;
+  offset?: number | null;
   session_id?: SessionId;
-  strategy_id?: string;
+  strategy_id?: string | null;
 };
 
 export type CoreError = {
@@ -428,7 +428,7 @@ export type CoreEvent = {
   event: BrainEvent;
   sessionId: SessionId;
   type: "brain_event_observed";
-  wakeId?: string;
+  wakeId?: string | null;
 } | {
   count: number;
   sessionId: SessionId;
@@ -442,7 +442,7 @@ export type CoreEventKind = "session_created" | "session_archived" | "agent_mess
 
 export type DelegatedCompletion = {
   childSessionId: SessionId;
-  correlationId?: string;
+  correlationId?: string | null;
   packet: CompletionPacket;
   parentConsumption: ParentConsumptionPolicy;
   requestedTaskId?: TaskId;
@@ -460,7 +460,7 @@ export type DelegatedFanOutGroup = {
   failed: number;
   failurePolicy: FanOutFailurePolicy;
   groupId: string;
-  maxConcurrency?: number;
+  maxConcurrency?: number | null;
   pending: number;
   status: FanOutGroupStatus;
   total: number;
@@ -479,14 +479,14 @@ export type DelegatedRunStatus = "requested" | "session_created" | "wake_request
 export type DelegatedSessionRuntimeStatus = {
   parentSessionId?: SessionId;
   runId?: RunId;
-  runStatus?: DelegatedRunStatus;
+  runStatus?: DelegatedRunStatus | null;
   session: SessionState;
   terminal: boolean;
 };
 
 export type DelegationLifecycleEvent = {
   delegatedSessionId: SessionId;
-  detail?: string;
+  detail?: string | null;
   parentSessionId: SessionId;
   phase: DelegationLifecyclePhase;
   runId?: RunId;
@@ -511,7 +511,7 @@ export type DenDataUpdate = {
   entityId: string;
   entityKind: string;
   projectId: ProjectId;
-  revision?: string;
+  revision?: string | null;
 };
 
 export type DenRuntimeReference = {
@@ -532,18 +532,18 @@ export type EventSubscription = {
 };
 
 export type ExternalAgentBinding = {
-  agentId?: string;
+  agentId?: string | null;
   bindingId: string;
   createdAt: string;
-  cwd?: string;
+  cwd?: string | null;
   effectiveConfigFingerprint: string;
-  nativeThreadId?: string;
+  nativeThreadId?: string | null;
   purpose: ExternalBindingPurpose;
   revision: number;
   runtimeId: string;
-  sessionId?: string;
+  sessionId?: string | null;
   status: ExternalBindingStatus;
-  taskRef?: DenRuntimeReference;
+  taskRef?: DenRuntimeReference | null;
   updatedAt: string;
 };
 
@@ -555,7 +555,7 @@ export type ExternalControlKind = "start_or_resume_thread" | "start_turn" | "ste
 
 export type ExternalControlReceipt = {
   outcome?: unknown;
-  reasonCode?: string;
+  reasonCode?: string | null;
   request: ExternalControlRequest;
   requestFingerprint: string;
   revision: number;
@@ -567,7 +567,7 @@ export type ExternalControlRequest = {
   bindingId: string;
   controlId: string;
   expectedBindingRevision: number;
-  expectedNativeTurnId?: string;
+  expectedNativeTurnId?: string | null;
   idempotencyKey: string;
   kind: ExternalControlKind;
   payload: unknown;
@@ -613,8 +613,8 @@ export type ExternalEventPayload = {
   correlationId: string;
   expiresAt: string;
   externalChannelId: string;
-  externalMessageId?: string;
-  externalThreadId?: string;
+  externalMessageId?: string | null;
+  externalThreadId?: string | null;
   from: string;
   idempotencyKey: string;
   provider: string;
@@ -622,7 +622,7 @@ export type ExternalEventPayload = {
   text: string;
   type: "channel_message";
 } | {
-  detail?: string;
+  detail?: string | null;
   status: string;
   type: "adapter_status";
 } | {
@@ -646,11 +646,11 @@ export type ExternalInteractionRecord = {
   nativeTurnId: string;
   outcome?: unknown;
   prompt: unknown;
-  rawDetailRef?: string;
+  rawDetailRef?: string | null;
   requestId: string;
   requestedAt: string;
-  resolutionIdempotencyKey?: string;
-  resolvedAt?: string;
+  resolutionIdempotencyKey?: string | null;
+  resolvedAt?: string | null;
   revision: number;
   runtimeId: string;
   status: ExternalInteractionStatus;
@@ -665,20 +665,20 @@ export type ExternalRuntimeDesiredState = "enabled" | "disabled";
 export type ExternalRuntimeEventInput = {
   createdAt: string;
   eventId: string;
-  itemId?: string;
+  itemId?: string | null;
   kind: string;
-  nativeThreadId?: string;
-  nativeTurnId?: string;
+  nativeThreadId?: string | null;
+  nativeTurnId?: string | null;
   payload: unknown;
-  rawDetailRef?: string;
-  requestId?: string;
+  rawDetailRef?: string | null;
+  requestId?: string | null;
   runtimeId: string;
-  sessionId?: string;
+  sessionId?: string | null;
 };
 
 export type ExternalRuntimeHandshakeDecision = {
   accepted: boolean;
-  reasonCode?: string;
+  reasonCode?: string | null;
   registration: ExternalRuntimeRegistration;
 };
 
@@ -696,14 +696,14 @@ export type ExternalRuntimeKind = "codex_app_server";
 export type ExternalRuntimeObservedState = "disconnected" | "connecting" | "ready" | "degraded" | "incompatible";
 
 export type ExternalRuntimeRegistration = {
-  codexHomeRef?: string;
+  codexHomeRef?: string | null;
   createdAt: string;
   desiredState: ExternalRuntimeDesiredState;
   endpoint: ExternalEndpoint;
   executableSha256: string;
   expectedCliVersion: string;
   kind: ExternalRuntimeKind;
-  observedReasonCode?: string;
+  observedReasonCode?: string | null;
   observedState: ExternalRuntimeObservedState;
   processOwnership: ExternalProcessOwnership;
   protocolSchemaSha256: string;
@@ -716,20 +716,20 @@ export type ExternalRuntimeStateObservation = {
   controller: ExternalControllerContext;
   observedAt: string;
   observedState: ExternalRuntimeObservedState;
-  reasonCode?: string;
+  reasonCode?: string | null;
   runtimeId: string;
 };
 
 export type ExternalTurnCorrelation = {
-  capacityLeaseId?: string;
+  capacityLeaseId?: string | null;
   nativeThreadId: string;
-  nativeTurnId?: string;
+  nativeTurnId?: string | null;
   phase: ExternalTurnPhase;
   request: SessionTurnRequested;
   revision: number;
   runtimeId: string;
-  taskRef?: DenRuntimeReference;
-  terminalReasonCode?: string;
+  taskRef?: DenRuntimeReference | null;
+  terminalReasonCode?: string | null;
   updatedAt: string;
 };
 
@@ -741,7 +741,7 @@ export type ExternalTurnInputPart = {
   url: string;
 } | {
   name: string;
-  path?: string;
+  path?: string | null;
   type: "skill";
 } | {
   kind: string;
@@ -767,7 +767,7 @@ export type MemoryEvidenceKind = "wake" | "event" | "tool_call" | "transcript" |
 
 export type MemoryEvidenceRef = {
   evidence_type: MemoryEvidenceKind;
-  label?: string;
+  label?: string | null;
   ref_id: string;
 };
 
@@ -781,15 +781,15 @@ export type MemoryFieldType = "string" | "markdown" | "json" | "integer" | "floa
 
 export type MemoryGovernanceDecisionInput = {
   actor: string;
-  confidence?: number;
-  decided_at?: string;
+  confidence?: number | null;
+  decided_at?: string | null;
   decision: MemoryGovernanceDecisionKind;
   decision_id: string;
   evidence_refs: Array<MemoryEvidenceRef>;
-  message?: string;
+  message?: string | null;
   policy_mode: MemoryGovernanceMode;
   proposal_id: string;
-  resulting_revision?: number;
+  resulting_revision?: number | null;
   source: MemoryProposalSource;
 };
 
@@ -797,15 +797,15 @@ export type MemoryGovernanceDecisionKind = "routed_to_review" | "approved" | "re
 
 export type MemoryGovernanceDecisionRecord = {
   actor: string;
-  confidence?: number;
+  confidence?: number | null;
   decided_at: string;
   decision: MemoryGovernanceDecisionKind;
   decision_id: string;
   evidence_refs: Array<MemoryEvidenceRef>;
-  message?: string;
+  message?: string | null;
   policy_mode: MemoryGovernanceMode;
   proposal_id: string;
-  resulting_revision?: number;
+  resulting_revision?: number | null;
   source: MemoryProposalSource;
 };
 
@@ -820,7 +820,7 @@ export type MemoryOperation = "read" | "list" | "add" | "replace" | "merge" | "s
 
 export type MemoryOperationPolicy = {
   governance_mode: MemoryGovernanceMode;
-  min_confidence?: number;
+  min_confidence?: number | null;
   operation: MemoryOperation;
   requires_expected_revision: boolean;
 };
@@ -830,9 +830,9 @@ export type MemoryPromptPolicy = "auto_context" | "summary_context" | "tool_only
 export type MemoryProposalEnvelope = {
   confidence: number;
   content: unknown;
-  created_at?: string;
-  dedupe_key?: string;
-  durability_rationale?: string;
+  created_at?: string | null;
+  dedupe_key?: string | null;
+  durability_rationale?: string | null;
   evidence_refs: Array<MemoryEvidenceRef>;
   governance_mode: MemoryGovernanceMode;
   operation: MemoryOperation;
@@ -844,20 +844,20 @@ export type MemoryProposalEnvelope = {
 };
 
 export type MemoryProposalQuery = {
-  dedupe_key?: string;
-  limit?: number;
-  offset?: number;
+  dedupe_key?: string | null;
+  limit?: number | null;
+  offset?: number | null;
   space_id?: MemorySpaceId;
-  status?: MemoryProposalReviewStatus;
+  status?: MemoryProposalReviewStatus | null;
 };
 
 export type MemoryProposalRecord = {
-  applied_at?: string;
+  applied_at?: string | null;
   created_at: string;
-  decided_at?: string;
-  duplicate_of?: string;
+  decided_at?: string | null;
+  duplicate_of?: string | null;
   proposal: MemoryProposalEnvelope;
-  resulting_revision?: number;
+  resulting_revision?: number | null;
   selected_governance_mode: MemoryGovernanceMode;
   status: MemoryProposalReviewStatus;
   updated_at: string;
@@ -914,7 +914,7 @@ export type MemorySpaceDescriptor = {
   diagnostics: MemoryDiagnosticsPolicy;
   export_import: MemoryExportImportPolicy;
   indexing: MemoryIndexingPolicy;
-  module_id?: string;
+  module_id?: string | null;
   operations: Array<MemoryOperation>;
   prompt_policy: MemoryPromptPolicy;
   provenance_policy: MemoryProvenancePolicy;
@@ -940,16 +940,16 @@ export type MidTurnDeltaMode = "frozen_snapshot_next_wake";
 export type NormalizedExternalRuntimeEvent = {
   createdAt: string;
   eventId: string;
-  itemId?: string;
+  itemId?: string | null;
   kind: string;
-  nativeThreadId?: string;
-  nativeTurnId?: string;
+  nativeThreadId?: string | null;
+  nativeTurnId?: string | null;
   payload: unknown;
-  rawDetailRef?: string;
-  requestId?: string;
+  rawDetailRef?: string | null;
+  requestId?: string | null;
   runtimeId: string;
   sequenceId: number;
-  sessionId?: string;
+  sessionId?: string | null;
 };
 
 export type ParentConsumptionPolicy = "await_completion" | "observe_only";
@@ -977,20 +977,20 @@ export type ProviderStateClearReason = "brain_requested_clear";
 export type ProviderStateMode = "unused" | "optional" | "required";
 
 export type ResourceLimits = {
-  maxDelegationDepth?: number;
-  maxDurationMs?: number;
-  workdir?: string;
+  maxDelegationDepth?: number | null;
+  maxDurationMs?: number | null;
+  workdir?: string | null;
 };
 
 export type SessionActivityDigest = {
   allowed_capture_spaces: Array<MemorySpaceId>;
-  completion_summary?: string;
+  completion_summary?: string | null;
   created_at: string;
   digest_id: string;
   event_counts_json: unknown;
   profile_id: ProfileId;
-  retention_until?: string;
-  reviewed_at?: string;
+  retention_until?: string | null;
+  reviewed_at?: string | null;
   session_id: SessionId;
   signals_json: unknown;
   source: string;
@@ -1001,17 +1001,17 @@ export type SessionActivityDigest = {
 
 export type SessionActivityDigestQuery = {
   include_reviewed: boolean;
-  limit?: number;
-  offset?: number;
+  limit?: number | null;
+  offset?: number | null;
   profile_id?: ProfileId;
   session_id?: SessionId;
-  wake_id?: string;
+  wake_id?: string | null;
 };
 
 export type SessionConfig = {
   agentId: AgentId;
-  delegation?: DelegationLineage;
-  historyWindow?: SessionHistoryWindow;
+  delegation?: DelegationLineage | null;
+  historyWindow?: SessionHistoryWindow | null;
   kind: SessionKind;
   profileId: ProfileId;
   resourceLimits: ResourceLimits;
@@ -1020,7 +1020,7 @@ export type SessionConfig = {
 };
 
 export type SessionHistoryWindow = {
-  maxMessages?: number;
+  maxMessages?: number | null;
 };
 
 export type SessionKind = "full" | "worker" | "delegated";
@@ -1029,9 +1029,9 @@ export type SessionState = {
   agentId: AgentId;
   brainTurnCount: number;
   createdAt: string;
-  delegation?: DelegationLineage;
+  delegation?: DelegationLineage | null;
   handle: SessionHandle;
-  historyWindow?: SessionHistoryWindow;
+  historyWindow?: SessionHistoryWindow | null;
   kind: SessionKind;
   lastActiveAt: string;
   profileId: ProfileId;
@@ -1046,41 +1046,41 @@ export type SessionStatus = "active" | "idle" | "archived";
 export type SessionTurnRequested = {
   bindingId: string;
   createdAt: string;
-  expiresAt?: string;
+  expiresAt?: string | null;
   idempotencyKey: string;
   input: Array<ExternalTurnInputPart>;
   provenance: TurnInputProvenance;
   requestId: string;
-  runId?: string;
+  runId?: string | null;
   sessionId: string;
 };
 
 export type ToolCallMetadata = {
   adapterId?: AdapterId;
-  bindingId?: string;
-  catalogRevision?: string;
-  debugDetailId?: string;
-  policy?: ToolCallPolicyMetadata;
+  bindingId?: string | null;
+  catalogRevision?: string | null;
+  debugDetailId?: string | null;
+  policy?: ToolCallPolicyMetadata | null;
   profileId?: ProfileId;
   serverNames: Array<string>;
   source: ToolCallSource;
-  sourceToolName?: string;
-  toolProfileKey?: string;
+  sourceToolName?: string | null;
+  toolProfileKey?: string | null;
 };
 
 export type ToolCallPolicyMetadata = {
-  allowed?: boolean;
-  archiveCleanup?: boolean;
-  cancelled?: boolean;
-  denialReason?: string;
-  timeoutMs?: number;
+  allowed?: boolean | null;
+  archiveCleanup?: boolean | null;
+  cancelled?: boolean | null;
+  denialReason?: string | null;
+  timeoutMs?: number | null;
 };
 
 export type ToolCallSource = "local" | "mcp" | "web" | "browser";
 
 export type ToolDescriptor = {
   description: string;
-  inputSchema?: number;
+  inputSchema?: number | null;
   name: string;
 };
 
@@ -1089,9 +1089,9 @@ export type ToolProfile = {
 };
 
 export type TurnInputProvenance = {
-  correlationId?: string;
+  correlationId?: string | null;
   kind: TurnInputProvenanceKind;
-  sourceId?: string;
+  sourceId?: string | null;
 };
 
 export type TurnInputProvenanceKind = "operator" | "routed_agent_message" | "scheduled_wake" | "external_wait_result" | "control";
@@ -1099,7 +1099,7 @@ export type TurnInputProvenanceKind = "operator" | "routed_agent_message" | "sch
 export type WorkerPoolCapacityFallbackPolicy = "reject_on_no_capacity" | "direct_on_no_capacity";
 
 export type WorkerPoolCapacityRequest = {
-  claimTtlMs?: number;
+  claimTtlMs?: number | null;
   fallbackPolicy?: WorkerPoolCapacityFallbackPolicy;
   memberId: string;
 };

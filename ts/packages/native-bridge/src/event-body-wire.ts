@@ -98,13 +98,13 @@ export function toNativeAgentMessage(message: AgentMessage): RawAgentMessage {
     from: message.from,
     to: message.to,
     body: message.body,
-    correlation_id: message.correlationId,
+    correlation_id: message.correlationId ?? undefined,
     projection: message.projection
       ? {
           visibility: message.projection.visibility,
-          target_ref: message.projection.targetRef,
-          work_ref: message.projection.workRef,
-          reason: message.projection.reason,
+          target_ref: message.projection.targetRef ?? undefined,
+          work_ref: message.projection.workRef ?? undefined,
+          reason: message.projection.reason ?? undefined,
         }
       : undefined,
   };
@@ -543,12 +543,12 @@ export function toNativeBrainEvent(event: BrainEvent): {
       return {
         eventType: event.type,
         text: event.text,
-        toolName: event.format,
+        toolName: event.format ?? undefined,
       };
     case "phase_change":
       return {
         eventType: event.type,
-        text: event.message,
+        text: event.message ?? undefined,
         toolName: event.phase,
       };
     case "tool_call_started":
@@ -573,7 +573,7 @@ export function toNativeBrainEvent(event: BrainEvent): {
         eventType: event.type,
         text: event.message,
         toolName: event.level,
-        metadataJson: event.metadataJson,
+        metadataJson: event.metadataJson ?? undefined,
       };
     case "finished":
       return { eventType: event.type };
@@ -610,21 +610,21 @@ export function toRawToolCallMetadata(
 ): RawToolCallMetadata {
   return {
     source: metadata.source,
-    adapter_id: metadata.adapterId,
-    binding_id: metadata.bindingId,
+    adapter_id: metadata.adapterId ?? undefined,
+    binding_id: metadata.bindingId ?? undefined,
     server_names: metadata.serverNames ?? [],
-    profile_id: metadata.profileId,
-    tool_profile_key: metadata.toolProfileKey,
-    source_tool_name: metadata.sourceToolName,
-    catalog_revision: metadata.catalogRevision,
-    debug_detail_id: metadata.debugDetailId,
+    profile_id: metadata.profileId ?? undefined,
+    tool_profile_key: metadata.toolProfileKey ?? undefined,
+    source_tool_name: metadata.sourceToolName ?? undefined,
+    catalog_revision: metadata.catalogRevision ?? undefined,
+    debug_detail_id: metadata.debugDetailId ?? undefined,
     policy: metadata.policy
       ? {
-          allowed: metadata.policy.allowed,
-          denial_reason: metadata.policy.denialReason,
-          timeout_ms: metadata.policy.timeoutMs,
-          cancelled: metadata.policy.cancelled,
-          archive_cleanup: metadata.policy.archiveCleanup,
+          allowed: metadata.policy.allowed ?? undefined,
+          denial_reason: metadata.policy.denialReason ?? undefined,
+          timeout_ms: metadata.policy.timeoutMs ?? undefined,
+          cancelled: metadata.policy.cancelled ?? undefined,
+          archive_cleanup: metadata.policy.archiveCleanup ?? undefined,
         }
       : undefined,
   };

@@ -174,8 +174,8 @@ function collectToolCalls(
       calls.push({
         tool_name: brainEvent.toolName,
         status: "started",
-        wake_id: event.wakeId,
-        metadata: brainEvent.metadata,
+        wake_id: event.wakeId ?? undefined,
+        metadata: brainEvent.metadata ?? undefined,
       });
       continue;
     }
@@ -183,8 +183,8 @@ function collectToolCalls(
       calls.push({
         tool_name: brainEvent.toolName,
         status: brainEvent.isError ? "failed" : "completed",
-        wake_id: event.wakeId,
-        metadata: brainEvent.metadata,
+        wake_id: event.wakeId ?? undefined,
+        metadata: brainEvent.metadata ?? undefined,
       });
     }
   }
@@ -204,7 +204,7 @@ function collectSignals(
           signal_type: "tool_failure",
           severity: "warning",
           summary: `Tool ${brainEvent.toolName} failed during wake.`,
-          wake_id: event.wakeId,
+          wake_id: event.wakeId ?? undefined,
         });
       } else if (
         brainEvent.type === "provider_status" &&
@@ -213,8 +213,8 @@ function collectSignals(
         signals.push({
           signal_type: "provider_status",
           severity: brainEvent.level === "error" ? "error" : "warning",
-          summary: brainEvent.message,
-          wake_id: event.wakeId,
+          summary: brainEvent.message ?? "Provider status changed.",
+          wake_id: event.wakeId ?? undefined,
         });
       }
     } else if (event.type === "external_event_injected") {

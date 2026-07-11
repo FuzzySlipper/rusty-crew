@@ -28,6 +28,16 @@ canonical source and generation direction to each family.
 
 ## Decision
 
+### Rust `Option<T>` wire convention
+
+Generated shared JSON contracts model Rust `Option<T>` fields as optional and
+nullable (`field?: T | null`). This is the exact serde-compatible input domain:
+callers may omit the property or send `null`, while ordinary Rust serialization
+emits the property with `null` when the value is `None`. Generated TypeScript
+must preserve the schema's `null` branch instead of narrowing it to
+`T | undefined`; output-specific consumers may narrow only after validating the
+actual value.
+
 Rusty Crew will use concern-specific canonical sources and deterministic,
 committed generated artifacts.
 

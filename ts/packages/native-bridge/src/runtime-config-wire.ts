@@ -566,9 +566,9 @@ export function toResourceLimits(
 
 export function toRawResourceLimits(limits: ResourceLimits): RawResourceLimits {
   return {
-    workdir: limits.workdir,
-    max_duration_ms: limits.maxDurationMs,
-    max_delegation_depth: limits.maxDelegationDepth,
+    workdir: limits.workdir ?? undefined,
+    max_duration_ms: limits.maxDurationMs ?? undefined,
+    max_delegation_depth: limits.maxDelegationDepth ?? undefined,
   };
 }
 

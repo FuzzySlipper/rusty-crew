@@ -394,7 +394,7 @@ export async function startTelegramConnector(
               agentMessage.from,
               agentMessage.to,
               agentMessage.body,
-              agentMessage.correlationId,
+              agentMessage.correlationId ?? undefined,
             ),
         },
         bindings: context.runtimeConfig.channelBindings,

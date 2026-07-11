@@ -180,7 +180,7 @@ export async function handleExternalRuntimeRequest(
   ) {
     if (method !== "POST") return methodNotAllowed(requestId);
     const binding = await context.bridge.getExternalBinding(parts[2] ?? "");
-    if (binding?.agentId === undefined) {
+    if (binding?.agentId == null) {
       return failure(409, requestId, {
         code: "failed_precondition",
         reason_code: "external_binding_not_routable",
