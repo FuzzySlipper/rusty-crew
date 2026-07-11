@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   CAPABILITY_EVIDENCE_SCHEMA_VERSION,
   buildEvidenceComparison,
+  expandedCapabilityScenarios,
   redactCapabilityEvidence,
   renderScenarioSummary,
   validateCapabilityScenario,
@@ -25,6 +26,10 @@ const scenario: CapabilityScenario = {
   permittedEffects: ["fixture_repo_write"],
   expectedArtifacts: ["result.txt"],
   validationCommands: ["node test.mjs"],
+  runtimeApplicability: {
+    codex_app_server: { status: "applicable" },
+    direct_brain: { status: "applicable" },
+  },
 };
 
 test("scenario validation rejects ambiguous empty contracts", () => {
@@ -37,6 +42,20 @@ test("scenario validation rejects ambiguous empty contracts", () => {
       }),
     /requiredCapabilities must not be empty/,
   );
+});
+
+test("expanded catalog declares runtime applicability without hiding gaps", () => {
+  assert.equal(expandedCapabilityScenarios.length, 8);
+  const den = expandedCapabilityScenarios.find(
+    (item) => item.id === "den_mcp_read_write",
+  );
+  assert.deepEqual(den?.runtimeApplicability.codex_app_server, {
+    status: "applicable",
+  });
+  assert.deepEqual(den?.runtimeApplicability.direct_brain, {
+    status: "unsupported",
+    reason: "certification profile has no MCP binding",
+  });
 });
 
 test("evidence redaction is bounded and preserves non-secret diagnostics", () => {

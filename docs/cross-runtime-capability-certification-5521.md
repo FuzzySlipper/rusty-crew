@@ -88,3 +88,36 @@ coordination scenarios remain separate follow-up coverage. The packet schema
 already represents recovery, interactions, usage, unsupported capabilities,
 and backend-native raw evidence so those scenarios do not need a new evidence
 format.
+
+## Expanded Capability Run (#5656)
+
+Run ID: `capability-1783764439078-96ad971b`
+
+Artifact root: `/tmp/rusty-crew-capability-5656`
+
+Codex thread: `019f50a5-51d7-7b23-9830-76db1ee817da`
+
+The shared scenario catalog and artifact writer now cover eight live scenarios:
+
+| Scenario | Codex app-server | direct Responses |
+| --- | --- | --- |
+| focused code edit | supported | supported |
+| second-turn structured readback | supported | supported |
+| multi-file repo instructions and validation | supported | supported |
+| Den MCP task read and thread write | supported | unsupported: no MCP binding |
+| web source read | supported | supported |
+| background command completion | supported | supported |
+| local visual input | supported | unsupported: text-only chat API |
+| subagent delegation and result use | supported | supported |
+
+The Den workflow read task `#5656` through native Codex MCP tools and wrote task
+message `21186` with the run-specific marker. The direct Responses runtime was
+not invoked for that scenario because the certification profile deliberately
+has no MCP binding; its evidence packet records the unsupported reason. The
+same explicit unsupported handling applies to direct-brain local image input.
+
+The multi-file scenario independently verified both changed files with
+`node multi-test.mjs` for each runtime. Background commands, web access, image
+inspection, and delegation require both the expected response marker and a
+matching observed tool/capability signal. No scenario uses response prose
+equality as its comparison metric.

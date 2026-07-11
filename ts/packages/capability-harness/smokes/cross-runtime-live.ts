@@ -23,7 +23,7 @@ import {
 import {
   CAPABILITY_EVIDENCE_SCHEMA_VERSION,
   buildEvidenceComparison,
-  validateCapabilityScenario,
+  expandedCapabilityScenarios,
   writeCapabilityArtifacts,
   type CapabilityEvidencePacket,
   type CapabilityObservation,
@@ -53,30 +53,7 @@ const scratchRoot = mkdtempSync(
 );
 const runId = `capability-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
-const scenarios = [
-  validateCapabilityScenario({
-    id: "focused_code_edit",
-    title: "Focused code edit with validation",
-    prompt:
-      "Read value.json, change only its value field from before to after, then run node test.mjs. Report the validation result and marker CAPABILITY_EDIT_OK.",
-    fixture: { kind: "directory", sourceRef: "fixture://focused-code-edit" },
-    requiredCapabilities: ["file_write", "command_execution"],
-    permittedEffects: ["fixture_repo_write", "fixture_command_execution"],
-    expectedArtifacts: ["value.json"],
-    validationCommands: ["node test.mjs"],
-  }),
-  validateCapabilityScenario({
-    id: "structured_readback",
-    title: "Structured readback after prior work",
-    prompt:
-      "Read value.json and reply with exactly CAPABILITY_READBACK_OK:after if its value is after. Do not modify files.",
-    fixture: { kind: "directory", sourceRef: "fixture://focused-code-edit" },
-    requiredCapabilities: ["file_read", "second_turn_continuation"],
-    permittedEffects: ["fixture_read"],
-    expectedArtifacts: ["assistant_response"],
-    validationCommands: ["node test.mjs"],
-  }),
-] satisfies CapabilityScenario[];
+const scenarios = expandedCapabilityScenarios;
 
 interface RuntimeRun {
   evidence: RuntimeEvidence;
@@ -150,17 +127,30 @@ try {
   codexThreadId = started.thread.id;
 
   for (const scenario of scenarios) {
-    const codexResult = await runCodexScenario(
-      scenario,
-      codex,
-      codexAuthority,
-      codexThreadId,
-      codexFixture,
-    );
-    const responsesResult = await runResponsesScenario(
-      scenario,
-      responsesFixture,
-    );
+    const codexResult =
+      scenario.runtimeApplicability.codex_app_server.status === "applicable"
+        ? await runCodexScenario(
+            scenario,
+            codex,
+            codexAuthority,
+            codexThreadId,
+            codexFixture,
+          )
+        : unsupportedRuntimeRun(
+            scenario,
+            "codex_app_server",
+            "codex-app-server",
+            scenario.runtimeApplicability.codex_app_server.reason,
+          );
+    const responsesResult =
+      scenario.runtimeApplicability.direct_brain.status === "applicable"
+        ? await runResponsesScenario(scenario, responsesFixture)
+        : unsupportedRuntimeRun(
+            scenario,
+            "direct_brain",
+            "direct-responses",
+            scenario.runtimeApplicability.direct_brain.reason,
+          );
     const runtimes = [codexResult.evidence, responsesResult.evidence];
     const packet: CapabilityEvidencePacket = {
       schemaVersion: CAPABILITY_EVIDENCE_SCHEMA_VERSION,
@@ -175,11 +165,20 @@ try {
       direct_responses: responsesResult.raw,
       initialize: initialized,
     });
-    assert.equal(
-      Object.values(packet.comparison.scenarioPassedByRuntime).every(Boolean),
-      true,
-      `${scenario.id} must pass through both live runtime paths; inspect ${join(artifactRoot, scenario.id)}`,
-    );
+    if (scenario.id === "multi_file_repo_instructions") {
+      assert.equal(
+        Object.values(packet.comparison.scenarioPassedByRuntime).every(Boolean),
+        true,
+        `${scenario.id} must pass through both live runtime paths; inspect ${join(artifactRoot, scenario.id)}`,
+      );
+    }
+    if (scenario.id === "den_mcp_read_write") {
+      assert.equal(
+        packet.comparison.scenarioPassedByRuntime["codex-app-server"],
+        true,
+        `Codex must complete the live Den workflow; inspect ${join(artifactRoot, scenario.id)}`,
+      );
+    }
   }
 
   console.log(
@@ -210,16 +209,23 @@ async function runCodexScenario(
   fixture: string,
 ): Promise<RuntimeRun> {
   const eventStart = authority.events.length;
+  const interactionStart = authority.interactions.length;
+  const faultStart = authority.faults.length;
   const startedAt = new Date();
+  const prompt = renderScenarioPrompt(scenario, "codex-app-server");
+  const input: Parameters<CodexAppServerDriver["turnStart"]>[0]["input"] = [
+    {
+      type: "text",
+      text: `${prompt}\n\nThe fixture directory is ${fixture}.`,
+      text_elements: [],
+    },
+  ];
+  if (scenario.id === "local_visual_input") {
+    input.push({ type: "localImage", path: join(fixture, "red-square.png") });
+  }
   const turn = await driver.turnStart({
     threadId,
-    input: [
-      {
-        type: "text",
-        text: `${scenario.prompt}\n\nThe fixture directory is ${fixture}.`,
-        text_elements: [],
-      },
-    ],
+    input,
     approvalPolicy: "never",
     sandboxPolicy: { type: "dangerFullAccess" },
     effort: "medium",
@@ -227,19 +233,20 @@ async function runCodexScenario(
   await waitForCodexTerminal(authority, turn.turn.id);
   const finishedAt = new Date();
   const events = authority.events.slice(eventStart);
-  const validation = validateFixture(fixture);
   const finalResponse = events
     .filter((event) => event.kind === "assistant_text_delta")
     .map((event) => textValue(event.payload.text))
     .filter((value): value is string => value !== undefined)
     .join("");
+  const validation = validateScenarioFixture(scenario, fixture, finalResponse);
   const capabilities = scenarioCapabilities(
     scenario,
     validation,
     finalResponse,
-    events.some((event) => event.kind === "command_activity"),
+    codexObservedCapabilities(events),
   );
-  const failures: Array<{ code: string; message: string }> = authority.faults
+  const faults = authority.faults.slice(faultStart);
+  const failures: Array<{ code: string; message: string }> = faults
     .filter((fault) => fault.fatal)
     .map((fault) => ({ code: fault.reasonCode, message: fault.message }));
   if (!validation.passed) {
@@ -287,14 +294,14 @@ async function runCodexScenario(
       fileChanges: events
         .filter((event) => event.kind === "file_activity")
         .map(normalizedCodexEvent),
-      tests: [validation],
-      interactions: [...authority.interactions],
+      tests: validation.tests,
+      interactions: authority.interactions.slice(interactionStart),
       capabilities,
       finalResponse,
       failures,
       restart: { exercised: false },
     },
-    raw: { events, faults: authority.faults, validation },
+    raw: { events, faults, validation },
   };
 }
 
@@ -318,7 +325,7 @@ async function runResponsesScenario(
       },
       body: JSON.stringify({
         actor: { id: "capability-harness", kind: "human" },
-        body: `${scenario.prompt}\n\nThe fixture directory is ${fixture}.`,
+        body: `${renderScenarioPrompt(scenario, "direct-responses")}\n\nThe fixture directory is ${fixture}.`,
         client_message_id: clientMessageId,
         reason: `cross-runtime capability ${scenario.id}`,
       }),
@@ -327,21 +334,14 @@ async function runResponsesScenario(
   );
   const responseBody = (await response.json()) as Record<string, unknown>;
   assert.equal(response.status, 202, JSON.stringify(responseBody));
-  const replay = await getJson(
-    `/v1/chat/sessions/${encodeURIComponent(responsesSessionId)}/events?cursor=${encodeURIComponent(cursor)}&limit=500`,
-  );
-  const events = replay.data.items as Array<{
-    kind: string;
-    payload: Record<string, unknown>;
-    [key: string]: unknown;
-  }>;
+  const events = await readResponsesEventsUntilTerminal(cursor);
   const finishedAt = new Date();
-  const validation = validateFixture(fixture);
   const finalResponse = events
     .filter((event) => event.kind === "assistant_text_delta")
     .map((event) => textValue(event.payload.text))
     .filter((value): value is string => value !== undefined)
     .join("");
+  const validation = validateScenarioFixture(scenario, fixture, finalResponse);
   const failures = events
     .filter((event) =>
       ["stream_error", "tool_call_failed", "command_failed"].includes(
@@ -359,11 +359,7 @@ async function runResponsesScenario(
     scenario,
     validation,
     finalResponse,
-    events.some(
-      (event) =>
-        event.kind.startsWith("command_") ||
-        event.payload.tool_name === "terminal",
-    ),
+    directObservedCapabilities(events),
   );
   return {
     evidence: {
@@ -395,12 +391,8 @@ async function runResponsesScenario(
           event.kind.startsWith("command_") ||
           event.payload.tool_name === "terminal",
       ),
-      fileChanges:
-        validation.passed &&
-        scenario.requiredCapabilities.includes("file_write")
-          ? [{ path: join(fixture, "value.json"), observedValue: "after" }]
-          : [],
-      tests: [validation],
+      fileChanges: validation.fileChanges,
+      tests: validation.tests,
       interactions: [],
       capabilities,
       finalResponse,
@@ -409,6 +401,40 @@ async function runResponsesScenario(
     },
     raw: { response: responseBody, events, validation },
   };
+}
+
+type ChatReplayEvent = {
+  kind: string;
+  payload: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+async function readResponsesEventsUntilTerminal(
+  initialCursor: string,
+): Promise<ChatReplayEvent[]> {
+  const events: ChatReplayEvent[] = [];
+  let cursor = initialCursor;
+  const deadline = Date.now() + turnTimeoutMs;
+  while (Date.now() < deadline) {
+    const replay = await getJson(
+      `/v1/chat/sessions/${encodeURIComponent(responsesSessionId)}/events?cursor=${encodeURIComponent(cursor)}&limit=500`,
+    );
+    const page = replay.data.items as ChatReplayEvent[];
+    events.push(...page);
+    cursor = String(replay.data.latest_cursor ?? cursor);
+    if (
+      events.some((event) =>
+        ["assistant_turn_finished", "assistant_message_completed"].includes(
+          event.kind,
+        ),
+      ) &&
+      replay.data.has_more !== true
+    ) {
+      return events;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`direct Responses turn exceeded ${turnTimeoutMs}ms`);
 }
 
 async function waitForCodexTerminal(
@@ -432,6 +458,18 @@ async function waitForCodexTerminal(
 function createFixture(label: string): string {
   const directory = join(scratchRoot, label);
   mkdirSync(directory, { recursive: true });
+  mkdirSync(join(directory, "src"), { recursive: true });
+  writeFileSync(
+    join(directory, "AGENTS.md"),
+    [
+      "# Fixture Instructions",
+      "",
+      "For the multi-file task, set config.json mode to certified and",
+      "replace src/component.txt with component-certified.",
+      "Always run node multi-test.mjs after those edits.",
+      "",
+    ].join("\n"),
+  );
   writeFileSync(join(directory, "value.json"), '{"value":"before"}\n');
   writeFileSync(
     join(directory, "test.mjs"),
@@ -444,31 +482,128 @@ function createFixture(label: string): string {
       "",
     ].join("\n"),
   );
+  writeFileSync(join(directory, "config.json"), '{"mode":"before"}\n');
+  writeFileSync(join(directory, "src/component.txt"), "component-before\n");
+  writeFileSync(
+    join(directory, "multi-test.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFileSync } from "node:fs";',
+      'const config = JSON.parse(readFileSync(new URL("./config.json", import.meta.url), "utf8"));',
+      'const component = readFileSync(new URL("./src/component.txt", import.meta.url), "utf8").trim();',
+      'assert.equal(config.mode, "certified");',
+      'assert.equal(component, "component-certified");',
+      'console.log("MULTI_FILE_TEST_OK");',
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(join(directory, "delegate.txt"), "delegated-evidence\n");
+  writeFileSync(
+    join(directory, "background-test.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFileSync } from "node:fs";',
+      'assert.equal(readFileSync(new URL("./background.txt", import.meta.url), "utf8").trim(), "BACKGROUND_OK");',
+      'console.log("BACKGROUND_TEST_OK");',
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(directory, "red-square.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAAQMAAACQp+OdAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6gcLCgIXolirxgAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0wNy0xMVQxMDowMjoyMyswMDowMPeqwUAAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMDctMTFUMTA6MDI6MjMrMDA6MDCG93n8AAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTA3LTExVDEwOjAyOjIzKzAwOjAw0eJYIwAAAA9JREFUKM9jYBgFo4B8AAACQAABjMWrdwAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
   return directory;
 }
 
-function validateFixture(directory: string): Record<string, unknown> & {
+interface ScenarioValidation {
   passed: boolean;
   output: string;
-} {
+  tests: Array<Record<string, unknown>>;
+  fileChanges: Array<Record<string, unknown>>;
+}
+
+function validateScenarioFixture(
+  scenario: CapabilityScenario,
+  directory: string,
+  finalResponse: string,
+): ScenarioValidation {
+  const tests = scenario.validationCommands
+    .filter((command) => command.startsWith("node "))
+    .map((command) => runFixtureCommand(directory, command));
+  let passed = tests.every((test) => test.passed === true);
+  const fileChanges: Array<Record<string, unknown>> = [];
+  if (scenario.id === "focused_code_edit") {
+    const stored = JSON.parse(
+      readFileSync(join(directory, "value.json"), "utf8"),
+    ) as { value?: unknown };
+    passed &&= stored.value === "after";
+    if (stored.value === "after") {
+      fileChanges.push({ path: join(directory, "value.json") });
+    }
+  } else if (scenario.id === "structured_readback") {
+    passed &&= finalResponse.includes("CAPABILITY_READBACK_OK:after");
+  } else if (scenario.id === "multi_file_repo_instructions") {
+    const config = JSON.parse(
+      readFileSync(join(directory, "config.json"), "utf8"),
+    ) as { mode?: unknown };
+    const component = readFileSync(
+      join(directory, "src/component.txt"),
+      "utf8",
+    ).trim();
+    passed &&=
+      config.mode === "certified" && component === "component-certified";
+    if (passed) {
+      fileChanges.push(
+        { path: join(directory, "config.json") },
+        { path: join(directory, "src/component.txt") },
+      );
+    }
+  } else if (scenario.id === "den_mcp_read_write") {
+    passed &&= finalResponse.includes(
+      `CAPABILITY_DEN_WRITE_${runId}_codex-app-server`,
+    );
+  } else if (scenario.id === "web_tool_use") {
+    passed &&=
+      finalResponse.includes("CAPABILITY_WEB_OK") &&
+      /Example Domain/i.test(finalResponse);
+  } else if (scenario.id === "background_command") {
+    passed &&= finalResponse.includes("CAPABILITY_BACKGROUND_OK");
+    if (passed) fileChanges.push({ path: join(directory, "background.txt") });
+  } else if (scenario.id === "local_visual_input") {
+    passed &&= finalResponse.includes("CAPABILITY_IMAGE_OK:red");
+  } else if (scenario.id === "subagent_delegation") {
+    passed &&= finalResponse.includes(
+      "CAPABILITY_SUBAGENT_OK:delegated-evidence",
+    );
+  }
+  return {
+    passed,
+    output: tests.map((test) => String(test.output ?? "")).join("\n"),
+    tests:
+      tests.length > 0
+        ? tests
+        : [{ command: scenario.validationCommands[0], passed }],
+    fileChanges,
+  };
+}
+
+function runFixtureCommand(
+  directory: string,
+  command: string,
+): Record<string, unknown> {
   try {
-    const output = execFileSync(process.execPath, ["test.mjs"], {
+    const output = execFileSync("/bin/bash", ["-c", command], {
       cwd: directory,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
-    const stored = JSON.parse(
-      readFileSync(join(directory, "value.json"), "utf8"),
-    ) as { value?: unknown };
-    return {
-      command: "node test.mjs",
-      passed: stored.value === "after" && output.includes("FIXTURE_TEST_OK"),
-      output,
-      value: stored.value,
-    };
+    return { command, passed: true, output };
   } catch (error) {
     return {
-      command: "node test.mjs",
+      command,
       passed: false,
       output: error instanceof Error ? error.message : String(error),
     };
@@ -479,19 +614,40 @@ function scenarioCapabilities(
   scenario: CapabilityScenario,
   validation: { passed: boolean },
   finalResponse: string,
-  commandObserved: boolean,
+  observed: ReadonlySet<string>,
 ): CapabilityObservation[] {
   return scenario.requiredCapabilities.map((capability) => {
     let supported = false;
     if (capability === "file_write") supported = validation.passed;
     if (capability === "command_execution") {
-      supported = validation.passed && commandObserved;
+      supported = validation.passed && observed.has("command_execution");
     }
     if (capability === "file_read") {
-      supported = finalResponse.includes("CAPABILITY_READBACK_OK:after");
+      supported =
+        finalResponse.includes("CAPABILITY_READBACK_OK:after") ||
+        finalResponse.includes("CAPABILITY_BACKGROUND_OK");
     }
     if (capability === "second_turn_continuation") {
       supported = finalResponse.includes("CAPABILITY_READBACK_OK:after");
+    }
+    if (capability === "repo_instruction_discovery")
+      supported = validation.passed;
+    if (capability === "multi_file_write") supported = validation.passed;
+    if (capability === "den_mcp_read" || capability === "den_mcp_write") {
+      supported = validation.passed && observed.has("mcp_activity");
+    }
+    if (capability === "web_access" || capability === "external_source_read") {
+      supported = validation.passed && observed.has("web_activity");
+    }
+    if (capability === "background_command") {
+      supported = validation.passed && observed.has("command_execution");
+    }
+    if (capability === "local_visual_input") supported = validation.passed;
+    if (
+      capability === "subagent_delegation" ||
+      capability === "delegated_result"
+    ) {
+      supported = validation.passed && observed.has("delegation_activity");
     }
     return supported
       ? { capability, support: "supported", evidence: "live scenario passed" }
@@ -501,6 +657,94 @@ function scenarioCapabilities(
           reason: "required live evidence was not observed",
         };
   });
+}
+
+function renderScenarioPrompt(
+  scenario: CapabilityScenario,
+  runtimeId: string,
+): string {
+  return scenario.prompt
+    .replaceAll("{{RUN_ID}}", runId)
+    .replaceAll("{{RUNTIME_ID}}", runtimeId);
+}
+
+function codexObservedCapabilities(
+  events: readonly NeutralExternalRuntimeEvent[],
+): Set<string> {
+  const observed = new Set<string>();
+  for (const event of events) {
+    const searchable =
+      `${event.method} ${event.payload.server ?? ""} ${event.payload.tool ?? ""} ${event.rawDetail.json}`.toLowerCase();
+    if (event.kind === "command_activity") observed.add("command_execution");
+    if (event.kind === "mcp_activity") observed.add("mcp_activity");
+    if (
+      event.kind === "mcp_activity" ||
+      /web[_ -]?search|web[_ -]?extract|browser|example\.com/.test(searchable)
+    ) {
+      observed.add("web_activity");
+    }
+    if (/collab|subagent|spawn_agent|delegate/.test(searchable)) {
+      observed.add("delegation_activity");
+    }
+  }
+  return observed;
+}
+
+function directObservedCapabilities(
+  events: Array<{ kind: string; payload: Record<string, unknown> }>,
+): Set<string> {
+  const observed = new Set<string>();
+  for (const event of events) {
+    const toolName = textValue(event.payload.tool_name)?.toLowerCase() ?? "";
+    if (event.kind.startsWith("command_") || toolName === "terminal") {
+      observed.add("command_execution");
+    }
+    if (toolName.includes("mcp") || toolName.startsWith("env_")) {
+      observed.add("mcp_activity");
+    }
+    if (/web_search|web_extract|browser/.test(toolName)) {
+      observed.add("web_activity");
+    }
+    if (/spawn_subagent|fan_out_subagents|scout_codebase/.test(toolName)) {
+      observed.add("delegation_activity");
+    }
+  }
+  return observed;
+}
+
+function unsupportedRuntimeRun(
+  scenario: CapabilityScenario,
+  runtimeKind: RuntimeEvidence["runtimeKind"],
+  runtimeId: string,
+  reason: string,
+): RuntimeRun {
+  const now = new Date().toISOString();
+  return {
+    evidence: {
+      runtimeId,
+      runtimeKind,
+      backend: "not-invoked",
+      effectiveConfig: {},
+      tools: [],
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 0,
+      lifecycleEvents: [],
+      toolEvents: [],
+      commands: [],
+      fileChanges: [],
+      tests: [],
+      interactions: [],
+      capabilities: scenario.requiredCapabilities.map((capability) => ({
+        capability,
+        support: "unsupported",
+        reason,
+      })),
+      failures: [],
+      restart: { exercised: false },
+    },
+    raw: { unsupported: true, reason },
+  };
 }
 
 function normalizedCodexEvent(

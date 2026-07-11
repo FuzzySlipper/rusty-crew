@@ -1,4 +1,4 @@
-export const CAPABILITY_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const CAPABILITY_EVIDENCE_SCHEMA_VERSION = 2 as const;
 
 export type CapabilitySupport = "supported" | "unsupported" | "not_exercised";
 export type HarnessRuntimeKind = "codex_app_server" | "direct_brain";
@@ -15,7 +15,12 @@ export interface CapabilityScenario {
   permittedEffects: string[];
   expectedArtifacts: string[];
   validationCommands: string[];
+  runtimeApplicability: Record<HarnessRuntimeKind, RuntimeApplicability>;
 }
+
+export type RuntimeApplicability =
+  | { status: "applicable" }
+  | { status: "unsupported"; reason: string };
 
 export interface CapabilityObservation {
   capability: string;
@@ -94,6 +99,15 @@ export function validateCapabilityScenario(
   requireNonEmpty(scenario.permittedEffects, "permittedEffects");
   requireNonEmpty(scenario.expectedArtifacts, "expectedArtifacts");
   requireNonEmpty(scenario.validationCommands, "validationCommands");
+  for (const runtimeKind of ["codex_app_server", "direct_brain"] as const) {
+    const applicability = scenario.runtimeApplicability[runtimeKind];
+    if (applicability.status === "unsupported") {
+      requireText(
+        applicability.reason,
+        `runtimeApplicability.${runtimeKind}.reason`,
+      );
+    }
+  }
   return structuredClone(scenario);
 }
 
