@@ -8,6 +8,10 @@ export type AgentId = Brand<string, "AgentId">;
 
 export type AgentInstanceId = Brand<string, "AgentInstanceId">;
 
+export type AgentMessageDeliveryId = Brand<string, "AgentMessageDeliveryId">;
+
+export type AgentRoundId = Brand<string, "AgentRoundId">;
+
 export type BrainImplementationId = Brand<string, "BrainImplementationId">;
 
 export type ConversationBranchId = Brand<string, "ConversationBranchId">;
@@ -25,6 +29,12 @@ export type RunId = Brand<string, "RunId">;
 export type SessionId = Brand<string, "SessionId">;
 
 export type TaskId = Brand<string, "TaskId">;
+
+export type ExternalBindingId = Brand<string, "ExternalBindingId">;
+
+export type ExternalRuntimeId = Brand<string, "ExternalRuntimeId">;
+
+export type ExternalTurnRequestId = Brand<string, "ExternalTurnRequestId">;
 
 export type BrainImplementationHandle = Brand<number, "BrainImplementationHandle">;
 
@@ -50,6 +60,63 @@ export type ActionRejection = {
   message: string;
 };
 
+export type AgentActivation = {
+  sessionId: string;
+  type: "direct_brain_wake_requested";
+  wakeId: string;
+} | {
+  bindingId: string;
+  requestId: string;
+  sessionId: string;
+  type: "external_turn_requested";
+} | {
+  queueId: string;
+  sessionId: string;
+  type: "queued_for_next_turn";
+} | {
+  reasonCode: string;
+  type: "rejected";
+};
+
+export type AgentCoordinationCaller = {
+  senderAgentId: string;
+  type: "system";
+} | {
+  sessionId: string;
+  toolCallId: string;
+  type: "direct_brain";
+  wakeId: string;
+} | {
+  bindingId: string;
+  controllerGeneration: number;
+  controllerInstanceId: string;
+  nativeRequestId: string;
+  nativeThreadId: string;
+  nativeTurnId: string;
+  runtimeId: string;
+  type: "external_agent";
+};
+
+export type AgentCorrelatedRound = {
+  correlationId: string;
+  createdAt: string;
+  expiresAt: string;
+  idempotencyKey: string;
+  messageId: string;
+  outcome?: unknown;
+  recipientAgentId: string;
+  recipientSessionId: string;
+  replyMessageId?: string;
+  revision: number;
+  roundId: string;
+  senderAgentId: string;
+  senderRequestId?: string;
+  senderSessionId: string;
+  status: AgentRoundStatus;
+  terminalAt?: string;
+  terminalReasonCode?: string;
+};
+
 export type AgentMessage = {
   body: string;
   correlationId?: string;
@@ -58,12 +125,70 @@ export type AgentMessage = {
   to: AgentId;
 };
 
+export type AgentMessageCommand = {
+  body: string;
+  caller: AgentCoordinationCaller;
+  correlationId?: string;
+  createdAt: string;
+  deliveryId: string;
+  expiresAt: string;
+  idempotencyKey: string;
+  messageId: string;
+  requireWake: boolean;
+  toAgentId: string;
+};
+
+export type AgentMessageDeliveryReceipt = {
+  activation?: AgentActivation;
+  reasonCode?: string;
+  request: AgentMessageDeliveryRequest;
+  resolvedRoundId?: string;
+  revision: number;
+  sequence?: number;
+  status: AgentMessageDeliveryStatus;
+  terminalAt?: string;
+};
+
+export type AgentMessageDeliveryRequest = {
+  body: string;
+  correlationId?: string;
+  createdAt: string;
+  deliveryId: string;
+  expiresAt: string;
+  fromAgentId: string;
+  idempotencyKey: string;
+  messageId: string;
+  requireWake: boolean;
+  toAgentId: string;
+};
+
+export type AgentMessageDeliveryStatus = "pending" | "accepted" | "rejected" | "expired";
+
 export type AgentMessageProjectionHint = {
   reason?: string;
   targetRef?: ProjectionRef;
   visibility: ProjectionVisibility;
   workRef?: ProjectionRef;
 };
+
+export type AgentRoundCommand = {
+  body: string;
+  caller: AgentCoordinationCaller;
+  correlationId: string;
+  createdAt: string;
+  expiresAt: string;
+  idempotencyKey: string;
+  messageId: string;
+  roundId: string;
+  toAgentId: string;
+};
+
+export type AgentRoundStartReceipt = {
+  delivery: AgentMessageDeliveryReceipt;
+  round: AgentCorrelatedRound;
+};
+
+export type AgentRoundStatus = "pending" | "replied" | "expired" | "cancelled" | "failed";
 
 export type BodyDeltaPolicy = {
   maxQueuedMessages: number;
@@ -282,6 +407,12 @@ export type CoreEvent = {
   message: AgentMessage;
   type: "agent_message_routed";
 } | {
+  receipt: AgentMessageDeliveryReceipt;
+  type: "agent_message_delivery_observed";
+} | {
+  round: AgentCorrelatedRound;
+  type: "agent_round_observed";
+} | {
   lifecycle: DelegationLifecycleEvent;
   type: "delegation_lifecycle_observed";
 } | {
@@ -307,7 +438,7 @@ export type CoreEvent = {
   type: "completion_packet_delivered";
 };
 
-export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
+export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
 
 export type DelegatedCompletion = {
   childSessionId: SessionId;

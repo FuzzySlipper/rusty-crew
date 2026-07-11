@@ -2,10 +2,11 @@
 
 use super::super::*;
 use rusty_crew_core_protocol::{
-    validate_external_runtime_registration, validate_external_turn_transition, AgentId,
-    ExternalAgentBinding, ExternalBindingId, ExternalControlId, ExternalControlReceipt,
-    ExternalControllerLease, ExternalCorrelatedRound, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRoundStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
+    validate_external_runtime_registration, validate_external_turn_transition,
+    AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
+    AgentRoundStatus, ExternalAgentBinding, ExternalBindingId, ExternalControlId,
+    ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
+    ExternalInteractionStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
     ExternalTurnCorrelation, ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
 };
 
@@ -129,6 +130,47 @@ pub(crate) fn migrate_v35_add_external_runtime(tx: &rusqlite::Transaction<'_>) -
             ON external_correlated_rounds(status, expires_at, recipient_agent_id);",
     )
     .map_err(|error| persistence_error("apply schema migration 35", error))
+}
+
+pub(crate) fn migrate_v36_add_agent_coordination(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS external_correlated_rounds;
+         DROP TABLE IF EXISTS agent_correlated_rounds;
+         CREATE TABLE IF NOT EXISTS agent_message_delivery_receipts (
+            delivery_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            message_id TEXT NOT NULL UNIQUE,
+            from_agent_id TEXT NOT NULL,
+            to_agent_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS agent_message_delivery_status_expiry_idx
+            ON agent_message_delivery_receipts(status, expires_at, to_agent_id);
+         CREATE TABLE IF NOT EXISTS agent_correlated_rounds (
+            round_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            sender_agent_id TEXT NOT NULL,
+            sender_session_id TEXT NOT NULL,
+            recipient_agent_id TEXT NOT NULL,
+            recipient_session_id TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            FOREIGN KEY(sender_session_id) REFERENCES sessions(session_id),
+            FOREIGN KEY(recipient_session_id) REFERENCES sessions(session_id)
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS agent_correlated_rounds_pending_correlation_idx
+            ON agent_correlated_rounds(sender_agent_id, recipient_agent_id, correlation_id)
+            WHERE status = 'pending';
+         CREATE INDEX IF NOT EXISTS agent_correlated_rounds_pending_idx
+            ON agent_correlated_rounds(status, expires_at, recipient_agent_id);",
+    )
+    .map_err(|error| persistence_error("apply schema migration 36", error))
 }
 
 impl CoordinationStore {
@@ -308,6 +350,19 @@ impl CoordinationStore {
         tx.commit()
             .map_err(|error| persistence_error("commit external controller release", error))?;
         Ok(released)
+    }
+
+    pub fn get_external_controller_lease(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalControllerLease>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM external_controller_leases WHERE runtime_id = ?1",
+            params![runtime_id.0.as_str()],
+            "load external controller lease",
+        )
     }
 
     pub fn put_external_agent_binding(
@@ -836,17 +891,17 @@ impl CoordinationStore {
         )
     }
 
-    pub fn create_external_correlated_round(
+    pub fn create_agent_correlated_round(
         &self,
-        record: &ExternalCorrelatedRound,
-    ) -> CoreResult<ExternalCorrelatedRound> {
+        record: &AgentCorrelatedRound,
+    ) -> CoreResult<AgentCorrelatedRound> {
         let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|error| persistence_error("start external correlated round", error))?;
-        let existing = load_json_optional::<ExternalCorrelatedRound, _>(
+        let existing = load_json_optional::<AgentCorrelatedRound, _>(
             &tx,
-            "SELECT record_json FROM external_correlated_rounds WHERE idempotency_key = ?1",
+            "SELECT record_json FROM agent_correlated_rounds WHERE idempotency_key = ?1",
             params![record.idempotency_key.as_str()],
             "load external correlated round",
         )?;
@@ -860,11 +915,11 @@ impl CoordinationStore {
             ));
         }
         tx.execute(
-            "INSERT INTO external_correlated_rounds
+            "INSERT INTO agent_correlated_rounds
                 (round_id, idempotency_key, sender_agent_id, sender_session_id,
-                 recipient_agent_id, recipient_session_id, status, expires_at,
+                 recipient_agent_id, recipient_session_id, correlation_id, status, expires_at,
                  revision, record_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 record.round_id.0,
                 record.idempotency_key,
@@ -872,6 +927,7 @@ impl CoordinationStore {
                 record.sender_session_id.0,
                 record.recipient_agent_id.0,
                 record.recipient_session_id.0,
+                record.correlation_id,
                 enum_json(&record.status)?,
                 record.expires_at,
                 record.revision as i64,
@@ -884,18 +940,146 @@ impl CoordinationStore {
         Ok(record.clone())
     }
 
-    pub fn update_external_correlated_round(
+    pub fn create_agent_message_delivery(
         &self,
-        next: &ExternalCorrelatedRound,
+        record: &AgentMessageDeliveryReceipt,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start agent message delivery", error))?;
+        let existing = load_json_optional::<AgentMessageDeliveryReceipt, _>(
+            &tx,
+            "SELECT record_json FROM agent_message_delivery_receipts WHERE idempotency_key = ?1",
+            params![record.request.idempotency_key.as_str()],
+            "load agent message delivery",
+        )?;
+        if let Some(existing) = existing {
+            if existing.request == record.request {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "agent message delivery idempotency key conflicts with a different request",
+            ));
+        }
+        tx.execute(
+            "INSERT INTO agent_message_delivery_receipts
+                (delivery_id, idempotency_key, message_id, from_agent_id, to_agent_id,
+                 status, expires_at, revision, record_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                record.request.delivery_id.0,
+                record.request.idempotency_key,
+                record.request.message_id,
+                record.request.from_agent_id.0,
+                record.request.to_agent_id.0,
+                enum_json(&record.status)?,
+                record.request.expires_at,
+                record.revision as i64,
+                to_json_text(record)?,
+            ],
+        )
+        .map_err(|error| persistence_error("save agent message delivery", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit agent message delivery", error))?;
+        Ok(record.clone())
+    }
+
+    pub fn update_agent_message_delivery(
+        &self,
+        next: &AgentMessageDeliveryReceipt,
         expected_revision: u64,
-    ) -> CoreResult<ExternalCorrelatedRound> {
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start update agent message delivery", error))?;
+        let current = load_json_required::<AgentMessageDeliveryReceipt, _>(
+            &tx,
+            "SELECT record_json FROM agent_message_delivery_receipts WHERE delivery_id = ?1",
+            params![next.request.delivery_id.0.as_str()],
+            "agent message delivery",
+        )?;
+        if current == *next {
+            return Ok(current);
+        }
+        if current.revision != expected_revision {
+            return revision_conflict(
+                "agent message delivery",
+                expected_revision,
+                current.revision,
+            );
+        }
+        if current.status.is_terminal() {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "terminal agent message delivery is immutable",
+            ));
+        }
+        if next.status == AgentMessageDeliveryStatus::Pending {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent message delivery must transition to a terminal status",
+            ));
+        }
+        let mut saved = next.clone();
+        saved.revision = current.revision + 1;
+        tx.execute(
+            "UPDATE agent_message_delivery_receipts SET status = ?1, revision = ?2,
+                record_json = ?3 WHERE delivery_id = ?4 AND revision = ?5",
+            params![
+                enum_json(&saved.status)?,
+                saved.revision as i64,
+                to_json_text(&saved)?,
+                saved.request.delivery_id.0,
+                expected_revision as i64,
+            ],
+        )
+        .map_err(|error| persistence_error("update agent message delivery", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit update agent message delivery", error))?;
+        Ok(saved)
+    }
+
+    pub fn get_agent_correlated_round(
+        &self,
+        round_id: &rusty_crew_core_protocol::AgentRoundId,
+    ) -> CoreResult<Option<AgentCorrelatedRound>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM agent_correlated_rounds WHERE round_id = ?1",
+            params![round_id.0.as_str()],
+            "load agent correlated round",
+        )
+    }
+
+    pub fn list_pending_agent_message_deliveries(
+        &self,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        let conn = self.conn()?;
+        load_json_list(
+            &conn,
+            "SELECT record_json FROM agent_message_delivery_receipts
+             WHERE status = 'pending' ORDER BY expires_at, delivery_id",
+            [],
+            "list pending agent message deliveries",
+        )
+    }
+
+    pub fn update_agent_correlated_round(
+        &self,
+        next: &AgentCorrelatedRound,
+        expected_revision: u64,
+    ) -> CoreResult<AgentCorrelatedRound> {
         let mut conn = self.conn()?;
         let tx = conn
             .transaction()
             .map_err(|error| persistence_error("start update external round", error))?;
-        let current = load_json_required::<ExternalCorrelatedRound, _>(
+        let current = load_json_required::<AgentCorrelatedRound, _>(
             &tx,
-            "SELECT record_json FROM external_correlated_rounds WHERE round_id = ?1",
+            "SELECT record_json FROM agent_correlated_rounds WHERE round_id = ?1",
             params![next.round_id.0.as_str()],
             "external correlated round",
         )?;
@@ -905,14 +1089,14 @@ impl CoordinationStore {
         if current.revision != expected_revision {
             return revision_conflict("external round", expected_revision, current.revision);
         }
-        if current.status != ExternalRoundStatus::Pending && current != *next {
+        if current.status != AgentRoundStatus::Pending && current != *next {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 "terminal external correlated round is immutable",
             ));
         }
-        if current.status == ExternalRoundStatus::Pending
-            && next.status == ExternalRoundStatus::Pending
+        if current.status == AgentRoundStatus::Pending
+            && next.status == AgentRoundStatus::Pending
             && current != *next
         {
             return Err(CoreError::new(
@@ -923,7 +1107,7 @@ impl CoordinationStore {
         let mut saved = next.clone();
         saved.revision = current.revision + 1;
         tx.execute(
-            "UPDATE external_correlated_rounds SET status = ?1, revision = ?2,
+            "UPDATE agent_correlated_rounds SET status = ?1, revision = ?2,
                 record_json = ?3 WHERE round_id = ?4 AND revision = ?5",
             params![
                 enum_json(&saved.status)?,
@@ -939,11 +1123,11 @@ impl CoordinationStore {
         Ok(saved)
     }
 
-    pub fn list_pending_external_rounds(&self) -> CoreResult<Vec<ExternalCorrelatedRound>> {
+    pub fn list_pending_agent_rounds(&self) -> CoreResult<Vec<AgentCorrelatedRound>> {
         let conn = self.conn()?;
         load_json_list(
             &conn,
-            "SELECT record_json FROM external_correlated_rounds
+            "SELECT record_json FROM agent_correlated_rounds
              WHERE status = 'pending' ORDER BY expires_at, round_id",
             [],
             "list pending external correlated rounds",
@@ -1038,11 +1222,11 @@ fn revision_conflict<T>(label: &str, expected: u64, found: u64) -> CoreResult<T>
 mod tests {
     use super::*;
     use rusty_crew_core_protocol::{
-        ExternalBindingPurpose, ExternalBindingStatus, ExternalControlId, ExternalControlKind,
-        ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus, ExternalEndpoint,
-        ExternalEndpointTransport, ExternalInteractionId, ExternalInteractionKind,
-        ExternalInteractionRecord, ExternalInteractionStatus, ExternalProcessOwnership,
-        ExternalRoundId, ExternalRuntimeDesiredState, ExternalRuntimeKind,
+        AgentRoundId, ExternalBindingPurpose, ExternalBindingStatus, ExternalControlId,
+        ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
+        ExternalEndpoint, ExternalEndpointTransport, ExternalInteractionId,
+        ExternalInteractionKind, ExternalInteractionRecord, ExternalInteractionStatus,
+        ExternalProcessOwnership, ExternalRuntimeDesiredState, ExternalRuntimeKind,
         ExternalRuntimeObservedState, ExternalTurnInputPart, ExternalTurnPhase, SessionHandle,
         SessionKind, SessionState, SessionStatus, ToolProfile, TurnInputProvenance,
         TurnInputProvenanceKind,
@@ -1157,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_external_rounds_are_idempotent_and_terminal() {
+    fn sqlite_agent_rounds_are_idempotent_and_terminal() {
         let path = temp_db_path("rounds");
         let store = CoordinationStore::open_file(&path).unwrap();
         store
@@ -1166,8 +1350,8 @@ mod tests {
         store
             .save_session(&session("agent-b", "session-b"))
             .unwrap();
-        let round = ExternalCorrelatedRound {
-            round_id: ExternalRoundId::new("round-a"),
+        let round = AgentCorrelatedRound {
+            round_id: AgentRoundId::new("round-a"),
             idempotency_key: "round-key-a".into(),
             sender_agent_id: AgentId::new("agent-a"),
             sender_session_id: SessionId::new("session-a"),
@@ -1175,39 +1359,35 @@ mod tests {
             recipient_session_id: SessionId::new("session-b"),
             sender_request_id: None,
             message_id: "message-a".into(),
+            correlation_id: "correlation-a".into(),
             reply_message_id: None,
-            status: ExternalRoundStatus::Pending,
+            status: AgentRoundStatus::Pending,
             outcome: None,
+            terminal_reason_code: None,
             created_at: "2026-07-10T00:00:00Z".into(),
             expires_at: "2026-07-10T00:10:00Z".into(),
             terminal_at: None,
             revision: 1,
         };
-        assert_eq!(
-            store.create_external_correlated_round(&round).unwrap(),
-            round
-        );
-        assert_eq!(
-            store.create_external_correlated_round(&round).unwrap(),
-            round
-        );
+        assert_eq!(store.create_agent_correlated_round(&round).unwrap(), round);
+        assert_eq!(store.create_agent_correlated_round(&round).unwrap(), round);
         drop(store);
         let store = CoordinationStore::open_file(&path).unwrap();
         assert_eq!(
-            store.list_pending_external_rounds().unwrap(),
+            store.list_pending_agent_rounds().unwrap(),
             vec![round.clone()]
         );
         let mut replied = round.clone();
-        replied.status = ExternalRoundStatus::Replied;
+        replied.status = AgentRoundStatus::Replied;
         replied.reply_message_id = Some("message-b".into());
         replied.terminal_at = Some("2026-07-10T00:01:00Z".into());
-        let replied = store.update_external_correlated_round(&replied, 1).unwrap();
+        let replied = store.update_agent_correlated_round(&replied, 1).unwrap();
         let mut late = replied.clone();
         late.reply_message_id = Some("message-late".into());
         assert!(store
-            .update_external_correlated_round(&late, replied.revision)
+            .update_agent_correlated_round(&late, replied.revision)
             .is_err());
-        assert!(store.list_pending_external_rounds().unwrap().is_empty());
+        assert!(store.list_pending_agent_rounds().unwrap().is_empty());
         remove_temp_db(&path);
     }
 

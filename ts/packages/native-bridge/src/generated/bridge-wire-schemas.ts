@@ -3456,6 +3456,99 @@ export const bridgeWireSchemaArtifact = {
         "null"
       ]
     },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentCorrelatedRound>": {
+      "properties": {
+        "correlationId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "outcome": true,
+        "recipientAgentId": {
+          "type": "string"
+        },
+        "recipientSessionId": {
+          "type": "string"
+        },
+        "replyMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roundId": {
+          "type": "string"
+        },
+        "senderAgentId": {
+          "type": "string"
+        },
+        "senderRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "senderSessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "replied",
+            "expired",
+            "cancelled",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "roundId",
+        "idempotencyKey",
+        "senderAgentId",
+        "senderSessionId",
+        "recipientAgentId",
+        "recipientSessionId",
+        "messageId",
+        "correlationId",
+        "status",
+        "createdAt",
+        "expiresAt",
+        "revision"
+      ],
+      "title": "Nullable_AgentCorrelatedRound",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "rusty_crew_brain_runtime::catalog::BrainCatalog": {
       "properties": {
         "modules": {
@@ -14045,6 +14138,486 @@ export const bridgeWireSchemaArtifact = {
       "title": "UpdateBranchHeadResult",
       "type": "object"
     },
+    "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt": {
+      "properties": {
+        "activation": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "direct_brain_wake_requested",
+                      "type": "string"
+                    },
+                    "wakeId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "wakeId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "bindingId": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "external_turn_requested",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "requestId",
+                    "bindingId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "queueId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "queued_for_next_turn",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "queueId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "reasonCode": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "rejected",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "reasonCode"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "correlationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "deliveryId": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "fromAgentId": {
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "requireWake": {
+              "type": "boolean"
+            },
+            "toAgentId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "deliveryId",
+            "idempotencyKey",
+            "messageId",
+            "fromAgentId",
+            "toAgentId",
+            "body",
+            "requireWake",
+            "createdAt",
+            "expiresAt"
+          ],
+          "type": "object"
+        },
+        "resolvedRoundId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "accepted",
+            "rejected",
+            "expired"
+          ],
+          "type": "string"
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "request",
+        "status",
+        "revision"
+      ],
+      "title": "AgentMessageDeliveryReceipt",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::AgentRoundStartReceipt": {
+      "properties": {
+        "delivery": {
+          "properties": {
+            "activation": {
+              "anyOf": [
+                {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "const": "direct_brain_wake_requested",
+                          "type": "string"
+                        },
+                        "wakeId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "sessionId",
+                        "wakeId"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "bindingId": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "const": "external_turn_requested",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "sessionId",
+                        "requestId",
+                        "bindingId"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "queueId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "const": "queued_for_next_turn",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "sessionId",
+                        "queueId"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "reasonCode": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "const": "rejected",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "reasonCode"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request": {
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "correlationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deliveryId": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": "string"
+                },
+                "fromAgentId": {
+                  "type": "string"
+                },
+                "idempotencyKey": {
+                  "type": "string"
+                },
+                "messageId": {
+                  "type": "string"
+                },
+                "requireWake": {
+                  "type": "boolean"
+                },
+                "toAgentId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "deliveryId",
+                "idempotencyKey",
+                "messageId",
+                "fromAgentId",
+                "toAgentId",
+                "body",
+                "requireWake",
+                "createdAt",
+                "expiresAt"
+              ],
+              "type": "object"
+            },
+            "resolvedRoundId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "accepted",
+                "rejected",
+                "expired"
+              ],
+              "type": "string"
+            },
+            "terminalAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "request",
+            "status",
+            "revision"
+          ],
+          "type": "object"
+        },
+        "round": {
+          "properties": {
+            "correlationId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "outcome": true,
+            "recipientAgentId": {
+              "type": "string"
+            },
+            "recipientSessionId": {
+              "type": "string"
+            },
+            "replyMessageId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "roundId": {
+              "type": "string"
+            },
+            "senderAgentId": {
+              "type": "string"
+            },
+            "senderRequestId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "senderSessionId": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "replied",
+                "expired",
+                "cancelled",
+                "failed"
+              ],
+              "type": "string"
+            },
+            "terminalAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "terminalReasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "roundId",
+            "idempotencyKey",
+            "senderAgentId",
+            "senderSessionId",
+            "recipientAgentId",
+            "recipientSessionId",
+            "messageId",
+            "correlationId",
+            "status",
+            "createdAt",
+            "expiresAt",
+            "revision"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "round",
+        "delivery"
+      ],
+      "title": "AgentRoundStartReceipt",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::memory_space::BackgroundMemoryAutoMutationPlan": {
       "properties": {
         "accepted_count": {
@@ -17010,6 +17583,7 @@ export const bridgeWireSchemaArtifact = {
     "apply_roleplay_alternative": "rusty_crew_core_persistence::contracts::ApplyRoleplayAlternativeResult",
     "apply_roleplay_session_projection": "rusty_crew_core_persistence::contracts::RoleplaySessionProjectionRecord",
     "archive_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
+    "begin_agent_round": "rusty_crew_core_protocol::external_runtime::AgentRoundStartReceipt",
     "brain_catalog": "rusty_crew_brain_runtime::catalog::BrainCatalog",
     "build_roleplay_prompt_context": "rusty_crew_roleplay_core::RoleplayPromptContextOutput",
     "build_session_memory_prompt_context": "rusty_crew_core_persistence::contracts::SessionMemoryPromptContext",
@@ -17025,7 +17599,9 @@ export const bridgeWireSchemaArtifact = {
     "create_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "delete_chat_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
     "delete_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
+    "deliver_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "ensure_active_chat_conversation_branch": "rusty_crew_core_persistence::contracts::EnsureActiveChatConversationBranchResult",
+    "get_agent_round": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentCorrelatedRound>",
     "get_chat_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayChatLayerRecord>",
     "get_conversation_branch_state": "rusty_crew_core_persistence::contracts::ConversationBranchStateRecord",
     "get_lore_entry": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreRecord>",

@@ -9,8 +9,6 @@ import type {
 import {
   agentRoundTool,
   createCoordinationToolResolver,
-  isCorrelatedReply,
-  replyFromEvent,
   sendAgentMessageTool,
   type CoordinationToolRuntime,
 } from "../src/coordination-tools.js";
@@ -94,6 +92,9 @@ assert.deepEqual(calls[0], {
   kind: "route",
   input: {
     fromAgentId: "coordination-agent",
+    fromSessionId: "coordination-session",
+    wakeId: "coordination-wake",
+    toolCallId: "send-call",
     toAgentId: "coordination-target",
     body: "please wake",
     correlationId: "coordination-proof",
@@ -178,30 +179,6 @@ assert.equal(
   (calls.at(-1)?.input as { fromAgentId?: string }).fromAgentId,
   "coordination-agent",
 );
-
-const replyEvent = {
-  type: "agent_message_routed",
-  message: {
-    from: "coordination-target" as AgentId,
-    to: "coordination-agent" as AgentId,
-    body: "confirmed",
-    correlationId: "round-proof",
-  },
-} as const;
-assert.equal(
-  isCorrelatedReply(replyEvent, {
-    fromAgentId: "coordination-agent",
-    toAgentId: "coordination-target",
-    correlationId: "round-proof",
-  }),
-  true,
-);
-assert.deepEqual(replyFromEvent(replyEvent), {
-  from: "coordination-target",
-  to: "coordination-agent",
-  body: "confirmed",
-  correlationId: "round-proof",
-});
 
 const catalog = buildBuiltInToolCatalog(defaultToolRegistry);
 assert.ok(

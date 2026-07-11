@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CODEX_APP_SERVER_PROTOCOL,
+  CODEX_COORDINATION_DYNAMIC_TOOLS,
   CodexAppServerDriver,
   UnixWebSocketTransport,
   type CodexControllerAuthority,
@@ -68,11 +69,13 @@ class LiveAuthority implements CodexControllerAuthority {
     const params = context.request.params;
     if (
       params.namespace !== "rusty_crew" ||
-      params.tool !== "echo_probe" ||
+      params.tool !== "send_agent_message" ||
       typeof params.arguments !== "object" ||
       params.arguments === null ||
-      !("token" in params.arguments) ||
-      params.arguments.token !== token
+      !("recipient" in params.arguments) ||
+      params.arguments.recipient !== "smoke-recipient" ||
+      !("body" in params.arguments) ||
+      params.arguments.body !== token
     ) {
       return {
         type: "error",
@@ -138,26 +141,7 @@ try {
     approvalPolicy: "never",
     sandbox: "danger-full-access",
     ephemeral: false,
-    dynamicTools: [
-      {
-        type: "namespace",
-        name: "rusty_crew",
-        description: "Identity-bound Rusty Crew compatibility tools.",
-        tools: [
-          {
-            type: "function",
-            name: "echo_probe",
-            description: "Echo the supplied integration token.",
-            inputSchema: {
-              type: "object",
-              properties: { token: { type: "string" } },
-              required: ["token"],
-              additionalProperties: false,
-            },
-          },
-        ],
-      },
-    ],
+    dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
   });
   stage = "dynamic-tool turn start";
   const turn = await first.turnStart({
@@ -165,7 +149,7 @@ try {
     input: [
       {
         type: "text",
-        text: `Call rusty_crew.echo_probe exactly once with token ${token}, then reply with its acknowledgement.`,
+        text: `Call rusty_crew.send_agent_message exactly once with recipient smoke-recipient and body ${token}, then reply with its acknowledgement.`,
         text_elements: [],
       },
     ],

@@ -2933,7 +2933,8 @@ pub enum DiagnosticTable {
     ExternalControlReceipts,
     ExternalInteractions,
     ExternalRuntimeEvents,
-    ExternalCorrelatedRounds,
+    AgentMessageDeliveryReceipts,
+    AgentCorrelatedRounds,
 }
 
 impl DiagnosticTable {
@@ -2999,7 +3000,8 @@ impl DiagnosticTable {
         Self::ExternalControlReceipts,
         Self::ExternalInteractions,
         Self::ExternalRuntimeEvents,
-        Self::ExternalCorrelatedRounds,
+        Self::AgentMessageDeliveryReceipts,
+        Self::AgentCorrelatedRounds,
     ];
 
     pub(crate) fn parse(raw: &str) -> CoreResult<Self> {
@@ -3065,7 +3067,8 @@ impl DiagnosticTable {
             "external_control_receipts" => Ok(Self::ExternalControlReceipts),
             "external_interactions" => Ok(Self::ExternalInteractions),
             "external_runtime_events" => Ok(Self::ExternalRuntimeEvents),
-            "external_correlated_rounds" => Ok(Self::ExternalCorrelatedRounds),
+            "agent_message_delivery_receipts" => Ok(Self::AgentMessageDeliveryReceipts),
+            "agent_correlated_rounds" => Ok(Self::AgentCorrelatedRounds),
             _ => Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
                 format!("unsupported persistence table {raw}"),
@@ -3136,7 +3139,8 @@ impl DiagnosticTable {
             Self::ExternalControlReceipts => "external_control_receipts",
             Self::ExternalInteractions => "external_interactions",
             Self::ExternalRuntimeEvents => "external_runtime_events",
-            Self::ExternalCorrelatedRounds => "external_correlated_rounds",
+            Self::AgentMessageDeliveryReceipts => "agent_message_delivery_receipts",
+            Self::AgentCorrelatedRounds => "agent_correlated_rounds",
         }
     }
 }

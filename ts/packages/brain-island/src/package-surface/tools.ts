@@ -45,8 +45,6 @@ export {
   agentRoundTool,
   coordinationTools,
   createCoordinationToolResolver,
-  isCorrelatedReply,
-  replyFromEvent,
   resolveCoordinationTools,
   sendAgentMessageTool,
 } from "../coordination-tools.js";

@@ -671,6 +671,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     drainSubscriptionEvents: unavailable("subscribe_events"),
     createSession: unavailable("initialize_engine"),
     routeAgentMessage: unavailable("inject_external_event"),
+    deliverAgentMessage: unavailable("deliver_agent_message"),
+    beginAgentRound: unavailable("begin_agent_round"),
+    getAgentRound: unavailable("get_agent_round"),
     buildBrainWakeRequest: unavailable("wake_brain"),
     buildBrainWakeRequestForSession: unavailable("wake_brain"),
     diagnosticProjectBodyStateJson: unavailable("wake_brain"),
@@ -1449,6 +1452,22 @@ function createNativeBridgeModule(
     archiveSession: async (sessionId) => binding.archiveSession(sessionId),
     routeAgentMessage: async (from, to, body, correlationId) =>
       binding.routeAgentMessage(from, to, body, correlationId),
+    deliverAgentMessage: async (command) =>
+      JSON.parse(
+        binding.deliverAgentMessageJson(JSON.stringify(command)),
+      ) as Awaited<ReturnType<NativeBridgeModule["deliverAgentMessage"]>>,
+    beginAgentRound: async (command) =>
+      JSON.parse(
+        binding.beginAgentRoundJson(JSON.stringify(command)),
+      ) as Awaited<ReturnType<NativeBridgeModule["beginAgentRound"]>>,
+    getAgentRound: async (roundId) => {
+      const value = binding.getAgentRoundJson(roundId);
+      return value === null || value === undefined
+        ? undefined
+        : (JSON.parse(value) as Awaited<
+            ReturnType<NativeBridgeModule["getAgentRound"]>
+          >);
+    },
     enqueueBodyFollowUpMessage: async (input) =>
       binding.enqueueBodyFollowUpMessage(
         input.sessionId,

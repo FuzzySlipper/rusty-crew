@@ -1,4 +1,11 @@
 use super::*;
+use rusty_crew_core_protocol::{
+    AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
+    AgentMessageDeliveryStatus,
+};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_LEGACY_MESSAGE_ID: AtomicU64 = AtomicU64::new(1);
 
 impl CoreEngine {
     pub fn register_profile_tool_profile(
@@ -33,12 +40,30 @@ impl CoreEngine {
     }
 
     pub fn route_agent_message(&self, message: AgentMessage) -> CoreResult<EventReceipt> {
-        let event = CoreEvent::AgentMessageRouted { message };
-        let sequence = self.bus.publish(event.clone())?;
-        self.schedule_wake_for_event(&event)?;
+        let now = self.now();
+        let expires_at = add_millis_to_iso(&now, 5_000)?;
+        let key = format!(
+            "{}-{}",
+            sanitized_clock_key(&now),
+            NEXT_LEGACY_MESSAGE_ID.fetch_add(1, Ordering::Relaxed)
+        );
+        let receipt = self.deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::System {
+                sender_agent_id: message.from,
+            },
+            delivery_id: AgentMessageDeliveryId::new(format!("delivery-{key}")),
+            idempotency_key: format!("delivery-{key}"),
+            message_id: format!("message-{key}"),
+            to_agent_id: message.to,
+            body: message.body,
+            correlation_id: message.correlation_id,
+            require_wake: true,
+            created_at: now,
+            expires_at,
+        })?;
         Ok(EventReceipt {
-            accepted: true,
-            sequence,
+            accepted: receipt.status == AgentMessageDeliveryStatus::Accepted,
+            sequence: receipt.sequence.unwrap_or_default(),
         })
     }
 

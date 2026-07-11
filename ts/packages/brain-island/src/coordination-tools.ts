@@ -1,4 +1,4 @@
-import type { AgentId, CoreEvent } from "@rusty-crew/contracts";
+import type { AgentId } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type {
@@ -47,6 +47,9 @@ export interface AgentRoundResult extends AgentMessageRouteResult {
 export interface CoordinationToolRuntime {
   routeMessage(input: {
     fromAgentId: string;
+    fromSessionId: string;
+    wakeId: string;
+    toolCallId: string;
     toAgentId: string;
     body: string;
     correlationId?: string;
@@ -54,6 +57,9 @@ export interface CoordinationToolRuntime {
   }): Promise<AgentMessageRouteResult>;
   roundTrip(input: {
     fromAgentId: string;
+    fromSessionId: string;
+    wakeId: string;
+    toolCallId: string;
     toAgentId: string;
     body: string;
     correlationId: string;
@@ -105,11 +111,17 @@ export function sendAgentMessageTool(
     executeWithContext: async (params, toolContext) =>
       sendAgentMessage(context, {
         fromAgentId: toolContext.wake.state.session.agentId,
+        fromSessionId: toolContext.sessionId,
+        wakeId: toolContext.wakeId,
+        toolCallId: toolContext.callId,
         params,
       }),
     execute: async (_callId, params) =>
       sendAgentMessage(context, {
         fromAgentId: undefined,
+        fromSessionId: undefined,
+        wakeId: undefined,
+        toolCallId: undefined,
         params,
       }),
   };
@@ -140,6 +152,9 @@ export function agentRoundTool(
         `${toolContext.sessionId}:${toolContext.callId}:agent-round`;
       const round = await context.runtime.roundTrip({
         fromAgentId,
+        fromSessionId: toolContext.sessionId,
+        wakeId: toolContext.wakeId,
+        toolCallId: toolContext.callId,
         toAgentId: params.toAgentId,
         body: params.body,
         correlationId,
@@ -172,6 +187,9 @@ async function sendAgentMessage(
   context: CoordinationToolContext,
   input: {
     fromAgentId: string | undefined;
+    fromSessionId: string | undefined;
+    wakeId: string | undefined;
+    toolCallId: string | undefined;
     params: SendAgentMessageParams;
   },
 ): Promise<BrainToolResult<CoordinationToolDetails>> {
@@ -185,10 +203,26 @@ async function sendAgentMessage(
       text: "send_agent_message requires wake context.",
     });
   }
+  if (
+    input.fromSessionId === undefined ||
+    input.wakeId === undefined ||
+    input.toolCallId === undefined
+  ) {
+    return coordinationResult({
+      ok: false,
+      operation: "send_agent_message",
+      reasonCode: "tool_context_required",
+      queuedActions: 0,
+      text: "send_agent_message requires durable wake and tool-call context.",
+    });
+  }
 
   if (context.runtime !== undefined) {
     const routed = await context.runtime.routeMessage({
       fromAgentId,
+      fromSessionId: input.fromSessionId,
+      wakeId: input.wakeId,
+      toolCallId: input.toolCallId,
       toAgentId: input.params.toAgentId,
       body: input.params.body,
       correlationId: input.params.correlationId,
@@ -248,33 +282,5 @@ function coordinationResult(input: {
       round: input.round,
       queuedActions: input.queuedActions,
     },
-  };
-}
-
-export function isCorrelatedReply(
-  event: CoreEvent,
-  input: {
-    fromAgentId: string;
-    toAgentId: string;
-    correlationId: string;
-  },
-): boolean {
-  return (
-    event.type === "agent_message_routed" &&
-    event.message.from === (input.toAgentId as AgentId) &&
-    event.message.to === (input.fromAgentId as AgentId) &&
-    event.message.correlationId === input.correlationId
-  );
-}
-
-export function replyFromEvent(
-  event: CoreEvent,
-): AgentRoundResult["reply"] | undefined {
-  if (event.type !== "agent_message_routed") return undefined;
-  return {
-    from: event.message.from,
-    to: event.message.to,
-    body: event.message.body,
-    correlationId: event.message.correlationId,
   };
 }

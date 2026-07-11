@@ -33,7 +33,8 @@ external_string_id!(ExternalBindingId);
 external_string_id!(ExternalTurnRequestId);
 external_string_id!(ExternalControlId);
 external_string_id!(ExternalInteractionId);
-external_string_id!(ExternalRoundId);
+external_string_id!(AgentRoundId);
+external_string_id!(AgentMessageDeliveryId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -270,7 +271,11 @@ pub struct ExternalTurnCorrelation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "type")]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum AgentActivation {
     DirectBrainWakeRequested {
         session_id: SessionId,
@@ -401,16 +406,123 @@ pub struct NormalizedExternalRuntimeEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ExternalRoundStatus {
+pub enum AgentRoundStatus {
     Pending,
     Replied,
     Expired,
     Cancelled,
+    Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ExternalCorrelatedRound {
-    pub round_id: ExternalRoundId,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMessageDeliveryStatus {
+    Pending,
+    Accepted,
+    Rejected,
+    Expired,
+}
+
+impl AgentMessageDeliveryStatus {
+    pub const fn is_terminal(self) -> bool {
+        !matches!(self, Self::Pending)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageDeliveryRequest {
+    pub delivery_id: AgentMessageDeliveryId,
+    pub idempotency_key: String,
+    pub message_id: String,
+    pub from_agent_id: AgentId,
+    pub to_agent_id: AgentId,
+    pub body: String,
+    pub correlation_id: Option<String>,
+    pub require_wake: bool,
+    pub created_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum AgentCoordinationCaller {
+    System {
+        sender_agent_id: AgentId,
+    },
+    DirectBrain {
+        session_id: SessionId,
+        wake_id: String,
+        tool_call_id: String,
+    },
+    ExternalAgent {
+        runtime_id: ExternalRuntimeId,
+        binding_id: ExternalBindingId,
+        controller_instance_id: String,
+        controller_generation: u64,
+        native_thread_id: String,
+        native_turn_id: String,
+        native_request_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageCommand {
+    pub caller: AgentCoordinationCaller,
+    pub delivery_id: AgentMessageDeliveryId,
+    pub idempotency_key: String,
+    pub message_id: String,
+    pub to_agent_id: AgentId,
+    pub body: String,
+    pub correlation_id: Option<String>,
+    pub require_wake: bool,
+    pub created_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoundCommand {
+    pub caller: AgentCoordinationCaller,
+    pub round_id: AgentRoundId,
+    pub idempotency_key: String,
+    pub message_id: String,
+    pub to_agent_id: AgentId,
+    pub body: String,
+    pub correlation_id: String,
+    pub created_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoundStartReceipt {
+    pub round: AgentCorrelatedRound,
+    pub delivery: AgentMessageDeliveryReceipt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageDeliveryReceipt {
+    pub request: AgentMessageDeliveryRequest,
+    pub status: AgentMessageDeliveryStatus,
+    pub sequence: Option<u64>,
+    pub activation: Option<AgentActivation>,
+    pub resolved_round_id: Option<AgentRoundId>,
+    pub reason_code: Option<String>,
+    pub terminal_at: Option<IsoTimestamp>,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCorrelatedRound {
+    pub round_id: AgentRoundId,
     pub idempotency_key: String,
     pub sender_agent_id: AgentId,
     pub sender_session_id: SessionId,
@@ -418,9 +530,11 @@ pub struct ExternalCorrelatedRound {
     pub recipient_session_id: SessionId,
     pub sender_request_id: Option<ExternalTurnRequestId>,
     pub message_id: String,
+    pub correlation_id: String,
     pub reply_message_id: Option<String>,
-    pub status: ExternalRoundStatus,
+    pub status: AgentRoundStatus,
     pub outcome: Option<Value>,
+    pub terminal_reason_code: Option<String>,
     pub created_at: IsoTimestamp,
     pub expires_at: IsoTimestamp,
     pub terminal_at: Option<IsoTimestamp>,

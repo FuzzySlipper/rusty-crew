@@ -2,10 +2,11 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
-    validate_external_runtime_registration, validate_external_turn_transition, AgentId,
-    ExternalAgentBinding, ExternalBindingId, ExternalControlId, ExternalControlReceipt,
-    ExternalControllerLease, ExternalCorrelatedRound, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRoundStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
+    validate_external_runtime_registration, validate_external_turn_transition,
+    AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
+    AgentRoundStatus, ExternalAgentBinding, ExternalBindingId, ExternalControlId,
+    ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
+    ExternalInteractionStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
     ExternalTurnCorrelation, ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
 };
 
@@ -212,6 +213,21 @@ impl PostgresBackendStore {
             postgres_error("commit release PostgreSQL external controller lease", error)
         })?;
         Ok(released)
+    }
+
+    pub fn get_external_controller_lease(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalControllerLease>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_controller_leases WHERE runtime_id = $1"
+            ),
+            &[&runtime_id.0],
+            "load PostgreSQL external controller lease",
+        )
     }
 
     pub fn put_external_agent_binding(
@@ -804,19 +820,19 @@ impl PostgresBackendStore {
         )
     }
 
-    pub fn create_external_correlated_round(
+    pub fn create_agent_correlated_round(
         &self,
-        record: &ExternalCorrelatedRound,
-    ) -> CoreResult<ExternalCorrelatedRound> {
+        record: &AgentCorrelatedRound,
+    ) -> CoreResult<AgentCorrelatedRound> {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start PostgreSQL external round", error))?;
-        let existing = load_optional::<ExternalCorrelatedRound>(
+        let existing = load_optional::<AgentCorrelatedRound>(
             &mut tx,
             &format!(
-                "SELECT record_json FROM {schema}.external_correlated_rounds
+                "SELECT record_json FROM {schema}.agent_correlated_rounds
                  WHERE idempotency_key = $1 FOR UPDATE"
             ),
             &[&record.idempotency_key],
@@ -833,11 +849,11 @@ impl PostgresBackendStore {
         }
         tx.execute(
             &format!(
-                "INSERT INTO {schema}.external_correlated_rounds
+                "INSERT INTO {schema}.agent_correlated_rounds
                     (round_id, idempotency_key, sender_agent_id, sender_session_id,
-                     recipient_agent_id, recipient_session_id, status, expires_at,
+                     recipient_agent_id, recipient_session_id, correlation_id, status, expires_at,
                      revision, record_json)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
             ),
             &[
                 &record.round_id.0,
@@ -846,6 +862,7 @@ impl PostgresBackendStore {
                 &record.sender_session_id.0,
                 &record.recipient_agent_id.0,
                 &record.recipient_session_id.0,
+                &record.correlation_id,
                 &enum_json(&record.status)?,
                 &record.expires_at,
                 &(record.revision as i64),
@@ -858,20 +875,166 @@ impl PostgresBackendStore {
         Ok(record.clone())
     }
 
-    pub fn update_external_correlated_round(
+    pub fn create_agent_message_delivery(
         &self,
-        next: &ExternalCorrelatedRound,
+        record: &AgentMessageDeliveryReceipt,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL agent message delivery", error))?;
+        let existing = load_optional::<AgentMessageDeliveryReceipt>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE idempotency_key = $1 FOR UPDATE"
+            ),
+            &[&record.request.idempotency_key],
+            "load PostgreSQL agent message delivery",
+        )?;
+        if let Some(existing) = existing {
+            if existing.request == record.request {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "agent message delivery idempotency key conflicts with a different request",
+            ));
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.agent_message_delivery_receipts
+                    (delivery_id, idempotency_key, message_id, from_agent_id, to_agent_id,
+                     status, expires_at, revision, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+            ),
+            &[
+                &record.request.delivery_id.0,
+                &record.request.idempotency_key,
+                &record.request.message_id,
+                &record.request.from_agent_id.0,
+                &record.request.to_agent_id.0,
+                &enum_json(&record.status)?,
+                &record.request.expires_at,
+                &(record.revision as i64),
+                &to_json_text(record)?,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL agent message delivery", error))?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL agent message delivery", error))?;
+        Ok(record.clone())
+    }
+
+    pub fn update_agent_message_delivery(
+        &self,
+        next: &AgentMessageDeliveryReceipt,
         expected_revision: u64,
-    ) -> CoreResult<ExternalCorrelatedRound> {
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start update PostgreSQL agent message delivery", error)
+        })?;
+        let current = load_required::<AgentMessageDeliveryReceipt>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE delivery_id = $1 FOR UPDATE"
+            ),
+            &[&next.request.delivery_id.0],
+            "PostgreSQL agent message delivery",
+        )?;
+        if current == *next {
+            return Ok(current);
+        }
+        if current.revision != expected_revision {
+            return revision_conflict(
+                "agent message delivery",
+                expected_revision,
+                current.revision,
+            );
+        }
+        if current.status.is_terminal() {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "terminal agent message delivery is immutable",
+            ));
+        }
+        if next.status == AgentMessageDeliveryStatus::Pending {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent message delivery must transition to a terminal status",
+            ));
+        }
+        let mut saved = next.clone();
+        saved.revision = current.revision + 1;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.agent_message_delivery_receipts SET status = $1,
+                    revision = $2, record_json = $3
+                 WHERE delivery_id = $4 AND revision = $5"
+            ),
+            &[
+                &enum_json(&saved.status)?,
+                &(saved.revision as i64),
+                &to_json_text(&saved)?,
+                &saved.request.delivery_id.0,
+                &(expected_revision as i64),
+            ],
+        )
+        .map_err(|error| postgres_error("update PostgreSQL agent message delivery", error))?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit update PostgreSQL agent message delivery", error)
+        })?;
+        Ok(saved)
+    }
+
+    pub fn get_agent_correlated_round(
+        &self,
+        round_id: &rusty_crew_core_protocol::AgentRoundId,
+    ) -> CoreResult<Option<AgentCorrelatedRound>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_correlated_rounds WHERE round_id = $1"
+            ),
+            &[&round_id.0],
+            "load PostgreSQL agent correlated round",
+        )
+    }
+
+    pub fn list_pending_agent_message_deliveries(
+        &self,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        let schema = self.quoted_schema();
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE status = 'pending' ORDER BY expires_at, delivery_id"
+            ),
+            &[],
+            "list PostgreSQL pending agent message deliveries",
+        )
+    }
+
+    pub fn update_agent_correlated_round(
+        &self,
+        next: &AgentCorrelatedRound,
+        expected_revision: u64,
+    ) -> CoreResult<AgentCorrelatedRound> {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start update PostgreSQL external round", error))?;
-        let current = load_required::<ExternalCorrelatedRound>(
+        let current = load_required::<AgentCorrelatedRound>(
             &mut tx,
             &format!(
-                "SELECT record_json FROM {schema}.external_correlated_rounds
+                "SELECT record_json FROM {schema}.agent_correlated_rounds
                  WHERE round_id = $1 FOR UPDATE"
             ),
             &[&next.round_id.0],
@@ -883,14 +1046,14 @@ impl PostgresBackendStore {
         if current.revision != expected_revision {
             return revision_conflict("external round", expected_revision, current.revision);
         }
-        if current.status != ExternalRoundStatus::Pending && current != *next {
+        if current.status != AgentRoundStatus::Pending && current != *next {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 "terminal external correlated round is immutable",
             ));
         }
-        if current.status == ExternalRoundStatus::Pending
-            && next.status == ExternalRoundStatus::Pending
+        if current.status == AgentRoundStatus::Pending
+            && next.status == AgentRoundStatus::Pending
             && current != *next
         {
             return Err(CoreError::new(
@@ -902,7 +1065,7 @@ impl PostgresBackendStore {
         saved.revision = current.revision + 1;
         tx.execute(
             &format!(
-                "UPDATE {schema}.external_correlated_rounds SET status = $1,
+                "UPDATE {schema}.agent_correlated_rounds SET status = $1,
                     revision = $2, record_json = $3
                  WHERE round_id = $4 AND revision = $5"
             ),
@@ -920,12 +1083,12 @@ impl PostgresBackendStore {
         Ok(saved)
     }
 
-    pub fn list_pending_external_rounds(&self) -> CoreResult<Vec<ExternalCorrelatedRound>> {
+    pub fn list_pending_agent_rounds(&self) -> CoreResult<Vec<AgentCorrelatedRound>> {
         let schema = self.quoted_schema();
         load_list(
             &mut *self.client()?,
             &format!(
-                "SELECT record_json FROM {schema}.external_correlated_rounds
+                "SELECT record_json FROM {schema}.agent_correlated_rounds
                  WHERE status = 'pending' ORDER BY expires_at, round_id"
             ),
             &[],

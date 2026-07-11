@@ -1,5 +1,13 @@
 export { CodexProtocolCodec, CodexProtocolError } from "./codec.js";
 export { CodexAppServerDriver, CodexRpcError } from "./driver.js";
+export {
+  CODEX_COORDINATION_DYNAMIC_TOOLS,
+  resolveCodexCoordinationToolCall,
+} from "./coordination.js";
+export type {
+  CodexCoordinationBinding,
+  CodexCoordinationPort,
+} from "./coordination.js";
 export { CODEX_APP_SERVER_PROTOCOL } from "./protocol-manifest.js";
 export {
   type CodexJsonRpcTransport,

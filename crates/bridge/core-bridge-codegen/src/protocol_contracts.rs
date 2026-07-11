@@ -53,12 +53,19 @@ struct ProtocolContractRoots {
     context_compaction_artifact_query: ContextCompactionArtifactQuery,
     memory_governance_decision_input: MemoryGovernanceDecisionInput,
     memory_governance_decision_record: MemoryGovernanceDecisionRecord,
+    agent_message_command: AgentMessageCommand,
+    agent_message_delivery_receipt: AgentMessageDeliveryReceipt,
+    agent_round_command: AgentRoundCommand,
+    agent_round_start_receipt: AgentRoundStartReceipt,
+    agent_correlated_round: AgentCorrelatedRound,
 }
 
 const STRING_BRANDS: &[&str] = &[
     "AdapterId",
     "AgentId",
     "AgentInstanceId",
+    "AgentMessageDeliveryId",
+    "AgentRoundId",
     "BrainImplementationId",
     "ConversationBranchId",
     "MemoryRecordShapeId",
@@ -68,6 +75,9 @@ const STRING_BRANDS: &[&str] = &[
     "RunId",
     "SessionId",
     "TaskId",
+    "ExternalBindingId",
+    "ExternalRuntimeId",
+    "ExternalTurnRequestId",
 ];
 
 const NUMBER_BRANDS: &[&str] = &[

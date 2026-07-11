@@ -279,6 +279,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn get_external_controller_lease(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalControllerLease>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_controller_lease(runtime_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_controller_lease(runtime_id),
+        }
+    }
+
     pub fn put_external_agent_binding(
         &self,
         record: &ExternalAgentBinding,
@@ -456,36 +467,78 @@ impl CoreCoordinationStore {
         }
     }
 
-    pub fn create_external_correlated_round(
+    pub fn create_agent_correlated_round(
         &self,
-        record: &ExternalCorrelatedRound,
-    ) -> CoreResult<ExternalCorrelatedRound> {
+        record: &AgentCorrelatedRound,
+    ) -> CoreResult<AgentCorrelatedRound> {
         match self {
-            Self::Sqlite(store) => store.create_external_correlated_round(record),
+            Self::Sqlite(store) => store.create_agent_correlated_round(record),
             #[cfg(feature = "postgres")]
-            Self::Postgres(store) => store.create_external_correlated_round(record),
+            Self::Postgres(store) => store.create_agent_correlated_round(record),
         }
     }
 
-    pub fn update_external_correlated_round(
+    pub fn create_agent_message_delivery(
         &self,
-        next: &ExternalCorrelatedRound,
+        record: &AgentMessageDeliveryReceipt,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        match self {
+            Self::Sqlite(store) => store.create_agent_message_delivery(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.create_agent_message_delivery(record),
+        }
+    }
+
+    pub fn update_agent_message_delivery(
+        &self,
+        next: &AgentMessageDeliveryReceipt,
         expected_revision: u64,
-    ) -> CoreResult<ExternalCorrelatedRound> {
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
         match self {
-            Self::Sqlite(store) => store.update_external_correlated_round(next, expected_revision),
+            Self::Sqlite(store) => store.update_agent_message_delivery(next, expected_revision),
             #[cfg(feature = "postgres")]
-            Self::Postgres(store) => {
-                store.update_external_correlated_round(next, expected_revision)
-            }
+            Self::Postgres(store) => store.update_agent_message_delivery(next, expected_revision),
         }
     }
 
-    pub fn list_pending_external_rounds(&self) -> CoreResult<Vec<ExternalCorrelatedRound>> {
+    pub fn get_agent_correlated_round(
+        &self,
+        round_id: &AgentRoundId,
+    ) -> CoreResult<Option<AgentCorrelatedRound>> {
         match self {
-            Self::Sqlite(store) => store.list_pending_external_rounds(),
+            Self::Sqlite(store) => store.get_agent_correlated_round(round_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(store) => store.list_pending_external_rounds(),
+            Self::Postgres(store) => store.get_agent_correlated_round(round_id),
+        }
+    }
+
+    pub fn list_pending_agent_message_deliveries(
+        &self,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.list_pending_agent_message_deliveries(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_pending_agent_message_deliveries(),
+        }
+    }
+
+    pub fn update_agent_correlated_round(
+        &self,
+        next: &AgentCorrelatedRound,
+        expected_revision: u64,
+    ) -> CoreResult<AgentCorrelatedRound> {
+        match self {
+            Self::Sqlite(store) => store.update_agent_correlated_round(next, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.update_agent_correlated_round(next, expected_revision),
+        }
+    }
+
+    pub fn list_pending_agent_rounds(&self) -> CoreResult<Vec<AgentCorrelatedRound>> {
+        match self {
+            Self::Sqlite(store) => store.list_pending_agent_rounds(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_pending_agent_rounds(),
         }
     }
 

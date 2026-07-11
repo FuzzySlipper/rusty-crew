@@ -1677,8 +1677,12 @@ impl PostgresBackendStore {
                     rows: self.table_rows("external_runtime_events")?,
                 },
                 RuntimeStorageTableCount {
-                    table: "external_correlated_rounds".to_string(),
-                    rows: self.table_rows("external_correlated_rounds")?,
+                    table: "agent_message_delivery_receipts".to_string(),
+                    rows: self.table_rows("agent_message_delivery_receipts")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "agent_correlated_rounds".to_string(),
+                    rows: self.table_rows("agent_correlated_rounds")?,
                 },
             ],
             capabilities: postgres_backend_capabilities(),
@@ -2758,7 +2762,12 @@ fn postgres_event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
         | CoreEvent::BrainEventObserved { session_id, .. }
         | CoreEvent::BrainActionsAccepted { session_id, .. } => vec![session_id.clone()],
         CoreEvent::CompletionPacketDelivered { packet } => vec![packet.session_id.clone()],
+        CoreEvent::AgentRoundObserved { round } => vec![
+            round.sender_session_id.clone(),
+            round.recipient_session_id.clone(),
+        ],
         CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. } => Vec::new(),
     }
@@ -2768,6 +2777,14 @@ fn postgres_event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
     match event {
         CoreEvent::SessionCreated { state } => vec![state.agent_id.clone()],
         CoreEvent::AgentMessageRouted { message } => vec![message.from.clone(), message.to.clone()],
+        CoreEvent::AgentMessageDeliveryObserved { receipt } => vec![
+            receipt.request.from_agent_id.clone(),
+            receipt.request.to_agent_id.clone(),
+        ],
+        CoreEvent::AgentRoundObserved { round } => vec![
+            round.sender_agent_id.clone(),
+            round.recipient_agent_id.clone(),
+        ],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
@@ -2790,6 +2807,10 @@ fn postgres_event_correlation_ids(event: &CoreEvent) -> Vec<String> {
         CoreEvent::AgentMessageRouted { message } => {
             message.correlation_id.clone().into_iter().collect()
         }
+        CoreEvent::AgentMessageDeliveryObserved { receipt } => {
+            receipt.request.correlation_id.clone().into_iter().collect()
+        }
+        CoreEvent::AgentRoundObserved { round } => vec![round.correlation_id.clone()],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
@@ -2815,6 +2836,8 @@ fn postgres_event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
         } => vec![wake_id.clone()],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
+        | CoreEvent::AgentRoundObserved { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
@@ -2866,6 +2889,8 @@ fn postgres_event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> 
         CoreEvent::CompletionPacketDelivered { .. } => vec![(COUNTER_COMPLETIONS, 1)],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::SessionCreated { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
+        | CoreEvent::AgentRoundObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. } => Vec::new(),
     }
@@ -14937,7 +14962,7 @@ mod tests {
             request: rusty_crew_core_protocol::SessionTurnRequested {
                 request_id: rusty_crew_core_protocol::ExternalTurnRequestId::new("request-a"),
                 idempotency_key: "turn-key".into(),
-                session_id: session.session_id,
+                session_id: session.session_id.clone(),
                 run_id: None,
                 binding_id: binding.binding_id,
                 input: vec![rusty_crew_core_protocol::ExternalTurnInputPart::Text {
@@ -14964,6 +14989,89 @@ mod tests {
         assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
         assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
         assert_eq!(store.list_nonterminal_external_turns().unwrap().len(), 1);
+        let recipient = SessionState {
+            handle: SessionHandle::new(2),
+            session_id: SessionId::new("recipient-session"),
+            agent_id: AgentId::new("recipient-agent"),
+            profile_id: ProfileId::new("recipient-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile { tools: Vec::new() },
+            history_window: None,
+            status: SessionStatus::Idle,
+            brain_turn_count: 0,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            last_active_at: "2026-07-10T00:00:00Z".into(),
+        };
+        store.save_session(&recipient).unwrap();
+        let delivery = rusty_crew_core_protocol::AgentMessageDeliveryReceipt {
+            request: rusty_crew_core_protocol::AgentMessageDeliveryRequest {
+                delivery_id: rusty_crew_core_protocol::AgentMessageDeliveryId::new("delivery-a"),
+                idempotency_key: "delivery-key-a".into(),
+                message_id: "message-a".into(),
+                from_agent_id: session.agent_id.clone(),
+                to_agent_id: recipient.agent_id.clone(),
+                body: "inspect".into(),
+                correlation_id: Some("correlation-a".into()),
+                require_wake: true,
+                created_at: "2026-07-10T00:00:00Z".into(),
+                expires_at: "2026-07-10T00:05:00Z".into(),
+            },
+            status: rusty_crew_core_protocol::AgentMessageDeliveryStatus::Pending,
+            sequence: None,
+            activation: None,
+            resolved_round_id: None,
+            reason_code: None,
+            terminal_at: None,
+            revision: 1,
+        };
+        assert_eq!(
+            store.create_agent_message_delivery(&delivery).unwrap(),
+            delivery
+        );
+        assert_eq!(
+            store.create_agent_message_delivery(&delivery).unwrap(),
+            delivery
+        );
+        let mut accepted = delivery.clone();
+        accepted.status = rusty_crew_core_protocol::AgentMessageDeliveryStatus::Accepted;
+        accepted.terminal_at = Some("2026-07-10T00:00:01Z".into());
+        assert_eq!(
+            store
+                .update_agent_message_delivery(&accepted, delivery.revision)
+                .unwrap()
+                .revision,
+            2
+        );
+        let round = rusty_crew_core_protocol::AgentCorrelatedRound {
+            round_id: rusty_crew_core_protocol::AgentRoundId::new("round-a"),
+            idempotency_key: "round-key-a".into(),
+            sender_agent_id: session.agent_id,
+            sender_session_id: session.session_id,
+            recipient_agent_id: recipient.agent_id,
+            recipient_session_id: recipient.session_id,
+            sender_request_id: Some(turn.request.request_id),
+            message_id: "message-a".into(),
+            correlation_id: "correlation-a".into(),
+            reply_message_id: None,
+            status: rusty_crew_core_protocol::AgentRoundStatus::Pending,
+            outcome: None,
+            terminal_reason_code: None,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            expires_at: "2026-07-10T00:05:00Z".into(),
+            terminal_at: None,
+            revision: 1,
+        };
+        assert_eq!(store.create_agent_correlated_round(&round).unwrap(), round);
+        assert_eq!(
+            store.get_agent_correlated_round(&round.round_id).unwrap(),
+            Some(round)
+        );
         assert!(store
             .storage_diagnostics()
             .unwrap()

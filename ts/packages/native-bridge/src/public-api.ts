@@ -2,6 +2,11 @@ import type {
   ActionBatchReceipt,
   AdapterId,
   AgentId,
+  AgentCorrelatedRound,
+  AgentMessageCommand,
+  AgentMessageDeliveryReceipt,
+  AgentRoundCommand,
+  AgentRoundStartReceipt,
   AgentMessage,
   BrainAction,
   BrainActionBatch,
@@ -2100,6 +2105,11 @@ export interface NativeBridgeModule {
     body: string,
     correlationId?: string,
   ): Promise<EventReceipt>;
+  deliverAgentMessage(
+    command: AgentMessageCommand,
+  ): Promise<AgentMessageDeliveryReceipt>;
+  beginAgentRound(command: AgentRoundCommand): Promise<AgentRoundStartReceipt>;
+  getAgentRound(roundId: string): Promise<AgentCorrelatedRound | undefined>;
   enqueueBodyFollowUpMessage(input: {
     sessionId: SessionId;
     from: AgentId;

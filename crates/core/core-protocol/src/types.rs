@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::fmt;
 use thiserror::Error;
 
+use crate::{AgentCorrelatedRound, AgentMessageDeliveryReceipt};
+
 macro_rules! handle_type {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -566,6 +568,8 @@ pub enum CoreEventKind {
     SessionCreated,
     SessionArchived,
     AgentMessageRouted,
+    AgentMessageDeliveryObserved,
+    AgentRoundObserved,
     DelegationLifecycleObserved,
     ExternalEventInjected,
     DenDataUpdated,
@@ -581,6 +585,8 @@ impl CoreEventKind {
             CoreEvent::SessionCreated { .. } => Self::SessionCreated,
             CoreEvent::SessionArchived { .. } => Self::SessionArchived,
             CoreEvent::AgentMessageRouted { .. } => Self::AgentMessageRouted,
+            CoreEvent::AgentMessageDeliveryObserved { .. } => Self::AgentMessageDeliveryObserved,
+            CoreEvent::AgentRoundObserved { .. } => Self::AgentRoundObserved,
             CoreEvent::DelegationLifecycleObserved { .. } => Self::DelegationLifecycleObserved,
             CoreEvent::ExternalEventInjected { .. } => Self::ExternalEventInjected,
             CoreEvent::DenDataUpdated { .. } => Self::DenDataUpdated,
@@ -766,6 +772,12 @@ pub enum CoreEvent {
     },
     AgentMessageRouted {
         message: AgentMessage,
+    },
+    AgentMessageDeliveryObserved {
+        receipt: AgentMessageDeliveryReceipt,
+    },
+    AgentRoundObserved {
+        round: AgentCorrelatedRound,
     },
     DelegationLifecycleObserved {
         lifecycle: DelegationLifecycleEvent,

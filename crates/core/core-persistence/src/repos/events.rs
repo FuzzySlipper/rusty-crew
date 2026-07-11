@@ -390,7 +390,12 @@ pub(crate) fn event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
         | CoreEvent::BrainEventObserved { session_id, .. }
         | CoreEvent::BrainActionsAccepted { session_id, .. } => vec![session_id.clone()],
         CoreEvent::CompletionPacketDelivered { packet } => vec![packet.session_id.clone()],
+        CoreEvent::AgentRoundObserved { round } => vec![
+            round.sender_session_id.clone(),
+            round.recipient_session_id.clone(),
+        ],
         CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. } => Vec::new(),
     }
@@ -400,6 +405,14 @@ pub(crate) fn event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
     match event {
         CoreEvent::SessionCreated { state } => vec![state.agent_id.clone()],
         CoreEvent::AgentMessageRouted { message } => vec![message.from.clone(), message.to.clone()],
+        CoreEvent::AgentMessageDeliveryObserved { receipt } => vec![
+            receipt.request.from_agent_id.clone(),
+            receipt.request.to_agent_id.clone(),
+        ],
+        CoreEvent::AgentRoundObserved { round } => vec![
+            round.sender_agent_id.clone(),
+            round.recipient_agent_id.clone(),
+        ],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
@@ -422,6 +435,10 @@ fn event_correlation_ids(event: &CoreEvent) -> Vec<String> {
         CoreEvent::AgentMessageRouted { message } => {
             message.correlation_id.clone().into_iter().collect()
         }
+        CoreEvent::AgentMessageDeliveryObserved { receipt } => {
+            receipt.request.correlation_id.clone().into_iter().collect()
+        }
+        CoreEvent::AgentRoundObserved { round } => vec![round.correlation_id.clone()],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
@@ -447,6 +464,8 @@ fn event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
         } => vec![wake_id.clone()],
         CoreEvent::SessionArchived { .. }
         | CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
+        | CoreEvent::AgentRoundObserved { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }

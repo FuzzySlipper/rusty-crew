@@ -1,11 +1,309 @@
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentActivation, ExternalAgentBinding, ExternalBindingId, ExternalBindingPurpose,
-    ExternalBindingStatus, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
+    AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
+    AgentMessageDeliveryStatus, AgentRoundCommand, AgentRoundId, AgentRoundStatus,
+    ExternalAgentBinding, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
+    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
     ExternalRuntimeDesiredState, ExternalRuntimeId, ExternalRuntimeKind,
     ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalTurnInputPart,
     ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
 };
+
+#[test]
+fn durable_agent_round_resolves_reply_without_second_wake() {
+    let data_dir = unique_data_dir("agent-round-reply");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let sender = engine
+        .create_session(session_config(
+            "sender-session",
+            "sender-agent",
+            "sender-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let recipient = engine
+        .create_session(session_config(
+            "recipient-session",
+            "recipient-agent",
+            "recipient-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let (_subscription_id, wakes) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::BrainWakeRequested],
+            session_id: Some(sender.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+    let (_observation_subscription_id, observations) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![
+                CoreEventKind::AgentMessageDeliveryObserved,
+                CoreEventKind::AgentRoundObserved,
+            ],
+            session_id: None,
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+
+    let started = engine
+        .begin_agent_round(AgentRoundCommand {
+            caller: AgentCoordinationCaller::DirectBrain {
+                session_id: sender.session_id.clone(),
+                wake_id: "sender-wake".into(),
+                tool_call_id: "round-call".into(),
+            },
+            round_id: AgentRoundId::new("round-1"),
+            idempotency_key: "round-key-1".into(),
+            message_id: "round-message-1".into(),
+            to_agent_id: recipient.agent_id.clone(),
+            body: "please inspect this".into(),
+            correlation_id: "round-correlation-1".into(),
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(started.round.status, AgentRoundStatus::Pending);
+    assert_eq!(
+        started.delivery.status,
+        AgentMessageDeliveryStatus::Accepted
+    );
+    assert!(matches!(
+        observations.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::AgentRoundObserved { round } if round.status == AgentRoundStatus::Pending
+    ));
+    assert!(matches!(
+        observations.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::AgentMessageDeliveryObserved { receipt }
+            if receipt.status == AgentMessageDeliveryStatus::Accepted
+    ));
+
+    let reply = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::DirectBrain {
+                session_id: recipient.session_id,
+                wake_id: "recipient-wake".into(),
+                tool_call_id: "reply-call".into(),
+            },
+            delivery_id: AgentMessageDeliveryId::new("reply-delivery-1"),
+            idempotency_key: "reply-delivery-key-1".into(),
+            message_id: "reply-message-1".into(),
+            to_agent_id: sender.agent_id,
+            body: "inspection complete".into(),
+            correlation_id: Some("round-correlation-1".into()),
+            require_wake: true,
+            created_at: "2026-06-19T00:00:01Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(reply.status, AgentMessageDeliveryStatus::Accepted);
+    assert_eq!(reply.resolved_round_id, Some(AgentRoundId::new("round-1")));
+    assert!(reply.activation.is_none());
+    assert!(matches!(
+        observations.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::AgentRoundObserved { round } if round.status == AgentRoundStatus::Replied
+    ));
+    assert!(matches!(
+        observations.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::AgentMessageDeliveryObserved { receipt }
+            if receipt.resolved_round_id == Some(AgentRoundId::new("round-1"))
+    ));
+    assert!(wakes.recv_timeout(Duration::from_millis(50)).is_err());
+
+    drop(engine);
+    let restarted = test_engine_with_data_dir(data_dir);
+    let round = restarted
+        .get_agent_round(&AgentRoundId::new("round-1"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(round.status, AgentRoundStatus::Replied);
+    assert_eq!(round.reply_message_id.as_deref(), Some("reply-message-1"));
+}
+
+#[test]
+fn active_external_recipient_queues_without_brain_wake() {
+    let engine = test_engine();
+    let sender = engine
+        .create_session(session_config(
+            "sender-session",
+            "sender-agent",
+            "sender-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let codex = engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+    engine
+        .activate_agent_execution(activation("codex-agent", "already-active"))
+        .unwrap();
+    let (_subscription_id, wakes) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::BrainWakeRequested],
+            session_id: Some(codex.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+
+    let command = AgentMessageCommand {
+        caller: AgentCoordinationCaller::DirectBrain {
+            session_id: sender.session_id,
+            wake_id: "sender-wake".into(),
+            tool_call_id: "send-call".into(),
+        },
+        delivery_id: AgentMessageDeliveryId::new("delivery-busy"),
+        idempotency_key: "delivery-busy-key".into(),
+        message_id: "message-busy".into(),
+        to_agent_id: codex.agent_id.clone(),
+        body: "queue for later".into(),
+        correlation_id: None,
+        require_wake: true,
+        created_at: "2026-06-19T00:00:00Z".into(),
+        expires_at: "2026-06-19T00:05:00Z".into(),
+    };
+    let receipt = engine.deliver_agent_message(command.clone()).unwrap();
+    assert!(matches!(
+        receipt.activation,
+        Some(AgentActivation::QueuedForNextTurn { .. })
+    ));
+    assert!(wakes.recv_timeout(Duration::from_millis(50)).is_err());
+    let queued = CoordinationStore::open(engine.config.engine_data_dir.clone())
+        .unwrap()
+        .load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(codex.session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].message.body, "queue for later");
+    assert_eq!(engine.deliver_agent_message(command).unwrap(), receipt);
+    let queued_after_replay = CoordinationStore::open(engine.config.engine_data_dir.clone())
+        .unwrap()
+        .load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(codex.session_id),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap();
+    assert_eq!(queued_after_replay.len(), 1);
+}
+
+#[test]
+fn codex_caller_requires_current_controller_and_active_native_turn() {
+    let engine = test_engine();
+    let direct = engine
+        .create_session(session_config(
+            "direct-session",
+            "direct-agent",
+            "direct-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+    let lease = engine
+        .acquire_external_runtime_controller(
+            &ExternalControllerLease {
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                holder_instance_id: "controller-a".into(),
+                generation: 0,
+                acquired_at: "2026-06-19T00:00:00Z".into(),
+                renewed_at: "2026-06-19T00:00:00Z".into(),
+                expires_at: "2026-06-19T00:10:00Z".into(),
+                revision: 0,
+            },
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+    engine
+        .activate_agent_execution(activation("codex-agent", "codex-active"))
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &ExternalTurnRequestId::new("codex-active"),
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:01Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &ExternalTurnRequestId::new("codex-active"),
+            ExternalTurnPhase::Active,
+            Some("native-turn-7".into()),
+            None,
+            "2026-06-19T00:00:02Z".into(),
+        )
+        .unwrap();
+
+    let command = AgentMessageCommand {
+        caller: AgentCoordinationCaller::ExternalAgent {
+            runtime_id: ExternalRuntimeId::new("codex-local"),
+            binding_id: ExternalBindingId::new("codex-binding"),
+            controller_instance_id: "controller-a".into(),
+            controller_generation: lease.generation,
+            native_thread_id: "native-thread-7".into(),
+            native_turn_id: "native-turn-7".into(),
+            native_request_id: "tool-call-1".into(),
+        },
+        delivery_id: AgentMessageDeliveryId::new("codex-delivery"),
+        idempotency_key: "codex-delivery-key".into(),
+        message_id: "codex-message".into(),
+        to_agent_id: direct.agent_id,
+        body: "message from Codex".into(),
+        correlation_id: None,
+        require_wake: true,
+        created_at: "2026-06-19T00:00:03Z".into(),
+        expires_at: "2026-06-19T00:05:00Z".into(),
+    };
+    assert!(matches!(
+        engine
+            .deliver_agent_message(command.clone())
+            .unwrap()
+            .activation,
+        Some(AgentActivation::DirectBrainWakeRequested { .. })
+    ));
+
+    let mut stale = command;
+    stale.delivery_id = AgentMessageDeliveryId::new("codex-delivery-stale");
+    stale.idempotency_key = "codex-delivery-stale-key".into();
+    stale.message_id = "codex-message-stale".into();
+    let AgentCoordinationCaller::ExternalAgent {
+        controller_generation,
+        ..
+    } = &mut stale.caller
+    else {
+        unreachable!()
+    };
+    *controller_generation += 1;
+    assert_eq!(
+        engine.deliver_agent_message(stale).unwrap_err().kind,
+        CoreErrorKind::ActionRejected
+    );
+}
 
 #[test]
 fn external_activation_is_runtime_neutral_and_rehydrates_exact_turn() {
@@ -181,8 +479,8 @@ fn binding() -> ExternalAgentBinding {
     }
 }
 
-fn activation(agent_id: &str, request_id: &str) -> ExternalActivationRequest {
-    ExternalActivationRequest {
+fn activation(agent_id: &str, request_id: &str) -> AgentActivationRequest {
+    AgentActivationRequest {
         agent_id: AgentId::new(agent_id),
         request_id: ExternalTurnRequestId::new(request_id),
         idempotency_key: format!("{request_id}-key"),

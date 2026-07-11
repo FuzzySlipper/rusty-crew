@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 20;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 21;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -114,6 +114,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 20,
         description: "add managed external agent runtime lifecycle records",
         apply: Some(apply_postgres_external_runtime),
+    },
+    PostgresSchemaMigration {
+        version: 21,
+        description: "add runtime-neutral agent delivery and correlated round records",
+        apply: Some(apply_postgres_agent_coordination),
     },
 ];
 
@@ -1074,6 +1079,45 @@ fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> Co
             ON {schema}.external_correlated_rounds(status, expires_at, recipient_agent_id);"
     ))
     .map_err(|error| postgres_error("apply PostgreSQL external runtime migration", error))
+}
+
+fn apply_postgres_agent_coordination(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "DROP TABLE IF EXISTS {schema}.external_correlated_rounds;
+         DROP TABLE IF EXISTS {schema}.agent_correlated_rounds;
+         CREATE TABLE IF NOT EXISTS {schema}.agent_message_delivery_receipts (
+            delivery_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            message_id TEXT NOT NULL UNIQUE,
+            from_agent_id TEXT NOT NULL,
+            to_agent_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revision BIGINT NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS agent_message_delivery_status_expiry_idx
+            ON {schema}.agent_message_delivery_receipts(status, expires_at, to_agent_id);
+         CREATE TABLE IF NOT EXISTS {schema}.agent_correlated_rounds (
+            round_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            sender_agent_id TEXT NOT NULL,
+            sender_session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            recipient_agent_id TEXT NOT NULL,
+            recipient_session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            correlation_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revision BIGINT NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS agent_correlated_rounds_pending_correlation_idx
+            ON {schema}.agent_correlated_rounds(sender_agent_id, recipient_agent_id, correlation_id)
+            WHERE status = 'pending';
+         CREATE INDEX IF NOT EXISTS agent_correlated_rounds_pending_idx
+            ON {schema}.agent_correlated_rounds(status, expires_at, recipient_agent_id);"
+    ))
+    .map_err(|error| postgres_error("apply PostgreSQL agent coordination migration", error))
 }
 
 fn apply_postgres_chat_event_log(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {

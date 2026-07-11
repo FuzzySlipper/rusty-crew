@@ -2,15 +2,15 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentActivation, ExternalAgentBinding, ExternalBindingPurpose, ExternalBindingStatus,
-    ExternalControllerLease, ExternalInteractionStatus, ExternalRoundStatus,
-    ExternalRuntimeDesiredState, ExternalRuntimeObservedState, ExternalRuntimeRegistration,
-    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
-    SessionTurnRequested, TurnInputProvenance,
+    AgentActivation, AgentMessageDeliveryStatus, AgentRoundStatus, ExternalAgentBinding,
+    ExternalBindingPurpose, ExternalBindingStatus, ExternalControllerLease,
+    ExternalInteractionStatus, ExternalRuntimeDesiredState, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase,
+    ExternalTurnRequestId, SessionTurnRequested, TurnInputProvenance,
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExternalActivationRequest {
+pub struct AgentActivationRequest {
     pub agent_id: AgentId,
     pub request_id: ExternalTurnRequestId,
     pub idempotency_key: String,
@@ -32,6 +32,7 @@ pub struct ExternalRuntimeHydrationReport {
     pub terminalized_request_ids: Vec<ExternalTurnRequestId>,
     pub expired_interaction_ids: Vec<String>,
     pub expired_round_ids: Vec<String>,
+    pub reconciled_delivery_ids: Vec<String>,
 }
 
 impl CoreEngine {
@@ -115,7 +116,7 @@ impl CoreEngine {
 
     pub fn activate_agent_execution(
         &self,
-        request: ExternalActivationRequest,
+        request: AgentActivationRequest,
     ) -> CoreResult<AgentActivation> {
         let session = self.sessions.get_session_by_agent(&request.agent_id)?;
         let Some(binding) = self
@@ -299,15 +300,39 @@ impl CoreEngine {
             }
         }
 
-        for round in self.store.list_pending_external_rounds()? {
+        for round in self.store.list_pending_agent_rounds()? {
             if round.expires_at <= *now {
                 let mut expired = round.clone();
-                expired.status = ExternalRoundStatus::Expired;
+                expired.status = AgentRoundStatus::Expired;
+                expired.terminal_reason_code = Some("agent_round_timeout".into());
                 expired.terminal_at = Some(now.clone());
-                self.store
-                    .update_external_correlated_round(&expired, round.revision)?;
+                let expired = self
+                    .store
+                    .update_agent_correlated_round(&expired, round.revision)?;
+                self.bus
+                    .publish(CoreEvent::AgentRoundObserved { round: expired })?;
                 report.expired_round_ids.push(round.round_id.0);
             }
+        }
+        for delivery in self.store.list_pending_agent_message_deliveries()? {
+            let mut reconciled = delivery.clone();
+            if delivery.request.expires_at <= *now {
+                reconciled.status = AgentMessageDeliveryStatus::Expired;
+                reconciled.reason_code = Some("agent_message_expired".into());
+            } else {
+                reconciled.status = AgentMessageDeliveryStatus::Rejected;
+                reconciled.reason_code = Some("delivery_outcome_unknown_after_restart".into());
+            }
+            reconciled.terminal_at = Some(now.clone());
+            let saved = self
+                .store
+                .update_agent_message_delivery(&reconciled, delivery.revision)?;
+            self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
+                receipt: saved.clone(),
+            })?;
+            report
+                .reconciled_delivery_ids
+                .push(saved.request.delivery_id.0);
         }
         Ok(report)
     }

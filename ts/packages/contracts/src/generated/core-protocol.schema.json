@@ -45,6 +45,258 @@
       ],
       "type": "object"
     },
+    "AgentActivation": {
+      "oneOf": [
+        {
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "direct_brain_wake_requested",
+              "type": "string"
+            },
+            "wakeId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "wakeId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "external_turn_requested",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "requestId",
+            "bindingId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "queueId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "queued_for_next_turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "queueId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "type": "string"
+            },
+            "type": {
+              "const": "rejected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reasonCode"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentCoordinationCaller": {
+      "oneOf": [
+        {
+          "properties": {
+            "senderAgentId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "system",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "senderAgentId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "toolCallId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "direct_brain",
+              "type": "string"
+            },
+            "wakeId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "wakeId",
+            "toolCallId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "controllerGeneration": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "controllerInstanceId": {
+              "type": "string"
+            },
+            "nativeRequestId": {
+              "type": "string"
+            },
+            "nativeThreadId": {
+              "type": "string"
+            },
+            "nativeTurnId": {
+              "type": "string"
+            },
+            "runtimeId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "external_agent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "runtimeId",
+            "bindingId",
+            "controllerInstanceId",
+            "controllerGeneration",
+            "nativeThreadId",
+            "nativeTurnId",
+            "nativeRequestId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentCorrelatedRound": {
+      "properties": {
+        "correlationId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "outcome": true,
+        "recipientAgentId": {
+          "type": "string"
+        },
+        "recipientSessionId": {
+          "type": "string"
+        },
+        "replyMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roundId": {
+          "type": "string"
+        },
+        "senderAgentId": {
+          "type": "string"
+        },
+        "senderRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "senderSessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentRoundStatus"
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "roundId",
+        "idempotencyKey",
+        "senderAgentId",
+        "senderSessionId",
+        "recipientAgentId",
+        "recipientSessionId",
+        "messageId",
+        "correlationId",
+        "status",
+        "createdAt",
+        "expiresAt",
+        "revision"
+      ],
+      "type": "object"
+    },
     "AgentMessage": {
       "properties": {
         "body": {
@@ -79,6 +331,170 @@
         "body"
       ],
       "type": "object"
+    },
+    "AgentMessageCommand": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "caller": {
+          "$ref": "#/$defs/AgentCoordinationCaller"
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "requireWake": {
+          "type": "boolean"
+        },
+        "toAgentId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "caller",
+        "deliveryId",
+        "idempotencyKey",
+        "messageId",
+        "toAgentId",
+        "body",
+        "requireWake",
+        "createdAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "AgentMessageDeliveryReceipt": {
+      "properties": {
+        "activation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentActivation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/AgentMessageDeliveryRequest"
+        },
+        "resolvedRoundId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/AgentMessageDeliveryStatus"
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "request",
+        "status",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "AgentMessageDeliveryRequest": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "fromAgentId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "requireWake": {
+          "type": "boolean"
+        },
+        "toAgentId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deliveryId",
+        "idempotencyKey",
+        "messageId",
+        "fromAgentId",
+        "toAgentId",
+        "body",
+        "requireWake",
+        "createdAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "AgentMessageDeliveryStatus": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "expired"
+      ],
+      "type": "string"
     },
     "AgentMessageProjectionHint": {
       "properties": {
@@ -116,6 +532,74 @@
         "visibility"
       ],
       "type": "object"
+    },
+    "AgentRoundCommand": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "caller": {
+          "$ref": "#/$defs/AgentCoordinationCaller"
+        },
+        "correlationId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "roundId": {
+          "type": "string"
+        },
+        "toAgentId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "caller",
+        "roundId",
+        "idempotencyKey",
+        "messageId",
+        "toAgentId",
+        "body",
+        "correlationId",
+        "createdAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "AgentRoundStartReceipt": {
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/AgentMessageDeliveryReceipt"
+        },
+        "round": {
+          "$ref": "#/$defs/AgentCorrelatedRound"
+        }
+      },
+      "required": [
+        "round",
+        "delivery"
+      ],
+      "type": "object"
+    },
+    "AgentRoundStatus": {
+      "enum": [
+        "pending",
+        "replied",
+        "expired",
+        "cancelled",
+        "failed"
+      ],
+      "type": "string"
     },
     "BodyDeltaPolicy": {
       "properties": {
@@ -1091,6 +1575,38 @@
         },
         {
           "properties": {
+            "receipt": {
+              "$ref": "#/$defs/AgentMessageDeliveryReceipt"
+            },
+            "type": {
+              "const": "agent_message_delivery_observed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "receipt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "round": {
+              "$ref": "#/$defs/AgentCorrelatedRound"
+            },
+            "type": {
+              "const": "agent_round_observed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "round"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "lifecycle": {
               "$ref": "#/$defs/DelegationLifecycleEvent"
             },
@@ -1224,6 +1740,8 @@
         "session_created",
         "session_archived",
         "agent_message_routed",
+        "agent_message_delivery_observed",
+        "agent_round_observed",
         "delegation_lifecycle_observed",
         "external_event_injected",
         "den_data_updated",
@@ -3162,11 +3680,26 @@
     "adapter_id": {
       "type": "string"
     },
+    "agent_correlated_round": {
+      "$ref": "#/$defs/AgentCorrelatedRound"
+    },
     "agent_id": {
       "type": "string"
     },
     "agent_instance_id": {
       "type": "string"
+    },
+    "agent_message_command": {
+      "$ref": "#/$defs/AgentMessageCommand"
+    },
+    "agent_message_delivery_receipt": {
+      "$ref": "#/$defs/AgentMessageDeliveryReceipt"
+    },
+    "agent_round_command": {
+      "$ref": "#/$defs/AgentRoundCommand"
+    },
+    "agent_round_start_receipt": {
+      "$ref": "#/$defs/AgentRoundStartReceipt"
     },
     "body_state": {
       "$ref": "#/$defs/BodyState"
@@ -3353,7 +3886,12 @@
     "context_compaction_artifact",
     "context_compaction_artifact_query",
     "memory_governance_decision_input",
-    "memory_governance_decision_record"
+    "memory_governance_decision_record",
+    "agent_message_command",
+    "agent_message_delivery_receipt",
+    "agent_round_command",
+    "agent_round_start_receipt",
+    "agent_correlated_round"
   ],
   "title": "ProtocolContractRoots",
   "type": "object"

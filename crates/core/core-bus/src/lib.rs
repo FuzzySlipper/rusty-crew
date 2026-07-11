@@ -252,7 +252,11 @@ fn event_mentions_session(event: &CoreEvent, session_id: &SessionId) -> bool {
             &lifecycle.parent_session_id == session_id
                 || &lifecycle.delegated_session_id == session_id
         }
+        CoreEvent::AgentRoundObserved { round } => {
+            &round.sender_session_id == session_id || &round.recipient_session_id == session_id
+        }
         CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. } => false,
     }
@@ -263,6 +267,12 @@ fn event_mentions_agent(event: &CoreEvent, agent_id: &AgentId) -> bool {
         CoreEvent::SessionCreated { state } => &state.agent_id == agent_id,
         CoreEvent::AgentMessageRouted { message } => {
             &message.from == agent_id || &message.to == agent_id
+        }
+        CoreEvent::AgentMessageDeliveryObserved { receipt } => {
+            &receipt.request.from_agent_id == agent_id || &receipt.request.to_agent_id == agent_id
+        }
+        CoreEvent::AgentRoundObserved { round } => {
+            &round.sender_agent_id == agent_id || &round.recipient_agent_id == agent_id
         }
         CoreEvent::SessionArchived { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
@@ -284,6 +294,8 @@ fn event_mentions_adapter(
         CoreEvent::SessionCreated { .. }
         | CoreEvent::SessionArchived { .. }
         | CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::AgentMessageDeliveryObserved { .. }
+        | CoreEvent::AgentRoundObserved { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }

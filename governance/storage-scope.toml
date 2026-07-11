@@ -49,6 +49,8 @@ id = "queues_messages"
 label = "Queues And Messages"
 owns = [
   "agent_messages",
+  "agent_message_delivery_receipts",
+  "agent_correlated_rounds",
   "queued_messages",
 ]
 notes = "Internal messages, queued messages, TTL expiry, terminal state, no-resurrection policy."
@@ -95,9 +97,8 @@ owns = [
   "external_control_receipts",
   "external_interactions",
   "external_runtime_events",
-  "external_correlated_rounds",
 ]
-notes = "External runtime registrations, exclusive controller generations, Crew/native identity correlation, idempotent turn/control/interaction state, normalized replay events, and correlated direct-message rounds."
+notes = "External runtime registrations, exclusive controller generations, Crew/native identity correlation, idempotent turn/control/interaction state, and normalized replay events."
 
 [[scope]]
 id = "profile_registry"

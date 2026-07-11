@@ -82,11 +82,12 @@ use rusty_crew_core_persistence::{
 };
 use rusty_crew_core_protocol::{
     plan_background_memory_auto_mutations, plan_capture_memory_proposals,
-    plan_curator_governance_transition, plan_curator_lifecycle_transition, AttachmentId,
-    BackgroundMemoryAutoMutationPlanInput, BodyState, BrainWakeProviderStateInput,
-    BrainWakeStreamItem, CaptureMemoryProposalPlanInput, ContextCompactionArtifact,
-    ContextCompactionArtifactQuery, CuratorGovernancePlanInput, CuratorLifecyclePlanInput,
-    DataBankScopeId, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
+    plan_curator_governance_transition, plan_curator_lifecycle_transition, AgentCorrelatedRound,
+    AgentMessageCommand, AgentMessageDeliveryReceipt, AgentRoundCommand, AgentRoundId,
+    AgentRoundStartReceipt, AttachmentId, BackgroundMemoryAutoMutationPlanInput, BodyState,
+    BrainWakeProviderStateInput, BrainWakeStreamItem, CaptureMemoryProposalPlanInput,
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, CuratorGovernancePlanInput,
+    CuratorLifecyclePlanInput, DataBankScopeId, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
     MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
@@ -118,6 +119,7 @@ use rusty_crew_roleplay_core::{
     RoleplaySceneStateReadInput, RoleplaySceneStateUpdateInput, RoleplaySessionLifecyclePlanInput,
     RoleplaySessionMetadataPatchInput, RoleplaySpeakerIdentityInput,
 };
+mod binding_agent_coordination;
 mod binding_brain_runs;
 mod binding_brains;
 mod binding_config_profiles;

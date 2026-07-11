@@ -50,11 +50,7 @@ import {
   type ChannelWakePolicy,
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
-import {
-  isCorrelatedReply,
-  replyFromEvent,
-  type CoordinationToolRuntime,
-} from "./coordination-tools.js";
+import type { CoordinationToolRuntime } from "./coordination-tools.js";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -4893,115 +4889,115 @@ function createServiceCoordinationRuntime(
       if (state === undefined) {
         throw new Error("service coordination runtime is not ready");
       }
-      const receipt = await state.bridge.routeAgentMessage(
-        input.fromAgentId,
-        input.toAgentId,
-        input.body,
-        input.correlationId,
-      );
-      const targetSession = (await state.bridge.listSessions()).find(
-        (candidate) => candidate.agentId === input.toAgentId,
-      );
-      if (targetSession === undefined) {
-        return {
-          accepted: receipt.accepted,
-          sequence: receipt.sequence,
-          wake: {
-            status: "skipped",
-            summary: `message routed to ${input.toAgentId}; no target session found to wake`,
-            reasonCode: "target_session_missing",
-          },
-        };
-      }
-      if (input.requireWake === false) {
-        return {
-          accepted: receipt.accepted,
-          sequence: receipt.sequence,
-          wake: {
-            status: "skipped",
-            summary: `message routed to ${input.toAgentId}; wake not requested`,
-            reasonCode: "wake_not_requested",
-          },
-        };
-      }
-      const pause = runtimePauseForSession(state, targetSession);
-      if (pause !== undefined) {
-        return {
-          accepted: receipt.accepted,
-          sequence: receipt.sequence,
-          wake: runtimePauseWakeReport(state, targetSession.sessionId, pause),
-        };
-      }
-      state.directDispatchSessions.add(targetSession.sessionId);
-      try {
-        const wake = await dispatchWake(
-          state,
-          {
-            type: "brain_wake_requested",
-            sessionId: targetSession.sessionId,
-          },
-          "direct_debug",
-        );
-        suppressNextWakeEventFromModule(
-          wakeEventDrainContext(state, "direct_debug"),
-          targetSession.sessionId,
-        );
-        await drainAndDispatchWakesFromModule(
-          wakeEventDrainContext(state, "direct_debug"),
-        );
-        return {
-          accepted: receipt.accepted,
-          sequence: receipt.sequence,
-          wake,
-        };
-      } finally {
-        state.directDispatchSessions.delete(targetSession.sessionId);
-      }
+      const createdAt = new Date().toISOString();
+      const identity = `${input.fromSessionId}:${input.wakeId}:${input.toolCallId}`;
+      const receipt = await state.bridge.deliverAgentMessage({
+        caller: {
+          type: "direct_brain",
+          sessionId: input.fromSessionId as SessionId,
+          wakeId: input.wakeId,
+          toolCallId: input.toolCallId,
+        },
+        deliveryId: `delivery:${identity}`,
+        idempotencyKey: `delivery:${identity}`,
+        messageId: `message:${identity}`,
+        toAgentId: input.toAgentId,
+        body: input.body,
+        ...(input.correlationId === undefined
+          ? {}
+          : { correlationId: input.correlationId }),
+        requireWake: input.requireWake ?? true,
+        createdAt,
+        expiresAt: new Date(Date.now() + 5_000).toISOString(),
+      });
+      const activation = receipt.activation;
+      return {
+        accepted: receipt.status === "accepted",
+        sequence: receipt.sequence,
+        wake:
+          activation?.type === "rejected" || receipt.status === "rejected"
+            ? {
+                status: "failed",
+                summary: `message delivery to ${input.toAgentId} was rejected`,
+                reasonCode:
+                  activation?.type === "rejected"
+                    ? activation.reasonCode
+                    : receipt.reasonCode,
+              }
+            : activation?.type === "queued_for_next_turn"
+              ? {
+                  status: "skipped",
+                  summary: `message queued for ${input.toAgentId}'s next external turn`,
+                  reasonCode: "external_turn_active",
+                }
+              : {
+                  status: "completed",
+                  summary:
+                    activation?.type === "external_turn_requested"
+                      ? `external turn requested for ${input.toAgentId}`
+                      : `direct wake requested for ${input.toAgentId}`,
+                },
+      };
     },
     async roundTrip(input) {
       const state = getState();
       if (state === undefined) {
         throw new Error("service coordination runtime is not ready");
       }
-      const subscription = await state.bridge.subscribeEvents({
-        eventKinds: ["agent_message_routed"],
+      const createdAt = new Date().toISOString();
+      const identity = `${input.fromSessionId}:${input.wakeId}:${input.toolCallId}`;
+      const started = await state.bridge.beginAgentRound({
+        caller: {
+          type: "direct_brain",
+          sessionId: input.fromSessionId as SessionId,
+          wakeId: input.wakeId,
+          toolCallId: input.toolCallId,
+        },
+        roundId: `round:${identity}`,
+        idempotencyKey: `round:${identity}`,
+        messageId: `round-message:${identity}`,
+        toAgentId: input.toAgentId,
+        body: input.body,
+        correlationId: input.correlationId,
+        createdAt,
+        expiresAt: new Date(Date.now() + input.timeoutMs).toISOString(),
       });
-      try {
-        const routed = await runtime.routeMessage({
-          fromAgentId: input.fromAgentId,
-          toAgentId: input.toAgentId,
-          body: input.body,
-          correlationId: input.correlationId,
-          requireWake: true,
-        });
-        const deadline = Date.now() + input.timeoutMs;
-        while (Date.now() < deadline) {
-          const events = await state.bridge.drainSubscriptionEvents(
-            subscription,
-            32,
-          );
-          const replyEvent = events.find((event) =>
-            isCorrelatedReply(event, input),
-          );
-          if (replyEvent !== undefined) {
-            return {
-              ...routed,
-              reply: replyFromEvent(replyEvent),
-            };
-          }
-          await drainAndDispatchWakesFromModule(
-            wakeEventDrainContext(state, "direct_debug"),
-          );
-          await delay(25);
+      while (true) {
+        const round = await state.bridge.getAgentRound(started.round.roundId);
+        if (round === undefined || round.status === "expired") {
+          return {
+            accepted: started.delivery.status === "accepted",
+            sequence: started.delivery.sequence,
+            timedOut: true,
+          };
         }
-        return {
-          ...routed,
-          timedOut: true,
-        };
-      } finally {
-        await state.bridge
-          .unsubscribeEvents(subscription)
-          .catch(() => undefined);
+        if (round.status === "replied") {
+          const outcome = round.outcome as
+            | {
+                from?: string;
+                to?: string;
+                body?: string;
+                correlationId?: string;
+              }
+            | undefined;
+          return {
+            accepted: true,
+            sequence: started.delivery.sequence,
+            reply: {
+              from: outcome?.from ?? input.toAgentId,
+              to: outcome?.to ?? input.fromAgentId,
+              body: outcome?.body ?? "",
+              correlationId: outcome?.correlationId ?? input.correlationId,
+            },
+          };
+        }
+        if (round.status === "failed" || round.status === "cancelled") {
+          return {
+            accepted: false,
+            sequence: started.delivery.sequence,
+          };
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
       }
     },
   };
@@ -5394,10 +5390,6 @@ async function drainSubscriptionEventsUntilIdle(
     if (chunk.length < chunkSize) break;
   }
   return events;
-}
-
-async function delay(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function publishWakeToolActivity(input: {

@@ -30,6 +30,27 @@ impl CoreEngine {
         body: impl Into<String>,
         correlation_id: Option<String>,
     ) -> CoreResult<QueuedMessageRecord> {
+        self.enqueue_body_follow_up_message_with_wake(session_id, from, body, correlation_id, true)
+    }
+
+    pub(crate) fn enqueue_body_follow_up_message_without_wake(
+        &self,
+        session_id: &SessionId,
+        from: AgentId,
+        body: impl Into<String>,
+        correlation_id: Option<String>,
+    ) -> CoreResult<QueuedMessageRecord> {
+        self.enqueue_body_follow_up_message_with_wake(session_id, from, body, correlation_id, false)
+    }
+
+    fn enqueue_body_follow_up_message_with_wake(
+        &self,
+        session_id: &SessionId,
+        from: AgentId,
+        body: impl Into<String>,
+        correlation_id: Option<String>,
+        request_wake: bool,
+    ) -> CoreResult<QueuedMessageRecord> {
         let session = self.sessions.get_session(session_id)?;
         if !session_kind_can_wake(&session.kind) || session.status == SessionStatus::Archived {
             return Err(CoreError::new(
@@ -66,9 +87,11 @@ impl CoreEngine {
         };
         save_body_follow_up_message(&self.store, &record)?;
         self.enforce_body_follow_up_cap(session_id, state.delta_policy.max_queued_messages)?;
-        self.bus.publish(CoreEvent::BrainWakeRequested {
-            session_id: session_id.clone(),
-        })?;
+        if request_wake {
+            self.bus.publish(CoreEvent::BrainWakeRequested {
+                session_id: session_id.clone(),
+            })?;
+        }
         Ok(record)
     }
 
