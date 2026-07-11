@@ -357,7 +357,7 @@ export class ServiceExternalRuntimeController {
       }
       await controlled.driver.threadResume({
         threadId: binding.nativeThreadId,
-        ...(binding.cwd === undefined ? {} : { cwd: binding.cwd }),
+        ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         excludeTurns: true,
