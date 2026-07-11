@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AgentMessageDeliveryReceipt,
   ExternalAgentBinding,
   ExternalControlReceipt,
   ExternalControlRequest,
@@ -71,6 +72,9 @@ export class ServiceExternalRuntimeController {
   readonly #bridge: NativeBridgeModule;
   readonly #now: () => Date;
   readonly #instanceId: string;
+  readonly #onCoordinationDelivery?: (
+    receipt: AgentMessageDeliveryReceipt,
+  ) => void;
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -90,10 +94,12 @@ export class ServiceExternalRuntimeController {
       registration: ExternalRuntimeRegistration,
       authority: CodexControllerAuthority,
     ) => CodexAppServerDriver;
+    onCoordinationDelivery?: (receipt: AgentMessageDeliveryReceipt) => void;
   }) {
     this.#bridge = input.bridge;
     this.#now = input.now ?? (() => new Date());
     this.#instanceId = input.instanceId ?? `service-host:${randomUUID()}`;
+    this.#onCoordinationDelivery = input.onCoordinationDelivery;
     this.#driverFactory =
       input.driverFactory ??
       ((registration, authority) =>
@@ -617,6 +623,7 @@ export class ServiceExternalRuntimeController {
           controllerGeneration: controlled.lease.generation,
         },
         port: this.#bridge,
+        onDelivery: this.#onCoordinationDelivery,
         now: this.#now,
       });
       return result === undefined

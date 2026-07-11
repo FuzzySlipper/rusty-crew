@@ -150,3 +150,37 @@ The lifecycle suite uses the same evidence packet and artifact writer:
 The restart evidence populates `restart.exercised`, `restart.recovered`, and a
 specific thread/session evidence string. Control and structured-input calls are
 recorded in `interactions` with their native identities.
+
+## Direct Messaging And Correlated Rounds (#5658)
+
+Run ID: `coordination-1783767972204-6dd0bcce`
+
+Artifact root: `/tmp/rusty-crew-capability-5658`
+
+The live coordination suite uses the deployed debug service, Pi-backed
+`tester` agent, two supervised Codex bindings, and the shared Rust-owned
+delivery/round substrate. It asserts durable identities and terminal states,
+not assistant response prose.
+
+- direct Pi agent -> Codex completed round
+  `round:tester-session:service-tester-session-1783767972332-3:call_01_769DgQ9mDjHvX7z7xvSp5667`;
+- Codex -> direct Pi agent completed round
+  `codex-round:rv-codex-5516-a-binding:019f5085-b337-7740-97da-4b25d86bde41:019f50db-7739-77b3-8096-54880d229e16:exec-a52a4d62-1ddf-480c-b836-cf7d6b2da290`;
+- Codex -> Codex completed round
+  `codex-round:rv-codex-5516-a-binding:019f5085-b337-7740-97da-4b25d86bde41:019f50db-b1c6-76d2-8c71-575bb7d6b7a0:exec-5b901e38-c5fe-496a-9bdf-c289de918b2c`;
+- each replied round preserves sender/recipient agent and session IDs,
+  correlation ID, Crew message/round ID, and Codex thread/turn/tool-call IDs;
+- replaying the pending-restart trigger returned the same durable delivery
+  receipt instead of creating another turn;
+- restarting `rusty-crew-debug.service` advanced controller generation 8 to 9
+  while preserving the exact pending round record;
+- that unrecoverable in-flight native callback terminated as `expired` with
+  `agent_round_timeout` at its 12-second TTL, with no reply message and no
+  resurrected work.
+
+The live run exposed and fixed two service-host timing gaps. Codex dynamic-tool
+deliveries now prompt an immediate wake-event drain when Rust selects a direct
+brain target. Manual chat/debug dispatch also registers duplicate-bus-event
+suppression before awaiting the LLM turn, preventing the background drain from
+leaving a stale suppression marker that could swallow the next legitimate
+cross-agent wake.

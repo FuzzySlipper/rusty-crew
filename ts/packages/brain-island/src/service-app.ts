@@ -914,6 +914,23 @@ export async function createRustyCrewServiceApp(
     const externalRuntimeController = new ServiceExternalRuntimeController({
       bridge,
       now: () => new Date((options.now ?? (() => new Date().toISOString()))()),
+      onCoordinationDelivery: () => {
+        const state = liveState;
+        if (state === undefined) return;
+        void drainAndDispatchWakesFromModule(
+          wakeEventDrainContext(state, "external_runtime"),
+        ).catch((error) =>
+          recordServiceEvent(state, {
+            source: "external-runtime-controller",
+            eventType: "wake_dispatch_failed",
+            severity: "error",
+            summary: errorMessage(
+              error,
+              "external runtime wake dispatch failed",
+            ),
+          }),
+        );
+      },
     });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
@@ -3182,6 +3199,10 @@ async function buildDirectDebugContext(
             body: input.body,
             correlationId: input.idempotencyKey,
           });
+          suppressNextWakeEventFromModule(
+            wakeEventDrainContext(state, "direct_debug"),
+            input.session.sessionId,
+          );
           wakeReport = await dispatchWake(
             state,
             {
@@ -3189,10 +3210,6 @@ async function buildDirectDebugContext(
               sessionId: input.session.sessionId,
             },
             "direct_debug",
-          );
-          suppressNextWakeEventFromModule(
-            wakeEventDrainContext(state, "direct_debug"),
-            input.session.sessionId,
           );
           await drainAndDispatchWakesFromModule(
             wakeEventDrainContext(state, "direct_debug"),
@@ -4893,6 +4910,10 @@ async function submitServiceTurn(
       body: input.body,
       correlationId: input.correlationId,
     });
+    suppressNextWakeEventFromModule(
+      wakeEventDrainContext(state, input.source, input.observationContext),
+      input.sessionId,
+    );
     const wakeReport = await dispatchWake(
       state,
       {
@@ -4902,10 +4923,6 @@ async function submitServiceTurn(
       input.source,
       input.observationContext,
       { appendChatEvents: input.appendChatEvents },
-    );
-    suppressNextWakeEventFromModule(
-      wakeEventDrainContext(state, input.source, input.observationContext),
-      input.sessionId,
     );
     await drainAndDispatchWakesFromModule(
       wakeEventDrainContext(state, input.source, input.observationContext),

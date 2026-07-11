@@ -134,8 +134,9 @@ owns = [
   "attachment_links",
   "data_bank_scopes",
   "chat_events",
+  "chat_message_ingest_receipts",
 ]
-notes = "Transcripts, branch state, message variants, attachments, and data-bank scopes."
+notes = "Transcripts, branch state, message variants, attachments, data-bank scopes, and bounded chat-ingest idempotency receipts."
 
 [[scope]]
 id = "memory_lore_modules"

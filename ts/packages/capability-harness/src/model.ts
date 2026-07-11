@@ -52,6 +52,7 @@ export interface RuntimeEvidence {
   fileChanges: Array<Record<string, unknown>>;
   tests: Array<Record<string, unknown>>;
   interactions: Array<Record<string, unknown>>;
+  coordination?: RuntimeCoordinationEvidence;
   capabilities: CapabilityObservation[];
   finalResponse?: string;
   failures: Array<{ code: string; message: string }>;
@@ -59,6 +60,44 @@ export interface RuntimeEvidence {
     exercised: boolean;
     recovered?: boolean;
     evidence?: string;
+  };
+}
+
+export interface RuntimeCoordinationEvidence {
+  deliveries: Array<{
+    deliveryId: string;
+    messageId: string;
+    fromAgentId: string;
+    toAgentId: string;
+    status: string;
+    activation?: Record<string, unknown>;
+  }>;
+  rounds: Array<{
+    roundId: string;
+    correlationId: string;
+    senderAgentId: string;
+    senderSessionId: string;
+    recipientAgentId: string;
+    recipientSessionId: string;
+    status: string;
+    terminalReasonCode?: string;
+  }>;
+  native: Array<{
+    runtimeId: string;
+    bindingId: string;
+    threadId: string;
+    turnId: string;
+    toolCallId: string;
+  }>;
+  duplicate?: {
+    exercised: boolean;
+    idempotent: boolean;
+    deliveryId: string;
+  };
+  expiry?: {
+    exercised: boolean;
+    status: string;
+    reasonCode?: string;
   };
 }
 

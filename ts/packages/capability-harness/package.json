@@ -11,7 +11,8 @@
   "scripts": {
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "smoke:cross-runtime-live": "tsx smokes/cross-runtime-live.ts",
-    "smoke:lifecycle-live": "tsx smokes/lifecycle-live.ts"
+    "smoke:lifecycle-live": "tsx smokes/lifecycle-live.ts",
+    "smoke:coordination-live": "tsx smokes/coordination-live.ts"
   },
   "dependencies": {
     "@rusty-crew/external-runtime-codex": "0.1.0",

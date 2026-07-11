@@ -50,6 +50,7 @@ export type ServiceWakeSource =
   | "background"
   | "direct_debug"
   | "delivery"
+  | "external_runtime"
   | "chat";
 
 export type WakeProfileContext = Awaited<ReturnType<typeof loadProfileContext>>;

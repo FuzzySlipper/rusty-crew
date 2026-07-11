@@ -50,6 +50,7 @@ test("Codex coordination derives trusted identity outside model arguments", asyn
 
 test("Codex coordination round returns the durable Rust reply", async () => {
   const port = new RecordingPort();
+  const delivered: AgentMessageDeliveryReceipt[] = [];
   const result = await resolveCodexCoordinationToolCall({
     params: {
       threadId: "thread-2",
@@ -66,11 +67,16 @@ test("Codex coordination round returns the durable Rust reply", async () => {
       controllerGeneration: 8,
     },
     port,
+    onDelivery: (receipt) => {
+      delivered.push(receipt);
+    },
     now: () => new Date("2026-07-10T00:00:00Z"),
   });
   assert.equal(result?.success, true);
   assert.equal(result?.contentItems[0]?.type, "inputText");
   assert.equal(result?.contentItems[0]?.text, "durable reply");
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0]?.activation?.type, "external_turn_requested");
 });
 
 class RecordingPort implements CodexCoordinationPort {

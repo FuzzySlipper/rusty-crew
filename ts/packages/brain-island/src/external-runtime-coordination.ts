@@ -34,6 +34,7 @@ export async function resolveCodexCoordinationToolCall(input: {
   readonly params: DynamicToolCallParams;
   readonly binding: CodexCoordinationBinding;
   readonly port: CodexCoordinationPort;
+  readonly onDelivery?: (receipt: AgentMessageDeliveryReceipt) => void;
   readonly now?: () => Date;
 }): Promise<DynamicToolCallResponse | undefined> {
   const { params } = input;
@@ -71,6 +72,7 @@ export async function resolveCodexCoordinationToolCall(input: {
       expiresAt: new Date(now.getTime() + MESSAGE_TTL_MS).toISOString(),
     };
     const receipt = await input.port.deliverAgentMessage(command);
+    input.onDelivery?.(receipt);
     return receipt.status === "accepted"
       ? succeeded(
           receipt.activation?.type === "queued_for_next_turn"
@@ -95,6 +97,7 @@ export async function resolveCodexCoordinationToolCall(input: {
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + timeoutMs).toISOString(),
   });
+  input.onDelivery?.(started.delivery);
   while (true) {
     const round = await input.port.getAgentRound(started.round.roundId);
     if (round === undefined) return failed("agent round disappeared");
