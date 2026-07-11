@@ -52,6 +52,28 @@ export type NeutralExternalEventKind =
   | "unknown_native_notification"
   | "unsupported_server_request";
 
+export interface NeutralExternalRuntimeEventPayload {
+  readonly nativeMethod: string;
+  readonly status?: string;
+  readonly text?: string;
+  readonly message?: string;
+  readonly command?: string;
+  readonly cwd?: string;
+  readonly output?: string;
+  readonly exitCode?: number;
+  readonly durationMs?: number;
+  readonly server?: string;
+  readonly tool?: string;
+  readonly success?: boolean;
+  readonly summary?: readonly string[];
+  readonly fileChanges?: readonly {
+    readonly path?: string;
+    readonly kind?: string;
+    readonly status?: string;
+  }[];
+  readonly usage?: Readonly<Record<string, number>>;
+}
+
 export interface NeutralExternalRuntimeEvent {
   readonly transportSequence: number;
   readonly method: string;
@@ -60,7 +82,7 @@ export interface NeutralExternalRuntimeEvent {
   readonly turnId?: string;
   readonly itemId?: string;
   readonly nativeRequestId?: JsonRpcId;
-  readonly payload: Readonly<Record<string, unknown>>;
+  readonly payload: NeutralExternalRuntimeEventPayload;
   readonly rawDetail: BoundedRawDetail;
 }
 

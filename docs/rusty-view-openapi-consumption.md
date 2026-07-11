@@ -27,6 +27,17 @@ The generated capability document is owned by
 `generate-api-capability-artifact.ts`. Do not copy its command descriptors,
 capability descriptors, operation ids, or enums into a second frontend schema.
 
+External-agent runtime operations use the versioned generated contract:
+
+```text
+docs/external-runtime-api-v0.openapi.json
+```
+
+Use that artifact for fleet, binding, thread, event/SSE, control, interaction,
+delivery, and correlated-round types. Its Crew-owned thread projections and
+Rust-derived coordination schemas are the browser wire authority; Codex
+app-server protocol files are not a frontend contract.
+
 The capability document lists every public operation, but only operations with
 `x-rusty-crew-contract-detail: wire` promise detailed response types. Operations
 marked `capability` are discovery metadata; their detailed body contracts remain
@@ -62,6 +73,7 @@ Run these before frontend regeneration:
 npm run codegen:api-capabilities
 npm run check:api-capabilities
 npm run smoke:api-command-registry
+npm run smoke:external-runtime-api-contract
 ```
 
 The check regenerates both committed capability artifacts and compares them

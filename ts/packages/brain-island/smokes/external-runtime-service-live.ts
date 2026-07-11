@@ -156,6 +156,8 @@ try {
 
   const terminal = await waitForTerminalEvent();
   assert.equal(terminal.payload.nativeMethod, "turn/completed");
+  assert.equal(typeof terminal.nativeThreadId, "string");
+  const primaryThreadId = terminal.nativeThreadId;
 
   server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -192,6 +194,62 @@ try {
   };
   assert.equal(runtimeBody.ok, true);
   assert.equal(runtimeBody.data.registration.observedState, "ready");
+
+  const threadListResponse = await fetch(
+    `${baseUrl}/v1/external-runtimes/${runtimeId}/threads?limit=20`,
+  );
+  assert.equal(threadListResponse.status, 200);
+  const threadListBody = (await threadListResponse.json()) as {
+    ok: boolean;
+    data: {
+      items: Array<{ threadId: string; turns: unknown[] }>;
+      nextCursor: string | null;
+      backwardsCursor: string | null;
+    };
+  };
+  assert.equal(threadListBody.ok, true);
+  assert.equal("data" in threadListBody.data, false);
+  assert.ok(
+    threadListBody.data.items.some(
+      (thread) => thread.threadId === primaryThreadId,
+    ),
+  );
+
+  const threadReadResponse = await fetch(
+    `${baseUrl}/v1/external-runtimes/${runtimeId}/threads/read`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        threadId: primaryThreadId,
+        includeTurns: true,
+      }),
+    },
+  );
+  assert.equal(threadReadResponse.status, 200);
+  const threadReadBody = (await threadReadResponse.json()) as {
+    ok: boolean;
+    data: {
+      thread: {
+        threadId: string;
+        status: string;
+        turns: Array<{
+          turnId: string;
+          items: Array<{ itemId: string; kind: string }>;
+        }>;
+      };
+    };
+  };
+  assert.equal(threadReadBody.ok, true);
+  assert.equal(threadReadBody.data.thread.threadId, primaryThreadId);
+  assert.ok(threadReadBody.data.thread.turns.length > 0);
+  assert.ok(
+    threadReadBody.data.thread.turns.every((turn) =>
+      turn.items.every(
+        (item) => item.itemId.length > 0 && item.kind.length > 0,
+      ),
+    ),
+  );
 
   const sseResponse = await fetch(
     `${baseUrl}/v1/external-runtimes/${runtimeId}/stream?cursor=0&once=true`,
@@ -324,14 +382,7 @@ try {
   assert.equal(interruptResponse.status, "applied");
   const interrupted = await waitForTerminalEvent(interruptTurn.nativeTurnId);
   assert.equal(interrupted.payload.nativeMethod, "turn/completed");
-  assert.equal(
-    typeof interrupted.payload.turn === "object" &&
-      interrupted.payload.turn !== null &&
-      "status" in interrupted.payload.turn
-      ? interrupted.payload.turn.status
-      : undefined,
-    "interrupted",
-  );
+  assert.equal(interrupted.payload.status, "interrupted");
 
   const bindingBeforeRestart = await bridge.getExternalBinding(bindingId);
   assert.equal(typeof bindingBeforeRestart?.nativeThreadId, "string");

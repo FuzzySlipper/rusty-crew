@@ -26,6 +26,13 @@ import {
 } from "@rusty-crew/external-runtime-codex";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { resolveCodexCoordinationToolCall } from "./external-runtime-coordination.js";
+import type {
+  ExternalThreadItemProjection,
+  ExternalThreadPage,
+  ExternalThreadProjection,
+  ExternalThreadReadResult,
+  ExternalThreadTurnProjection,
+} from "./external-runtime-api-contract.js";
 
 const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
@@ -188,22 +195,30 @@ export class ServiceExternalRuntimeController {
     }
   }
 
-  async listThreads(runtimeId: string, params: unknown): Promise<unknown> {
+  async listThreads(
+    runtimeId: string,
+    params: unknown,
+  ): Promise<ExternalThreadPage> {
     const controlled = await this.#requireControlled(runtimeId);
-    return browserSafeNativeValue(
-      await controlled.driver.threadList(
-        params as Parameters<CodexAppServerDriver["threadList"]>[0],
-      ),
+    const result = await controlled.driver.threadList(
+      params as Parameters<CodexAppServerDriver["threadList"]>[0],
     );
+    return {
+      items: result.data.map(projectExternalThread),
+      nextCursor: result.nextCursor,
+      backwardsCursor: result.backwardsCursor,
+    };
   }
 
-  async readThread(runtimeId: string, params: unknown): Promise<unknown> {
+  async readThread(
+    runtimeId: string,
+    params: unknown,
+  ): Promise<ExternalThreadReadResult> {
     const controlled = await this.#requireControlled(runtimeId);
-    return browserSafeNativeValue(
-      await controlled.driver.threadRead(
-        params as Parameters<CodexAppServerDriver["threadRead"]>[0],
-      ),
+    const result = await controlled.driver.threadRead(
+      params as Parameters<CodexAppServerDriver["threadRead"]>[0],
     );
+    return { thread: projectExternalThread(result.thread) };
   }
 
   async executeControl(
@@ -834,6 +849,139 @@ export class ServiceExternalRuntimeController {
   }
 }
 
+function projectExternalThread(value: unknown): ExternalThreadProjection {
+  const thread = requireNativeRecord(value, "thread");
+  return {
+    threadId: requireNativeString(thread.id, "thread.id"),
+    sessionId: requireNativeString(thread.sessionId, "thread.sessionId"),
+    parentThreadId: nullableNativeString(thread.parentThreadId),
+    preview: nativeString(thread.preview) ?? "",
+    ephemeral: thread.ephemeral === true,
+    modelProvider: nativeString(thread.modelProvider) ?? "unknown",
+    createdAt: nativeNumber(thread.createdAt) ?? 0,
+    updatedAt: nativeNumber(thread.updatedAt) ?? 0,
+    status: projectNativeStatus(thread.status),
+    cwd: nativeString(thread.cwd) ?? "/home",
+    cliVersion: nativeString(thread.cliVersion) ?? "unknown",
+    name: nullableNativeString(thread.name),
+    agentNickname: nullableNativeString(thread.agentNickname),
+    agentRole: nullableNativeString(thread.agentRole),
+    turns: Array.isArray(thread.turns)
+      ? thread.turns.map(projectExternalThreadTurn)
+      : [],
+  };
+}
+
+function projectExternalThreadTurn(
+  value: unknown,
+): ExternalThreadTurnProjection {
+  const turn = requireNativeRecord(value, "thread turn");
+  return {
+    turnId: requireNativeString(turn.id, "turn.id"),
+    status: nativeString(turn.status) ?? "unknown",
+    startedAt: nullableNativeNumber(turn.startedAt),
+    completedAt: nullableNativeNumber(turn.completedAt),
+    durationMs: nullableNativeNumber(turn.durationMs),
+    items: Array.isArray(turn.items)
+      ? turn.items.map(projectExternalThreadItem)
+      : [],
+  };
+}
+
+function projectExternalThreadItem(
+  value: unknown,
+): ExternalThreadItemProjection {
+  const item = requireNativeRecord(value, "thread item");
+  const kind = requireNativeString(item.type, "thread item type");
+  const itemId = requireNativeString(item.id, "thread item id");
+  const status = projectOptionalNativeStatus(item.status);
+  const text = projectThreadItemText(kind, item);
+  const summary = Array.isArray(item.summary)
+    ? item.summary.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return {
+    itemId,
+    kind,
+    ...(status === undefined ? {} : { status }),
+    ...(text === undefined ? {} : { text }),
+    ...(summary === undefined || summary.length === 0 ? {} : { summary }),
+  };
+}
+
+function projectThreadItemText(
+  kind: string,
+  item: Record<string, unknown>,
+): string | undefined {
+  if (typeof item.text === "string") return item.text;
+  if (kind === "commandExecution") {
+    const command = nativeString(item.command);
+    const output = nativeString(item.aggregatedOutput);
+    return [command, output].filter((part) => part !== undefined).join("\n");
+  }
+  if (kind === "fileChange" && Array.isArray(item.changes)) {
+    return `${item.changes.length} file change${item.changes.length === 1 ? "" : "s"}`;
+  }
+  if (kind === "mcpToolCall") {
+    return [nativeString(item.server), nativeString(item.tool)]
+      .filter((part) => part !== undefined)
+      .join("/");
+  }
+  if (kind === "dynamicToolCall") return nativeString(item.tool);
+  if (kind === "userMessage" && Array.isArray(item.content)) {
+    const text = item.content
+      .map((entry) =>
+        isRecord(entry)
+          ? (nativeString(entry.text) ?? nativeString(entry.value))
+          : undefined,
+      )
+      .filter((entry): entry is string => entry !== undefined)
+      .join("\n");
+    return text === "" ? undefined : text;
+  }
+  return undefined;
+}
+
+function projectNativeStatus(value: unknown): string {
+  return projectOptionalNativeStatus(value) ?? "unknown";
+}
+
+function projectOptionalNativeStatus(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return isRecord(value) ? nativeString(value.type) : undefined;
+}
+
+function requireNativeRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`invalid native ${label} payload`);
+  return value;
+}
+
+function requireNativeString(value: unknown, label: string): string {
+  const parsed = nativeString(value);
+  if (parsed === undefined) throw new Error(`invalid native ${label}`);
+  return parsed;
+}
+
+function nativeString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function nullableNativeString(value: unknown): string | null {
+  return nativeString(value) ?? null;
+}
+
+function nativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function nullableNativeNumber(value: unknown): number | null {
+  return nativeNumber(value) ?? null;
+}
+
 function parseCodexCliVersion(userAgent: string): string {
   const match = /^(?:codex_cli_rs|codex-cli|[^/\s]+)\/([^\s]+)/.exec(userAgent);
   return match?.[1] ?? userAgent;
@@ -853,23 +1001,8 @@ function browserSafeNativeValue(value: unknown): unknown {
 
 function browserSafePayload(
   event: NeutralExternalRuntimeEvent,
-): Readonly<Record<string, unknown>> {
-  if (event.rawDetail.truncated) {
-    return {
-      method: event.method,
-      truncated: true,
-      originalSha256: event.rawDetail.originalSha256,
-    };
-  }
-  try {
-    const parsed = JSON.parse(event.rawDetail.json) as unknown;
-    if (isRecord(parsed) && isRecord(parsed.params)) {
-      return { nativeMethod: event.method, ...parsed.params };
-    }
-  } catch {
-    // The bounded detail remains available through the operator-only lookup.
-  }
-  return { nativeMethod: event.method };
+): NeutralExternalRuntimeEvent["payload"] {
+  return event.payload;
 }
 
 function browserSafeRawDetail(
@@ -894,8 +1027,9 @@ function terminalPhase(
     : undefined;
   const source = method ?? event.kind;
   if (source === "turn/completed") {
-    const turn = isRecord(event.payload) ? event.payload.turn : undefined;
-    const status = isRecord(turn) ? stringValue(turn.status) : undefined;
+    const status = isRecord(event.payload)
+      ? stringValue(event.payload.status)
+      : undefined;
     if (status === "interrupted") return "interrupted";
     if (status === "failed") return "failed";
     return "completed";

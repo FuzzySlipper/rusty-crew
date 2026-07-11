@@ -15,6 +15,10 @@ import {
   apiCapabilityOpenApiDocument,
 } from "./api-capability-openapi.js";
 import { apiCapabilityRegistry } from "./api-command-registry.js";
+import {
+  EXTERNAL_RUNTIME_API_OPENAPI_PATH,
+  externalRuntimeApiOpenApiDocument,
+} from "./external-runtime-api-contract.js";
 import { slashCommandHandlerNames } from "./slash-command-router.js";
 
 const capabilityOutputUrl = new URL(
@@ -25,6 +29,19 @@ const openApiOutputUrl = new URL(
   `../../../../${API_CAPABILITY_OPENAPI_PATH}`,
   import.meta.url,
 );
+const externalRuntimeOpenApiOutputUrl = new URL(
+  `../../../../${EXTERNAL_RUNTIME_API_OPENAPI_PATH}`,
+  import.meta.url,
+);
+const coreProtocolSchema = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../contracts/src/generated/core-protocol.schema.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as { $defs: Record<string, Record<string, unknown> | boolean> };
 const capabilityArtifact = await format(
   JSON.stringify({
     schema_version: 1,
@@ -39,12 +56,27 @@ const openApiArtifact = await format(
   JSON.stringify(apiCapabilityOpenApiDocument()),
   { parser: "json" },
 );
+const externalRuntimeOpenApiArtifact = await format(
+  JSON.stringify(
+    externalRuntimeApiOpenApiDocument({
+      coreProtocolSchemas: coreProtocolSchema.$defs,
+      capabilityIds: new Set(
+        apiCapabilityRegistry().capabilities.map((capability) => capability.id),
+      ),
+    }),
+  ),
+  { parser: "json" },
+);
 const artifacts = [
   {
     path: fileURLToPath(capabilityOutputUrl),
     content: capabilityArtifact,
   },
   { path: fileURLToPath(openApiOutputUrl), content: openApiArtifact },
+  {
+    path: fileURLToPath(externalRuntimeOpenApiOutputUrl),
+    content: externalRuntimeOpenApiArtifact,
+  },
 ];
 
 if (process.argv.includes("--check")) {

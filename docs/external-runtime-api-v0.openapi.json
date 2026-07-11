@@ -1,0 +1,3772 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rusty Crew External Agent Runtime API",
+    "version": "0.1.0",
+    "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
+  },
+  "security": [{ "AdminBearer": [] }],
+  "paths": {
+    "/v1/external-runtimes": {
+      "get": {
+        "operationId": "listExternalRuntimes",
+        "tags": ["external-runtime"],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeFleet"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.list",
+        "x-rusty-crew-contract-detail": "wire"
+      },
+      "post": {
+        "operationId": "registerExternalRuntime",
+        "tags": ["external-runtime"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalRuntimeRegistrationWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.register",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}": {
+      "get": {
+        "operationId": "readExternalRuntime",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeDetail"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/connect": {
+      "post": {
+        "operationId": "connectExternalRuntime",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeControllerStatus"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.connect",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/threads": {
+      "get": {
+        "operationId": "listExternalRuntimeThreads",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalThreadPage"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.threads.list",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/threads/read": {
+      "post": {
+        "operationId": "readExternalRuntimeThread",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalThreadReadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalThreadReadResult"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.threads.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/events": {
+      "get": {
+        "operationId": "listExternalRuntimeEvents",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeEventPage"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.events.list",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/stream": {
+      "get": {
+        "operationId": "streamExternalRuntimeEvents",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cursor-ordered normalized external runtime events",
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" },
+                "x-rusty-crew-event-schema": {
+                  "$ref": "#/components/schemas/NormalizedExternalRuntimeEvent"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.events.stream",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}": {
+      "get": {
+        "operationId": "readExternalRuntimeRawDetail",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "detail_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeRawDetail"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.raw_details.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-bindings": {
+      "get": {
+        "operationId": "listExternalBindings",
+        "tags": ["external-runtime"],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalBindingFleet"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.list",
+        "x-rusty-crew-contract-detail": "wire"
+      },
+      "post": {
+        "operationId": "writeExternalBinding",
+        "tags": ["external-runtime"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExternalBindingWrite" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalAgentBinding"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.write",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-bindings/{binding_id}/controls": {
+      "post": {
+        "operationId": "submitExternalBindingControl",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExternalControlWrite" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalControlReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.control",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-bindings/{binding_id}/messages": {
+      "post": {
+        "operationId": "sendExternalBindingMessage",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalBindingMessageWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.messages.create",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-interactions": {
+      "get": {
+        "operationId": "listExternalInteractions",
+        "tags": ["external-runtime"],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalInteractionAttention"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.interactions.list",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-interactions/{interaction_id}/resolve": {
+      "post": {
+        "operationId": "resolveExternalInteraction",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalInteractionResolutionWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalInteractionRecord"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.interactions.resolve",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/agent-deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "readAgentDelivery",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "agent.deliveries.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/agent-rounds/{round_id}": {
+      "get": {
+        "operationId": "readAgentRound",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/AgentCorrelatedRound"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "agent.rounds.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "AdminBearer": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "ActionBatchReceipt": {
+        "properties": {
+          "accepted_actions": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejected_actions": {
+            "items": { "$ref": "#/components/schemas/ActionRejection" },
+            "type": "array"
+          },
+          "wake_id": { "type": "string" }
+        },
+        "required": ["wake_id", "accepted_actions", "rejected_actions"],
+        "type": "object"
+      },
+      "ActionRejection": {
+        "properties": {
+          "index": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "kind": { "$ref": "#/components/schemas/CoreErrorKind" },
+          "message": { "type": "string" }
+        },
+        "required": ["index", "kind", "message"],
+        "type": "object"
+      },
+      "AgentActivation": {
+        "oneOf": [
+          {
+            "properties": {
+              "sessionId": { "type": "string" },
+              "type": {
+                "const": "direct_brain_wake_requested",
+                "type": "string"
+              },
+              "wakeId": { "type": "string" }
+            },
+            "required": ["type", "sessionId", "wakeId"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "bindingId": { "type": "string" },
+              "requestId": { "type": "string" },
+              "sessionId": { "type": "string" },
+              "type": { "const": "external_turn_requested", "type": "string" }
+            },
+            "required": ["type", "sessionId", "requestId", "bindingId"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "queueId": { "type": "string" },
+              "sessionId": { "type": "string" },
+              "type": { "const": "queued_for_next_turn", "type": "string" }
+            },
+            "required": ["type", "sessionId", "queueId"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reasonCode": { "type": "string" },
+              "type": { "const": "rejected", "type": "string" }
+            },
+            "required": ["type", "reasonCode"],
+            "type": "object"
+          }
+        ]
+      },
+      "AgentCoordinationCaller": {
+        "oneOf": [
+          {
+            "properties": {
+              "senderAgentId": { "type": "string" },
+              "type": { "const": "system", "type": "string" }
+            },
+            "required": ["type", "senderAgentId"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "sessionId": { "type": "string" },
+              "toolCallId": { "type": "string" },
+              "type": { "const": "direct_brain", "type": "string" },
+              "wakeId": { "type": "string" }
+            },
+            "required": ["type", "sessionId", "wakeId", "toolCallId"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "bindingId": { "type": "string" },
+              "controllerGeneration": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "controllerInstanceId": { "type": "string" },
+              "nativeRequestId": { "type": "string" },
+              "nativeThreadId": { "type": "string" },
+              "nativeTurnId": { "type": "string" },
+              "runtimeId": { "type": "string" },
+              "type": { "const": "external_agent", "type": "string" }
+            },
+            "required": [
+              "type",
+              "runtimeId",
+              "bindingId",
+              "controllerInstanceId",
+              "controllerGeneration",
+              "nativeThreadId",
+              "nativeTurnId",
+              "nativeRequestId"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AgentCorrelatedRound": {
+        "properties": {
+          "correlationId": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "messageId": { "type": "string" },
+          "outcome": true,
+          "recipientAgentId": { "type": "string" },
+          "recipientSessionId": { "type": "string" },
+          "replyMessageId": { "type": ["string", "null"] },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "roundId": { "type": "string" },
+          "senderAgentId": { "type": "string" },
+          "senderRequestId": { "type": ["string", "null"] },
+          "senderSessionId": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/AgentRoundStatus" },
+          "terminalAt": { "type": ["string", "null"] },
+          "terminalReasonCode": { "type": ["string", "null"] }
+        },
+        "required": [
+          "roundId",
+          "idempotencyKey",
+          "senderAgentId",
+          "senderSessionId",
+          "recipientAgentId",
+          "recipientSessionId",
+          "messageId",
+          "correlationId",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "AgentMessage": {
+        "properties": {
+          "body": { "type": "string" },
+          "correlation_id": { "type": ["string", "null"] },
+          "from": { "type": "string" },
+          "projection": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentMessageProjectionHint" },
+              { "type": "null" }
+            ]
+          },
+          "to": { "type": "string" }
+        },
+        "required": ["from", "to", "body"],
+        "type": "object"
+      },
+      "AgentMessageCommand": {
+        "properties": {
+          "body": { "type": "string" },
+          "caller": { "$ref": "#/components/schemas/AgentCoordinationCaller" },
+          "correlationId": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" },
+          "deliveryId": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "messageId": { "type": "string" },
+          "requireWake": { "type": "boolean" },
+          "toAgentId": { "type": "string" }
+        },
+        "required": [
+          "caller",
+          "deliveryId",
+          "idempotencyKey",
+          "messageId",
+          "toAgentId",
+          "body",
+          "requireWake",
+          "createdAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "AgentMessageDeliveryReceipt": {
+        "properties": {
+          "activation": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentActivation" },
+              { "type": "null" }
+            ]
+          },
+          "reasonCode": { "type": ["string", "null"] },
+          "request": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryRequest"
+          },
+          "resolvedRoundId": { "type": ["string", "null"] },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "sequence": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryStatus"
+          },
+          "terminalAt": { "type": ["string", "null"] }
+        },
+        "required": ["request", "status", "revision"],
+        "type": "object"
+      },
+      "AgentMessageDeliveryRequest": {
+        "properties": {
+          "body": { "type": "string" },
+          "correlationId": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" },
+          "deliveryId": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "fromAgentId": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "messageId": { "type": "string" },
+          "requireWake": { "type": "boolean" },
+          "toAgentId": { "type": "string" }
+        },
+        "required": [
+          "deliveryId",
+          "idempotencyKey",
+          "messageId",
+          "fromAgentId",
+          "toAgentId",
+          "body",
+          "requireWake",
+          "createdAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "AgentMessageDeliveryStatus": {
+        "enum": ["pending", "accepted", "rejected", "expired"],
+        "type": "string"
+      },
+      "AgentMessageProjectionHint": {
+        "properties": {
+          "reason": { "type": ["string", "null"] },
+          "target_ref": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ProjectionRef" },
+              { "type": "null" }
+            ]
+          },
+          "visibility": { "$ref": "#/components/schemas/ProjectionVisibility" },
+          "work_ref": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ProjectionRef" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["visibility"],
+        "type": "object"
+      },
+      "AgentRoundCommand": {
+        "properties": {
+          "body": { "type": "string" },
+          "caller": { "$ref": "#/components/schemas/AgentCoordinationCaller" },
+          "correlationId": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "messageId": { "type": "string" },
+          "roundId": { "type": "string" },
+          "toAgentId": { "type": "string" }
+        },
+        "required": [
+          "caller",
+          "roundId",
+          "idempotencyKey",
+          "messageId",
+          "toAgentId",
+          "body",
+          "correlationId",
+          "createdAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "AgentRoundStartReceipt": {
+        "properties": {
+          "delivery": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+          },
+          "round": { "$ref": "#/components/schemas/AgentCorrelatedRound" }
+        },
+        "required": ["round", "delivery"],
+        "type": "object"
+      },
+      "AgentRoundStatus": {
+        "enum": ["pending", "replied", "expired", "cancelled", "failed"],
+        "type": "string"
+      },
+      "BodyDeltaPolicy": {
+        "properties": {
+          "max_queued_messages": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": { "$ref": "#/components/schemas/MidTurnDeltaMode" },
+          "queue_owner": { "$ref": "#/components/schemas/DeltaQueueOwner" },
+          "queued_message_ttl_ms": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "queue_owner",
+          "queued_message_ttl_ms",
+          "max_queued_messages"
+        ],
+        "type": "object"
+      },
+      "BodyState": {
+        "properties": {
+          "child_completions": {
+            "items": { "$ref": "#/components/schemas/DelegatedCompletion" },
+            "type": "array"
+          },
+          "delta_policy": { "$ref": "#/components/schemas/BodyDeltaPolicy" },
+          "fan_out_groups": {
+            "items": { "$ref": "#/components/schemas/DelegatedFanOutGroup" },
+            "type": "array"
+          },
+          "pending_messages": {
+            "items": { "$ref": "#/components/schemas/AgentMessage" },
+            "type": "array"
+          },
+          "recent_events": {
+            "items": { "$ref": "#/components/schemas/CoreEvent" },
+            "type": "array"
+          },
+          "session": { "$ref": "#/components/schemas/SessionState" }
+        },
+        "required": [
+          "session",
+          "pending_messages",
+          "recent_events",
+          "child_completions",
+          "fan_out_groups",
+          "delta_policy"
+        ],
+        "type": "object"
+      },
+      "BrainAction": {
+        "oneOf": [
+          {
+            "properties": {
+              "message": { "$ref": "#/components/schemas/AgentMessage" },
+              "type": { "const": "send_message", "type": "string" }
+            },
+            "required": ["type", "message"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "capacity_request": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/WorkerPoolCapacityRequest" },
+                  { "type": "null" }
+                ]
+              },
+              "correlation_id": { "type": ["string", "null"] },
+              "expected_output": { "type": ["string", "null"] },
+              "fan_out_failure_policy": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/FanOutFailurePolicy" },
+                  { "type": "null" }
+                ]
+              },
+              "fan_out_group_id": { "type": ["string", "null"] },
+              "fan_out_max_concurrency": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": ["integer", "null"]
+              },
+              "parent_consumption": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/ParentConsumptionPolicy" },
+                  { "type": "null" }
+                ]
+              },
+              "priority": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/DelegationPriority" },
+                  { "type": "null" }
+                ]
+              },
+              "profile_id": { "type": "string" },
+              "prompt": { "type": "string" },
+              "resource_limits": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/ResourceLimits" },
+                  { "type": "null" }
+                ]
+              },
+              "task_id": { "type": ["string", "null"] },
+              "timeout_ms": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": ["integer", "null"]
+              },
+              "type": { "const": "request_delegation", "type": "string" }
+            },
+            "required": ["type", "profile_id", "prompt"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "packet": { "$ref": "#/components/schemas/CompletionPacket" },
+              "type": { "const": "deliver_completion", "type": "string" }
+            },
+            "required": ["type", "packet"],
+            "type": "object"
+          }
+        ]
+      },
+      "BrainActionBatch": {
+        "properties": {
+          "actions": {
+            "items": { "$ref": "#/components/schemas/BrainAction" },
+            "type": "array"
+          },
+          "session_id": { "type": "string" },
+          "wake_id": { "type": "string" }
+        },
+        "required": ["wake_id", "session_id", "actions"],
+        "type": "object"
+      },
+      "BrainEvent": {
+        "oneOf": [
+          {
+            "properties": { "type": { "const": "started", "type": "string" } },
+            "required": ["type"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "text": { "type": "string" },
+              "type": { "const": "text_delta", "type": "string" }
+            },
+            "required": ["type", "text"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "format": { "type": ["string", "null"] },
+              "text": { "type": "string" },
+              "type": { "const": "reasoning_delta", "type": "string" }
+            },
+            "required": ["type", "text"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": { "type": ["string", "null"] },
+              "phase": { "$ref": "#/components/schemas/BrainPhase" },
+              "type": { "const": "phase_change", "type": "string" }
+            },
+            "required": ["type", "phase"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "metadata": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/ToolCallMetadata" },
+                  { "type": "null" }
+                ]
+              },
+              "tool_name": { "type": "string" },
+              "type": { "const": "tool_call_started", "type": "string" }
+            },
+            "required": ["type", "tool_name"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "is_error": { "type": "boolean" },
+              "metadata": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/ToolCallMetadata" },
+                  { "type": "null" }
+                ]
+              },
+              "tool_name": { "type": "string" },
+              "type": { "const": "tool_call_finished", "type": "string" }
+            },
+            "required": ["type", "tool_name", "is_error"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/BrainProviderStatusLevel"
+              },
+              "message": { "type": "string" },
+              "metadata_json": { "type": ["string", "null"] },
+              "type": { "const": "provider_status", "type": "string" }
+            },
+            "required": ["type", "level", "message"],
+            "type": "object"
+          },
+          {
+            "properties": { "type": { "const": "finished", "type": "string" } },
+            "required": ["type"],
+            "type": "object"
+          }
+        ]
+      },
+      "BrainEventEnvelope": {
+        "properties": {
+          "event": { "$ref": "#/components/schemas/BrainEvent" },
+          "session_id": { "type": "string" },
+          "wake_id": { "type": "string" }
+        },
+        "required": ["wake_id", "session_id", "event"],
+        "type": "object"
+      },
+      "BrainPhase": {
+        "enum": ["idle", "exploring", "composing", "reviewing"],
+        "type": "string"
+      },
+      "BrainProviderStateScope": {
+        "properties": {
+          "profile_fingerprint": { "type": "string" },
+          "provider_fingerprint": { "type": "string" }
+        },
+        "required": ["profile_fingerprint", "provider_fingerprint"],
+        "type": "object"
+      },
+      "BrainProviderStateStrategyMetadata": {
+        "properties": {
+          "mode": { "$ref": "#/components/schemas/ProviderStateMode" }
+        },
+        "required": ["mode"],
+        "type": "object"
+      },
+      "BrainProviderStatusLevel": {
+        "enum": ["info", "degraded", "error"],
+        "type": "string"
+      },
+      "BrainStrategyMetadata": {
+        "properties": {
+          "module_id": { "type": "string" },
+          "provider_state": {
+            "$ref": "#/components/schemas/BrainProviderStateStrategyMetadata"
+          },
+          "strategy_id": { "type": "string" }
+        },
+        "required": ["module_id", "strategy_id", "provider_state"],
+        "type": "object"
+      },
+      "BrainWakeAccepted": {
+        "properties": {
+          "accepted": { "type": "boolean" },
+          "wake_id": { "type": "string" }
+        },
+        "required": ["wake_id", "accepted"],
+        "type": "object"
+      },
+      "BrainWakeFailure": {
+        "properties": {
+          "kind": { "$ref": "#/components/schemas/CoreErrorKind" },
+          "message": { "type": "string" },
+          "session_id": { "type": "string" },
+          "wake_id": { "type": "string" }
+        },
+        "required": ["wake_id", "session_id", "kind", "message"],
+        "type": "object"
+      },
+      "BrainWakeProviderStateInput": {
+        "properties": {
+          "expires_at": { "type": ["string", "null"] },
+          "module_id": { "type": "string" },
+          "payload": true,
+          "payload_version": { "type": "string" },
+          "profile_fingerprint": { "type": "string" },
+          "provider_fingerprint": { "type": "string" },
+          "strategy_id": { "type": "string" }
+        },
+        "required": [
+          "module_id",
+          "strategy_id",
+          "profile_fingerprint",
+          "provider_fingerprint",
+          "payload_version",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "BrainWakeProviderStateOutput": {
+        "oneOf": [
+          {
+            "properties": {
+              "type": { "const": "unchanged", "type": "string" }
+            },
+            "required": ["type"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/BrainWakeProviderStateUpdate"
+              },
+              "type": { "const": "replace", "type": "string" }
+            },
+            "required": ["type", "state"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/ProviderStateClearReason"
+              },
+              "type": { "const": "clear", "type": "string" }
+            },
+            "required": ["type", "reason"],
+            "type": "object"
+          }
+        ]
+      },
+      "BrainWakeProviderStateUpdate": {
+        "properties": {
+          "module_id": { "type": "string" },
+          "payload": true,
+          "payload_version": { "type": "string" },
+          "profile_fingerprint": { "type": "string" },
+          "provider_fingerprint": { "type": "string" },
+          "strategy_id": { "type": "string" },
+          "ttl_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          }
+        },
+        "required": [
+          "module_id",
+          "strategy_id",
+          "profile_fingerprint",
+          "provider_fingerprint",
+          "payload_version",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "BrainWakeRequest": {
+        "properties": {
+          "body_state": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "brain": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "provider_state": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/BrainWakeProviderStateInput" },
+              { "type": "null" }
+            ]
+          },
+          "provider_state_absence": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ProviderStateAbsenceReason" },
+              { "type": "null" }
+            ]
+          },
+          "role_assembly": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": { "type": "string" },
+          "system_prompt": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wake_id": { "type": "string" }
+        },
+        "required": [
+          "brain",
+          "session_id",
+          "body_state",
+          "system_prompt",
+          "role_assembly",
+          "wake_id"
+        ],
+        "type": "object"
+      },
+      "BrainWakeStreamItem": {
+        "oneOf": [
+          {
+            "properties": {
+              "event": { "$ref": "#/components/schemas/BrainEventEnvelope" },
+              "type": { "const": "event", "type": "string" }
+            },
+            "required": ["type", "event"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "batch": { "$ref": "#/components/schemas/BrainActionBatch" },
+              "type": { "const": "actions", "type": "string" }
+            },
+            "required": ["type", "batch"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "failure": { "$ref": "#/components/schemas/BrainWakeFailure" },
+              "type": { "const": "wake_failed", "type": "string" }
+            },
+            "required": ["type", "failure"],
+            "type": "object"
+          }
+        ]
+      },
+      "CompletionPacket": {
+        "properties": {
+          "session_id": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/CompletionStatus" },
+          "summary": { "type": "string" }
+        },
+        "required": ["session_id", "status", "summary"],
+        "type": "object"
+      },
+      "CompletionStatus": {
+        "enum": ["completed", "failed", "blocked", "exhausted"],
+        "type": "string"
+      },
+      "ContextCompactionArtifact": {
+        "description": "Durable record for a derived context-compaction summary.\n\nCompaction artifacts are not raw transcript storage and are not ordinary\nsession memory. They preserve provenance, model metadata, token estimates,\nand strategy decisions so future context strategies can decide whether and\nhow to project them into model context while keeping source transcript\nhistory intact.",
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "branch_id": { "type": ["string", "null"] },
+          "context_policy": { "type": "string" },
+          "created_at": { "type": "string" },
+          "enters_future_context": { "type": "boolean" },
+          "estimate_after_json": true,
+          "estimate_before_json": true,
+          "metadata_json": true,
+          "provider_metadata_json": true,
+          "session_id": { "type": "string" },
+          "source_refs_json": true,
+          "strategy_id": { "type": "string" },
+          "summary_text": { "type": "string" },
+          "updated_at": { "type": "string" }
+        },
+        "required": [
+          "artifact_id",
+          "session_id",
+          "strategy_id",
+          "source_refs_json",
+          "provider_metadata_json",
+          "estimate_before_json",
+          "summary_text",
+          "enters_future_context",
+          "context_policy",
+          "metadata_json",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ContextCompactionArtifactQuery": {
+        "properties": {
+          "branch_id": { "type": ["string", "null"] },
+          "enters_future_context": { "type": ["boolean", "null"] },
+          "latest_only": { "type": "boolean" },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "offset": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "session_id": { "type": ["string", "null"] },
+          "strategy_id": { "type": ["string", "null"] }
+        },
+        "required": ["latest_only"],
+        "type": "object"
+      },
+      "CoreError": {
+        "properties": {
+          "kind": { "$ref": "#/components/schemas/CoreErrorKind" },
+          "message": { "type": "string" }
+        },
+        "required": ["kind", "message"],
+        "type": "object"
+      },
+      "CoreErrorKind": {
+        "enum": [
+          "invalid_input",
+          "not_found",
+          "already_exists",
+          "session_expired",
+          "timeout_expired",
+          "persistence_failure",
+          "adapter_unavailable",
+          "brain_unavailable",
+          "action_rejected",
+          "internal_error"
+        ],
+        "type": "string"
+      },
+      "CoreEvent": {
+        "oneOf": [
+          {
+            "properties": {
+              "state": { "$ref": "#/components/schemas/SessionState" },
+              "type": { "const": "session_created", "type": "string" }
+            },
+            "required": ["type", "state"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "session_id": { "type": "string" },
+              "type": { "const": "session_archived", "type": "string" }
+            },
+            "required": ["type", "session_id"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": { "$ref": "#/components/schemas/AgentMessage" },
+              "type": { "const": "agent_message_routed", "type": "string" }
+            },
+            "required": ["type", "message"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "receipt": {
+                "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+              },
+              "type": {
+                "const": "agent_message_delivery_observed",
+                "type": "string"
+              }
+            },
+            "required": ["type", "receipt"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "round": { "$ref": "#/components/schemas/AgentCorrelatedRound" },
+              "type": { "const": "agent_round_observed", "type": "string" }
+            },
+            "required": ["type", "round"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "lifecycle": {
+                "$ref": "#/components/schemas/DelegationLifecycleEvent"
+              },
+              "type": {
+                "const": "delegation_lifecycle_observed",
+                "type": "string"
+              }
+            },
+            "required": ["type", "lifecycle"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "event": { "$ref": "#/components/schemas/ExternalEvent" },
+              "type": { "const": "external_event_injected", "type": "string" }
+            },
+            "required": ["type", "event"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": { "const": "den_data_updated", "type": "string" },
+              "update": { "$ref": "#/components/schemas/DenDataUpdate" }
+            },
+            "required": ["type", "update"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "session_id": { "type": "string" },
+              "type": { "const": "brain_wake_requested", "type": "string" }
+            },
+            "required": ["type", "session_id"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "event": { "$ref": "#/components/schemas/BrainEvent" },
+              "session_id": { "type": "string" },
+              "type": { "const": "brain_event_observed", "type": "string" },
+              "wake_id": { "type": ["string", "null"] }
+            },
+            "required": ["type", "session_id", "event"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "count": { "format": "uint32", "minimum": 0, "type": "integer" },
+              "session_id": { "type": "string" },
+              "type": { "const": "brain_actions_accepted", "type": "string" }
+            },
+            "required": ["type", "session_id", "count"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "packet": { "$ref": "#/components/schemas/CompletionPacket" },
+              "type": {
+                "const": "completion_packet_delivered",
+                "type": "string"
+              }
+            },
+            "required": ["type", "packet"],
+            "type": "object"
+          }
+        ]
+      },
+      "CoreEventKind": {
+        "enum": [
+          "session_created",
+          "session_archived",
+          "agent_message_routed",
+          "agent_message_delivery_observed",
+          "agent_round_observed",
+          "delegation_lifecycle_observed",
+          "external_event_injected",
+          "den_data_updated",
+          "brain_wake_requested",
+          "brain_event_observed",
+          "brain_actions_accepted",
+          "completion_packet_delivered"
+        ],
+        "type": "string"
+      },
+      "DelegatedCompletion": {
+        "properties": {
+          "child_session_id": { "type": "string" },
+          "correlation_id": { "type": ["string", "null"] },
+          "packet": { "$ref": "#/components/schemas/CompletionPacket" },
+          "parent_consumption": {
+            "$ref": "#/components/schemas/ParentConsumptionPolicy"
+          },
+          "requested_task_id": { "type": ["string", "null"] },
+          "run_id": { "type": "string" },
+          "source_action_index": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_wake_id": { "type": "string" }
+        },
+        "required": [
+          "run_id",
+          "child_session_id",
+          "source_wake_id",
+          "source_action_index",
+          "parent_consumption",
+          "packet"
+        ],
+        "type": "object"
+      },
+      "DelegatedFanOutGroup": {
+        "properties": {
+          "blocked": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "cancelled": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "completed": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "exhausted": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "expired": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "failed": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "failure_policy": {
+            "$ref": "#/components/schemas/FanOutFailurePolicy"
+          },
+          "group_id": { "type": "string" },
+          "max_concurrency": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "pending": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "status": { "$ref": "#/components/schemas/FanOutGroupStatus" },
+          "total": { "format": "uint32", "minimum": 0, "type": "integer" }
+        },
+        "required": [
+          "group_id",
+          "total",
+          "pending",
+          "completed",
+          "failed",
+          "blocked",
+          "exhausted",
+          "cancelled",
+          "expired",
+          "failure_policy",
+          "status"
+        ],
+        "type": "object"
+      },
+      "DelegatedResourceCleanupReport": {
+        "properties": {
+          "cleaned_at": { "type": "string" },
+          "expired_archived": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "orphaned_archived": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "resources_released": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "terminal_archived": {
+            "items": { "type": "string" },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cleaned_at",
+          "terminal_archived",
+          "orphaned_archived",
+          "expired_archived",
+          "resources_released"
+        ],
+        "type": "object"
+      },
+      "DelegatedRunStatus": {
+        "enum": [
+          "requested",
+          "session_created",
+          "wake_requested",
+          "running",
+          "checkpoint_waiting",
+          "completed",
+          "failed",
+          "blocked",
+          "exhausted",
+          "cancelled",
+          "expired"
+        ],
+        "type": "string"
+      },
+      "DelegatedSessionRuntimeStatus": {
+        "properties": {
+          "parent_session_id": { "type": ["string", "null"] },
+          "run_id": { "type": ["string", "null"] },
+          "run_status": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DelegatedRunStatus" },
+              { "type": "null" }
+            ]
+          },
+          "session": { "$ref": "#/components/schemas/SessionState" },
+          "terminal": { "type": "boolean" }
+        },
+        "required": ["session", "terminal"],
+        "type": "object"
+      },
+      "DelegationLifecycleEvent": {
+        "properties": {
+          "delegated_session_id": { "type": "string" },
+          "detail": { "type": ["string", "null"] },
+          "parent_session_id": { "type": "string" },
+          "phase": { "$ref": "#/components/schemas/DelegationLifecyclePhase" },
+          "run_id": { "type": ["string", "null"] }
+        },
+        "required": ["parent_session_id", "delegated_session_id", "phase"],
+        "type": "object"
+      },
+      "DelegationLifecyclePhase": {
+        "enum": [
+          "created",
+          "wake_requested",
+          "checkpoint_requested",
+          "completed",
+          "failed",
+          "blocked",
+          "exhausted",
+          "timed_out",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "DelegationLineage": {
+        "properties": {
+          "correlation_id": { "type": "string" },
+          "parent_agent_id": { "type": "string" },
+          "parent_session_id": { "type": "string" },
+          "requested_task_id": { "type": ["string", "null"] },
+          "source_action_index": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_wake_id": { "type": "string" }
+        },
+        "required": [
+          "parent_session_id",
+          "parent_agent_id",
+          "source_wake_id",
+          "source_action_index",
+          "correlation_id"
+        ],
+        "type": "object"
+      },
+      "DelegationPriority": {
+        "enum": ["low", "normal", "high"],
+        "type": "string"
+      },
+      "DeltaQueueOwner": { "enum": ["body"], "type": "string" },
+      "DenDataUpdate": {
+        "properties": {
+          "entity_id": { "type": "string" },
+          "entity_kind": { "type": "string" },
+          "project_id": { "type": "string" },
+          "revision": { "type": ["string", "null"] }
+        },
+        "required": ["project_id", "entity_kind", "entity_id"],
+        "type": "object"
+      },
+      "DenRuntimeReference": {
+        "properties": {
+          "project_id": { "type": ["string", "null"] },
+          "task_id": { "type": ["string", "null"] }
+        },
+        "type": "object"
+      },
+      "EventReceipt": {
+        "properties": {
+          "accepted": { "type": "boolean" },
+          "sequence": { "format": "uint64", "minimum": 0, "type": "integer" }
+        },
+        "required": ["accepted", "sequence"],
+        "type": "object"
+      },
+      "EventSubscription": {
+        "properties": {
+          "adapter_id": { "type": ["string", "null"] },
+          "agent_id": { "type": ["string", "null"] },
+          "event_kinds": {
+            "items": { "$ref": "#/components/schemas/CoreEventKind" },
+            "type": "array"
+          },
+          "session_id": { "type": ["string", "null"] }
+        },
+        "required": ["event_kinds"],
+        "type": "object"
+      },
+      "ExternalAgentBinding": {
+        "properties": {
+          "agentId": { "type": ["string", "null"] },
+          "bindingId": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "cwd": { "type": ["string", "null"] },
+          "effectiveConfigFingerprint": { "type": "string" },
+          "nativeThreadId": { "type": ["string", "null"] },
+          "purpose": { "$ref": "#/components/schemas/ExternalBindingPurpose" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "runtimeId": { "type": "string" },
+          "sessionId": { "type": ["string", "null"] },
+          "status": { "$ref": "#/components/schemas/ExternalBindingStatus" },
+          "taskRef": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DenRuntimeReference" },
+              { "type": "null" }
+            ]
+          },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "bindingId",
+          "runtimeId",
+          "purpose",
+          "effectiveConfigFingerprint",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalBindingPurpose": {
+        "enum": ["crew_agent", "imported_observer"],
+        "type": "string"
+      },
+      "ExternalBindingStatus": {
+        "enum": ["active", "paused", "archived"],
+        "type": "string"
+      },
+      "ExternalControlKind": {
+        "enum": [
+          "start_or_resume_thread",
+          "start_turn",
+          "steer_turn",
+          "interrupt_turn",
+          "compact_thread",
+          "resolve_interaction",
+          "reconcile_runtime",
+          "archive_binding"
+        ],
+        "type": "string"
+      },
+      "ExternalControlReceipt": {
+        "properties": {
+          "outcome": true,
+          "reasonCode": { "type": ["string", "null"] },
+          "request": { "$ref": "#/components/schemas/ExternalControlRequest" },
+          "requestFingerprint": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "status": { "$ref": "#/components/schemas/ExternalControlStatus" },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "request",
+          "requestFingerprint",
+          "status",
+          "revision",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalControlRequest": {
+        "properties": {
+          "bindingId": { "type": "string" },
+          "controlId": { "type": "string" },
+          "expectedBindingRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expectedNativeTurnId": { "type": ["string", "null"] },
+          "idempotencyKey": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/ExternalControlKind" },
+          "payload": true,
+          "requestedAt": { "type": "string" }
+        },
+        "required": [
+          "controlId",
+          "idempotencyKey",
+          "bindingId",
+          "expectedBindingRevision",
+          "kind",
+          "payload",
+          "requestedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalControlStatus": {
+        "enum": ["pending", "applied", "rejected", "failed"],
+        "type": "string"
+      },
+      "ExternalControllerContext": {
+        "properties": {
+          "generation": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "holderInstanceId": { "type": "string" }
+        },
+        "required": ["holderInstanceId", "generation"],
+        "type": "object"
+      },
+      "ExternalControllerLease": {
+        "properties": {
+          "acquiredAt": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "generation": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "holderInstanceId": { "type": "string" },
+          "renewedAt": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "runtimeId": { "type": "string" }
+        },
+        "required": [
+          "runtimeId",
+          "holderInstanceId",
+          "generation",
+          "acquiredAt",
+          "renewedAt",
+          "expiresAt",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "ExternalEndpoint": {
+        "properties": {
+          "address": { "type": "string" },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalEndpointTransport"
+          }
+        },
+        "required": ["transport", "address"],
+        "type": "object"
+      },
+      "ExternalEndpointTransport": {
+        "enum": ["unix_web_socket"],
+        "type": "string"
+      },
+      "ExternalEvent": {
+        "properties": {
+          "adapter_id": { "type": "string" },
+          "payload": { "$ref": "#/components/schemas/ExternalEventPayload" },
+          "source": { "type": "string" }
+        },
+        "required": ["adapter_id", "source", "payload"],
+        "type": "object"
+      },
+      "ExternalEventPayload": {
+        "oneOf": [
+          {
+            "properties": {
+              "from": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "const": "human_message", "type": "string" }
+            },
+            "required": ["type", "from", "text"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "binding_id": { "type": "string" },
+              "correlation_id": { "type": "string" },
+              "expires_at": { "type": "string" },
+              "external_channel_id": { "type": "string" },
+              "external_message_id": { "type": ["string", "null"] },
+              "external_thread_id": { "type": ["string", "null"] },
+              "from": { "type": "string" },
+              "idempotency_key": { "type": "string" },
+              "provider": { "type": "string" },
+              "received_at": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "const": "channel_message", "type": "string" }
+            },
+            "required": [
+              "type",
+              "binding_id",
+              "correlation_id",
+              "idempotency_key",
+              "provider",
+              "external_channel_id",
+              "from",
+              "text",
+              "received_at",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "detail": { "type": ["string", "null"] },
+              "status": { "type": "string" },
+              "type": { "const": "adapter_status", "type": "string" }
+            },
+            "required": ["type", "status"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "catalog_id": { "type": "string" },
+              "type": { "const": "tool_catalog_changed", "type": "string" }
+            },
+            "required": ["type", "catalog_id"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "json": { "type": "string" },
+              "type": { "const": "raw_json", "type": "string" }
+            },
+            "required": ["type", "json"],
+            "type": "object"
+          }
+        ]
+      },
+      "ExternalInteractionKind": {
+        "enum": [
+          "command_approval",
+          "file_approval",
+          "request_user_input",
+          "permission_request",
+          "mcp_elicitation",
+          "unsupported"
+        ],
+        "type": "string"
+      },
+      "ExternalInteractionRecord": {
+        "properties": {
+          "allowedResponses": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "bindingId": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "interactionId": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/ExternalInteractionKind" },
+          "nativeRequestId": { "type": "string" },
+          "nativeThreadId": { "type": "string" },
+          "nativeTurnId": { "type": "string" },
+          "outcome": true,
+          "prompt": true,
+          "rawDetailRef": { "type": ["string", "null"] },
+          "requestId": { "type": "string" },
+          "requestedAt": { "type": "string" },
+          "resolutionIdempotencyKey": { "type": ["string", "null"] },
+          "resolvedAt": { "type": ["string", "null"] },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "runtimeId": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/ExternalInteractionStatus" }
+        },
+        "required": [
+          "interactionId",
+          "runtimeId",
+          "bindingId",
+          "requestId",
+          "nativeThreadId",
+          "nativeTurnId",
+          "nativeRequestId",
+          "kind",
+          "prompt",
+          "allowedResponses",
+          "status",
+          "requestedAt",
+          "expiresAt",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "ExternalInteractionStatus": {
+        "enum": ["pending", "resolved", "expired", "lost"],
+        "type": "string"
+      },
+      "ExternalProcessOwnership": {
+        "enum": ["attached", "managed"],
+        "type": "string"
+      },
+      "ExternalRuntimeDesiredState": {
+        "enum": ["enabled", "disabled"],
+        "type": "string"
+      },
+      "ExternalRuntimeEventInput": {
+        "properties": {
+          "createdAt": { "type": "string" },
+          "eventId": { "type": "string" },
+          "itemId": { "type": ["string", "null"] },
+          "kind": { "type": "string" },
+          "nativeThreadId": { "type": ["string", "null"] },
+          "nativeTurnId": { "type": ["string", "null"] },
+          "payload": true,
+          "rawDetailRef": { "type": ["string", "null"] },
+          "requestId": { "type": ["string", "null"] },
+          "runtimeId": { "type": "string" },
+          "sessionId": { "type": ["string", "null"] }
+        },
+        "required": ["eventId", "createdAt", "kind", "runtimeId", "payload"],
+        "type": "object"
+      },
+      "ExternalRuntimeHandshakeDecision": {
+        "properties": {
+          "accepted": { "type": "boolean" },
+          "reasonCode": { "type": ["string", "null"] },
+          "registration": {
+            "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+          }
+        },
+        "required": ["accepted", "registration"],
+        "type": "object"
+      },
+      "ExternalRuntimeHandshakeObservation": {
+        "properties": {
+          "cliVersion": { "type": "string" },
+          "controller": {
+            "$ref": "#/components/schemas/ExternalControllerContext"
+          },
+          "executableSha256": { "type": "string" },
+          "observedAt": { "type": "string" },
+          "protocolSchemaSha256": { "type": "string" },
+          "runtimeId": { "type": "string" }
+        },
+        "required": [
+          "runtimeId",
+          "controller",
+          "cliVersion",
+          "executableSha256",
+          "protocolSchemaSha256",
+          "observedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalRuntimeKind": { "enum": ["codex_app_server"], "type": "string" },
+      "ExternalRuntimeObservedState": {
+        "enum": [
+          "disconnected",
+          "connecting",
+          "ready",
+          "degraded",
+          "incompatible"
+        ],
+        "type": "string"
+      },
+      "ExternalRuntimeRegistration": {
+        "properties": {
+          "codexHomeRef": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" },
+          "desiredState": {
+            "$ref": "#/components/schemas/ExternalRuntimeDesiredState"
+          },
+          "endpoint": { "$ref": "#/components/schemas/ExternalEndpoint" },
+          "executableSha256": { "type": "string" },
+          "expectedCliVersion": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/ExternalRuntimeKind" },
+          "observedReasonCode": { "type": ["string", "null"] },
+          "observedState": {
+            "$ref": "#/components/schemas/ExternalRuntimeObservedState"
+          },
+          "processOwnership": {
+            "$ref": "#/components/schemas/ExternalProcessOwnership"
+          },
+          "protocolSchemaSha256": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "runtimeId": { "type": "string" },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "runtimeId",
+          "kind",
+          "endpoint",
+          "processOwnership",
+          "expectedCliVersion",
+          "executableSha256",
+          "protocolSchemaSha256",
+          "desiredState",
+          "observedState",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalRuntimeStateObservation": {
+        "properties": {
+          "controller": {
+            "$ref": "#/components/schemas/ExternalControllerContext"
+          },
+          "observedAt": { "type": "string" },
+          "observedState": {
+            "$ref": "#/components/schemas/ExternalRuntimeObservedState"
+          },
+          "reasonCode": { "type": ["string", "null"] },
+          "runtimeId": { "type": "string" }
+        },
+        "required": ["runtimeId", "controller", "observedState", "observedAt"],
+        "type": "object"
+      },
+      "ExternalTurnCorrelation": {
+        "properties": {
+          "capacityLeaseId": { "type": ["string", "null"] },
+          "nativeThreadId": { "type": "string" },
+          "nativeTurnId": { "type": ["string", "null"] },
+          "phase": { "$ref": "#/components/schemas/ExternalTurnPhase" },
+          "request": { "$ref": "#/components/schemas/SessionTurnRequested" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "runtimeId": { "type": "string" },
+          "taskRef": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DenRuntimeReference" },
+              { "type": "null" }
+            ]
+          },
+          "terminalReasonCode": { "type": ["string", "null"] },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "request",
+          "runtimeId",
+          "nativeThreadId",
+          "phase",
+          "revision",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalTurnInputPart": {
+        "oneOf": [
+          {
+            "properties": {
+              "text": { "type": "string" },
+              "type": { "const": "text", "type": "string" }
+            },
+            "required": ["type", "text"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": { "const": "image", "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["type", "url"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": ["string", "null"] },
+              "type": { "const": "skill", "type": "string" }
+            },
+            "required": ["type", "name"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": { "type": "string" },
+              "payload": true,
+              "type": { "const": "machine_fact", "type": "string" }
+            },
+            "required": ["type", "kind", "payload"],
+            "type": "object"
+          }
+        ]
+      },
+      "ExternalTurnPhase": {
+        "enum": [
+          "accepted",
+          "starting",
+          "active",
+          "waiting_interaction",
+          "completed",
+          "failed",
+          "interrupted",
+          "outcome_unknown"
+        ],
+        "type": "string"
+      },
+      "FanOutFailurePolicy": {
+        "enum": ["fail_fast", "fail_soft"],
+        "type": "string"
+      },
+      "FanOutGroupStatus": {
+        "enum": ["in_progress", "completed", "partial_failure", "failed_fast"],
+        "type": "string"
+      },
+      "MemoryConflictPolicy": {
+        "enum": [
+          "expected_revision",
+          "supersession",
+          "merge",
+          "immutable",
+          "domain_specific"
+        ],
+        "type": "string"
+      },
+      "MemoryDiagnosticsPolicy": {
+        "properties": {
+          "expose_catalog": { "type": "boolean" },
+          "expose_policy_decisions": { "type": "boolean" },
+          "expose_record_counts": { "type": "boolean" }
+        },
+        "required": [
+          "expose_catalog",
+          "expose_record_counts",
+          "expose_policy_decisions"
+        ],
+        "type": "object"
+      },
+      "MemoryEvidenceKind": {
+        "oneOf": [
+          {
+            "enum": [
+              "wake",
+              "event",
+              "tool_call",
+              "transcript",
+              "user_correction",
+              "source_document",
+              "import",
+              "migration",
+              "ui",
+              "other"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "den_memory",
+            "description": "Explicit bridge/import evidence from external Den-owned memory.",
+            "type": "string"
+          }
+        ]
+      },
+      "MemoryEvidenceRef": {
+        "properties": {
+          "evidence_type": {
+            "$ref": "#/components/schemas/MemoryEvidenceKind"
+          },
+          "label": { "type": ["string", "null"] },
+          "ref_id": { "type": "string" }
+        },
+        "required": ["evidence_type", "ref_id"],
+        "type": "object"
+      },
+      "MemoryExportImportPolicy": {
+        "properties": {
+          "export_supported": { "type": "boolean" },
+          "import_governance_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "import_supported": { "type": "boolean" }
+        },
+        "required": [
+          "export_supported",
+          "import_supported",
+          "import_governance_mode"
+        ],
+        "type": "object"
+      },
+      "MemoryFieldType": {
+        "enum": [
+          "string",
+          "markdown",
+          "json",
+          "integer",
+          "float",
+          "boolean",
+          "timestamp"
+        ],
+        "type": "string"
+      },
+      "MemoryGovernanceDecisionInput": {
+        "properties": {
+          "actor": { "type": "string" },
+          "confidence": { "format": "float", "type": ["number", "null"] },
+          "decided_at": { "type": ["string", "null"] },
+          "decision": {
+            "$ref": "#/components/schemas/MemoryGovernanceDecisionKind"
+          },
+          "decision_id": { "type": "string" },
+          "evidence_refs": {
+            "items": { "$ref": "#/components/schemas/MemoryEvidenceRef" },
+            "type": "array"
+          },
+          "message": { "type": ["string", "null"] },
+          "policy_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "proposal_id": { "type": "string" },
+          "resulting_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "source": { "$ref": "#/components/schemas/MemoryProposalSource" }
+        },
+        "required": [
+          "decision_id",
+          "proposal_id",
+          "decision",
+          "actor",
+          "source",
+          "evidence_refs",
+          "policy_mode"
+        ],
+        "type": "object"
+      },
+      "MemoryGovernanceDecisionKind": {
+        "enum": ["routed_to_review", "approved", "rejected", "applied"],
+        "type": "string"
+      },
+      "MemoryGovernanceDecisionRecord": {
+        "properties": {
+          "actor": { "type": "string" },
+          "confidence": { "format": "float", "type": ["number", "null"] },
+          "decided_at": { "type": "string" },
+          "decision": {
+            "$ref": "#/components/schemas/MemoryGovernanceDecisionKind"
+          },
+          "decision_id": { "type": "string" },
+          "evidence_refs": {
+            "items": { "$ref": "#/components/schemas/MemoryEvidenceRef" },
+            "type": "array"
+          },
+          "message": { "type": ["string", "null"] },
+          "policy_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "proposal_id": { "type": "string" },
+          "resulting_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "source": { "$ref": "#/components/schemas/MemoryProposalSource" }
+        },
+        "required": [
+          "decision_id",
+          "proposal_id",
+          "decision",
+          "actor",
+          "source",
+          "evidence_refs",
+          "policy_mode",
+          "decided_at"
+        ],
+        "type": "object"
+      },
+      "MemoryGovernanceMode": {
+        "enum": [
+          "read_only",
+          "direct_write",
+          "candidate",
+          "manual_review",
+          "curator_route",
+          "auto_apply_threshold"
+        ],
+        "type": "string"
+      },
+      "MemoryIndexingPolicy": {
+        "properties": {
+          "optional_capabilities": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "required_capabilities": {
+            "items": { "type": "string" },
+            "type": "array"
+          }
+        },
+        "required": ["required_capabilities", "optional_capabilities"],
+        "type": "object"
+      },
+      "MemoryOperation": {
+        "enum": [
+          "read",
+          "list",
+          "add",
+          "replace",
+          "merge",
+          "supersede",
+          "remove",
+          "archive",
+          "candidate_only"
+        ],
+        "type": "string"
+      },
+      "MemoryOperationPolicy": {
+        "properties": {
+          "governance_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "min_confidence": { "format": "float", "type": ["number", "null"] },
+          "operation": { "$ref": "#/components/schemas/MemoryOperation" },
+          "requires_expected_revision": { "type": "boolean" }
+        },
+        "required": [
+          "operation",
+          "governance_mode",
+          "requires_expected_revision"
+        ],
+        "type": "object"
+      },
+      "MemoryPromptPolicy": {
+        "enum": [
+          "auto_context",
+          "summary_context",
+          "tool_only",
+          "explicit_user_context",
+          "never_prompt"
+        ],
+        "type": "string"
+      },
+      "MemoryProposalEnvelope": {
+        "description": "Proposed Crew memory mutation.\n\nThis envelope may be produced by a brain/tool/UI/importer. It is not a write\nby itself: Rust validates it against the Rust-owned descriptor and routes it\nthrough the descriptor's governance policy before any Crew storage changes.",
+        "properties": {
+          "confidence": { "format": "float", "type": "number" },
+          "content": true,
+          "created_at": { "type": ["string", "null"] },
+          "dedupe_key": { "type": ["string", "null"] },
+          "durability_rationale": { "type": ["string", "null"] },
+          "evidence_refs": {
+            "items": { "$ref": "#/components/schemas/MemoryEvidenceRef" },
+            "type": "array"
+          },
+          "governance_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "operation": { "$ref": "#/components/schemas/MemoryOperation" },
+          "proposal_id": { "type": "string" },
+          "scope": { "$ref": "#/components/schemas/MemoryScope" },
+          "shape": { "$ref": "#/components/schemas/MemoryRecordShapeRef" },
+          "source": { "$ref": "#/components/schemas/MemoryProposalSource" },
+          "space_id": { "$ref": "#/components/schemas/MemorySpaceId" }
+        },
+        "required": [
+          "proposal_id",
+          "space_id",
+          "operation",
+          "scope",
+          "shape",
+          "content",
+          "evidence_refs",
+          "confidence",
+          "governance_mode",
+          "source"
+        ],
+        "type": "object"
+      },
+      "MemoryProposalQuery": {
+        "properties": {
+          "dedupe_key": { "type": ["string", "null"] },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "offset": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "space_id": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/MemorySpaceId" },
+              { "type": "null" }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/MemoryProposalReviewStatus" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "MemoryProposalRecord": {
+        "properties": {
+          "applied_at": { "type": ["string", "null"] },
+          "created_at": { "type": "string" },
+          "decided_at": { "type": ["string", "null"] },
+          "duplicate_of": { "type": ["string", "null"] },
+          "proposal": { "$ref": "#/components/schemas/MemoryProposalEnvelope" },
+          "resulting_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "selected_governance_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MemoryProposalReviewStatus"
+          },
+          "updated_at": { "type": "string" }
+        },
+        "required": [
+          "proposal",
+          "status",
+          "selected_governance_mode",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "MemoryProposalReviewStatus": {
+        "enum": ["pending_review", "approved", "rejected", "applied"],
+        "type": "string"
+      },
+      "MemoryProposalSource": {
+        "enum": [
+          "in_wake_tool",
+          "capture_producer",
+          "ui",
+          "import",
+          "migration",
+          "human",
+          "den_memory_import"
+        ],
+        "type": "string"
+      },
+      "MemoryProvenancePolicy": {
+        "properties": {
+          "rationale_required": { "type": "boolean" },
+          "required_evidence": {
+            "items": { "$ref": "#/components/schemas/MemoryEvidenceKind" },
+            "type": "array"
+          },
+          "source_required": { "type": "boolean" }
+        },
+        "required": [
+          "required_evidence",
+          "source_required",
+          "rationale_required"
+        ],
+        "type": "object"
+      },
+      "MemoryRecordFieldDescriptor": {
+        "properties": {
+          "description": { "type": "string" },
+          "field_name": { "type": "string" },
+          "field_type": { "$ref": "#/components/schemas/MemoryFieldType" },
+          "required": { "type": "boolean" }
+        },
+        "required": ["field_name", "field_type", "required", "description"],
+        "type": "object"
+      },
+      "MemoryRecordShapeDescriptor": {
+        "properties": {
+          "description": { "type": "string" },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryRecordFieldDescriptor"
+            },
+            "type": "array"
+          },
+          "shape_id": { "$ref": "#/components/schemas/MemoryRecordShapeId" },
+          "version": { "format": "uint32", "minimum": 0, "type": "integer" }
+        },
+        "required": ["shape_id", "version", "description", "fields"],
+        "type": "object"
+      },
+      "MemoryRecordShapeId": {
+        "description": "Record shape id inside a memory space, such as `profile_dense_item`.",
+        "type": "string"
+      },
+      "MemoryRecordShapeRef": {
+        "properties": {
+          "shape_id": { "$ref": "#/components/schemas/MemoryRecordShapeId" },
+          "version": { "format": "uint32", "minimum": 0, "type": "integer" }
+        },
+        "required": ["shape_id", "version"],
+        "type": "object"
+      },
+      "MemoryRetentionPolicy": {
+        "enum": [
+          "manual_only",
+          "expire",
+          "archive",
+          "tombstone",
+          "compact",
+          "domain_specific"
+        ],
+        "type": "string"
+      },
+      "MemoryRetrievalStrategy": {
+        "enum": [
+          "direct_lookup",
+          "query_search",
+          "recency",
+          "relevance",
+          "branch_aware",
+          "domain_specific"
+        ],
+        "type": "string"
+      },
+      "MemoryScope": {
+        "properties": {
+          "scope_id": { "type": "string" },
+          "scope_type": { "$ref": "#/components/schemas/MemoryScopeType" }
+        },
+        "required": ["scope_type", "scope_id"],
+        "type": "object"
+      },
+      "MemoryScopeModel": {
+        "properties": {
+          "allowed_scopes": {
+            "items": { "$ref": "#/components/schemas/MemoryScopeType" },
+            "type": "array"
+          },
+          "primary_scope": { "$ref": "#/components/schemas/MemoryScopeType" }
+        },
+        "required": ["allowed_scopes", "primary_scope"],
+        "type": "object"
+      },
+      "MemoryScopeType": {
+        "enum": [
+          "profile",
+          "user",
+          "session",
+          "conversation_branch",
+          "world",
+          "entity",
+          "project"
+        ],
+        "type": "string"
+      },
+      "MemorySpaceDescriptor": {
+        "description": "Rust-owned memory-space descriptor projected outward to TypeScript clients.\n\nTypeScript may consume these descriptors for UI, tools, adapters, and\nproposal validation, but physical registration and storage ownership remain\nin Rusty Crew core. Descriptors describe Crew runtime memory; external Den\nmemory remains a separate Den service unless explicitly imported/proposed.",
+        "properties": {
+          "conflict_policy": {
+            "$ref": "#/components/schemas/MemoryConflictPolicy"
+          },
+          "description": { "type": "string" },
+          "diagnostics": {
+            "$ref": "#/components/schemas/MemoryDiagnosticsPolicy"
+          },
+          "export_import": {
+            "$ref": "#/components/schemas/MemoryExportImportPolicy"
+          },
+          "indexing": { "$ref": "#/components/schemas/MemoryIndexingPolicy" },
+          "module_id": { "type": ["string", "null"] },
+          "operations": {
+            "items": { "$ref": "#/components/schemas/MemoryOperation" },
+            "type": "array"
+          },
+          "prompt_policy": {
+            "$ref": "#/components/schemas/MemoryPromptPolicy"
+          },
+          "provenance_policy": {
+            "$ref": "#/components/schemas/MemoryProvenancePolicy"
+          },
+          "record_shapes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryRecordShapeDescriptor"
+            },
+            "type": "array"
+          },
+          "retention_policy": {
+            "$ref": "#/components/schemas/MemoryRetentionPolicy"
+          },
+          "retrieval_strategies": {
+            "items": { "$ref": "#/components/schemas/MemoryRetrievalStrategy" },
+            "type": "array"
+          },
+          "schema_version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope_model": { "$ref": "#/components/schemas/MemoryScopeModel" },
+          "space_id": { "$ref": "#/components/schemas/MemorySpaceId" },
+          "visibility_model": {
+            "$ref": "#/components/schemas/MemoryVisibilityModel"
+          },
+          "write_policy": { "$ref": "#/components/schemas/MemoryWritePolicy" }
+        },
+        "required": [
+          "space_id",
+          "schema_version",
+          "description",
+          "record_shapes",
+          "scope_model",
+          "visibility_model",
+          "retrieval_strategies",
+          "indexing",
+          "prompt_policy",
+          "write_policy",
+          "operations",
+          "provenance_policy",
+          "retention_policy",
+          "conflict_policy",
+          "diagnostics",
+          "export_import"
+        ],
+        "type": "object"
+      },
+      "MemorySpaceId": {
+        "description": "Runtime-owned durable memory space id.\n\nCrew memory spaces live in Rusty Crew service storage and may be projected\ninto prompts according to their descriptor policy. They are distinct from\nDen memory, which is external Den-owned product memory and should only enter\nCrew memory through explicit import/proposal flows with provenance.",
+        "type": "string"
+      },
+      "MemoryVisibilityModel": {
+        "enum": [
+          "profile_local",
+          "user_scoped",
+          "session_scoped",
+          "world_scoped",
+          "project_scoped",
+          "service_internal",
+          "explicit_policy"
+        ],
+        "type": "string"
+      },
+      "MemoryWritePolicy": {
+        "properties": {
+          "default_mode": {
+            "$ref": "#/components/schemas/MemoryGovernanceMode"
+          },
+          "operation_policies": {
+            "items": { "$ref": "#/components/schemas/MemoryOperationPolicy" },
+            "type": "array"
+          }
+        },
+        "required": ["default_mode", "operation_policies"],
+        "type": "object"
+      },
+      "MidTurnDeltaMode": {
+        "enum": ["frozen_snapshot_next_wake"],
+        "type": "string"
+      },
+      "NormalizedExternalRuntimeEvent": {
+        "type": "object",
+        "required": [
+          "eventId",
+          "runtimeId",
+          "sequenceId",
+          "createdAt",
+          "kind",
+          "payload"
+        ],
+        "properties": {
+          "eventId": { "type": "string" },
+          "runtimeId": { "type": "string" },
+          "sequenceId": { "type": "integer", "minimum": 0 },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "kind": { "type": "string" },
+          "sessionId": { "type": ["string", "null"] },
+          "nativeThreadId": { "type": ["string", "null"] },
+          "nativeTurnId": { "type": ["string", "null"] },
+          "itemId": { "type": ["string", "null"] },
+          "requestId": { "type": ["string", "null"] },
+          "rawDetailRef": { "type": ["string", "null"] },
+          "payload": {
+            "$ref": "#/components/schemas/ExternalRuntimeEventPayload"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ParentConsumptionPolicy": {
+        "enum": ["await_completion", "observe_only"],
+        "type": "string"
+      },
+      "PlatformAdapterKind": {
+        "enum": ["den", "telegram", "mcp", "tui", "cli"],
+        "type": "string"
+      },
+      "PlatformAdapterRegistration": {
+        "properties": {
+          "adapter_id": { "type": "string" },
+          "display_name": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/PlatformAdapterKind" }
+        },
+        "required": ["adapter_id", "kind", "display_name"],
+        "type": "object"
+      },
+      "ProjectionRef": {
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "system": { "type": "string" }
+        },
+        "required": ["system", "kind", "id"],
+        "type": "object"
+      },
+      "ProjectionVisibility": {
+        "enum": ["observation", "user_visible"],
+        "type": "string"
+      },
+      "ProviderStateAbsenceReason": {
+        "enum": [
+          "not_configured",
+          "missing",
+          "expired",
+          "invalidated",
+          "module_does_not_use_state",
+          "load_failed"
+        ],
+        "type": "string"
+      },
+      "ProviderStateClearReason": {
+        "enum": ["brain_requested_clear"],
+        "type": "string"
+      },
+      "ProviderStateMode": {
+        "enum": ["unused", "optional", "required"],
+        "type": "string"
+      },
+      "ResourceLimits": {
+        "properties": {
+          "max_delegation_depth": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "max_duration_ms": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "workdir": { "type": ["string", "null"] }
+        },
+        "type": "object"
+      },
+      "SessionActivityDigest": {
+        "description": "Bounded per-wake activity digest used by the post-wake capture producer.\n\nThe digest is intentionally not a raw transcript. TypeScript builds it from\nthe warm post-wake event stream, then Rust persists it for scheduled\nbackground review. Capture Phase 1 validates `profile_dense` proposals first;\n`session_memory` and `roleplay_lore` remain gated expansion targets.",
+        "properties": {
+          "allowed_capture_spaces": {
+            "items": { "$ref": "#/components/schemas/MemorySpaceId" },
+            "type": "array"
+          },
+          "completion_summary": { "type": ["string", "null"] },
+          "created_at": { "type": "string" },
+          "digest_id": { "type": "string" },
+          "event_counts_json": true,
+          "profile_id": { "type": "string" },
+          "retention_until": { "type": ["string", "null"] },
+          "reviewed_at": { "type": ["string", "null"] },
+          "session_id": { "type": "string" },
+          "signals_json": true,
+          "source": { "type": "string" },
+          "summary_text": { "type": "string" },
+          "tool_calls_json": true,
+          "wake_id": { "type": "string" }
+        },
+        "required": [
+          "digest_id",
+          "profile_id",
+          "session_id",
+          "wake_id",
+          "source",
+          "summary_text",
+          "event_counts_json",
+          "tool_calls_json",
+          "signals_json",
+          "allowed_capture_spaces",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SessionActivityDigestQuery": {
+        "properties": {
+          "include_reviewed": { "type": "boolean" },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "offset": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "profile_id": { "type": ["string", "null"] },
+          "session_id": { "type": ["string", "null"] },
+          "wake_id": { "type": ["string", "null"] }
+        },
+        "required": ["include_reviewed"],
+        "type": "object"
+      },
+      "SessionConfig": {
+        "properties": {
+          "agent_id": { "type": "string" },
+          "delegation": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DelegationLineage" },
+              { "type": "null" }
+            ]
+          },
+          "history_window": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionHistoryWindow" },
+              { "type": "null" }
+            ]
+          },
+          "kind": { "$ref": "#/components/schemas/SessionKind" },
+          "profile_id": { "type": "string" },
+          "resource_limits": { "$ref": "#/components/schemas/ResourceLimits" },
+          "session_id": { "type": "string" },
+          "tool_profile": { "$ref": "#/components/schemas/ToolProfile" }
+        },
+        "required": [
+          "session_id",
+          "agent_id",
+          "profile_id",
+          "kind",
+          "resource_limits",
+          "tool_profile"
+        ],
+        "type": "object"
+      },
+      "SessionHistoryWindow": {
+        "properties": {
+          "max_messages": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          }
+        },
+        "type": "object"
+      },
+      "SessionKind": {
+        "enum": ["full", "worker", "delegated"],
+        "type": "string"
+      },
+      "SessionState": {
+        "properties": {
+          "agent_id": { "type": "string" },
+          "brain_turn_count": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": { "type": "string" },
+          "delegation": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DelegationLineage" },
+              { "type": "null" }
+            ]
+          },
+          "handle": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "history_window": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionHistoryWindow" },
+              { "type": "null" }
+            ]
+          },
+          "kind": { "$ref": "#/components/schemas/SessionKind" },
+          "last_active_at": { "type": "string" },
+          "profile_id": { "type": "string" },
+          "resource_limits": { "$ref": "#/components/schemas/ResourceLimits" },
+          "session_id": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/SessionStatus" },
+          "tool_profile": { "$ref": "#/components/schemas/ToolProfile" }
+        },
+        "required": [
+          "handle",
+          "session_id",
+          "agent_id",
+          "profile_id",
+          "kind",
+          "resource_limits",
+          "tool_profile",
+          "status",
+          "brain_turn_count",
+          "created_at",
+          "last_active_at"
+        ],
+        "type": "object"
+      },
+      "SessionStatus": {
+        "enum": ["active", "idle", "archived"],
+        "type": "string"
+      },
+      "SessionTurnRequested": {
+        "properties": {
+          "bindingId": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "expiresAt": { "type": ["string", "null"] },
+          "idempotencyKey": { "type": "string" },
+          "input": {
+            "items": { "$ref": "#/components/schemas/ExternalTurnInputPart" },
+            "type": "array"
+          },
+          "provenance": { "$ref": "#/components/schemas/TurnInputProvenance" },
+          "requestId": { "type": "string" },
+          "runId": { "type": ["string", "null"] },
+          "sessionId": { "type": "string" }
+        },
+        "required": [
+          "requestId",
+          "idempotencyKey",
+          "sessionId",
+          "bindingId",
+          "input",
+          "provenance",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "ToolCallMetadata": {
+        "properties": {
+          "adapter_id": { "type": ["string", "null"] },
+          "binding_id": { "type": ["string", "null"] },
+          "catalog_revision": { "type": ["string", "null"] },
+          "debug_detail_id": { "type": ["string", "null"] },
+          "policy": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ToolCallPolicyMetadata" },
+              { "type": "null" }
+            ]
+          },
+          "profile_id": { "type": ["string", "null"] },
+          "server_names": { "items": { "type": "string" }, "type": "array" },
+          "source": { "$ref": "#/components/schemas/ToolCallSource" },
+          "source_tool_name": { "type": ["string", "null"] },
+          "tool_profile_key": { "type": ["string", "null"] }
+        },
+        "required": ["source", "server_names"],
+        "type": "object"
+      },
+      "ToolCallPolicyMetadata": {
+        "properties": {
+          "allowed": { "type": ["boolean", "null"] },
+          "archive_cleanup": { "type": ["boolean", "null"] },
+          "cancelled": { "type": ["boolean", "null"] },
+          "denial_reason": { "type": ["string", "null"] },
+          "timeout_ms": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          }
+        },
+        "type": "object"
+      },
+      "ToolCallSource": {
+        "enum": ["local", "mcp", "web", "browser"],
+        "type": "string"
+      },
+      "ToolDescriptor": {
+        "properties": {
+          "description": { "type": "string" },
+          "input_schema": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "name": { "type": "string" }
+        },
+        "required": ["name", "description"],
+        "type": "object"
+      },
+      "ToolProfile": {
+        "properties": {
+          "tools": {
+            "items": { "$ref": "#/components/schemas/ToolDescriptor" },
+            "type": "array"
+          }
+        },
+        "required": ["tools"],
+        "type": "object"
+      },
+      "TurnInputProvenance": {
+        "properties": {
+          "correlationId": { "type": ["string", "null"] },
+          "kind": { "$ref": "#/components/schemas/TurnInputProvenanceKind" },
+          "sourceId": { "type": ["string", "null"] }
+        },
+        "required": ["kind"],
+        "type": "object"
+      },
+      "TurnInputProvenanceKind": {
+        "enum": [
+          "operator",
+          "routed_agent_message",
+          "scheduled_wake",
+          "external_wait_result",
+          "control"
+        ],
+        "type": "string"
+      },
+      "WorkerPoolCapacityFallbackPolicy": {
+        "enum": ["reject_on_no_capacity", "direct_on_no_capacity"],
+        "type": "string"
+      },
+      "WorkerPoolCapacityRequest": {
+        "properties": {
+          "claim_ttl_ms": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "fallback_policy": {
+            "$ref": "#/components/schemas/WorkerPoolCapacityFallbackPolicy",
+            "default": "reject_on_no_capacity"
+          },
+          "member_id": { "type": "string" }
+        },
+        "required": ["member_id"],
+        "type": "object"
+      },
+      "ApiMeta": {
+        "type": "object",
+        "required": ["request_id", "schema_version"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "schema_version": { "type": "integer", "const": 1 }
+        },
+        "additionalProperties": false
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["code", "reason_code", "message", "retryable"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "unauthorized",
+              "forbidden",
+              "method_not_allowed",
+              "not_found",
+              "invalid_input",
+              "failed_precondition",
+              "conflict",
+              "internal_error"
+            ]
+          },
+          "reason_code": { "type": "string" },
+          "message": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ApiErrorEnvelope": {
+        "type": "object",
+        "required": ["ok", "error", "meta"],
+        "properties": {
+          "ok": { "const": false },
+          "error": { "$ref": "#/components/schemas/ApiError" },
+          "meta": { "$ref": "#/components/schemas/ApiMeta" }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeControllerStatus": {
+        "type": "object",
+        "required": [
+          "runtimeId",
+          "driverState",
+          "controllerInstanceId",
+          "controllerGeneration",
+          "leaseExpiresAt"
+        ],
+        "properties": {
+          "runtimeId": { "type": "string" },
+          "driverState": { "type": "string" },
+          "controllerInstanceId": { "type": "string" },
+          "controllerGeneration": { "type": "integer", "minimum": 0 },
+          "leaseExpiresAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeFleet": {
+        "type": "object",
+        "required": ["runtimes", "controllers"],
+        "properties": {
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+            }
+          },
+          "controllers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeControllerStatus"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeDetail": {
+        "type": "object",
+        "required": ["registration"],
+        "properties": {
+          "registration": {
+            "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+          },
+          "controller": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalRuntimeControllerStatus"
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeRegistrationWrite": {
+        "type": "object",
+        "required": ["registration"],
+        "properties": {
+          "registration": {
+            "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+          },
+          "expectedRevision": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ExternalBindingFleet": {
+        "type": "object",
+        "required": ["bindings"],
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ExternalAgentBinding" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalBindingWrite": {
+        "type": "object",
+        "required": ["binding"],
+        "properties": {
+          "binding": { "$ref": "#/components/schemas/ExternalAgentBinding" },
+          "expectedRevision": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ExternalControlWrite": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "controlId": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "expectedBindingRevision": { "type": "integer", "minimum": 0 },
+          "expectedNativeTurnId": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/ExternalControlKind" },
+          "payload": true
+        },
+        "additionalProperties": false
+      },
+      "ExternalBindingMessageWrite": {
+        "type": "object",
+        "required": ["body"],
+        "properties": {
+          "body": { "type": "string", "minLength": 1 },
+          "deliveryId": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "messageId": { "type": "string" },
+          "correlationId": { "type": "string" },
+          "ttlMs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "default": 5000
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalInteractionAttention": {
+        "type": "object",
+        "required": ["interactions"],
+        "properties": {
+          "interactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalInteractionRecord"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalInteractionResolutionWrite": {
+        "type": "object",
+        "required": ["expectedRevision", "idempotencyKey", "result"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 0 },
+          "idempotencyKey": { "type": "string", "minLength": 1 },
+          "result": true
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeEventPayload": {
+        "type": "object",
+        "required": ["nativeMethod"],
+        "properties": {
+          "nativeMethod": { "type": "string" },
+          "status": { "type": "string" },
+          "text": { "type": "string" },
+          "message": { "type": "string" },
+          "command": { "type": "string" },
+          "cwd": { "type": "string" },
+          "output": { "type": "string" },
+          "exitCode": { "type": "number" },
+          "durationMs": { "type": "number", "minimum": 0 },
+          "server": { "type": "string" },
+          "tool": { "type": "string" },
+          "success": { "type": "boolean" },
+          "summary": { "type": "array", "items": { "type": "string" } },
+          "fileChanges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "kind": { "type": "string" },
+                "status": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeEventPage": {
+        "type": "object",
+        "required": ["events"],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NormalizedExternalRuntimeEvent"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeRawDetail": {
+        "type": "object",
+        "required": [
+          "detailId",
+          "runtimeId",
+          "json",
+          "originalSha256",
+          "truncated",
+          "redactedKeys"
+        ],
+        "properties": {
+          "detailId": { "type": "string" },
+          "runtimeId": { "type": "string" },
+          "json": { "type": "string" },
+          "originalSha256": { "type": "string" },
+          "truncated": { "type": "boolean" },
+          "redactedKeys": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadReadRequest": {
+        "type": "object",
+        "required": ["threadId"],
+        "properties": {
+          "threadId": { "type": "string", "minLength": 1 },
+          "includeTurns": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadItemProjection": {
+        "type": "object",
+        "required": ["itemId", "kind"],
+        "properties": {
+          "itemId": { "type": "string" },
+          "kind": { "type": "string" },
+          "status": { "type": "string" },
+          "text": { "type": "string" },
+          "summary": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadTurnProjection": {
+        "type": "object",
+        "required": [
+          "turnId",
+          "status",
+          "startedAt",
+          "completedAt",
+          "durationMs",
+          "items"
+        ],
+        "properties": {
+          "turnId": { "type": "string" },
+          "status": { "type": "string" },
+          "startedAt": { "type": ["number", "null"] },
+          "completedAt": { "type": ["number", "null"] },
+          "durationMs": { "type": ["number", "null"] },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalThreadItemProjection"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadProjection": {
+        "type": "object",
+        "required": [
+          "threadId",
+          "sessionId",
+          "parentThreadId",
+          "preview",
+          "ephemeral",
+          "modelProvider",
+          "createdAt",
+          "updatedAt",
+          "status",
+          "cwd",
+          "cliVersion",
+          "name",
+          "agentNickname",
+          "agentRole",
+          "turns"
+        ],
+        "properties": {
+          "threadId": { "type": "string" },
+          "sessionId": { "type": "string" },
+          "parentThreadId": { "type": ["string", "null"] },
+          "preview": { "type": "string" },
+          "ephemeral": { "type": "boolean" },
+          "modelProvider": { "type": "string" },
+          "createdAt": { "type": "number" },
+          "updatedAt": { "type": "number" },
+          "status": { "type": "string" },
+          "cwd": { "type": "string" },
+          "cliVersion": { "type": "string" },
+          "name": { "type": ["string", "null"] },
+          "agentNickname": { "type": ["string", "null"] },
+          "agentRole": { "type": ["string", "null"] },
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalThreadTurnProjection"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadPage": {
+        "type": "object",
+        "required": ["items", "nextCursor", "backwardsCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ExternalThreadProjection" }
+          },
+          "nextCursor": { "type": ["string", "null"] },
+          "backwardsCursor": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadReadResult": {
+        "type": "object",
+        "required": ["thread"],
+        "properties": {
+          "thread": { "$ref": "#/components/schemas/ExternalThreadProjection" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "x-rusty-crew-generated": {
+    "source": "ts/packages/brain-island/src/external-runtime-api-contract.ts",
+    "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
+    "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
+    "regeneration_command": "npm run codegen:api-capabilities",
+    "operation_count": 17,
+    "native_payload_policy": "bounded_raw_detail_only"
+  }
+}

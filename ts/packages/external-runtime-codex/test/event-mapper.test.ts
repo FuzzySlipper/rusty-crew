@@ -25,5 +25,9 @@ for (const [itemType, expectedKind] of [
     );
     assert.equal(event.kind, expectedKind);
     assert.equal(event.itemId, "item-1");
+    assert.equal(event.payload.nativeMethod, "item/completed");
+    assert.equal("threadId" in event.payload, false);
+    assert.equal("turnId" in event.payload, false);
+    assert.equal("item" in event.payload, false);
   });
 }

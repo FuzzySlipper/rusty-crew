@@ -230,10 +230,7 @@ async function runCodexScenario(
   const validation = validateFixture(fixture);
   const finalResponse = events
     .filter((event) => event.kind === "assistant_text_delta")
-    .map(
-      (event) =>
-        textValue(event.payload.delta) ?? textValue(event.payload.text),
-    )
+    .map((event) => textValue(event.payload.text))
     .filter((value): value is string => value !== undefined)
     .join("");
   const capabilities = scenarioCapabilities(

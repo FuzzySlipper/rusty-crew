@@ -18,16 +18,17 @@ export function mapNotification(
   const threadId = stringValue(params.threadId);
   const turnId = stringValue(params.turnId) ?? stringValue(turn.id);
   const itemId = stringValue(params.itemId) ?? stringValue(item.id);
+  const kind = known
+    ? classifyNotification(notification.method, item)
+    : "unknown_native_notification";
   return {
     transportSequence,
     method: notification.method,
-    kind: known
-      ? classifyNotification(notification.method, item)
-      : "unknown_native_notification",
+    kind,
     ...(threadId === undefined ? {} : { threadId }),
     ...(turnId === undefined ? {} : { turnId }),
     ...(itemId === undefined ? {} : { itemId }),
-    payload: params,
+    payload: projectPayload(notification.method, kind, params, item, turn),
     rawDetail: captureBoundedRawDetail(notification, maxRawDetailBytes),
   };
 }
@@ -47,9 +48,128 @@ export function mapUnsupportedServerRequest(
     ...(threadId === undefined ? {} : { threadId }),
     ...(turnId === undefined ? {} : { turnId }),
     nativeRequestId: request.id,
-    payload: params,
+    payload: {
+      nativeMethod: request.method,
+      message: "unsupported external runtime server request",
+    },
     rawDetail: captureBoundedRawDetail(request, maxRawDetailBytes),
   };
+}
+
+function projectPayload(
+  method: string,
+  kind: NeutralExternalEventKind,
+  params: Record<string, unknown>,
+  item: Record<string, unknown>,
+  turn: Record<string, unknown>,
+): NeutralExternalRuntimeEvent["payload"] {
+  const source = Object.keys(item).length === 0 ? params : item;
+  const status = statusValue(source.status) ?? statusValue(turn.status);
+  const text =
+    stringValue(params.delta) ??
+    stringValue(params.text) ??
+    stringValue(source.text);
+  const durationMs = numberValue(source.durationMs);
+  const base = {
+    nativeMethod: method,
+    ...(status === undefined ? {} : { status }),
+    ...(text === undefined ? {} : { text }),
+    ...(durationMs === undefined ? {} : { durationMs }),
+  };
+  switch (kind) {
+    case "command_activity": {
+      const command = stringValue(source.command);
+      const cwd = stringValue(source.cwd);
+      const output = stringValue(source.aggregatedOutput);
+      const exitCode = numberValue(source.exitCode);
+      return {
+        ...base,
+        ...(command === undefined ? {} : { command }),
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(output === undefined ? {} : { output }),
+        ...(exitCode === undefined ? {} : { exitCode }),
+      };
+    }
+    case "file_activity":
+      return {
+        ...base,
+        fileChanges: projectFileChanges(source.changes),
+      };
+    case "mcp_activity": {
+      const server = stringValue(source.server);
+      const tool = stringValue(source.tool);
+      return {
+        ...base,
+        ...(server === undefined ? {} : { server }),
+        ...(tool === undefined ? {} : { tool }),
+      };
+    }
+    case "dynamic_tool_activity": {
+      const tool = stringValue(source.tool);
+      return {
+        ...base,
+        ...(tool === undefined ? {} : { tool }),
+        ...(typeof source.success === "boolean"
+          ? { success: source.success }
+          : {}),
+      };
+    }
+    case "reasoning_delta":
+      return {
+        ...base,
+        ...(!Array.isArray(source.summary)
+          ? {}
+          : {
+              summary: source.summary.filter(
+                (entry): entry is string => typeof entry === "string",
+              ),
+            }),
+      };
+    case "usage":
+      return { ...base, usage: numericRecord(params) };
+    case "runtime_warning": {
+      const message = stringValue(params.message);
+      return {
+        ...base,
+        ...(message === undefined ? {} : { message }),
+      };
+    }
+    default:
+      return base;
+  }
+}
+
+function projectFileChanges(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const change = asRecord(entry);
+    const path = stringValue(change.path);
+    const kind = stringValue(change.kind);
+    const status = statusValue(change.status);
+    return {
+      ...(path === undefined ? {} : { path }),
+      ...(kind === undefined ? {} : { kind }),
+      ...(status === undefined ? {} : { status }),
+    };
+  });
+}
+
+function numericRecord(value: Record<string, unknown>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, number] => typeof entry[1] === "number",
+    ),
+  );
+}
+
+function statusValue(value: unknown): string | undefined {
+  return stringValue(value) ?? stringValue(asRecord(value).type);
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function classifyNotification(
