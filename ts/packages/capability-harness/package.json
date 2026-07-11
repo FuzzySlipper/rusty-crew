@@ -1,0 +1,20 @@
+{
+  "name": "@rusty-crew/capability-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
+    "smoke:cross-runtime-live": "tsx smokes/cross-runtime-live.ts"
+  },
+  "dependencies": {
+    "@rusty-crew/external-runtime-codex": "0.1.0",
+    "@rusty-crew/native-bridge": "0.1.0",
+    "@rusty-crew/service-host": "0.1.0"
+  }
+}

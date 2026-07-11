@@ -56,6 +56,7 @@ function classifyNotification(
   method: string,
   item: Record<string, unknown>,
 ): NeutralExternalEventKind {
+  const itemType = stringValue(item.type);
   if (method === "item/agentMessage/delta") return "assistant_text_delta";
   if (method.startsWith("item/reasoning/")) return "reasoning_delta";
   if (method === "item/plan/delta" || method === "turn/plan/updated") {
@@ -65,16 +66,32 @@ function classifyNotification(
   if (method === "thread/compacted") return "compaction";
   if (method.startsWith("thread/")) return "thread_lifecycle";
   if (method.startsWith("turn/")) return "turn_lifecycle";
-  if (method.includes("commandExecution") || method.startsWith("command/")) {
+  if (
+    itemType === "commandExecution" ||
+    itemType === "command_execution" ||
+    method.includes("commandExecution") ||
+    method.startsWith("command/")
+  ) {
     return "command_activity";
   }
-  if (method.includes("fileChange")) return "file_activity";
-  if (method.startsWith("mcpServer/") || method.includes("mcpToolCall")) {
+  if (
+    itemType === "fileChange" ||
+    itemType === "file_change" ||
+    method.includes("fileChange")
+  ) {
+    return "file_activity";
+  }
+  if (
+    itemType === "mcpToolCall" ||
+    itemType === "mcp_tool_call" ||
+    method.startsWith("mcpServer/") ||
+    method.includes("mcpToolCall")
+  ) {
     return "mcp_activity";
   }
   if (
     method.startsWith("item/") &&
-    (item.type === "dynamicToolCall" || item.type === "dynamic_tool_call")
+    (itemType === "dynamicToolCall" || itemType === "dynamic_tool_call")
   ) {
     return "dynamic_tool_activity";
   }
