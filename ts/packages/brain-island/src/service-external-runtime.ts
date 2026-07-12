@@ -18,6 +18,7 @@ import {
   CODEX_APP_SERVER_PROTOCOL,
   CODEX_COORDINATION_DYNAMIC_TOOLS,
   CodexAppServerDriver,
+  CodexRpcError,
   UnixWebSocketTransport,
   captureBoundedRawDetail,
   type CollaborationMode,
@@ -32,6 +33,7 @@ import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { resolveCodexCoordinationToolCall } from "./external-runtime-coordination.js";
 import type {
   ExternalAgentSessionCreateResult,
+  ExternalAgentMessagePhase,
   ExternalThreadItemProjection,
   ExternalThreadLifecycleReceipt,
   ExternalThreadPage,
@@ -286,8 +288,20 @@ export class ServiceExternalRuntimeController {
     params: unknown,
   ): Promise<ExternalThreadReadResult> {
     const controlled = await this.#requireControlled(runtimeId);
-    const result = await controlled.driver.threadRead(
-      params as Parameters<CodexAppServerDriver["threadRead"]>[0],
+    const input = params as Parameters<CodexAppServerDriver["threadRead"]>[0];
+    const result = await controlled.driver.threadRead(input).catch(
+      async (error: unknown) => {
+        if (
+          input.includeTurns !== false &&
+          isUnmaterializedThreadRead(error)
+        ) {
+          return controlled.driver.threadRead({
+            ...input,
+            includeTurns: false,
+          });
+        }
+        throw error;
+      },
     );
     return { thread: projectExternalThread(result.thread) };
   }
@@ -1472,13 +1486,33 @@ function projectExternalThreadItem(
   const summary = Array.isArray(item.summary)
     ? item.summary.filter((entry): entry is string => typeof entry === "string")
     : undefined;
+  const messagePhase =
+    kind === "agentMessage" ? projectAgentMessagePhase(item.phase) : undefined;
   return {
     itemId,
     kind,
     ...(status === undefined ? {} : { status }),
     ...(text === undefined ? {} : { text }),
     ...(summary === undefined || summary.length === 0 ? {} : { summary }),
+    ...(messagePhase === undefined ? {} : { messagePhase }),
   };
+}
+
+function isUnmaterializedThreadRead(error: unknown): boolean {
+  return (
+    error instanceof CodexRpcError &&
+    error.message.includes(
+      "is not materialized yet; includeTurns is unavailable before first user message",
+    )
+  );
+}
+
+function projectAgentMessagePhase(
+  value: unknown,
+): ExternalAgentMessagePhase | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === "commentary" || value === "final_answer") return value;
+  return "unknown";
 }
 
 function projectThreadItemText(

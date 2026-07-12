@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -3905,6 +3905,10 @@
           "tool": { "type": "string" },
           "success": { "type": "boolean" },
           "summary": { "type": "array", "items": { "type": "string" } },
+          "messagePhase": {
+            "type": "string",
+            "enum": ["commentary", "final_answer", "unknown"]
+          },
           "fileChanges": {
             "type": "array",
             "items": {
@@ -3974,7 +3978,11 @@
           "kind": { "type": "string" },
           "status": { "type": "string" },
           "text": { "type": "string" },
-          "summary": { "type": "array", "items": { "type": "string" } }
+          "summary": { "type": "array", "items": { "type": "string" } },
+          "messagePhase": {
+            "type": "string",
+            "enum": ["commentary", "final_answer", "unknown"]
+          }
         },
         "additionalProperties": false
       },

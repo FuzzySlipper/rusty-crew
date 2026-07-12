@@ -3,7 +3,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.2.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.3.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -37,7 +37,11 @@ export interface ExternalThreadItemProjection {
   readonly status?: string;
   readonly text?: string;
   readonly summary?: readonly string[];
+  readonly messagePhase?: ExternalAgentMessagePhase;
 }
+
+export type ExternalAgentMessagePhase =
+  "commentary" | "final_answer" | "unknown";
 
 export interface ExternalThreadTurnProjection {
   readonly turnId: string;
@@ -708,6 +712,10 @@ function routeSchemas(): Record<string, JsonSchema> {
         tool: { type: "string" },
         success: { type: "boolean" },
         summary: { type: "array", items: { type: "string" } },
+        messagePhase: {
+          type: "string",
+          enum: ["commentary", "final_answer", "unknown"],
+        },
         fileChanges: {
           type: "array",
           items: {
@@ -804,6 +812,10 @@ function routeSchemas(): Record<string, JsonSchema> {
         status: { type: "string" },
         text: { type: "string" },
         summary: { type: "array", items: { type: "string" } },
+        messagePhase: {
+          type: "string",
+          enum: ["commentary", "final_answer", "unknown"],
+        },
       },
       additionalProperties: false,
     },

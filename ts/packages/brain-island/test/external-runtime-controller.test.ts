@@ -147,6 +147,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   readonly threads: Array<Record<string, unknown>> = [];
   readonly resumeFailureThreadIds = new Set<string>();
   readonly archivedThreadIds = new Set<string>();
+  readonly unmaterializedThreadIds = new Set<string>();
   #loseFirstStartResponse: boolean;
   readonly #startFailureMessage?: string;
 
@@ -230,6 +231,19 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       return;
     }
     if (parsed.method === "thread/read") {
+      if (
+        params.includeTurns !== false &&
+        this.unmaterializedThreadIds.has(String(params.threadId))
+      ) {
+        this.emit({
+          id: parsed.id,
+          error: {
+            code: -32000,
+            message: `thread ${String(params.threadId)} is not materialized yet; includeTurns is unavailable before first user message`,
+          },
+        });
+        return;
+      }
       const thread = this.threads.find(
         (candidate) => candidate.id === params.threadId,
       );
@@ -452,6 +466,131 @@ test("controller archives native history with bindings and restores history expl
       (error: unknown) =>
         error instanceof ExternalThreadLifecycleError &&
         error.reasonCode === "external_thread_not_found",
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("thread snapshots preserve message phase across controller reload", async () => {
+  const fixture = await externalCreationFixture(false);
+  let reloaded: ServiceExternalRuntimeController | undefined;
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "phase-snapshot-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const thread = fixture.transport.threads.find(
+      (candidate) => candidate.id === created.thread.threadId,
+    );
+    assert.ok(thread);
+    thread.turns = [
+      {
+        id: "phase-turn-1",
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1_000,
+        items: [
+          {
+            type: "agentMessage",
+            id: "phase-commentary-1",
+            text: "Checking files.",
+            phase: "commentary",
+            memoryCitation: null,
+          },
+          {
+            type: "reasoning",
+            id: "phase-reasoning-1",
+            summary: ["Compared contracts"],
+            content: [],
+          },
+          {
+            type: "agentMessage",
+            id: "phase-final-1",
+            text: "Finished.",
+            phase: "final_answer",
+            memoryCitation: null,
+          },
+          {
+            type: "agentMessage",
+            id: "phase-legacy-1",
+            text: "Legacy phase-less message.",
+            phase: null,
+            memoryCitation: null,
+          },
+        ],
+      },
+    ];
+
+    const before = await fixture.controller.readThread(fixture.runtimeId, {
+      threadId: created.thread.threadId,
+      includeTurns: true,
+    });
+    assert.deepEqual(
+      before.thread.turns[0]?.items.map((item) => ({
+        kind: item.kind,
+        messagePhase: item.messagePhase,
+      })),
+      [
+        { kind: "agentMessage", messagePhase: "commentary" },
+        { kind: "reasoning", messagePhase: undefined },
+        { kind: "agentMessage", messagePhase: "final_answer" },
+        { kind: "agentMessage", messagePhase: undefined },
+      ],
+    );
+
+    await fixture.controller.stop();
+    reloaded = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "phase-reload-controller",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority),
+    });
+    await reloaded.connect(fixture.runtimeId);
+    const after = await reloaded.readThread(fixture.runtimeId, {
+      threadId: created.thread.threadId,
+      includeTurns: true,
+    });
+    assert.deepEqual(after.thread.turns, before.thread.turns);
+  } finally {
+    await reloaded?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("thread read returns phase-neutral metadata before first message materializes", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "unmaterialized-thread-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    fixture.transport.unmaterializedThreadIds.add(created.thread.threadId);
+
+    const read = await fixture.controller.readThread(fixture.runtimeId, {
+      threadId: created.thread.threadId,
+      includeTurns: true,
+    });
+    assert.equal(read.thread.threadId, created.thread.threadId);
+    assert.deepEqual(read.thread.turns, []);
+    assert.deepEqual(
+      fixture.transport.sent
+        .filter((message) => message.method === "thread/read")
+        .slice(-2)
+        .map((message) => message.params),
+      [
+        { threadId: created.thread.threadId, includeTurns: true },
+        { threadId: created.thread.threadId, includeTurns: false },
+      ],
     );
   } finally {
     await fixture.cleanup();

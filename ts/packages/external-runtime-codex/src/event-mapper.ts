@@ -70,10 +70,16 @@ function projectPayload(
     stringValue(params.text) ??
     stringValue(source.text);
   const durationMs = numberValue(source.durationMs);
+  const messagePhase =
+    stringValue(source.type) === "agentMessage" ||
+    method.includes("agentMessage")
+      ? messagePhaseValue(source.phase ?? params.phase)
+      : undefined;
   const base = {
     nativeMethod: method,
     ...(status === undefined ? {} : { status }),
     ...(text === undefined ? {} : { text }),
+    ...(messagePhase === undefined ? {} : { messagePhase }),
     ...(durationMs === undefined ? {} : { durationMs }),
   };
   switch (kind) {
@@ -137,6 +143,14 @@ function projectPayload(
     default:
       return base;
   }
+}
+
+function messagePhaseValue(
+  value: unknown,
+): "commentary" | "final_answer" | "unknown" | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === "commentary" || value === "final_answer") return value;
+  return "unknown";
 }
 
 function projectFileChanges(value: unknown) {

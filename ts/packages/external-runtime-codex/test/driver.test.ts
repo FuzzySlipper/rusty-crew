@@ -243,6 +243,85 @@ test("driver exposes schema-checked native thread archive lifecycle calls", asyn
   await driver.close();
 });
 
+test("driver preserves supplied agent message phase without inferring delta finality", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport);
+  const driver = new CodexAppServerDriver(transport, authority);
+  await driver.connect();
+
+  transport.emit({
+    method: "item/started",
+    params: {
+      threadId: "thread-phase-1",
+      turnId: "turn-phase-1",
+      startedAtMs: 1,
+      item: {
+        type: "agentMessage",
+        id: "commentary-1",
+        text: "I am checking the repository.",
+        phase: "commentary",
+        memoryCitation: null,
+      },
+    },
+  });
+  transport.emit({
+    method: "item/agentMessage/delta",
+    params: {
+      threadId: "thread-phase-1",
+      turnId: "turn-phase-1",
+      itemId: "commentary-1",
+      delta: "More progress",
+    },
+  });
+  transport.emit({
+    method: "item/completed",
+    params: {
+      threadId: "thread-phase-1",
+      turnId: "turn-phase-1",
+      completedAtMs: 2,
+      item: {
+        type: "agentMessage",
+        id: "final-1",
+        text: "The task is complete.",
+        phase: "final_answer",
+        memoryCitation: null,
+      },
+    },
+  });
+  await settle();
+
+  assert.deepEqual(
+    authority.events.map((event) => ({
+      kind: event.kind,
+      itemId: event.itemId,
+      text: event.payload.text,
+      messagePhase: event.payload.messagePhase,
+    })),
+    [
+      {
+        kind: "item_lifecycle",
+        itemId: "commentary-1",
+        text: "I am checking the repository.",
+        messagePhase: "commentary",
+      },
+      {
+        kind: "assistant_text_delta",
+        itemId: "commentary-1",
+        text: "More progress",
+        messagePhase: undefined,
+      },
+      {
+        kind: "item_lifecycle",
+        itemId: "final-1",
+        text: "The task is complete.",
+        messagePhase: "final_answer",
+      },
+    ],
+  );
+  await driver.close();
+});
+
 test("Rust authority can reject an incompatible runtime before mutation", async () => {
   const transport = new FakeTransport();
   const authority = new FakeAuthority();
