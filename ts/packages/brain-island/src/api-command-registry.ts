@@ -6,10 +6,18 @@ export type ApiCapabilityAuth = "none" | "chat" | "admin";
 export type ApiCapabilityMutation = "read" | "write" | "control";
 export type ApiCapabilityStability = "stable" | "experimental";
 export type ChatCommandArgumentType =
-  "string" | "number" | "boolean" | "enum" | "json" | "file";
+  | "string"
+  | "number"
+  | "boolean"
+  | "enum"
+  | "json"
+  | "file";
 export type ChatCommandSurface = "chat-input" | "global" | "message-context";
 export type ChatCommandSource =
-  "backend" | "backend-control" | "frontend-local" | "plugin";
+  | "backend"
+  | "backend-control"
+  | "frontend-local"
+  | "plugin";
 export type ApiCapabilityScope =
   | "attachment"
   | "chat"
