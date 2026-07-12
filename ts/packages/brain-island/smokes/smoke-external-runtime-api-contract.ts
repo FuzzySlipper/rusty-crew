@@ -66,6 +66,10 @@ assert.ok(schema("ExternalThreadProjection").properties?.turns);
 assert.ok(schema("ExternalThreadTurnProjection").properties?.items);
 assert.ok(schema("ExternalThreadItemProjection").properties?.text);
 assert.ok(schema("ExternalRuntimeRegistration").properties?.runtimeId);
+assert.deepEqual(
+  Object.keys(schema("DenRuntimeReference").properties ?? {}).sort(),
+  ["project_id", "task_id"],
+);
 assert.ok(schema("AgentMessageDeliveryReceipt").properties?.request);
 assert.ok(schema("AgentCorrelatedRound").properties?.status);
 assert.ok(schema("ExternalInteractionRecord").properties?.allowedResponses);

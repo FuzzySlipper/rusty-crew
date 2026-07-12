@@ -13,7 +13,7 @@ level binding API as a substitute.
   "runtimeId": "codex-local",
   "profileId": "asha-planner",
   "cwd": "/home/dev/asha",
-  "taskRef": { "projectId": "asha", "taskId": "4281" },
+  "taskRef": { "project_id": "asha", "task_id": "4281" },
   "label": "Asha planning agent"
 }
 ```

@@ -2,11 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 
 import type {
+  DenRuntimeReference,
   ExternalAgentBinding,
   ExternalAgentSessionCreationRequest,
   ExternalCollaborationMode,
   ExternalControlRequest,
   ExternalRuntimeRegistration,
+  ProjectId,
+  TaskId,
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
@@ -466,19 +469,16 @@ function boundedRequiredString(
   return parsed;
 }
 
-function optionalTaskReference(value: unknown): {
-  projectId?: string;
-  taskId?: string;
-} {
+function optionalTaskReference(value: unknown): DenRuntimeReference {
   const input = requireRecord(value);
-  const projectId = optionalString(input.projectId);
-  const taskId = optionalString(input.taskId);
+  const projectId = optionalString(input.project_id);
+  const taskId = optionalString(input.task_id);
   if (projectId === undefined && taskId === undefined) {
-    throw new Error("taskRef requires projectId or taskId");
+    throw new Error("taskRef requires project_id or task_id");
   }
   return {
-    ...(projectId === undefined ? {} : { projectId }),
-    ...(taskId === undefined ? {} : { taskId }),
+    ...(projectId === undefined ? {} : { projectId: projectId as ProjectId }),
+    ...(taskId === undefined ? {} : { taskId: taskId as TaskId }),
   };
 }
 

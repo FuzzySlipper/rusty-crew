@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 import type {
   AgentId,
+  ExternalAgentSessionCreationRequest,
   ProfileId,
   SessionId,
   SessionState,
@@ -13,6 +14,10 @@ import type {
   NativeProfileRegistryRecord,
   NativeProfileRegistryWrite,
 } from "@rusty-crew/native-bridge";
+import {
+  handleExternalRuntimeRequest,
+  type ExternalRuntimeRouteContext,
+} from "../src/service-external-runtime-routes.js";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
 import {
@@ -60,6 +65,46 @@ import type {
   LocalToolProfileStore,
   LocalToolProfileWrite,
 } from "../src/local-tool-profiles.js";
+
+test("external session route translates generated Den task reference wire fields", async () => {
+  let captured: ExternalAgentSessionCreationRequest | undefined;
+  const body = {
+    idempotencyKey: "view:create:task-ref",
+    runtimeId: "codex-local",
+    profileId: "asha-planner",
+    cwd: "/home/dev/asha",
+    taskRef: {
+      project_id: "asha",
+      task_id: "4281",
+    },
+    label: "Asha planning agent",
+  };
+  const context = {
+    bridge: {},
+    controller: {
+      async createAgentSession(request: ExternalAgentSessionCreationRequest) {
+        captured = request;
+        return { accepted: true };
+      },
+    },
+    now: () => "2026-07-11T20:00:00.000Z",
+    requestId: () => "req-external-session-create",
+    readJsonBody: async () => body,
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-agent-sessions"),
+    context,
+  );
+
+  okData<{ accepted: boolean }>(result as AdminRouteResult);
+  assert.deepEqual(captured?.taskRef, {
+    projectId: "asha",
+    taskId: "4281",
+  });
+  assert.equal(captured?.requestedAt, "2026-07-11T20:00:00.000Z");
+});
 
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {
   const calls: string[] = [];
