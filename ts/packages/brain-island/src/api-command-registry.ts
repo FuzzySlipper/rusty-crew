@@ -615,6 +615,13 @@ export const API_CAPABILITIES = [
     ["session"],
   ),
   controlApiCapability(
+    "external.runtimes.threads.delete",
+    "POST",
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/delete",
+    "Hard-delete native Codex history after archiving every associated Crew binding.",
+    ["session"],
+  ),
+  controlApiCapability(
     "external.runtimes.threads.unarchive",
     "POST",
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",

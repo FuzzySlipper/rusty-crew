@@ -34,6 +34,7 @@ import { resolveCodexCoordinationToolCall } from "./external-runtime-coordinatio
 import type {
   ExternalAgentSessionCreateResult,
   ExternalAgentMessagePhase,
+  ExternalThreadDeleteReceipt,
   ExternalThreadItemProjection,
   ExternalThreadLifecycleReceipt,
   ExternalThreadPage,
@@ -78,6 +79,11 @@ type NativeCodexThread = Awaited<
   ReturnType<CodexAppServerDriver["threadList"]>
 >["data"][number];
 
+interface NativeThreadCatalogEntry {
+  readonly thread: NativeCodexThread;
+  readonly archived: boolean;
+}
+
 export interface ExternalRuntimeRawDetail {
   readonly detailId: string;
   readonly runtimeId: string;
@@ -121,7 +127,8 @@ export class ExternalThreadLifecycleError extends Error {
       | "external_thread_active"
       | "external_thread_interaction_pending"
       | "external_thread_listing_limit_exceeded"
-      | "external_thread_binding_reconciliation_failed",
+      | "external_thread_binding_reconciliation_failed"
+      | "external_thread_native_delete_failed",
     message: string,
   ) {
     super(`${reasonCode}: ${message}`);
@@ -382,6 +389,121 @@ export class ServiceExternalRuntimeController {
       true,
       bindings,
       new Map(saved.map(({ before, after }) => [before.bindingId, after])),
+    );
+  }
+
+  async deleteThread(
+    runtimeId: string,
+    threadId: string,
+  ): Promise<ExternalThreadDeleteReceipt> {
+    const controlled = await this.#requireControlled(runtimeId);
+    const nativeScope = await this.#threadDeletionScope(controlled, threadId);
+    const scopedThreadIds = new Set(
+      nativeScope.map((entry) => entry.thread.id),
+    );
+    scopedThreadIds.add(threadId);
+    const bindings = (await this.#bridge.listExternalBindings()).filter(
+      (binding) =>
+        binding.runtimeId === runtimeId &&
+        typeof binding.nativeThreadId === "string" &&
+        scopedThreadIds.has(binding.nativeThreadId),
+    );
+    await this.#assertThreadsHaveNoCrewWork(
+      runtimeId,
+      scopedThreadIds,
+      bindings,
+    );
+    const active = nativeScope.find(
+      (entry) => !entry.archived && entry.thread.status.type === "active",
+    );
+    if (active !== undefined) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_active",
+        `native thread ${active.thread.id} in deletion scope ${threadId} is active`,
+      );
+    }
+
+    const saved: Array<{
+      readonly before: ExternalAgentBinding;
+      readonly after: ExternalAgentBinding;
+    }> = [];
+    try {
+      for (const binding of [...bindings].sort((left, right) =>
+        left.bindingId.localeCompare(right.bindingId),
+      )) {
+        if (binding.status === "archived") continue;
+        const after = await this.#bridge.bindExternalAgent({
+          binding: {
+            ...binding,
+            status: "archived",
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: binding.revision,
+        });
+        saved.push({ before: binding, after });
+      }
+    } catch (error) {
+      const compensationFailures = await this.#restoreBindingTransitions(saved);
+      throw new ExternalThreadLifecycleError(
+        "external_thread_binding_reconciliation_failed",
+        `binding reconciliation failed before native delete: ${String(error)}; compensation failures: ${compensationFailures.length === 0 ? "none" : compensationFailures.join("; ")}`,
+      );
+    }
+
+    try {
+      await controlled.driver.threadDelete({ threadId });
+    } catch (error) {
+      if (nativeScope.length === 0 && isMissingThreadDelete(error)) {
+        return this.#threadDeleteReceipt(
+          runtimeId,
+          threadId,
+          "already_deleted",
+          bindings,
+          saved,
+        );
+      }
+      if (!(error instanceof CodexRpcError)) {
+        let remaining: Set<string>;
+        try {
+          remaining = await this.#remainingNativeThreadIds(
+            controlled,
+            scopedThreadIds,
+          );
+        } catch (verificationError) {
+          throw new ExternalThreadLifecycleError(
+            "external_thread_native_delete_failed",
+            `native delete failed with an ambiguous outcome: ${String(error)}; verification failed: ${String(verificationError)}; bindings remain archived`,
+          );
+        }
+        if (remaining.size === 0) {
+          return this.#threadDeleteReceipt(
+            runtimeId,
+            threadId,
+            nativeScope.length === 0 ? "already_deleted" : "applied",
+            bindings,
+            saved,
+          );
+        }
+        if (remaining.size !== scopedThreadIds.size) {
+          throw new ExternalThreadLifecycleError(
+            "external_thread_native_delete_failed",
+            `native delete partially completed after ${String(error)}; remaining native threads: ${[...remaining].sort().join(", ")}; bindings remain archived`,
+          );
+        }
+      }
+      const compensationFailures = await this.#restoreBindingTransitions(saved);
+      throw new ExternalThreadLifecycleError(
+        "external_thread_native_delete_failed",
+        `native delete failed: ${String(error)}; binding compensation failures: ${compensationFailures.length === 0 ? "none" : compensationFailures.join("; ")}`,
+      );
+    }
+
+    return this.#threadDeleteReceipt(
+      runtimeId,
+      threadId,
+      nativeScope.length === 0 ? "already_deleted" : "applied",
+      bindings,
+      saved,
     );
   }
 
@@ -1278,17 +1400,29 @@ export class ServiceExternalRuntimeController {
     threadId: string,
     bindings: readonly ExternalAgentBinding[],
   ): Promise<void> {
+    await this.#assertThreadsHaveNoCrewWork(
+      runtimeId,
+      new Set([threadId]),
+      bindings,
+    );
+  }
+
+  async #assertThreadsHaveNoCrewWork(
+    runtimeId: string,
+    threadIds: ReadonlySet<string>,
+    bindings: readonly ExternalAgentBinding[],
+  ): Promise<void> {
     const bindingIds = new Set(bindings.map((binding) => binding.bindingId));
     const activeTurn = (await this.#bridge.listActiveExternalTurns()).find(
       (turn) =>
         turn.runtimeId === runtimeId &&
-        (turn.nativeThreadId === threadId ||
+        (threadIds.has(turn.nativeThreadId ?? "") ||
           bindingIds.has(turn.request.bindingId)),
     );
     if (activeTurn !== undefined) {
       throw new ExternalThreadLifecycleError(
         "external_thread_active",
-        `thread ${threadId} has active Crew turn ${activeTurn.request.requestId}`,
+        `thread lifecycle scope has active Crew turn ${activeTurn.request.requestId}`,
       );
     }
     const interaction = (
@@ -1296,14 +1430,94 @@ export class ServiceExternalRuntimeController {
     ).find(
       (candidate) =>
         candidate.runtimeId === runtimeId &&
-        candidate.nativeThreadId === threadId,
+        threadIds.has(candidate.nativeThreadId),
     );
     if (interaction !== undefined) {
       throw new ExternalThreadLifecycleError(
         "external_thread_interaction_pending",
-        `thread ${threadId} has unresolved interaction ${interaction.interactionId}`,
+        `thread ${interaction.nativeThreadId} has unresolved interaction ${interaction.interactionId}`,
       );
     }
+  }
+
+  async #threadDeletionScope(
+    controlled: ControlledRuntime,
+    threadId: string,
+  ): Promise<NativeThreadCatalogEntry[]> {
+    const [active, archived] = await Promise.all([
+      this.#listNativeThreadCatalog(controlled, false),
+      this.#listNativeThreadCatalog(controlled, true),
+    ]);
+    const catalog = new Map<string, NativeThreadCatalogEntry>();
+    for (const entry of [...archived, ...active]) {
+      catalog.set(entry.thread.id, entry);
+    }
+    if (!catalog.has(threadId)) return [];
+
+    const scope = new Set([threadId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const entry of catalog.values()) {
+        if (
+          entry.thread.parentThreadId !== null &&
+          scope.has(entry.thread.parentThreadId) &&
+          !scope.has(entry.thread.id)
+        ) {
+          scope.add(entry.thread.id);
+          changed = true;
+        }
+      }
+    }
+    return [...scope]
+      .sort()
+      .map((id) => catalog.get(id))
+      .filter(
+        (entry): entry is NativeThreadCatalogEntry => entry !== undefined,
+      );
+  }
+
+  async #listNativeThreadCatalog(
+    controlled: ControlledRuntime,
+    archived: boolean,
+  ): Promise<NativeThreadCatalogEntry[]> {
+    const entries: NativeThreadCatalogEntry[] = [];
+    let cursor: string | undefined;
+    const seenCursors = new Set<string>();
+    for (let page = 0; page < 100; page += 1) {
+      const result = await controlled.driver.threadList({
+        archived,
+        limit: 1_000,
+        useStateDbOnly: true,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      entries.push(
+        ...result.data.map((thread) => ({ thread, archived }) as const),
+      );
+      if (result.nextCursor === null) return entries;
+      if (seenCursors.has(result.nextCursor)) break;
+      seenCursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+    throw new ExternalThreadLifecycleError(
+      "external_thread_listing_limit_exceeded",
+      "could not enumerate the bounded native thread catalog for deletion",
+    );
+  }
+
+  async #remainingNativeThreadIds(
+    controlled: ControlledRuntime,
+    scopedThreadIds: ReadonlySet<string>,
+  ): Promise<Set<string>> {
+    const [active, archived] = await Promise.all([
+      this.#listNativeThreadCatalog(controlled, false),
+      this.#listNativeThreadCatalog(controlled, true),
+    ]);
+    return new Set(
+      [...active, ...archived]
+        .map((entry) => entry.thread.id)
+        .filter((id) => scopedThreadIds.has(id)),
+    );
   }
 
   async #locateThread(
@@ -1358,16 +1572,68 @@ export class ServiceExternalRuntimeController {
       action,
       outcome,
       nativeArchived,
-      bindings: bindings.map((binding) => {
-        const current = saved.get(binding.bindingId) ?? binding;
-        return {
-          bindingId: binding.bindingId,
-          previousStatus: binding.status,
-          currentStatus: current.status,
-          revision: current.revision,
-        };
-      }),
+      bindings: this.#bindingTransitions(bindings, saved),
     };
+  }
+
+  #threadDeleteReceipt(
+    runtimeId: string,
+    threadId: string,
+    outcome: ExternalThreadDeleteReceipt["outcome"],
+    bindings: readonly ExternalAgentBinding[],
+    saved: readonly {
+      readonly before: ExternalAgentBinding;
+      readonly after: ExternalAgentBinding;
+    }[],
+  ): ExternalThreadDeleteReceipt {
+    return {
+      runtimeId,
+      threadId,
+      action: "delete",
+      outcome,
+      nativeDeleted: true,
+      bindings: this.#bindingTransitions(
+        bindings,
+        new Map(saved.map(({ before, after }) => [before.bindingId, after])),
+      ),
+    };
+  }
+
+  #bindingTransitions(
+    bindings: readonly ExternalAgentBinding[],
+    saved = new Map<string, ExternalAgentBinding>(),
+  ): ExternalThreadLifecycleReceipt["bindings"] {
+    return bindings.map((binding) => {
+      const current = saved.get(binding.bindingId) ?? binding;
+      return {
+        bindingId: binding.bindingId,
+        previousStatus: binding.status,
+        currentStatus: current.status,
+        revision: current.revision,
+      };
+    });
+  }
+
+  async #restoreBindingTransitions(
+    saved: readonly {
+      readonly before: ExternalAgentBinding;
+      readonly after: ExternalAgentBinding;
+    }[],
+  ): Promise<string[]> {
+    const failures: string[] = [];
+    for (const transition of [...saved].reverse()) {
+      await this.#bridge
+        .bindExternalAgent({
+          binding: {
+            ...transition.after,
+            status: transition.before.status,
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: transition.after.revision,
+        })
+        .catch((error: unknown) => failures.push(String(error)));
+    }
+    return failures;
   }
 
   async #requireBinding(bindingId: string): Promise<ExternalAgentBinding> {
@@ -1501,6 +1767,13 @@ function isUnmaterializedThreadRead(error: unknown): boolean {
     error.message.includes(
       "is not materialized yet; includeTurns is unavailable before first user message",
     )
+  );
+}
+
+function isMissingThreadDelete(error: unknown): boolean {
+  return (
+    error instanceof CodexRpcError &&
+    error.message.includes("no rollout found for thread id")
   );
 }
 

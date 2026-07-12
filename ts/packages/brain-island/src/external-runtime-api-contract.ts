@@ -3,7 +3,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.3.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.4.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -17,6 +17,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   threadRead: "/v1/external-runtimes/{runtime_id}/threads/read",
   threadArchive:
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive",
+  threadDelete: "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/delete",
   threadUnarchive:
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
   events: "/v1/external-runtimes/{runtime_id}/events",
@@ -95,6 +96,15 @@ export interface ExternalThreadLifecycleReceipt {
   readonly action: "archive" | "unarchive";
   readonly outcome: "applied" | "already_archived" | "already_active";
   readonly nativeArchived: boolean;
+  readonly bindings: readonly ExternalThreadLifecycleBindingTransition[];
+}
+
+export interface ExternalThreadDeleteReceipt {
+  readonly runtimeId: string;
+  readonly threadId: string;
+  readonly action: "delete";
+  readonly outcome: "applied" | "already_deleted";
+  readonly nativeDeleted: true;
   readonly bindings: readonly ExternalThreadLifecycleBindingTransition[];
 }
 
@@ -190,6 +200,13 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "post",
     EXTERNAL_RUNTIME_API_PATHS.threadArchive,
     "ExternalThreadLifecycleReceipt",
+  ),
+  operation(
+    "external.runtimes.threads.delete",
+    "deleteExternalRuntimeThread",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.threadDelete,
+    "ExternalThreadDeleteReceipt",
   ),
   operation(
     "external.runtimes.threads.unarchive",
@@ -936,6 +953,34 @@ function routeSchemas(): Record<string, JsonSchema> {
           enum: ["applied", "already_archived", "already_active"],
         },
         nativeArchived: { type: "boolean" },
+        bindings: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalThreadLifecycleBindingTransition",
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadDeleteReceipt: {
+      type: "object",
+      required: [
+        "runtimeId",
+        "threadId",
+        "action",
+        "outcome",
+        "nativeDeleted",
+        "bindings",
+      ],
+      properties: {
+        runtimeId: { type: "string" },
+        threadId: { type: "string" },
+        action: { type: "string", enum: ["delete"] },
+        outcome: {
+          type: "string",
+          enum: ["applied", "already_deleted"],
+        },
+        nativeDeleted: { type: "boolean", const: true },
         bindings: {
           type: "array",
           items: {

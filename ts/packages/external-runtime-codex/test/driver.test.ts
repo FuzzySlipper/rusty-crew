@@ -156,11 +156,12 @@ test("driver authorizes exact handshake before exposing typed requests", async (
   await driver.close();
 });
 
-test("driver exposes schema-checked native thread archive lifecycle calls", async () => {
+test("driver exposes schema-checked native thread lifecycle calls", async () => {
   const transport = new FakeTransport();
   const authority = new FakeAuthority();
   configureInitialize(transport);
   transport.responders.set("thread/archive", () => ({}));
+  transport.responders.set("thread/delete", () => ({}));
   transport.responders.set("thread/unarchive", () => ({
     thread: {
       id: "thread-archive-1",
@@ -195,16 +196,24 @@ test("driver exposes schema-checked native thread archive lifecycle calls", asyn
     await driver.threadArchive({ threadId: "thread-archive-1" }),
     {},
   );
+  assert.deepEqual(
+    await driver.threadDelete({ threadId: "thread-delete-1" }),
+    {},
+  );
   assert.equal(
     (await driver.threadUnarchive({ threadId: "thread-archive-1" })).thread.id,
     "thread-archive-1",
   );
   assert.deepEqual(
-    transport.sent.slice(-2).map(({ method, params }) => ({ method, params })),
+    transport.sent.slice(-3).map(({ method, params }) => ({ method, params })),
     [
       {
         method: "thread/archive",
         params: { threadId: "thread-archive-1" },
+      },
+      {
+        method: "thread/delete",
+        params: { threadId: "thread-delete-1" },
       },
       {
         method: "thread/unarchive",
@@ -215,6 +224,10 @@ test("driver exposes schema-checked native thread archive lifecycle calls", asyn
   transport.emit({
     method: "thread/archived",
     params: { threadId: "thread-archive-1" },
+  });
+  transport.emit({
+    method: "thread/deleted",
+    params: { threadId: "thread-delete-1" },
   });
   transport.emit({
     method: "thread/unarchived",
@@ -232,6 +245,11 @@ test("driver exposes schema-checked native thread archive lifecycle calls", asyn
         method: "thread/archived",
         kind: "thread_lifecycle",
         threadId: "thread-archive-1",
+      },
+      {
+        method: "thread/deleted",
+        kind: "thread_lifecycle",
+        threadId: "thread-delete-1",
       },
       {
         method: "thread/unarchived",

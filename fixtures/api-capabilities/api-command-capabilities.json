@@ -215,6 +215,17 @@
         "public": true
       },
       {
+        "id": "external.runtimes.threads.delete",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/delete",
+        "description": "Hard-delete native Codex history after archiving every associated Crew binding.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
         "id": "external.runtimes.threads.unarchive",
         "method": "POST",
         "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
@@ -1956,6 +1967,13 @@
         "capability_id": "external.runtimes.threads.archive",
         "method": "POST",
         "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.threads.delete",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/delete",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

@@ -107,7 +107,7 @@ test("external session route translates generated Den task reference wire fields
   assert.equal(captured?.requestedAt, "2026-07-11T20:00:00.000Z");
 });
 
-test("external thread lifecycle routes expose archive, restore, and archived listing", async () => {
+test("external thread lifecycle routes expose archive, delete, restore, and archived listing", async () => {
   const calls: string[] = [];
   const context = {
     bridge: {
@@ -128,6 +128,17 @@ test("external thread lifecycle routes expose archive, restore, and archived lis
           action: "archive",
           outcome: "applied",
           nativeArchived: true,
+          bindings: [],
+        };
+      },
+      async deleteThread(runtimeId: string, threadId: string) {
+        calls.push(`delete:${runtimeId}:${threadId}`);
+        return {
+          runtimeId,
+          threadId,
+          action: "delete",
+          outcome: "applied",
+          nativeDeleted: true,
           bindings: [],
         };
       },
@@ -169,6 +180,18 @@ test("external thread lifecycle routes expose archive, restore, and archived lis
     okData<{ outcome: string }>(archived as AdminRouteResult).outcome,
     "applied",
   );
+  const deleted = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/threads/thread%2F1/delete",
+    ),
+    context,
+  );
+  assert.equal(
+    okData<{ nativeDeleted: boolean }>(deleted as AdminRouteResult)
+      .nativeDeleted,
+    true,
+  );
   const restored = await handleExternalRuntimeRequest(
     { method: "POST" } as IncomingMessage,
     new URL(
@@ -184,6 +207,7 @@ test("external thread lifecycle routes expose archive, restore, and archived lis
   assert.deepEqual(calls, [
     'list:{"limit":20,"archived":true}',
     "archive:runtime-1:thread/1",
+    "delete:runtime-1:thread/1",
     "unarchive:runtime-1:thread/1",
   ]);
 

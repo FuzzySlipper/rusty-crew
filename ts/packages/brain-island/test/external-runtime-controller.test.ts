@@ -148,6 +148,8 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   readonly resumeFailureThreadIds = new Set<string>();
   readonly archivedThreadIds = new Set<string>();
   readonly unmaterializedThreadIds = new Set<string>();
+  deleteFailureMessage?: string;
+  loseNextDeleteResponse = false;
   #loseFirstStartResponse: boolean;
   readonly #startFailureMessage?: string;
 
@@ -196,6 +198,66 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
     if (parsed.method === "thread/archive") {
       this.archivedThreadIds.add(String(params.threadId));
       this.emit({ id: parsed.id, result: {} });
+      return;
+    }
+    if (parsed.method === "thread/delete") {
+      if (this.deleteFailureMessage !== undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: this.deleteFailureMessage },
+        });
+        return;
+      }
+      const rootThreadId = String(params.threadId);
+      if (!this.threads.some((thread) => thread.id === rootThreadId)) {
+        this.emit({
+          id: parsed.id,
+          error: {
+            code: -32000,
+            message: `no rollout found for thread id ${rootThreadId}`,
+          },
+        });
+        return;
+      }
+      const deletedThreadIds = new Set([rootThreadId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const thread of this.threads) {
+          if (
+            typeof thread.parentThreadId === "string" &&
+            deletedThreadIds.has(thread.parentThreadId) &&
+            !deletedThreadIds.has(String(thread.id))
+          ) {
+            deletedThreadIds.add(String(thread.id));
+            changed = true;
+          }
+        }
+      }
+      for (let index = this.threads.length - 1; index >= 0; index -= 1) {
+        const candidate = this.threads[index];
+        if (
+          candidate !== undefined &&
+          deletedThreadIds.has(String(candidate.id))
+        ) {
+          this.threads.splice(index, 1);
+        }
+      }
+      for (const deletedThreadId of deletedThreadIds) {
+        this.archivedThreadIds.delete(deletedThreadId);
+        this.unmaterializedThreadIds.delete(deletedThreadId);
+      }
+      if (this.loseNextDeleteResponse) {
+        this.loseNextDeleteResponse = false;
+      } else {
+        this.emit({ id: parsed.id, result: {} });
+      }
+      for (const deletedThreadId of deletedThreadIds) {
+        this.emit({
+          method: "thread/deleted",
+          params: { threadId: deletedThreadId },
+        });
+      }
       return;
     }
     if (parsed.method === "thread/unarchive") {
@@ -467,6 +529,99 @@ test("controller archives native history with bindings and restores history expl
         error instanceof ExternalThreadLifecycleError &&
         error.reasonCode === "external_thread_not_found",
     );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller deletes native thread trees only after durable binding reconciliation", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const root = await fixture.controller.createAgentSession({
+      idempotencyKey: "delete-root-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const child = await fixture.controller.createAgentSession({
+      idempotencyKey: "delete-child-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const rootThreadId = root.thread.threadId;
+    const childThreadId = child.thread.threadId;
+    const childThread = fixture.transport.threads.find(
+      (thread) => thread.id === childThreadId,
+    );
+    assert.ok(childThread);
+    childThread.parentThreadId = rootThreadId;
+    childThread.status = { type: "active", activeFlags: [] };
+
+    await assert.rejects(
+      fixture.controller.deleteThread(fixture.runtimeId, rootThreadId),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode === "external_thread_active",
+    );
+    childThread.status = { type: "idle" };
+
+    fixture.transport.deleteFailureMessage = "simulated native delete failure";
+    await assert.rejects(
+      fixture.controller.deleteThread(fixture.runtimeId, rootThreadId),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode === "external_thread_native_delete_failed",
+    );
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(root.creation.binding.bindingId))
+        ?.status,
+      "active",
+    );
+    assert.equal(
+      (
+        await fixture.bridge.getExternalBinding(
+          child.creation.binding.bindingId,
+        )
+      )?.status,
+      "active",
+    );
+
+    fixture.transport.deleteFailureMessage = undefined;
+    fixture.transport.loseNextDeleteResponse = true;
+    const deleted = await fixture.controller.deleteThread(
+      fixture.runtimeId,
+      rootThreadId,
+    );
+    assert.equal(deleted.outcome, "applied");
+    assert.equal(deleted.nativeDeleted, true);
+    assert.deepEqual(
+      deleted.bindings.map((binding) => binding.currentStatus).sort(),
+      ["archived", "archived"],
+    );
+    assert.deepEqual(fixture.transport.threads, []);
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(root.creation.binding.bindingId))
+        ?.status,
+      "archived",
+    );
+    assert.equal(
+      (
+        await fixture.bridge.getExternalBinding(
+          child.creation.binding.bindingId,
+        )
+      )?.status,
+      "archived",
+    );
+
+    const repeated = await fixture.controller.deleteThread(
+      fixture.runtimeId,
+      rootThreadId,
+    );
+    assert.equal(repeated.outcome, "already_deleted");
+    assert.equal(repeated.nativeDeleted, true);
   } finally {
     await fixture.cleanup();
   }

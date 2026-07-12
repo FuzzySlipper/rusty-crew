@@ -4,6 +4,8 @@ import type { ThreadCompactStartParams } from "../protocol/0.144.1/ts/v2/ThreadC
 import type { ThreadCompactStartResponse } from "../protocol/0.144.1/ts/v2/ThreadCompactStartResponse.js";
 import type { ThreadArchiveParams } from "../protocol/0.144.1/ts/v2/ThreadArchiveParams.js";
 import type { ThreadArchiveResponse } from "../protocol/0.144.1/ts/v2/ThreadArchiveResponse.js";
+import type { ThreadDeleteParams } from "../protocol/0.144.1/ts/v2/ThreadDeleteParams.js";
+import type { ThreadDeleteResponse } from "../protocol/0.144.1/ts/v2/ThreadDeleteResponse.js";
 import type { CollaborationModeListParams } from "../protocol/0.144.1/ts/v2/CollaborationModeListParams.js";
 import type { CollaborationModeListResponse } from "../protocol/0.144.1/ts/v2/CollaborationModeListResponse.js";
 import type { ThreadItemsListParams } from "../protocol/0.144.1/ts/v2/ThreadItemsListParams.js";
@@ -210,6 +212,13 @@ export class CodexAppServerDriver {
     signal?: AbortSignal,
   ): Promise<ThreadArchiveResponse> {
     return this.#request("thread/archive", params, signal);
+  }
+
+  threadDelete(
+    params: ThreadDeleteParams,
+    signal?: AbortSignal,
+  ): Promise<ThreadDeleteResponse> {
+    return this.#request("thread/delete", params, signal);
   }
 
   threadUnarchive(

@@ -18,7 +18,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.3.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.4.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -74,6 +74,14 @@ assert.deepEqual(
 assert.deepEqual(
   propertySchema("ExternalRuntimeEventPayload", "messagePhase").enum,
   ["commentary", "final_answer", "unknown"],
+);
+assert.deepEqual(
+  propertySchema("ExternalThreadDeleteReceipt", "outcome").enum,
+  ["applied", "already_deleted"],
+);
+assert.equal(
+  propertySchema("ExternalThreadDeleteReceipt", "nativeDeleted").const,
+  true,
 );
 assert.ok(schema("ExternalRuntimeRegistration").properties?.runtimeId);
 assert.ok(
@@ -150,6 +158,7 @@ interface Operation {
 }
 
 interface JsonSchema {
+  const?: unknown;
   enum?: string[];
   required?: string[];
   properties?: Record<string, unknown>;

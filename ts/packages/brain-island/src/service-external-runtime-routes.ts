@@ -341,6 +341,15 @@ export async function handleExternalRuntimeRequest(
                 ),
               );
             }
+            if (parts[5] === "delete") {
+              return successRoute(
+                requestId,
+                await context.controller.deleteThread(
+                  runtimeId,
+                  parts[4] ?? "",
+                ),
+              );
+            }
             if (parts[5] === "unarchive") {
               return successRoute(
                 requestId,
