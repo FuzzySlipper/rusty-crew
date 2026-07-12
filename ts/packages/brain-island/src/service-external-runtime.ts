@@ -289,20 +289,17 @@ export class ServiceExternalRuntimeController {
   ): Promise<ExternalThreadReadResult> {
     const controlled = await this.#requireControlled(runtimeId);
     const input = params as Parameters<CodexAppServerDriver["threadRead"]>[0];
-    const result = await controlled.driver.threadRead(input).catch(
-      async (error: unknown) => {
-        if (
-          input.includeTurns !== false &&
-          isUnmaterializedThreadRead(error)
-        ) {
+    const result = await controlled.driver
+      .threadRead(input)
+      .catch(async (error: unknown) => {
+        if (input.includeTurns !== false && isUnmaterializedThreadRead(error)) {
           return controlled.driver.threadRead({
             ...input,
             includeTurns: false,
           });
         }
         throw error;
-      },
-    );
+      });
     return { thread: projectExternalThread(result.thread) };
   }
 
@@ -1388,8 +1385,7 @@ export class ServiceExternalRuntimeController {
     controlled.rawDetails.set(detail.detailId, detail);
     while (controlled.rawDetails.size > RAW_DETAIL_LIMIT) {
       const oldest = controlled.rawDetails.keys().next().value as
-        | string
-        | undefined;
+        string | undefined;
       if (oldest === undefined) break;
       controlled.rawDetails.delete(oldest);
     }
