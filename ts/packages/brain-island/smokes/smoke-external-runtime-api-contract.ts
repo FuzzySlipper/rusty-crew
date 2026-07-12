@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { apiCapabilityRegistry } from "../src/api-command-registry.js";
 import {
+  EXTERNAL_RUNTIME_API_CONTRACT_VERSION,
   EXTERNAL_RUNTIME_API_OPENAPI_PATH,
   EXTERNAL_RUNTIME_API_OPERATIONS,
   EXTERNAL_RUNTIME_API_PATHS,
@@ -17,7 +18,8 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(contract.info.version, "0.1.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.3.0");
+assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
   apiCapabilityRegistry().capabilities.map((capability) => capability.id),
@@ -65,6 +67,14 @@ assert.deepEqual(schema("ExternalThreadPage").required, [
 assert.ok(schema("ExternalThreadProjection").properties?.turns);
 assert.ok(schema("ExternalThreadTurnProjection").properties?.items);
 assert.ok(schema("ExternalThreadItemProjection").properties?.text);
+assert.deepEqual(
+  propertySchema("ExternalThreadItemProjection", "messagePhase").enum,
+  ["commentary", "final_answer", "unknown"],
+);
+assert.deepEqual(
+  propertySchema("ExternalRuntimeEventPayload", "messagePhase").enum,
+  ["commentary", "final_answer", "unknown"],
+);
 assert.ok(schema("ExternalRuntimeRegistration").properties?.runtimeId);
 assert.ok(
   schema("ExternalRuntimeControllerStatus").properties?.bindingResumeFailures,
@@ -100,6 +110,15 @@ function schema(name: string): JsonSchema {
   const value = contract.components.schemas[name];
   assert.ok(value, `missing schema ${name}`);
   return value;
+}
+
+function propertySchema(schemaName: string, propertyName: string): JsonSchema {
+  const value = schema(schemaName).properties?.[propertyName];
+  assert.ok(
+    typeof value === "object" && value !== null,
+    `missing schema ${schemaName}.${propertyName}`,
+  );
+  return value as JsonSchema;
 }
 
 interface OpenApiDocument {
