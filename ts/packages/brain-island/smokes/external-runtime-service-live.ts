@@ -31,6 +31,10 @@ const bindingId = "codex-service-live-binding";
 const peerSessionId = "codex-service-live-peer-session";
 const peerAgentId = "codex-service-live-peer-agent";
 const peerBindingId = "codex-service-live-peer-binding";
+const staleSessionId = "codex-service-live-stale-session";
+const staleAgentId = "codex-service-live-stale-agent";
+const staleBindingId = "codex-service-live-stale-binding";
+const staleNativeThreadId = "codex-service-live-missing-native-thread";
 const browserProfileId = "codex-service-live-browser-profile";
 const now = (): string => new Date().toISOString();
 
@@ -602,6 +606,30 @@ try {
 
   const bindingBeforeRestart = await bridge.getExternalBinding(bindingId);
   assert.equal(typeof bindingBeforeRestart?.nativeThreadId, "string");
+  await bridge.ensureConfiguredSession({
+    sessionId: staleSessionId,
+    agentId: staleAgentId,
+    profileId: "codex-service-live-stale-profile",
+    kind: "full",
+    resourceLimits: { workdir: dataDir },
+    toolProfile: { tools: [] },
+  });
+  await bridge.bindExternalAgent({
+    binding: {
+      bindingId: staleBindingId,
+      runtimeId,
+      sessionId: staleSessionId,
+      agentId: staleAgentId,
+      nativeThreadId: staleNativeThreadId,
+      purpose: "crew_agent",
+      cwd: dataDir,
+      effectiveConfigFingerprint: "external-service-live-stale-v1",
+      status: "active",
+      revision: 0,
+      createdAt: now(),
+      updatedAt: now(),
+    },
+  });
   const controllerGenerationBeforeRestart =
     controller.statuses()[0]?.controllerGeneration;
   await controller.stop();
@@ -636,6 +664,20 @@ try {
   });
   controller = new ServiceExternalRuntimeController({ bridge });
   await waitForControllerReady();
+  const recoveredStatus = controller.statuses()[0];
+  assert.equal(recoveredStatus?.bindingResumeFailures.length, 1);
+  assert.equal(
+    recoveredStatus?.bindingResumeFailures[0]?.bindingId,
+    staleBindingId,
+  );
+  assert.equal(
+    recoveredStatus?.bindingResumeFailures[0]?.nativeThreadId,
+    staleNativeThreadId,
+  );
+  assert.equal(
+    (await bridge.getExternalRuntime(runtimeId))?.observedState,
+    "ready",
+  );
   const bindingAfterRestart = await bridge.getExternalBinding(bindingId);
   assert.equal(
     bindingAfterRestart?.nativeThreadId,
@@ -647,6 +689,24 @@ try {
     controllerGenerationAfterRestart,
     controllerGenerationBeforeRestart,
   );
+
+  const postRestartCreationResponse = await fetch(
+    `${baseUrl}/v1/external-agent-sessions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...browserCreationRequest,
+        idempotencyKey: "external-service-live-post-restart-create",
+        label: "Post-restart browser-created Codex agent",
+      }),
+    },
+  );
+  assert.equal(postRestartCreationResponse.status, 200);
+  const postRestartCreation = (await postRestartCreationResponse.json()) as {
+    data: { creation: { phase: string; binding: { bindingId: string } } };
+  };
+  assert.equal(postRestartCreation.data.creation.phase, "ready");
 
   const restartDelivery = await deliverLiveMessage(
     baseUrl,
@@ -678,6 +738,14 @@ try {
         interruptedTurnId: interrupted.nativeTurnId,
         restartTurnId: restartTerminal.nativeTurnId,
         exactThreadRestartResume: true,
+        staleBindingRecovery: {
+          bindingId: staleBindingId,
+          nativeThreadId: staleNativeThreadId,
+          isolatedFailureCount:
+            recoveredStatus?.bindingResumeFailures.length ?? 0,
+          postRestartBindingId:
+            postRestartCreation.data.creation.binding.bindingId,
+        },
         browserAgentSessionCreation: {
           creationId: browserCreation.data.creation.creationId,
           sessionId: browserCreation.data.creation.session.sessionId,

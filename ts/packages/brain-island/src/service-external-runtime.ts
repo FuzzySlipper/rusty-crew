@@ -59,6 +59,8 @@ interface ControlledRuntime {
   registration: ExternalRuntimeRegistration;
   lease: ExternalControllerLease;
   driver: CodexAppServerDriver;
+  handshakeIdentity?: CodexInitializeIdentity;
+  bindingResumeFailures: ExternalBindingResumeFailure[];
   rawDetails: Map<string, ExternalRuntimeRawDetail>;
   threadSettings: Map<string, CollaborationMode["settings"]>;
 }
@@ -84,6 +86,14 @@ export interface ExternalRuntimeControllerStatus {
   readonly controllerInstanceId: string;
   readonly controllerGeneration: number;
   readonly leaseExpiresAt: string;
+  readonly bindingResumeFailures: readonly ExternalBindingResumeFailure[];
+}
+
+export interface ExternalBindingResumeFailure {
+  readonly bindingId: string;
+  readonly nativeThreadId: string;
+  readonly reason: string;
+  readonly observedAt: string;
 }
 
 export class ExternalAgentSessionCreationError extends Error {
@@ -167,19 +177,22 @@ export class ServiceExternalRuntimeController {
   }
 
   statuses(): ExternalRuntimeControllerStatus[] {
-    return [...this.#controlled.values()].map((controlled) => ({
-      runtimeId: controlled.registration.runtimeId,
-      driverState: controlled.driver.state,
-      controllerInstanceId: this.#instanceId,
-      controllerGeneration: controlled.lease.generation,
-      leaseExpiresAt: controlled.lease.expiresAt,
-    }));
+    return [...this.#controlled.values()].map((controlled) =>
+      this.#status(controlled),
+    );
   }
 
   async connect(runtimeId: string): Promise<ExternalRuntimeControllerStatus> {
     const existing = this.#controlled.get(runtimeId);
     if (existing !== undefined && existing.driver.state === "ready") {
       existing.lease = await this.#acquireLease(runtimeId);
+      await this.#resumePersistedBindings(existing);
+      existing.registration =
+        (await this.#bridge.getExternalRuntime(runtimeId)) ??
+        existing.registration;
+      if (existing.registration.observedState !== "ready") {
+        await this.#restoreReadyRegistration(existing);
+      }
       return this.#status(existing);
     }
     const registration = await this.#bridge.getExternalRuntime(runtimeId);
@@ -208,6 +221,7 @@ export class ServiceExternalRuntimeController {
       registration,
       lease,
       driver: undefined as unknown as CodexAppServerDriver,
+      bindingResumeFailures: [],
       rawDetails: new Map(),
       threadSettings: new Map(),
     };
@@ -456,7 +470,9 @@ export class ServiceExternalRuntimeController {
         const controlled = this.#controlled.get(registration.runtimeId);
         if (
           controlled === undefined ||
-          controlled.driver.state === "disconnected"
+          controlled.driver.state === "disconnected" ||
+          (controlled.driver.state === "ready" &&
+            registration.observedState !== "ready")
         ) {
           await this.connect(registration.runtimeId).catch(() => undefined);
           continue;
@@ -497,6 +513,7 @@ export class ServiceExternalRuntimeController {
   }
 
   async #resumePersistedBindings(controlled: ControlledRuntime): Promise<void> {
+    controlled.bindingResumeFailures = [];
     const bindings = await this.#bridge.listExternalBindings();
     for (const binding of bindings) {
       if (
@@ -506,18 +523,45 @@ export class ServiceExternalRuntimeController {
       ) {
         continue;
       }
-      const resumed = await controlled.driver.threadResume({
-        threadId: binding.nativeThreadId,
-        ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
-        approvalPolicy: "never",
-        sandbox: "danger-full-access",
-        excludeTurns: true,
-      });
-      controlled.threadSettings.set(binding.nativeThreadId, {
-        model: resumed.model,
-        reasoning_effort: resumed.reasoningEffort,
-        developer_instructions: null,
-      });
+      try {
+        const resumed = await controlled.driver.threadResume({
+          threadId: binding.nativeThreadId,
+          ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          excludeTurns: true,
+        });
+        controlled.threadSettings.set(binding.nativeThreadId, {
+          model: resumed.model,
+          reasoning_effort: resumed.reasoningEffort,
+          developer_instructions: null,
+        });
+      } catch (error) {
+        controlled.bindingResumeFailures.push({
+          bindingId: binding.bindingId,
+          nativeThreadId: binding.nativeThreadId,
+          reason: String(error),
+          observedAt: this.#now().toISOString(),
+        });
+      }
+    }
+  }
+
+  async #restoreReadyRegistration(
+    controlled: ControlledRuntime,
+  ): Promise<void> {
+    const identity = controlled.handshakeIdentity;
+    if (identity === undefined) {
+      throw new Error(
+        `external runtime ${controlled.registration.runtimeId} has no accepted handshake identity`,
+      );
+    }
+    const decision = await this.#authorizeHandshake(controlled, identity);
+    if (!decision.accepted) {
+      throw new Error(
+        decision.reasonCode ??
+          `external runtime ${controlled.registration.runtimeId} handshake reconciliation failed`,
+      );
     }
   }
 
@@ -761,6 +805,9 @@ export class ServiceExternalRuntimeController {
       observedAt: this.#now().toISOString(),
     });
     controlled.registration = decision.registration;
+    if (decision.accepted) {
+      controlled.handshakeIdentity = identity;
+    }
     return {
       accepted: decision.accepted,
       ...(decision.reasonCode == null
@@ -1055,8 +1102,13 @@ export class ServiceExternalRuntimeController {
   }
 
   async #requireControlled(runtimeId: string): Promise<ControlledRuntime> {
-    await this.connect(runtimeId);
-    const controlled = this.#controlled.get(runtimeId);
+    let controlled = this.#controlled.get(runtimeId);
+    if (controlled === undefined || controlled.driver.state !== "ready") {
+      await this.connect(runtimeId);
+      controlled = this.#controlled.get(runtimeId);
+    } else if (!this.#hasLease(controlled)) {
+      controlled.lease = await this.#acquireLease(runtimeId);
+    }
     if (controlled === undefined || controlled.driver.state !== "ready") {
       throw new Error(`external runtime ${runtimeId} controller is not ready`);
     }
@@ -1092,6 +1144,9 @@ export class ServiceExternalRuntimeController {
       controllerInstanceId: this.#instanceId,
       controllerGeneration: controlled.lease.generation,
       leaseExpiresAt: controlled.lease.expiresAt,
+      bindingResumeFailures: controlled.bindingResumeFailures.map(
+        (failure) => ({ ...failure }),
+      ),
     };
   }
 }

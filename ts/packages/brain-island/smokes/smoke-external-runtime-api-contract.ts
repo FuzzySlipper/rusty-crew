@@ -66,6 +66,9 @@ assert.ok(schema("ExternalThreadProjection").properties?.turns);
 assert.ok(schema("ExternalThreadTurnProjection").properties?.items);
 assert.ok(schema("ExternalThreadItemProjection").properties?.text);
 assert.ok(schema("ExternalRuntimeRegistration").properties?.runtimeId);
+assert.ok(
+  schema("ExternalRuntimeControllerStatus").properties?.bindingResumeFailures,
+);
 assert.deepEqual(
   Object.keys(schema("DenRuntimeReference").properties ?? {}).sort(),
   ["project_id", "task_id"],

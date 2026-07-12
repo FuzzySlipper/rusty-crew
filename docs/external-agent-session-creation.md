@@ -52,6 +52,13 @@ prevents a second native thread from being created. Completion writes the
 native thread ID to the binding before marking the creation ready; a retry can
 therefore also repair a process loss between those writes.
 
+On controller restart, persisted bindings are resumed independently. A stale
+native thread is reported in the controller's `bindingResumeFailures` array
+with its binding ID, native thread ID, reason, and observation time; it does not
+degrade an otherwise healthy runtime or block new session creation. An explicit
+runtime connect retries binding reconciliation and repairs a stale degraded
+registration through exact handshake authorization.
+
 Repeating the same key and intent returns the original creation. Reusing the
 key with changed runtime, profile, cwd, task reference, or label fails with
 `external_agent_creation_idempotency_conflict`.

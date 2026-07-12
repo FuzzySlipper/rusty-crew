@@ -144,6 +144,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
   readonly sent: Array<Record<string, unknown>> = [];
   readonly threads: Array<Record<string, unknown>> = [];
+  readonly resumeFailureThreadIds = new Set<string>();
   #loseFirstStartResponse: boolean;
   readonly #startFailureMessage?: string;
 
@@ -217,6 +218,16 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       return;
     }
     if (parsed.method === "thread/resume") {
+      if (this.resumeFailureThreadIds.has(String(params.threadId))) {
+        this.emit({
+          id: parsed.id,
+          error: {
+            code: -32001,
+            message: `native thread ${String(params.threadId)} was not found`,
+          },
+        });
+        return;
+      }
       const thread = this.threads.find(
         (candidate) => candidate.id === params.threadId,
       );
@@ -345,6 +356,110 @@ test("controller atomically creates and idempotently reuses an external agent se
       /external_agent_creation_idempotency_conflict/,
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller isolates stale binding resume failures and repairs degraded readiness", async () => {
+  const fixture = await externalCreationFixture(false);
+  let recoveryController: ServiceExternalRuntimeController | undefined;
+  try {
+    const original = await fixture.controller.createAgentSession({
+      idempotencyKey: "restart-stale-binding-original",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const staleThreadId = original.creation.binding.nativeThreadId;
+    assert.equal(typeof staleThreadId, "string");
+    await fixture.controller.stop();
+
+    const recoveryTransport = new FakeCreationTransport();
+    recoveryTransport.resumeFailureThreadIds.add(staleThreadId!);
+    recoveryTransport.threads.push(
+      fakeCreationThread(
+        "unrelated-native-thread",
+        fixture.dataDir,
+        "unrelated-thread-source",
+      ),
+    );
+    recoveryController = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "restart-recovery-controller",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(recoveryTransport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+
+    const recovered = await recoveryController.connect(fixture.runtimeId);
+    assert.equal(recovered.driverState, "ready");
+    assert.equal(recovered.bindingResumeFailures.length, 1);
+    assert.equal(
+      recovered.bindingResumeFailures[0]?.bindingId,
+      original.creation.binding.bindingId,
+    );
+    assert.equal(
+      recovered.bindingResumeFailures[0]?.nativeThreadId,
+      staleThreadId,
+    );
+    assert.match(
+      recovered.bindingResumeFailures[0]?.reason ?? "",
+      new RegExp(`native thread ${staleThreadId} was not found`),
+    );
+    assert.equal(
+      typeof recovered.bindingResumeFailures[0]?.observedAt,
+      "string",
+    );
+    assert.equal(
+      (await fixture.bridge.getExternalRuntime(fixture.runtimeId))
+        ?.observedState,
+      "ready",
+    );
+
+    await fixture.bridge.recordExternalRuntimeState({
+      runtimeId: fixture.runtimeId,
+      controller: {
+        holderInstanceId: recovered.controllerInstanceId,
+        generation: recovered.controllerGeneration,
+      },
+      observedState: "degraded",
+      reasonCode: "controller_connect_failed",
+      observedAt: new Date().toISOString(),
+    });
+    const reconciled = await recoveryController.connect(fixture.runtimeId);
+    assert.equal(reconciled.driverState, "ready");
+    assert.equal(reconciled.bindingResumeFailures.length, 1);
+    const registration = await fixture.bridge.getExternalRuntime(
+      fixture.runtimeId,
+    );
+    assert.equal(registration?.observedState, "ready");
+    assert.equal(registration?.observedReasonCode, null);
+    const resumeCallsBeforeCreate = recoveryTransport.sent.filter(
+      (message) => message.method === "thread/resume",
+    ).length;
+
+    const created = await recoveryController.createAgentSession({
+      idempotencyKey: "restart-stale-binding-new-browser-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    assert.equal(created.creation.phase, "ready");
+    assert.notEqual(
+      created.creation.binding.bindingId,
+      original.creation.binding.bindingId,
+    );
+    assert.equal(
+      recoveryTransport.sent.filter(
+        (message) => message.method === "thread/resume",
+      ).length,
+      resumeCallsBeforeCreate,
+    );
+  } finally {
+    await recoveryController?.stop().catch(() => undefined);
     await fixture.cleanup();
   }
 });

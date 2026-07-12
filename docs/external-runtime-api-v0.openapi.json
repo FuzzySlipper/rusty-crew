@@ -3593,14 +3593,34 @@
           "driverState",
           "controllerInstanceId",
           "controllerGeneration",
-          "leaseExpiresAt"
+          "leaseExpiresAt",
+          "bindingResumeFailures"
         ],
         "properties": {
           "runtimeId": { "type": "string" },
           "driverState": { "type": "string" },
           "controllerInstanceId": { "type": "string" },
           "controllerGeneration": { "type": "integer", "minimum": 0 },
-          "leaseExpiresAt": { "type": "string", "format": "date-time" }
+          "leaseExpiresAt": { "type": "string", "format": "date-time" },
+          "bindingResumeFailures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "bindingId",
+                "nativeThreadId",
+                "reason",
+                "observedAt"
+              ],
+              "properties": {
+                "bindingId": { "type": "string" },
+                "nativeThreadId": { "type": "string" },
+                "reason": { "type": "string" },
+                "observedAt": { "type": "string", "format": "date-time" }
+              },
+              "additionalProperties": false
+            }
+          }
         },
         "additionalProperties": false
       },

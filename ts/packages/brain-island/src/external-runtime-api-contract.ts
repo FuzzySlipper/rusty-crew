@@ -490,6 +490,7 @@ function routeSchemas(): Record<string, JsonSchema> {
         "controllerInstanceId",
         "controllerGeneration",
         "leaseExpiresAt",
+        "bindingResumeFailures",
       ],
       properties: {
         runtimeId: { type: "string" },
@@ -497,6 +498,20 @@ function routeSchemas(): Record<string, JsonSchema> {
         controllerInstanceId: { type: "string" },
         controllerGeneration: { type: "integer", minimum: 0 },
         leaseExpiresAt: { type: "string", format: "date-time" },
+        bindingResumeFailures: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["bindingId", "nativeThreadId", "reason", "observedAt"],
+            properties: {
+              bindingId: { type: "string" },
+              nativeThreadId: { type: "string" },
+              reason: { type: "string" },
+              observedAt: { type: "string", format: "date-time" },
+            },
+            additionalProperties: false,
+          },
+        },
       },
       additionalProperties: false,
     },
