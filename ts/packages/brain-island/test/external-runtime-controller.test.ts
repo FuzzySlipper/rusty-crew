@@ -18,6 +18,7 @@ import {
 
 import {
   ExternalAgentSessionCreationError,
+  ExternalThreadLifecycleError,
   ServiceExternalRuntimeController,
 } from "../src/service-external-runtime.js";
 
@@ -145,6 +146,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   readonly sent: Array<Record<string, unknown>> = [];
   readonly threads: Array<Record<string, unknown>> = [];
   readonly resumeFailureThreadIds = new Set<string>();
+  readonly archivedThreadIds = new Set<string>();
   #loseFirstStartResponse: boolean;
   readonly #startFailureMessage?: string;
 
@@ -179,11 +181,28 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       this.emit({
         id: parsed.id,
         result: {
-          data: this.threads,
+          data: this.threads.filter((thread) =>
+            params.archived === true
+              ? this.archivedThreadIds.has(String(thread.id))
+              : !this.archivedThreadIds.has(String(thread.id)),
+          ),
           nextCursor: null,
           backwardsCursor: null,
         },
       });
+      return;
+    }
+    if (parsed.method === "thread/archive") {
+      this.archivedThreadIds.add(String(params.threadId));
+      this.emit({ id: parsed.id, result: {} });
+      return;
+    }
+    if (parsed.method === "thread/unarchive") {
+      this.archivedThreadIds.delete(String(params.threadId));
+      const thread = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      this.emit({ id: parsed.id, result: { thread } });
       return;
     }
     if (parsed.method === "thread/start") {
@@ -354,6 +373,85 @@ test("controller atomically creates and idempotently reuses an external agent se
         label: "Changed intent",
       }),
       /external_agent_creation_idempotency_conflict/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller archives native history with bindings and restores history explicitly", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "archive-browser-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const threadId = created.thread.threadId;
+    const bindingId = created.creation.binding.bindingId;
+    const nativeThread = fixture.transport.threads.find(
+      (thread) => thread.id === threadId,
+    );
+    assert.ok(nativeThread);
+    nativeThread.status = { type: "active", activeFlags: [] };
+    await assert.rejects(
+      fixture.controller.archiveThread(fixture.runtimeId, threadId),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode === "external_thread_active",
+    );
+    nativeThread.status = { type: "idle" };
+
+    const archived = await fixture.controller.archiveThread(
+      fixture.runtimeId,
+      threadId,
+    );
+    assert.equal(archived.outcome, "applied");
+    assert.equal(archived.nativeArchived, true);
+    assert.equal(archived.bindings[0]?.currentStatus, "archived");
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(bindingId))?.status,
+      "archived",
+    );
+    assert.deepEqual(
+      (
+        await fixture.controller.listThreads(fixture.runtimeId, {
+          limit: 50,
+          archived: false,
+        })
+      ).items,
+      [],
+    );
+    assert.equal(
+      (await fixture.controller.archiveThread(fixture.runtimeId, threadId))
+        .outcome,
+      "already_archived",
+    );
+
+    const restored = await fixture.controller.unarchiveThread(
+      fixture.runtimeId,
+      threadId,
+    );
+    assert.equal(restored.outcome, "applied");
+    assert.equal(restored.nativeArchived, false);
+    assert.equal(restored.bindings[0]?.currentStatus, "archived");
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(bindingId))?.status,
+      "archived",
+    );
+    assert.equal(
+      (await fixture.controller.unarchiveThread(fixture.runtimeId, threadId))
+        .outcome,
+      "already_active",
+    );
+
+    await assert.rejects(
+      fixture.controller.archiveThread(fixture.runtimeId, "missing-thread"),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode === "external_thread_not_found",
     );
   } finally {
     await fixture.cleanup();

@@ -18,6 +18,7 @@ import {
   handleExternalRuntimeRequest,
   type ExternalRuntimeRouteContext,
 } from "../src/service-external-runtime-routes.js";
+import { ExternalThreadLifecycleError } from "../src/service-external-runtime.js";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
 import {
@@ -104,6 +105,112 @@ test("external session route translates generated Den task reference wire fields
     taskId: "4281",
   });
   assert.equal(captured?.requestedAt, "2026-07-11T20:00:00.000Z");
+});
+
+test("external thread lifecycle routes expose archive, restore, and archived listing", async () => {
+  const calls: string[] = [];
+  const context = {
+    bridge: {
+      async getExternalRuntime(runtimeId: string) {
+        return { runtimeId };
+      },
+    },
+    controller: {
+      async listThreads(_runtimeId: string, params: unknown) {
+        calls.push(`list:${JSON.stringify(params)}`);
+        return { items: [], nextCursor: null, backwardsCursor: null };
+      },
+      async archiveThread(runtimeId: string, threadId: string) {
+        calls.push(`archive:${runtimeId}:${threadId}`);
+        return {
+          runtimeId,
+          threadId,
+          action: "archive",
+          outcome: "applied",
+          nativeArchived: true,
+          bindings: [],
+        };
+      },
+      async unarchiveThread(runtimeId: string, threadId: string) {
+        calls.push(`unarchive:${runtimeId}:${threadId}`);
+        return {
+          runtimeId,
+          threadId,
+          action: "unarchive",
+          outcome: "applied",
+          nativeArchived: false,
+          bindings: [],
+        };
+      },
+    },
+    requestId: () => "req-external-thread-lifecycle",
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const listed = await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/threads?archived=true&limit=20",
+    ),
+    context,
+  );
+  assert.deepEqual(okData(listed as AdminRouteResult), {
+    items: [],
+    nextCursor: null,
+    backwardsCursor: null,
+  });
+  const archived = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/threads/thread%2F1/archive",
+    ),
+    context,
+  );
+  assert.equal(
+    okData<{ outcome: string }>(archived as AdminRouteResult).outcome,
+    "applied",
+  );
+  const restored = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/threads/thread%2F1/unarchive",
+    ),
+    context,
+  );
+  assert.equal(
+    okData<{ nativeArchived: boolean }>(restored as AdminRouteResult)
+      .nativeArchived,
+    false,
+  );
+  assert.deepEqual(calls, [
+    'list:{"limit":20,"archived":true}',
+    "archive:runtime-1:thread/1",
+    "unarchive:runtime-1:thread/1",
+  ]);
+
+  const rejectingContext = {
+    ...context,
+    controller: {
+      ...context.controller,
+      async archiveThread() {
+        throw new ExternalThreadLifecycleError(
+          "external_thread_active",
+          "thread is active",
+        );
+      },
+    },
+  } as unknown as ExternalRuntimeRouteContext;
+  const conflict = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/threads/thread-1/archive",
+    ),
+    rejectingContext,
+  );
+  assert.equal((conflict as AdminRouteResult).status, 409);
+  assert.equal(
+    errorReason(conflict as AdminRouteResult),
+    "external_thread_active",
+  );
 });
 
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {

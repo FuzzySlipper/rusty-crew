@@ -21,6 +21,7 @@ import {
 import {
   EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES,
   ExternalAgentSessionCreationError,
+  ExternalThreadLifecycleError,
   type ServiceExternalRuntimeController,
 } from "./service-external-runtime.js";
 
@@ -313,6 +314,7 @@ export async function handleExternalRuntimeRequest(
             requestId,
             await context.controller.listThreads(runtimeId, {
               limit: numberParam(url, "limit") ?? 50,
+              archived: booleanParam(url, "archived") ?? false,
               ...(stringParam(url, "cursor") === undefined
                 ? {}
                 : { cursor: stringParam(url, "cursor") }),
@@ -327,6 +329,30 @@ export async function handleExternalRuntimeRequest(
               await context.readJsonBody(request),
             ),
           );
+        }
+        if (parts.length === 6 && method === "POST") {
+          try {
+            if (parts[5] === "archive") {
+              return successRoute(
+                requestId,
+                await context.controller.archiveThread(
+                  runtimeId,
+                  parts[4] ?? "",
+                ),
+              );
+            }
+            if (parts[5] === "unarchive") {
+              return successRoute(
+                requestId,
+                await context.controller.unarchiveThread(
+                  runtimeId,
+                  parts[4] ?? "",
+                ),
+              );
+            }
+          } catch (error) {
+            return externalThreadLifecycleFailure(requestId, error);
+          }
         }
         return methodNotAllowed(requestId);
       case "events":
@@ -568,6 +594,43 @@ function numberParam(url: URL, name: string): number | undefined {
 
 function stringParam(url: URL, name: string): string | undefined {
   return optionalString(url.searchParams.get(name));
+}
+
+function booleanParam(url: URL, name: string): boolean | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null) return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
+}
+
+function externalThreadLifecycleFailure(
+  requestId: string,
+  error: unknown,
+): ServiceRouteResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const reasonCode =
+    error instanceof ExternalThreadLifecycleError
+      ? error.reasonCode
+      : "external_thread_lifecycle_failed";
+  const status =
+    reasonCode === "external_thread_not_found"
+      ? 404
+      : reasonCode === "external_thread_active" ||
+          reasonCode === "external_thread_interaction_pending"
+        ? 409
+        : 500;
+  return failure(status, requestId, {
+    code:
+      status === 404
+        ? "not_found"
+        : status === 409
+          ? "conflict"
+          : "internal_error",
+    reason_code: reasonCode,
+    message,
+    retryable: status >= 500,
+  });
 }
 
 function methodNotAllowed(requestId: string): ServiceRouteResult {

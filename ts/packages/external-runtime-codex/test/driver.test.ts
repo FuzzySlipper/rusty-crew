@@ -156,6 +156,93 @@ test("driver authorizes exact handshake before exposing typed requests", async (
   await driver.close();
 });
 
+test("driver exposes schema-checked native thread archive lifecycle calls", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport);
+  transport.responders.set("thread/archive", () => ({}));
+  transport.responders.set("thread/unarchive", () => ({
+    thread: {
+      id: "thread-archive-1",
+      extra: null,
+      sessionId: "session-archive-1",
+      forkedFromId: null,
+      parentThreadId: null,
+      preview: "archived thread",
+      ephemeral: false,
+      historyMode: "paginated",
+      modelProvider: "openai",
+      createdAt: 1,
+      updatedAt: 2,
+      recencyAt: 2,
+      status: { type: "notLoaded" },
+      path: "/tmp/thread.jsonl",
+      cwd: "/home",
+      cliVersion: "0.144.1",
+      source: "appServer",
+      threadSource: null,
+      agentNickname: null,
+      agentRole: null,
+      gitInfo: null,
+      name: null,
+      turns: [],
+    },
+  }));
+  const driver = new CodexAppServerDriver(transport, authority);
+
+  await driver.connect();
+  assert.deepEqual(
+    await driver.threadArchive({ threadId: "thread-archive-1" }),
+    {},
+  );
+  assert.equal(
+    (await driver.threadUnarchive({ threadId: "thread-archive-1" })).thread.id,
+    "thread-archive-1",
+  );
+  assert.deepEqual(
+    transport.sent.slice(-2).map(({ method, params }) => ({ method, params })),
+    [
+      {
+        method: "thread/archive",
+        params: { threadId: "thread-archive-1" },
+      },
+      {
+        method: "thread/unarchive",
+        params: { threadId: "thread-archive-1" },
+      },
+    ],
+  );
+  transport.emit({
+    method: "thread/archived",
+    params: { threadId: "thread-archive-1" },
+  });
+  transport.emit({
+    method: "thread/unarchived",
+    params: { threadId: "thread-archive-1" },
+  });
+  await settle();
+  assert.deepEqual(
+    authority.events.map((event) => ({
+      method: event.method,
+      kind: event.kind,
+      threadId: event.threadId,
+    })),
+    [
+      {
+        method: "thread/archived",
+        kind: "thread_lifecycle",
+        threadId: "thread-archive-1",
+      },
+      {
+        method: "thread/unarchived",
+        kind: "thread_lifecycle",
+        threadId: "thread-archive-1",
+      },
+    ],
+  );
+  await driver.close();
+});
+
 test("Rust authority can reject an incompatible runtime before mutation", async () => {
   const transport = new FakeTransport();
   const authority = new FakeAuthority();

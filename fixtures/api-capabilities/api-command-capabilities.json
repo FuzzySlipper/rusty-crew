@@ -204,6 +204,28 @@
         "public": true
       },
       {
+        "id": "external.runtimes.threads.archive",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive",
+        "description": "Archive native Codex history and archive every associated Crew binding.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.threads.unarchive",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
+        "description": "Restore native Codex history without implicitly reactivating Crew bindings.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
         "id": "external.runtimes.events.list",
         "method": "GET",
         "path_template": "/v1/external-runtimes/{runtime_id}/events",
@@ -1927,6 +1949,20 @@
         "capability_id": "external.runtimes.threads.read",
         "method": "POST",
         "path_template": "/v1/external-runtimes/{runtime_id}/threads/read",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.threads.archive",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.threads.unarchive",
+        "method": "POST",
+        "path_template": "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -253,6 +253,12 @@
               "maximum": 1000,
               "default": 50
             }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false }
           }
         ],
         "responses": {
@@ -340,6 +346,108 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.threads.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive": {
+      "post": {
+        "operationId": "archiveExternalRuntimeThread",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalThreadLifecycleReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.threads.archive",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive": {
+      "post": {
+        "operationId": "unarchiveExternalRuntimeThread",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalThreadLifecycleReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.threads.unarchive",
         "x-rusty-crew-contract-detail": "wire"
       }
     },
@@ -3958,6 +4066,50 @@
           "thread": { "$ref": "#/components/schemas/ExternalThreadProjection" }
         },
         "additionalProperties": false
+      },
+      "ExternalThreadLifecycleBindingTransition": {
+        "type": "object",
+        "required": [
+          "bindingId",
+          "previousStatus",
+          "currentStatus",
+          "revision"
+        ],
+        "properties": {
+          "bindingId": { "type": "string" },
+          "previousStatus": { "type": "string" },
+          "currentStatus": { "type": "string" },
+          "revision": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadLifecycleReceipt": {
+        "type": "object",
+        "required": [
+          "runtimeId",
+          "threadId",
+          "action",
+          "outcome",
+          "nativeArchived",
+          "bindings"
+        ],
+        "properties": {
+          "runtimeId": { "type": "string" },
+          "threadId": { "type": "string" },
+          "action": { "type": "string", "enum": ["archive", "unarchive"] },
+          "outcome": {
+            "type": "string",
+            "enum": ["applied", "already_archived", "already_active"]
+          },
+          "nativeArchived": { "type": "boolean" },
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalThreadLifecycleBindingTransition"
+            }
+          }
+        },
+        "additionalProperties": false
       }
     }
   },
@@ -3966,7 +4118,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 18,
+    "operation_count": 20,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

@@ -607,6 +607,20 @@ export const API_CAPABILITIES = [
     "admin",
     ["session"],
   ),
+  controlApiCapability(
+    "external.runtimes.threads.archive",
+    "POST",
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive",
+    "Archive native Codex history and archive every associated Crew binding.",
+    ["session"],
+  ),
+  controlApiCapability(
+    "external.runtimes.threads.unarchive",
+    "POST",
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
+    "Restore native Codex history without implicitly reactivating Crew bindings.",
+    ["session"],
+  ),
   readCapability(
     "external.runtimes.events.list",
     "GET",

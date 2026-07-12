@@ -2,6 +2,8 @@ import type { InitializeParams } from "../protocol/0.144.1/ts/InitializeParams.j
 import type { InitializeResponse } from "../protocol/0.144.1/ts/InitializeResponse.js";
 import type { ThreadCompactStartParams } from "../protocol/0.144.1/ts/v2/ThreadCompactStartParams.js";
 import type { ThreadCompactStartResponse } from "../protocol/0.144.1/ts/v2/ThreadCompactStartResponse.js";
+import type { ThreadArchiveParams } from "../protocol/0.144.1/ts/v2/ThreadArchiveParams.js";
+import type { ThreadArchiveResponse } from "../protocol/0.144.1/ts/v2/ThreadArchiveResponse.js";
 import type { CollaborationModeListParams } from "../protocol/0.144.1/ts/v2/CollaborationModeListParams.js";
 import type { CollaborationModeListResponse } from "../protocol/0.144.1/ts/v2/CollaborationModeListResponse.js";
 import type { ThreadItemsListParams } from "../protocol/0.144.1/ts/v2/ThreadItemsListParams.js";
@@ -12,6 +14,8 @@ import type { ThreadLoadedListParams } from "../protocol/0.144.1/ts/v2/ThreadLoa
 import type { ThreadLoadedListResponse } from "../protocol/0.144.1/ts/v2/ThreadLoadedListResponse.js";
 import type { ThreadReadParams } from "../protocol/0.144.1/ts/v2/ThreadReadParams.js";
 import type { ThreadReadResponse } from "../protocol/0.144.1/ts/v2/ThreadReadResponse.js";
+import type { ThreadUnarchiveParams } from "../protocol/0.144.1/ts/v2/ThreadUnarchiveParams.js";
+import type { ThreadUnarchiveResponse } from "../protocol/0.144.1/ts/v2/ThreadUnarchiveResponse.js";
 import type { ThreadResumeParams } from "../protocol/0.144.1/ts/v2/ThreadResumeParams.js";
 import type { ThreadResumeResponse } from "../protocol/0.144.1/ts/v2/ThreadResumeResponse.js";
 import type { ThreadStartParams } from "../protocol/0.144.1/ts/v2/ThreadStartParams.js";
@@ -199,6 +203,20 @@ export class CodexAppServerDriver {
     signal?: AbortSignal,
   ): Promise<ThreadReadResponse> {
     return this.#request("thread/read", params, signal);
+  }
+
+  threadArchive(
+    params: ThreadArchiveParams,
+    signal?: AbortSignal,
+  ): Promise<ThreadArchiveResponse> {
+    return this.#request("thread/archive", params, signal);
+  }
+
+  threadUnarchive(
+    params: ThreadUnarchiveParams,
+    signal?: AbortSignal,
+  ): Promise<ThreadUnarchiveResponse> {
+    return this.#request("thread/unarchive", params, signal);
   }
 
   threadStart(

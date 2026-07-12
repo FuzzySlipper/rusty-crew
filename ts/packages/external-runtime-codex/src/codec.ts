@@ -34,6 +34,8 @@ const responseSchemaByMethod: Readonly<Record<string, string>> = Object.freeze({
   initialize: "v1/InitializeResponse.json",
   "thread/list": "v2/ThreadListResponse.json",
   "thread/read": "v2/ThreadReadResponse.json",
+  "thread/archive": "v2/ThreadArchiveResponse.json",
+  "thread/unarchive": "v2/ThreadUnarchiveResponse.json",
   "thread/loaded/list": "v2/ThreadLoadedListResponse.json",
   "thread/start": "v2/ThreadStartResponse.json",
   "thread/resume": "v2/ThreadResumeResponse.json",

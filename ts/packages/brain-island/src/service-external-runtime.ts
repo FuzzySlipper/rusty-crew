@@ -33,6 +33,7 @@ import { resolveCodexCoordinationToolCall } from "./external-runtime-coordinatio
 import type {
   ExternalAgentSessionCreateResult,
   ExternalThreadItemProjection,
+  ExternalThreadLifecycleReceipt,
   ExternalThreadPage,
   ExternalThreadProjection,
   ExternalThreadReadResult,
@@ -71,6 +72,10 @@ interface PendingInteractionResolution {
   interaction: ExternalInteractionRecord;
 }
 
+type NativeCodexThread = Awaited<
+  ReturnType<CodexAppServerDriver["threadList"]>
+>["data"][number];
+
 export interface ExternalRuntimeRawDetail {
   readonly detailId: string;
   readonly runtimeId: string;
@@ -104,6 +109,21 @@ export class ExternalAgentSessionCreationError extends Error {
   ) {
     super(`${reasonCode}: ${message}`);
     this.name = "ExternalAgentSessionCreationError";
+  }
+}
+
+export class ExternalThreadLifecycleError extends Error {
+  constructor(
+    readonly reasonCode:
+      | "external_thread_not_found"
+      | "external_thread_active"
+      | "external_thread_interaction_pending"
+      | "external_thread_listing_limit_exceeded"
+      | "external_thread_binding_reconciliation_failed",
+    message: string,
+  ) {
+    super(`${reasonCode}: ${message}`);
+    this.name = "ExternalThreadLifecycleError";
   }
 }
 
@@ -270,6 +290,123 @@ export class ServiceExternalRuntimeController {
       params as Parameters<CodexAppServerDriver["threadRead"]>[0],
     );
     return { thread: projectExternalThread(result.thread) };
+  }
+
+  async archiveThread(
+    runtimeId: string,
+    threadId: string,
+  ): Promise<ExternalThreadLifecycleReceipt> {
+    const controlled = await this.#requireControlled(runtimeId);
+    const bindings = await this.#bindingsForThread(runtimeId, threadId);
+    await this.#assertThreadHasNoCrewWork(runtimeId, threadId, bindings);
+    const state = await this.#locateThread(controlled, threadId);
+    if (state === undefined) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_not_found",
+        `native thread ${threadId} was not found in runtime ${runtimeId}`,
+      );
+    }
+    if (state !== "archived" && state.thread.status.type === "active") {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_active",
+        `native thread ${threadId} is active`,
+      );
+    }
+
+    const nativeArchiveApplied = state !== "archived";
+    if (nativeArchiveApplied) {
+      await controlled.driver.threadArchive({ threadId });
+    }
+    const saved: Array<{
+      readonly before: ExternalAgentBinding;
+      readonly after: ExternalAgentBinding;
+    }> = [];
+    try {
+      for (const binding of bindings) {
+        if (binding.status === "archived") continue;
+        const after = await this.#bridge.bindExternalAgent({
+          binding: {
+            ...binding,
+            status: "archived",
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: binding.revision,
+        });
+        saved.push({ before: binding, after });
+      }
+    } catch (error) {
+      const compensationFailures: string[] = [];
+      for (const transition of saved.reverse()) {
+        await this.#bridge
+          .bindExternalAgent({
+            binding: {
+              ...transition.after,
+              status: transition.before.status,
+              updatedAt: this.#now().toISOString(),
+            },
+            expectedRevision: transition.after.revision,
+          })
+          .catch((compensationError: unknown) => {
+            compensationFailures.push(String(compensationError));
+          });
+      }
+      if (nativeArchiveApplied) {
+        await controlled.driver
+          .threadUnarchive({ threadId })
+          .catch((compensationError: unknown) => {
+            compensationFailures.push(String(compensationError));
+          });
+      }
+      throw new ExternalThreadLifecycleError(
+        "external_thread_binding_reconciliation_failed",
+        `binding reconciliation failed after native archive: ${String(error)}; compensation failures: ${compensationFailures.length === 0 ? "none" : compensationFailures.join("; ")}`,
+      );
+    }
+
+    return this.#threadLifecycleReceipt(
+      runtimeId,
+      threadId,
+      "archive",
+      nativeArchiveApplied ? "applied" : "already_archived",
+      true,
+      bindings,
+      new Map(saved.map(({ before, after }) => [before.bindingId, after])),
+    );
+  }
+
+  async unarchiveThread(
+    runtimeId: string,
+    threadId: string,
+  ): Promise<ExternalThreadLifecycleReceipt> {
+    const controlled = await this.#requireControlled(runtimeId);
+    const bindings = await this.#bindingsForThread(runtimeId, threadId);
+    await this.#assertThreadHasNoCrewWork(runtimeId, threadId, bindings);
+    const state = await this.#locateThread(controlled, threadId);
+    if (state !== undefined && state !== "archived") {
+      return this.#threadLifecycleReceipt(
+        runtimeId,
+        threadId,
+        "unarchive",
+        "already_active",
+        false,
+        bindings,
+      );
+    }
+    if (state === undefined) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_not_found",
+        `native thread ${threadId} was not found in runtime ${runtimeId}`,
+      );
+    }
+    await controlled.driver.threadUnarchive({ threadId });
+    return this.#threadLifecycleReceipt(
+      runtimeId,
+      threadId,
+      "unarchive",
+      "applied",
+      false,
+      bindings,
+    );
   }
 
   async createAgentSession(
@@ -1113,6 +1250,113 @@ export class ServiceExternalRuntimeController {
       throw new Error(`external runtime ${runtimeId} controller is not ready`);
     }
     return controlled;
+  }
+
+  async #bindingsForThread(
+    runtimeId: string,
+    threadId: string,
+  ): Promise<ExternalAgentBinding[]> {
+    return (await this.#bridge.listExternalBindings()).filter(
+      (binding) =>
+        binding.runtimeId === runtimeId && binding.nativeThreadId === threadId,
+    );
+  }
+
+  async #assertThreadHasNoCrewWork(
+    runtimeId: string,
+    threadId: string,
+    bindings: readonly ExternalAgentBinding[],
+  ): Promise<void> {
+    const bindingIds = new Set(bindings.map((binding) => binding.bindingId));
+    const activeTurn = (await this.#bridge.listActiveExternalTurns()).find(
+      (turn) =>
+        turn.runtimeId === runtimeId &&
+        (turn.nativeThreadId === threadId ||
+          bindingIds.has(turn.request.bindingId)),
+    );
+    if (activeTurn !== undefined) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_active",
+        `thread ${threadId} has active Crew turn ${activeTurn.request.requestId}`,
+      );
+    }
+    const interaction = (
+      await this.#bridge.listPendingExternalInteractions()
+    ).find(
+      (candidate) =>
+        candidate.runtimeId === runtimeId &&
+        candidate.nativeThreadId === threadId,
+    );
+    if (interaction !== undefined) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_interaction_pending",
+        `thread ${threadId} has unresolved interaction ${interaction.interactionId}`,
+      );
+    }
+  }
+
+  async #locateThread(
+    controlled: ControlledRuntime,
+    threadId: string,
+  ): Promise<{ readonly thread: NativeCodexThread } | "archived" | undefined> {
+    const active = await this.#findThread(controlled, threadId, false);
+    if (active !== undefined) return { thread: active };
+    const archived = await this.#findThread(controlled, threadId, true);
+    return archived === undefined ? undefined : "archived";
+  }
+
+  async #findThread(
+    controlled: ControlledRuntime,
+    threadId: string,
+    archived: boolean,
+  ): Promise<NativeCodexThread | undefined> {
+    let cursor: string | undefined;
+    const seenCursors = new Set<string>();
+    for (let page = 0; page < 100; page += 1) {
+      const result = await controlled.driver.threadList({
+        archived,
+        limit: 1_000,
+        useStateDbOnly: true,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      const found = result.data.find((thread) => thread.id === threadId);
+      if (found !== undefined) return found;
+      if (result.nextCursor === null) return undefined;
+      if (seenCursors.has(result.nextCursor)) break;
+      seenCursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+    throw new ExternalThreadLifecycleError(
+      "external_thread_listing_limit_exceeded",
+      `could not locate thread ${threadId} within the bounded native thread catalog`,
+    );
+  }
+
+  #threadLifecycleReceipt(
+    runtimeId: string,
+    threadId: string,
+    action: "archive" | "unarchive",
+    outcome: ExternalThreadLifecycleReceipt["outcome"],
+    nativeArchived: boolean,
+    bindings: readonly ExternalAgentBinding[],
+    saved = new Map<string, ExternalAgentBinding>(),
+  ): ExternalThreadLifecycleReceipt {
+    return {
+      runtimeId,
+      threadId,
+      action,
+      outcome,
+      nativeArchived,
+      bindings: bindings.map((binding) => {
+        const current = saved.get(binding.bindingId) ?? binding;
+        return {
+          bindingId: binding.bindingId,
+          previousStatus: binding.status,
+          currentStatus: current.status,
+          revision: current.revision,
+        };
+      }),
+    };
   }
 
   async #requireBinding(bindingId: string): Promise<ExternalAgentBinding> {

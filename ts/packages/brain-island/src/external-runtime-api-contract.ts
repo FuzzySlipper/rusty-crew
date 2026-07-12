@@ -3,7 +3,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.1.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.2.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -15,6 +15,10 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   connect: "/v1/external-runtimes/{runtime_id}/connect",
   threads: "/v1/external-runtimes/{runtime_id}/threads",
   threadRead: "/v1/external-runtimes/{runtime_id}/threads/read",
+  threadArchive:
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive",
+  threadUnarchive:
+    "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
   events: "/v1/external-runtimes/{runtime_id}/events",
   stream: "/v1/external-runtimes/{runtime_id}/stream",
   rawDetail: "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
@@ -70,6 +74,22 @@ export interface ExternalThreadPage {
 
 export interface ExternalThreadReadResult {
   readonly thread: ExternalThreadProjection;
+}
+
+export interface ExternalThreadLifecycleBindingTransition {
+  readonly bindingId: string;
+  readonly previousStatus: string;
+  readonly currentStatus: string;
+  readonly revision: number;
+}
+
+export interface ExternalThreadLifecycleReceipt {
+  readonly runtimeId: string;
+  readonly threadId: string;
+  readonly action: "archive" | "unarchive";
+  readonly outcome: "applied" | "already_archived" | "already_active";
+  readonly nativeArchived: boolean;
+  readonly bindings: readonly ExternalThreadLifecycleBindingTransition[];
 }
 
 export interface ExternalAgentSessionCreateResult {
@@ -147,6 +167,7 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
         name: "limit",
         schema: { type: "integer", minimum: 1, maximum: 1000, default: 50 },
       },
+      { name: "archived", schema: { type: "boolean", default: false } },
     ],
   ),
   operation(
@@ -156,6 +177,20 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.threadRead,
     "ExternalThreadReadResult",
     "ExternalThreadReadRequest",
+  ),
+  operation(
+    "external.runtimes.threads.archive",
+    "archiveExternalRuntimeThread",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.threadArchive,
+    "ExternalThreadLifecycleReceipt",
+  ),
+  operation(
+    "external.runtimes.threads.unarchive",
+    "unarchiveExternalRuntimeThread",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.threadUnarchive,
+    "ExternalThreadLifecycleReceipt",
   ),
   operation(
     "external.runtimes.events.list",
@@ -854,6 +889,45 @@ function routeSchemas(): Record<string, JsonSchema> {
       required: ["thread"],
       properties: {
         thread: { $ref: "#/components/schemas/ExternalThreadProjection" },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadLifecycleBindingTransition: {
+      type: "object",
+      required: ["bindingId", "previousStatus", "currentStatus", "revision"],
+      properties: {
+        bindingId: { type: "string" },
+        previousStatus: { type: "string" },
+        currentStatus: { type: "string" },
+        revision: { type: "integer", minimum: 0 },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadLifecycleReceipt: {
+      type: "object",
+      required: [
+        "runtimeId",
+        "threadId",
+        "action",
+        "outcome",
+        "nativeArchived",
+        "bindings",
+      ],
+      properties: {
+        runtimeId: { type: "string" },
+        threadId: { type: "string" },
+        action: { type: "string", enum: ["archive", "unarchive"] },
+        outcome: {
+          type: "string",
+          enum: ["applied", "already_archived", "already_active"],
+        },
+        nativeArchived: { type: "boolean" },
+        bindings: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalThreadLifecycleBindingTransition",
+          },
+        },
       },
       additionalProperties: false,
     },
