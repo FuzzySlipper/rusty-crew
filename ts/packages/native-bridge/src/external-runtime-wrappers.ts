@@ -1,5 +1,6 @@
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import type { NativeBridgeModule } from "./public-api.js";
+import { serializeExternalAgentSessionCreationRequest } from "./external-runtime-wire.js";
 
 type ExternalRuntimeMethodName =
   | "registerExternalRuntime"
@@ -89,7 +90,7 @@ export function createNativeBridgeExternalRuntimeMethods(
     prepareExternalAgentSessionCreation: async (request) =>
       JSON.parse(
         binding.prepareExternalAgentSessionCreationJson(
-          JSON.stringify(request),
+          serializeExternalAgentSessionCreationRequest(request),
         ),
       ) as Awaited<
         ReturnType<NativeBridgeModule["prepareExternalAgentSessionCreation"]>

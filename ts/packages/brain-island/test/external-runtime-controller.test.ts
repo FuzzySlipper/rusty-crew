@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import type { ExternalAgentSessionCreationRequest } from "@rusty-crew/contracts";
 import {
   CODEX_APP_SERVER_PROTOCOL,
   CodexAppServerDriver,
@@ -296,6 +297,10 @@ test("controller atomically creates and idempotently reuses an external agent se
       runtimeId: fixture.runtimeId,
       profileId: fixture.profileId,
       cwd: fixture.dataDir,
+      taskRef: {
+        projectId: "rusty-crew",
+        taskId: "5678",
+      } as ExternalAgentSessionCreationRequest["taskRef"],
       label: "Browser Codex agent",
       requestedAt: new Date().toISOString(),
     } as const;
@@ -304,6 +309,21 @@ test("controller atomically creates and idempotently reuses an external agent se
     assert.equal(created.thread.threadId, "created-thread-1");
     assert.equal(created.creation.session.profileId, fixture.profileId);
     assert.equal(created.creation.binding.nativeThreadId, "created-thread-1");
+    assert.deepEqual(created.creation.request.taskRef, {
+      project_id: "rusty-crew",
+      task_id: "5678",
+    });
+    assert.deepEqual(created.creation.binding.taskRef, {
+      project_id: "rusty-crew",
+      task_id: "5678",
+    });
+    const persistedBinding = await fixture.bridge.getExternalBinding(
+      created.creation.binding.bindingId,
+    );
+    assert.deepEqual(persistedBinding?.taskRef, {
+      project_id: "rusty-crew",
+      task_id: "5678",
+    });
 
     const retried = await fixture.controller.createAgentSession({
       ...request,
@@ -738,6 +758,7 @@ async function externalCreationFixture(
     dataDir,
     runtimeId,
     profileId,
+    bridge,
     transport,
     controller,
     cleanup: async () => {

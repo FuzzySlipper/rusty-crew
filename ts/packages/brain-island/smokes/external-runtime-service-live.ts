@@ -202,6 +202,7 @@ try {
     runtimeId,
     profileId: browserProfileId,
     cwd: dataDir,
+    taskRef: { project_id: "rusty-crew", task_id: "5678" },
     label: "Live browser-created Codex agent",
   };
   const browserCreationResponse = await fetch(
@@ -221,7 +222,11 @@ try {
         nativeThreadId: string;
         phase: string;
         session: { sessionId: string; profileId: string };
-        binding: { bindingId: string; nativeThreadId: string };
+        binding: {
+          bindingId: string;
+          nativeThreadId: string;
+          taskRef: { project_id: string; task_id: string };
+        };
       };
       thread: { threadId: string };
     };
@@ -236,6 +241,10 @@ try {
     browserCreation.data.thread.threadId,
     browserCreation.data.creation.nativeThreadId,
   );
+  assert.deepEqual(browserCreation.data.creation.binding.taskRef, {
+    project_id: "rusty-crew",
+    task_id: "5678",
+  });
 
   const browserCreationRetryResponse = await fetch(
     `${baseUrl}/v1/external-agent-sessions`,
