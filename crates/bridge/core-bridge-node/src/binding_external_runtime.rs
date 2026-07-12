@@ -362,6 +362,18 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn expire_external_turn_dispatches_json(&self, now: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .expire_external_turn_dispatches(&now)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
     pub fn transition_external_turn_json(&self, input_json: String) -> napi::Result<String> {
         let input = parse_json::<TurnTransition>(&input_json)?;
         serialize_json(

@@ -691,6 +691,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         Vec<protocol::ExternalTurnCorrelation>
     );
     schema!(
+        "expire_external_turn_dispatches",
+        Vec<protocol::ExternalTurnCorrelation>
+    );
+    schema!(
         "transition_external_turn",
         protocol::ExternalTurnCorrelation
     );

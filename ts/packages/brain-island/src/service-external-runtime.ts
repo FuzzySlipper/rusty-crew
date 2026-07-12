@@ -136,6 +136,20 @@ export class ExternalThreadLifecycleError extends Error {
   }
 }
 
+class ExternalTurnDispatchError extends Error {
+  constructor(
+    readonly phase: "failed" | "outcome_unknown",
+    readonly reasonCode:
+      | "external_turn_preflight_failed"
+      | "external_turn_start_outcome_unknown",
+    message: string,
+    cause: unknown,
+  ) {
+    super(message, { cause });
+    this.name = "ExternalTurnDispatchError";
+  }
+}
+
 export class ServiceExternalRuntimeController {
   readonly #bridge: NativeBridgeModule;
   readonly #now: () => Date;
@@ -750,6 +764,9 @@ export class ServiceExternalRuntimeController {
         controlled.registration = registration;
         controlled.lease = await this.#acquireLease(registration.runtimeId);
       }
+      await this.#bridge.expireExternalTurnDispatches(
+        this.#now().toISOString(),
+      );
       await this.#dispatchAcceptedTurns();
     } finally {
       this.#ticking = false;
@@ -760,26 +777,76 @@ export class ServiceExternalRuntimeController {
     const turns = await this.#bridge.listActiveExternalTurns();
     for (const turn of turns) {
       if (turn.phase !== "accepted") continue;
+      const controlled = this.#controlled.get(turn.runtimeId);
+      if (controlled === undefined || controlled.driver.state !== "ready") {
+        continue;
+      }
       const binding = await this.#bridge.getExternalBinding(
         turn.request.bindingId,
       );
-      if (binding === undefined) continue;
-      const controlled = await this.#requireControlled(binding.runtimeId).catch(
-        () => undefined,
-      );
-      if (controlled === undefined) continue;
+      if (binding === undefined || binding.status !== "active") {
+        await this.#terminalizeDispatchFailure(
+          controlled,
+          turn,
+          binding === undefined
+            ? "external_turn_binding_missing"
+            : "external_turn_binding_not_active",
+          binding === undefined
+            ? `external binding ${turn.request.bindingId} was not found`
+            : `external binding ${turn.request.bindingId} is ${binding.status}`,
+          "failed",
+        );
+        continue;
+      }
       await this.#startAcceptedTurn(controlled, binding, turn).catch(
         async (error) => {
-          await this.#bridge.transitionExternalTurn({
-            controller: this.#controllerContext(controlled),
-            requestId: turn.request.requestId,
-            nextPhase: "failed",
-            terminalReasonCode: `external_turn_start_failed:${String(error)}`,
-            now: this.#now().toISOString(),
-          });
+          const dispatchError =
+            error instanceof ExternalTurnDispatchError ? error : undefined;
+          await this.#terminalizeDispatchFailure(
+            controlled,
+            turn,
+            dispatchError?.reasonCode ?? "external_turn_start_failed",
+            error instanceof Error ? error.message : String(error),
+            dispatchError?.phase ?? "failed",
+          );
         },
       );
     }
+  }
+
+  async #terminalizeDispatchFailure(
+    controlled: ControlledRuntime,
+    turn: ExternalTurnCorrelation,
+    reasonCode: string,
+    message: string,
+    phase: "failed" | "outcome_unknown",
+  ): Promise<void> {
+    await this.#bridge.transitionExternalTurn({
+      controller: this.#controllerContext(controlled),
+      requestId: turn.request.requestId,
+      nextPhase: phase,
+      terminalReasonCode: reasonCode,
+      now: this.#now().toISOString(),
+    });
+    await this.#bridge
+      .recordExternalRuntimeEvent({
+        controller: this.#controllerContext(controlled),
+        event: {
+          eventId: `${controlled.registration.runtimeId}:controller:${randomUUID()}`,
+          sessionId: turn.request.sessionId,
+          createdAt: this.#now().toISOString(),
+          kind: "runtime_status",
+          runtimeId: controlled.registration.runtimeId,
+          nativeThreadId: turn.nativeThreadId,
+          requestId: turn.request.requestId,
+          payload: {
+            nativeMethod: "rustyCrew/externalTurnDispatchFailed",
+            status: reasonCode,
+            message: message.slice(0, 2_000),
+          },
+        },
+      })
+      .catch(() => undefined);
   }
 
   async #resumePersistedBindings(controlled: ControlledRuntime): Promise<void> {
@@ -901,39 +968,59 @@ export class ServiceExternalRuntimeController {
     binding: ExternalAgentBinding,
     turn: ExternalTurnCorrelation,
   ): Promise<void> {
+    let collaborationMode: CollaborationMode;
+    try {
+      collaborationMode = await this.#resolveCollaborationMode(
+        controlled,
+        binding,
+        turn.request.collaborationMode ?? "default",
+      );
+    } catch (error) {
+      throw new ExternalTurnDispatchError(
+        "failed",
+        "external_turn_preflight_failed",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
+    }
     await this.#bridge.transitionExternalTurn({
       controller: this.#controllerContext(controlled),
       requestId: turn.request.requestId,
       nextPhase: "starting",
       now: this.#now().toISOString(),
     });
-    const started = await controlled.driver.turnStart({
-      threadId: turn.nativeThreadId,
-      input: turn.request.input.map((part) =>
-        part.type === "text"
-          ? { type: "text" as const, text: part.text, text_elements: [] }
-          : {
-              type: "text" as const,
-              text: `[${part.type}] ${JSON.stringify(part)}`,
-              text_elements: [],
-            },
-      ),
-      ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
-      approvalPolicy: "never",
-      sandboxPolicy: { type: "dangerFullAccess" },
-      collaborationMode: await this.#resolveCollaborationMode(
-        controlled,
-        binding,
-        turn.request.collaborationMode ?? "default",
-      ),
-    });
-    await this.#bridge.transitionExternalTurn({
-      controller: this.#controllerContext(controlled),
-      requestId: turn.request.requestId,
-      nextPhase: "active",
-      nativeTurnId: started.turn.id,
-      now: this.#now().toISOString(),
-    });
+    try {
+      const started = await controlled.driver.turnStart({
+        threadId: turn.nativeThreadId,
+        input: turn.request.input.map((part) =>
+          part.type === "text"
+            ? { type: "text" as const, text: part.text, text_elements: [] }
+            : {
+                type: "text" as const,
+                text: `[${part.type}] ${JSON.stringify(part)}`,
+                text_elements: [],
+              },
+        ),
+        ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        collaborationMode,
+      });
+      await this.#bridge.transitionExternalTurn({
+        controller: this.#controllerContext(controlled),
+        requestId: turn.request.requestId,
+        nextPhase: "active",
+        nativeTurnId: started.turn.id,
+        now: this.#now().toISOString(),
+      });
+    } catch (error) {
+      throw new ExternalTurnDispatchError(
+        "outcome_unknown",
+        "external_turn_start_outcome_unknown",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
+    }
   }
 
   async #resolveCollaborationMode(

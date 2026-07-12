@@ -141,6 +141,17 @@ class FakeTransport implements CodexJsonRpcTransport {
   }
 }
 
+class TurnStartTimeoutTransport extends FakeTransport {
+  override async send(message: string): Promise<void> {
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    if (parsed.method === "turn/start") {
+      this.sent.push(parsed);
+      return;
+    }
+    await super.send(message);
+  }
+}
+
 class FakeCreationTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -1169,6 +1180,146 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
     assert.deepEqual(
       (defaultTurnStart?.params as Record<string, unknown>)?.sandboxPolicy,
       { type: "dangerFullAccess" },
+    );
+  } finally {
+    await controller.stop().catch(() => undefined);
+    await bridge.shutdownEngine({ engine, drainTimeoutMs: 5_000 });
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("controller expires undispatched turns and reports ambiguous native starts durably", async () => {
+  const dataDir = mkdtempSync(
+    join(tmpdir(), "rusty-crew-external-dispatch-controller-"),
+  );
+  const bridge = await loadNativeBridge();
+  const engine = await bridge.initializeEngine({
+    engineDataDir: dataDir,
+    clock: "system",
+    defaultTurnBudget: 16,
+    defaultIdleTimeoutMs: 30_000,
+    storage: { backend: "sqlite" },
+  });
+  const transport = new TurnStartTimeoutTransport();
+  const controller = new ServiceExternalRuntimeController({
+    bridge,
+    instanceId: "dispatch-test-controller",
+    driverFactory: (_registration, authority) =>
+      new CodexAppServerDriver(transport, authority, { requestTimeoutMs: 25 }),
+  });
+  const runtimeId = "dispatch-runtime";
+  const sessionId = "dispatch-session";
+  const agentId = "dispatch-agent";
+  const bindingId = "dispatch-binding";
+  const now = (): string => new Date().toISOString();
+
+  try {
+    await bridge.registerExternalRuntime({
+      registration: {
+        runtimeId,
+        kind: "codex_app_server",
+        endpoint: { transport: "unix_web_socket", address: "/tmp/fake.sock" },
+        processOwnership: "attached",
+        expectedCliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
+        executableSha256: CODEX_APP_SERVER_PROTOCOL.nativeExecutableSha256,
+        protocolSchemaSha256: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+        desiredState: "enabled",
+        observedState: "disconnected",
+        revision: 0,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+    });
+    await bridge.ensureConfiguredSession({
+      sessionId,
+      agentId,
+      profileId: "dispatch-profile",
+      kind: "full",
+      toolProfile: { tools: [] },
+    });
+    await bridge.bindExternalAgent({
+      binding: {
+        bindingId,
+        runtimeId,
+        sessionId,
+        agentId,
+        purpose: "crew_agent",
+        nativeThreadId: "dispatch-thread",
+        effectiveConfigFingerprint: "dispatch-test",
+        status: "active",
+        revision: 0,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+    });
+    await controller.connect(runtimeId);
+
+    const expiring = await bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "dispatch-expiry-delivery",
+      idempotencyKey: "dispatch-expiry-delivery",
+      messageId: "dispatch-expiry-message",
+      toAgentId: agentId,
+      body: "expire before dispatch",
+      requireWake: true,
+      createdAt: now(),
+      expiresAt: new Date(Date.now() + 10).toISOString(),
+    });
+    assert.equal(expiring.activation?.type, "external_turn_requested");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await controller.tick();
+    const expired = await bridge.getExternalTurn(
+      expiring.activation?.type === "external_turn_requested"
+        ? expiring.activation.requestId
+        : "",
+    );
+    assert.equal(expired?.phase, "failed");
+    assert.equal(expired?.terminalReasonCode, "external_turn_dispatch_expired");
+    assert.equal(
+      transport.sent.some((message) => message.method === "turn/start"),
+      false,
+    );
+
+    const ambiguous = await bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "dispatch-timeout-delivery",
+      idempotencyKey: "dispatch-timeout-delivery",
+      messageId: "dispatch-timeout-message",
+      toAgentId: agentId,
+      body: "time out after native dispatch",
+      requireWake: true,
+      createdAt: now(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(ambiguous.activation?.type, "external_turn_requested");
+    await controller.tick();
+    const requestId =
+      ambiguous.activation?.type === "external_turn_requested"
+        ? ambiguous.activation.requestId
+        : "";
+    const terminal = await bridge.getExternalTurn(requestId);
+    assert.equal(terminal?.phase, "outcome_unknown");
+    assert.equal(
+      terminal?.terminalReasonCode,
+      "external_turn_start_outcome_unknown",
+    );
+    const events = await bridge.queryExternalRuntimeEvents({
+      runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    });
+    assert.ok(
+      events.some(
+        (event) =>
+          event.requestId === requestId &&
+          typeof event.payload === "object" &&
+          event.payload !== null &&
+          "nativeMethod" in event.payload &&
+          "status" in event.payload &&
+          event.payload.nativeMethod ===
+            "rustyCrew/externalTurnDispatchFailed" &&
+          event.payload.status === "external_turn_start_outcome_unknown",
+      ),
     );
   } finally {
     await controller.stop().catch(() => undefined);

@@ -1,6 +1,7 @@
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import type { NativeBridgeModule } from "./public-api.js";
 import { serializeExternalAgentSessionCreationRequest } from "./external-runtime-wire.js";
+import { createNativeBridgeExternalRuntimeTurnMethods } from "./external-runtime-turn-wrappers.js";
 
 type ExternalRuntimeMethodName =
   | "registerExternalRuntime"
@@ -19,6 +20,7 @@ type ExternalRuntimeMethodName =
   | "recordExternalAgentSessionCreationFailure"
   | "getExternalTurn"
   | "listActiveExternalTurns"
+  | "expireExternalTurnDispatches"
   | "transitionExternalTurn"
   | "submitExternalControl"
   | "completeExternalControl"
@@ -33,6 +35,7 @@ export function createNativeBridgeExternalRuntimeMethods(
   binding: NativeBridgeBinding,
 ): Pick<NativeBridgeModule, ExternalRuntimeMethodName> {
   return {
+    ...createNativeBridgeExternalRuntimeTurnMethods(binding),
     registerExternalRuntime: async (input) =>
       JSON.parse(
         binding.registerExternalRuntimeJson(JSON.stringify(input)),
@@ -119,22 +122,6 @@ export function createNativeBridgeExternalRuntimeMethods(
           NativeBridgeModule["recordExternalAgentSessionCreationFailure"]
         >
       >,
-    getExternalTurn: async (requestId) => {
-      const value = binding.getExternalTurnJson(requestId);
-      return value === null || value === undefined
-        ? undefined
-        : (JSON.parse(value) as Awaited<
-            ReturnType<NativeBridgeModule["getExternalTurn"]>
-          >);
-    },
-    listActiveExternalTurns: async () =>
-      JSON.parse(binding.listActiveExternalTurnsJson()) as Awaited<
-        ReturnType<NativeBridgeModule["listActiveExternalTurns"]>
-      >,
-    transitionExternalTurn: async (input) =>
-      JSON.parse(
-        binding.transitionExternalTurnJson(JSON.stringify(input)),
-      ) as Awaited<ReturnType<NativeBridgeModule["transitionExternalTurn"]>>,
     submitExternalControl: async (request) =>
       JSON.parse(
         binding.submitExternalControlJson(JSON.stringify(request)),

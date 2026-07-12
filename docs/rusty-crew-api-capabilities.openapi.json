@@ -3849,6 +3849,32 @@
         "x-rusty-crew-stability": "experimental",
         "x-rusty-crew-contract-detail": "capability"
       }
+    },
+    "/v1/external-turns/{request_id}": {
+      "get": {
+        "operationId": "externalTurnsRead",
+        "summary": "Read durable Crew/native external turn lifecycle state by activation request ID.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.turns.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
     }
   },
   "components": {
@@ -4106,7 +4132,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 158,
+    "capability_count": 159,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

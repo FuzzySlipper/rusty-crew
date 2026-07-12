@@ -288,13 +288,20 @@ Inputs are typed content parts plus machine provenance. Gate results, direct
 agent messages, operator chat, and scheduled wakes remain distinguishable. Crew
 does not disguise machine facts as unlabelled user prose.
 
+The input TTL governs admission and dispatch waiting only. Rust terminalizes an
+`accepted` request as `failed` with `external_turn_dispatch_expired` when its TTL
+elapses before native dispatch. Once the controller has entered `starting`, the
+input TTL no longer caps the native turn. A native start request whose outcome
+cannot be established becomes `outcome_unknown`; it is never silently replayed.
+
 `ExternalTurnPhase` is one of:
 
 ```text
 accepted -> starting -> active
 active -> waiting_interaction -> active
 active -> completed | failed | interrupted
-accepted | starting -> failed | interrupted
+accepted -> failed | interrupted
+starting -> failed | interrupted | outcome_unknown
 ```
 
 Terminal phases are immutable. A native turn ID is bound once. Conflicting
@@ -430,9 +437,38 @@ low-rate coordination facts such as turn terminal, interaction attention,
 capacity release, and routed agent messages. Raw native details are bounded,
 redacted, lazy, and operator-only.
 
+Cursor domains are deliberately separate. `AgentMessageDeliveryReceipt.sequence`
+is a CoreBus coordination sequence and must never be supplied as the `after` or
+`Last-Event-ID` cursor for an external-runtime event feed. External event cursors
+come only from `NormalizedExternalRuntimeEvent.sequenceId`. A caller that needs
+durable lifecycle state follows `AgentActivation::ExternalTurnRequested.requestId`
+through `GET /v1/external-turns/{request_id}`; it does not infer completion from
+the delivery receipt remaining `accepted`.
+
 Browser APIs advertise capabilities from the current runtime registration and
 observed state. The UI does not infer that all external runtimes support every
 control.
+
+### Dispatch lifecycle field proof
+
+Task `#5710` re-examined a delivery initially reported as never dispatched. The
+durable SQLite records showed that request had actually started and completed in
+about 3.4 seconds. Its delivery receipt used CoreBus sequence `48970`, while its
+external runtime events used sequences `4326` through `4340`; polling the latter
+with `after=48970` had hidden the successful turn.
+
+After the lifecycle repair, the debug service certified both terminal paths:
+
+- request `agent-message:task-5710-live-1783897289-message` completed native
+  turn `019f5890-8224-7333-8450-ffcdbcaea381`, streamed
+  `EXTERNAL_DISPATCH_5710_OK`, and read back as `completed` through the durable
+  external-turn route;
+- request `agent-message:task-5710-expiry-1783897330-message` used a one
+  millisecond input TTL and read back as `failed` with
+  `external_turn_dispatch_expired` without creating a native turn.
+
+Both disposable native threads and bindings were cleaned through Crew's typed
+hard-delete route after certification.
 
 ## Persistence
 

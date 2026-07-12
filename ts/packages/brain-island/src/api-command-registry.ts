@@ -699,6 +699,14 @@ export const API_CAPABILITIES = [
     ["session"],
   ),
   readCapability(
+    "external.turns.read",
+    "GET",
+    "/v1/external-turns/{request_id}",
+    "Read durable Crew/native external turn lifecycle state by activation request ID.",
+    "admin",
+    ["session", "diagnostics"],
+  ),
+  readCapability(
     "agent.rounds.read",
     "GET",
     "/v1/agent-rounds/{round_id}",

@@ -79,6 +79,7 @@ export interface NativeExternalRuntimeBridgeMethods {
     requestId: string,
   ): Promise<ExternalTurnCorrelation | undefined>;
   listActiveExternalTurns(): Promise<ExternalTurnCorrelation[]>;
+  expireExternalTurnDispatches(now: string): Promise<ExternalTurnCorrelation[]>;
   transitionExternalTurn(input: {
     controller: ExternalControllerContext;
     requestId: string;

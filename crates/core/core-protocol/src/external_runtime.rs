@@ -352,7 +352,10 @@ impl ExternalTurnPhase {
         match (self, next) {
             (current, next) if current == next => true,
             (Self::Accepted, Self::Starting | Self::Failed | Self::Interrupted) => true,
-            (Self::Starting, Self::Active | Self::Failed | Self::Interrupted) => true,
+            (
+                Self::Starting,
+                Self::Active | Self::Failed | Self::Interrupted | Self::OutcomeUnknown,
+            ) => true,
             (
                 Self::Active,
                 Self::WaitingInteraction

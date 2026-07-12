@@ -111,6 +111,7 @@ export interface NativeBridgeBinding {
   recordExternalAgentSessionCreationFailureJson(inputJson: string): string
   getExternalTurnJson(requestId: string): string
   listActiveExternalTurnsJson(): string
+  expireExternalTurnDispatchesJson(now: string): string
   transitionExternalTurnJson(inputJson: string): string
   submitExternalControlJson(inputJson: string): string
   completeExternalControlJson(inputJson: string): string
@@ -779,7 +780,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 235,
+  "manifestOperationCount": 236,
   "methods": [
     {
       "name": "deliverAgentMessageJson",
@@ -1660,6 +1661,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "list_active_external_turns"
+    },
+    {
+      "name": "expireExternalTurnDispatchesJson",
+      "parameterSource": "now: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "expire_external_turn_dispatches"
     },
     {
       "name": "transitionExternalTurnJson",

@@ -19994,6 +19994,7 @@ export const bridgeWireSchemaArtifact = {
     "delete_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
     "deliver_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "ensure_active_chat_conversation_branch": "rusty_crew_core_persistence::contracts::EnsureActiveChatConversationBranchResult",
+    "expire_external_turn_dispatches": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "get_agent_message_delivery": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt>",
     "get_agent_round": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentCorrelatedRound>",
     "get_chat_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayChatLayerRecord>",

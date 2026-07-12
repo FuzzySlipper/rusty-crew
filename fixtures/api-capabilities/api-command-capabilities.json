@@ -336,6 +336,17 @@
         "public": true
       },
       {
+        "id": "external.turns.read",
+        "method": "GET",
+        "path_template": "/v1/external-turns/{request_id}",
+        "description": "Read durable Crew/native external turn lifecycle state by activation request ID.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "agent.rounds.read",
         "method": "GET",
         "path_template": "/v1/agent-rounds/{round_id}",
@@ -2044,6 +2055,13 @@
         "capability_id": "external.interactions.resolve",
         "method": "POST",
         "path_template": "/v1/external-interactions/{interaction_id}/resolve",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.turns.read",
+        "method": "GET",
+        "path_template": "/v1/external-turns/{request_id}",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

@@ -681,6 +681,77 @@ fn external_collaboration_mode_is_persisted_on_the_requested_turn() {
 }
 
 #[test]
+fn expired_accepted_external_turn_is_terminalized_without_capping_active_work() {
+    let engine = test_engine();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+
+    let expired_request = ExternalTurnRequestId::new("expired-before-dispatch");
+    engine
+        .activate_agent_execution(AgentActivationRequest {
+            expires_at: Some("2026-06-19T00:00:05Z".into()),
+            ..activation("codex-agent", &expired_request.0)
+        })
+        .unwrap();
+    let expired = engine
+        .expire_external_turn_dispatches(&"2026-06-19T00:00:06Z".into())
+        .unwrap();
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].request.request_id, expired_request);
+    assert_eq!(expired[0].phase, ExternalTurnPhase::Failed);
+    assert_eq!(
+        expired[0].terminal_reason_code.as_deref(),
+        Some("external_turn_dispatch_expired")
+    );
+
+    let active_request = ExternalTurnRequestId::new("active-past-input-ttl");
+    engine
+        .activate_agent_execution(AgentActivationRequest {
+            expires_at: Some("2026-06-19T00:00:07Z".into()),
+            ..activation("codex-agent", &active_request.0)
+        })
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:06Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Active,
+            Some("native-active".into()),
+            None,
+            "2026-06-19T00:00:06Z".into(),
+        )
+        .unwrap();
+    assert!(engine
+        .expire_external_turn_dispatches(&"2026-06-19T00:00:08Z".into())
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        engine
+            .get_external_turn(&active_request)
+            .unwrap()
+            .unwrap()
+            .phase,
+        ExternalTurnPhase::Active
+    );
+}
+
+#[test]
 fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
     let engine = test_engine();
     let codex = engine

@@ -308,6 +308,27 @@ try {
     browserTerminal.nativeThreadId,
     browserCreation.data.creation.nativeThreadId,
   );
+  assert.equal(browserDelivery.activation?.type, "external_turn_requested");
+  const browserRequestId =
+    browserDelivery.activation?.type === "external_turn_requested"
+      ? browserDelivery.activation.requestId
+      : "";
+  const turnReceiptResponse = await fetch(
+    `${baseUrl}/v1/external-turns/${encodeURIComponent(browserRequestId)}`,
+  );
+  assert.equal(turnReceiptResponse.status, 200);
+  const turnReceiptBody = (await turnReceiptResponse.json()) as {
+    ok: boolean;
+    data: {
+      phase: string;
+      nativeTurnId: string | null;
+      terminalReasonCode: string | null;
+    };
+  };
+  assert.equal(turnReceiptBody.ok, true);
+  assert.equal(turnReceiptBody.data.phase, "completed");
+  assert.equal(turnReceiptBody.data.nativeTurnId, browserTurn.nativeTurnId);
+  assert.equal(turnReceiptBody.data.terminalReasonCode, null);
   const browserTurnText = (
     await bridge.queryExternalRuntimeEvents({
       runtimeId,

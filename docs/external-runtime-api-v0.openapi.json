@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -929,6 +929,51 @@
           }
         },
         "x-rusty-crew-capability-id": "external.interactions.resolve",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-turns/{request_id}": {
+      "get": {
+        "operationId": "readExternalTurn",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalTurnCorrelation"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.turns.read",
         "x-rusty-crew-contract-detail": "wire"
       }
     },
@@ -4205,7 +4250,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 21,
+    "operation_count": 22,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

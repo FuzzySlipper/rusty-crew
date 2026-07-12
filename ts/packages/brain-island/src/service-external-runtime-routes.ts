@@ -45,6 +45,7 @@ export function isExternalRuntimeRoute(pathname: string): boolean {
     pathname.startsWith("/v1/external-bindings/") ||
     pathname === "/v1/external-interactions" ||
     pathname.startsWith("/v1/external-interactions/") ||
+    pathname.startsWith("/v1/external-turns/") ||
     pathname.startsWith("/v1/agent-deliveries/") ||
     pathname.startsWith("/v1/agent-rounds/")
   );
@@ -156,6 +157,14 @@ export async function handleExternalRuntimeRequest(
     return round === undefined
       ? notFound(requestId, "agent_round_not_found", "agent round")
       : successRoute(requestId, round);
+  }
+
+  if (parts[1] === "external-turns" && parts.length === 3) {
+    if (method !== "GET") return methodNotAllowed(requestId);
+    const turn = await context.bridge.getExternalTurn(parts[2] ?? "");
+    return turn === undefined
+      ? notFound(requestId, "external_turn_not_found", "external turn")
+      : successRoute(requestId, turn);
   }
 
   if (parts[1] === "agent-deliveries" && parts.length === 3) {

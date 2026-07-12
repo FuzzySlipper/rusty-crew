@@ -702,6 +702,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     getExternalTurn: unavailable("get_external_turn"),
     listActiveExternalTurns: unavailable("list_active_external_turns"),
+    expireExternalTurnDispatches: unavailable(
+      "expire_external_turn_dispatches",
+    ),
     transitionExternalTurn: unavailable("transition_external_turn"),
     submitExternalControl: unavailable("submit_external_control"),
     completeExternalControl: unavailable("complete_external_control"),

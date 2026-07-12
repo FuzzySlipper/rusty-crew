@@ -59,6 +59,7 @@ export const bridgeOperations = [
   {"name":"record_external_agent_session_creation_failure","surface":"stable","direction":"ts_to_rust","input":"controller + creation_id + expected_revision + reason + now","output":"core_protocol::ExternalAgentSessionCreationRecord","errors":"core_protocol::CoreError","summary":"Persist a recoverable native-start failure without losing deterministic session identity."},
   {"name":"get_external_turn","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalTurnRequestId","output":"option<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"Read one Crew/native external turn correlation."},
   {"name":"list_active_external_turns","surface":"stable","direction":"ts_to_rust","input":"unit","output":"vec<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"List nonterminal external turns for controller reconciliation and fleet attention."},
+  {"name":"expire_external_turn_dispatches","surface":"stable","direction":"ts_to_rust","input":"core_protocol::IsoTimestamp","output":"vec<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"Terminalize accepted external turns whose input TTL elapsed before native dispatch."},
   {"name":"transition_external_turn","surface":"stable","direction":"ts_to_rust","input":"request_id + phase + native_turn_id + terminal_reason_code + now","output":"core_protocol::ExternalTurnCorrelation","errors":"core_protocol::CoreError","summary":"Apply a validated monotonic Crew/native external turn lifecycle transition."},
   {"name":"submit_external_control","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalControlRequest","output":"core_protocol::ExternalControlReceipt","errors":"core_protocol::CoreError","summary":"Validate binding revision and expected native turn before a controller performs an external side effect."},
   {"name":"complete_external_control","surface":"stable","direction":"ts_to_rust","input":"control_id + terminal status + outcome + reason_code + now","output":"core_protocol::ExternalControlReceipt","errors":"core_protocol::CoreError","summary":"Persist the immutable terminal result of a validated external control."},
@@ -247,4 +248,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "e6dd8e8bae9c1eaeeb650853a112f187490c05bac76b58f8ada0ee3098178aa6" as const;
+export const bridgeWireShapeFingerprint = "5dc092eedd4f92edb5ab591deb74a60fcc29262c463e238fc63fe3459cae9d94" as const;

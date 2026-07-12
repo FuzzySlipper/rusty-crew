@@ -541,6 +541,15 @@ errors = "core_protocol::CoreError"
 summary = "List nonterminal external turns for controller reconciliation and fleet attention."
 
 [[operation]]
+name = "expire_external_turn_dispatches"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::IsoTimestamp"
+output = "vec<core_protocol::ExternalTurnCorrelation>"
+errors = "core_protocol::CoreError"
+summary = "Terminalize accepted external turns whose input TTL elapsed before native dispatch."
+
+[[operation]]
 name = "transition_external_turn"
 surface = "stable"
 direction = "ts_to_rust"

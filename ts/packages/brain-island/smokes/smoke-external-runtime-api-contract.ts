@@ -18,7 +18,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.4.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.5.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -92,6 +92,7 @@ assert.deepEqual(
   ["project_id", "task_id"],
 );
 assert.ok(schema("AgentMessageDeliveryReceipt").properties?.request);
+assert.ok(schema("ExternalTurnCorrelation").properties?.terminalReasonCode);
 assert.ok(schema("AgentCorrelatedRound").properties?.status);
 assert.ok(schema("ExternalInteractionRecord").properties?.allowedResponses);
 assert.deepEqual(schema("ExternalCollaborationMode").enum, ["plan"]);

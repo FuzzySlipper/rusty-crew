@@ -511,6 +511,32 @@ impl CoreEngine {
         self.store.list_nonterminal_external_turns()
     }
 
+    pub fn expire_external_turn_dispatches(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        let mut expired = Vec::new();
+        for turn in self.store.list_nonterminal_external_turns()? {
+            if turn.phase != ExternalTurnPhase::Accepted
+                || turn
+                    .request
+                    .expires_at
+                    .as_ref()
+                    .is_none_or(|expires_at| expires_at > now)
+            {
+                continue;
+            }
+            expired.push(self.transition_external_turn(
+                &turn.request.request_id,
+                ExternalTurnPhase::Failed,
+                None,
+                Some("external_turn_dispatch_expired".into()),
+                now.clone(),
+            )?);
+        }
+        Ok(expired)
+    }
+
     pub fn submit_external_control(
         &self,
         request: ExternalControlRequest,

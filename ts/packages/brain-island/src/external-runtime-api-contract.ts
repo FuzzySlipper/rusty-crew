@@ -3,7 +3,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.4.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.5.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -28,6 +28,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   messages: "/v1/external-bindings/{binding_id}/messages",
   interactions: "/v1/external-interactions",
   interactionResolve: "/v1/external-interactions/{interaction_id}/resolve",
+  turn: "/v1/external-turns/{request_id}",
   delivery: "/v1/agent-deliveries/{delivery_id}",
   round: "/v1/agent-rounds/{round_id}",
 } as const;
@@ -291,6 +292,13 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.interactionResolve,
     "ExternalInteractionRecord",
     "ExternalInteractionResolutionWrite",
+  ),
+  operation(
+    "external.turns.read",
+    "readExternalTurn",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.turn,
+    "ExternalTurnCorrelation",
   ),
   operation(
     "agent.deliveries.read",
