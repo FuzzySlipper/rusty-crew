@@ -796,7 +796,9 @@ impl CoreEngine {
                     "external binding agent_id does not match the bound Crew session",
                 ));
             }
-            if session.status == SessionStatus::Archived {
+            if session.status == SessionStatus::Archived
+                && binding.status != ExternalBindingStatus::Archived
+            {
                 return Err(CoreError::new(
                     CoreErrorKind::SessionExpired,
                     "cannot bind an archived Crew session to an external runtime",

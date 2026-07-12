@@ -328,6 +328,42 @@ fn mid_turn_controls_require_exact_native_turn_identity() {
 }
 
 #[test]
+fn archived_session_allows_binding_archival_but_not_reactivation() {
+    let engine = test_engine();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let saved = engine.bind_external_agent(&binding(), None).unwrap();
+    engine
+        .archive_session(&SessionId::new("codex-session"))
+        .unwrap();
+
+    let mut active = saved.clone();
+    active.updated_at = "2026-06-19T00:00:01Z".into();
+    assert_eq!(
+        engine
+            .bind_external_agent(&active, Some(saved.revision))
+            .unwrap_err()
+            .kind,
+        CoreErrorKind::SessionExpired
+    );
+
+    let mut archived = saved.clone();
+    archived.status = ExternalBindingStatus::Archived;
+    archived.updated_at = "2026-06-19T00:00:02Z".into();
+    let archived = engine
+        .bind_external_agent(&archived, Some(saved.revision))
+        .unwrap();
+    assert_eq!(archived.status, ExternalBindingStatus::Archived);
+}
+
+#[test]
 fn durable_agent_round_resolves_reply_without_second_wake() {
     let data_dir = unique_data_dir("agent-round-reply");
     let engine = test_engine_with_data_dir(data_dir.clone());
