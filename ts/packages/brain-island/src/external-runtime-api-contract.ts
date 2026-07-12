@@ -41,7 +41,9 @@ export interface ExternalThreadItemProjection {
 }
 
 export type ExternalAgentMessagePhase =
-  "commentary" | "final_answer" | "unknown";
+  | "commentary"
+  | "final_answer"
+  | "unknown";
 
 export interface ExternalThreadTurnProjection {
   readonly turnId: string;

@@ -1385,7 +1385,8 @@ export class ServiceExternalRuntimeController {
     controlled.rawDetails.set(detail.detailId, detail);
     while (controlled.rawDetails.size > RAW_DETAIL_LIMIT) {
       const oldest = controlled.rawDetails.keys().next().value as
-        string | undefined;
+        | string
+        | undefined;
       if (oldest === undefined) break;
       controlled.rawDetails.delete(oldest);
     }
