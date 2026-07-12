@@ -30,6 +30,53 @@ The debug unit is `rusty-crew-debug.service`, uses port `9348`, and stores its
 SQLite database at
 `/home/system/rusty-crew-debug/data/engine/coordination.sqlite3`.
 
+## Codex App-Server Isolation
+
+Live/CLI and debug Codex runtimes use separate app-server processes and
+separate history roots. Do not point both Crew controllers at one app-server
+socket, and do not give the debug process the live `/home/agent/.codex` home.
+
+| Purpose | Unit | `CODEX_HOME` | Socket |
+| --- | --- | --- | --- |
+| live and normal CLI history | `codex-app-server-live.service` | `/home/agent/.codex` | `/run/user/1001/codex-app-server-live/app-server.sock` |
+| debug and certification history | `codex-app-server.service` | `/home/system/rusty-crew-debug/codex-home` | `/run/user/1001/codex-app-server/app-server.sock` |
+
+Bootstrap the private debug home without copying live sessions, history, or
+state databases:
+
+```bash
+install -d -m 700 /home/system/rusty-crew-debug/codex-home
+install -m 600 /home/agent/.codex/auth.json \
+  /home/system/rusty-crew-debug/codex-home/auth.json
+install -m 600 /home/agent/.codex/config.toml \
+  /home/system/rusty-crew-debug/codex-home/config.toml
+ln -s /home/agent/.codex/skills \
+  /home/system/rusty-crew-debug/codex-home/skills
+ln -s /home/agent/.codex/plugins \
+  /home/system/rusty-crew-debug/codex-home/plugins
+ln -s /home/agent/.codex/rules \
+  /home/system/rusty-crew-debug/codex-home/rules
+```
+
+The copied auth/config files are local secrets and must not be committed. The
+linked capability directories are shared intentionally; native session and
+rollout state is not. Install the repo-owned units with:
+
+```bash
+cp ops/systemd/codex-app-server.service \
+  ~/.config/systemd/user/codex-app-server.service
+cp ops/systemd/codex-app-server-live.service \
+  ~/.config/systemd/user/codex-app-server-live.service
+systemctl --user daemon-reload
+systemctl --user enable --now \
+  codex-app-server.service codex-app-server-live.service
+```
+
+After changing a Codex home or replacing an app-server process, restart the
+corresponding Crew service so its single controller creates a fresh WebSocket
+driver. Verify each runtime reports `observedState: ready`, and prove a newly
+created debug thread cannot be read through the live runtime API.
+
 ## First Setup
 
 From `/home/dev/rusty-crew`:

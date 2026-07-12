@@ -1,0 +1,20 @@
+[Unit]
+Description=Codex App Server for Rusty Crew debug integration
+Documentation=https://learn.chatgpt.com/docs/app-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/agent
+Environment=CODEX_HOME=/home/system/rusty-crew-debug/codex-home
+ExecStart=/home/agent/.npm-global/bin/codex app-server --listen unix:///run/user/1001/codex-app-server/app-server.sock
+Restart=on-failure
+RestartSec=3s
+RuntimeDirectory=codex-app-server
+RuntimeDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
