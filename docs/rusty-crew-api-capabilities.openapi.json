@@ -3384,6 +3384,24 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/external-agent-sessions": {
+      "post": {
+        "operationId": "externalAgentSessionsCreate",
+        "summary": "Atomically create or recover a Crew session, binding, and native Codex app-server thread.",
+        "tags": ["session", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.agent_sessions.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/external-bindings": {
       "get": {
         "operationId": "externalBindingsList",
@@ -3992,7 +4010,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 154,
+    "capability_count": 155,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

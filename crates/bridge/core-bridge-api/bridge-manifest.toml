@@ -487,6 +487,42 @@ errors = "core_protocol::CoreError"
 summary = "Read one durable external runtime binding."
 
 [[operation]]
+name = "prepare_external_agent_session_creation"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalAgentSessionCreationRequest"
+output = "core_protocol::ExternalAgentSessionCreationRecord"
+errors = "core_protocol::CoreError"
+summary = "Prepare or reconcile one idempotent Rust-owned external agent session creation."
+
+[[operation]]
+name = "mark_external_agent_session_native_starting"
+surface = "stable"
+direction = "ts_to_rust"
+input = "controller + creation_id + expected_revision + now"
+output = "core_protocol::ExternalAgentSessionCreationRecord"
+errors = "core_protocol::CoreError"
+summary = "Fence the native app-server start phase under the current runtime controller lease."
+
+[[operation]]
+name = "complete_external_agent_session_creation"
+surface = "stable"
+direction = "ts_to_rust"
+input = "controller + creation_id + expected_revision + native_thread_id + now"
+output = "core_protocol::ExternalAgentSessionCreationRecord"
+errors = "core_protocol::CoreError"
+summary = "Atomically correlate a native app-server thread with the prepared Crew session and binding."
+
+[[operation]]
+name = "record_external_agent_session_creation_failure"
+surface = "stable"
+direction = "ts_to_rust"
+input = "controller + creation_id + expected_revision + reason + now"
+output = "core_protocol::ExternalAgentSessionCreationRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a recoverable native-start failure without losing deterministic session identity."
+
+[[operation]]
 name = "get_external_turn"
 surface = "stable"
 direction = "ts_to_rust"

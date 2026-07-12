@@ -6,18 +6,10 @@ export type ApiCapabilityAuth = "none" | "chat" | "admin";
 export type ApiCapabilityMutation = "read" | "write" | "control";
 export type ApiCapabilityStability = "stable" | "experimental";
 export type ChatCommandArgumentType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "enum"
-  | "json"
-  | "file";
+  "string" | "number" | "boolean" | "enum" | "json" | "file";
 export type ChatCommandSurface = "chat-input" | "global" | "message-context";
 export type ChatCommandSource =
-  | "backend"
-  | "backend-control"
-  | "frontend-local"
-  | "plugin";
+  "backend" | "backend-control" | "frontend-local" | "plugin";
 export type ApiCapabilityScope =
   | "attachment"
   | "chat"
@@ -552,6 +544,14 @@ export const ADMIN_CONTROL_CAPABILITIES = [
 ] as const satisfies readonly ApiCapabilityDescriptor[];
 
 export const API_CAPABILITIES = [
+  writeCapability(
+    "external.agent_sessions.create",
+    "POST",
+    "/v1/external-agent-sessions",
+    "Atomically create or recover a Crew session, binding, and native Codex app-server thread.",
+    "admin",
+    ["session", "profile"],
+  ),
   readCapability(
     "external.runtimes.list",
     "GET",

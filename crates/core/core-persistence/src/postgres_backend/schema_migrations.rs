@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 22;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 23;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -124,6 +124,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 22,
         description: "add typed bounded chat message ingest receipts",
         apply: Some(apply_postgres_chat_message_ingest_receipts),
+    },
+    PostgresSchemaMigration {
+        version: 23,
+        description: "add idempotent external agent session creation records",
+        apply: Some(apply_postgres_external_agent_session_creations),
     },
 ];
 
@@ -1207,6 +1212,36 @@ fn apply_postgres_chat_message_ingest_receipts(
             ON {schema}.chat_message_ingest_receipts(slot_id);"
     ))
     .map_err(|error| postgres_error("add PostgreSQL chat message ingest receipts", error))
+}
+
+fn apply_postgres_external_agent_session_creations(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.external_agent_session_creations (
+            creation_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            request_fingerprint TEXT NOT NULL,
+            runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            profile_id TEXT NOT NULL REFERENCES {schema}.profile_registry(profile_id),
+            session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            binding_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            native_thread_id TEXT,
+            revision BIGINT NOT NULL,
+            updated_at TEXT NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS external_agent_session_creations_phase_idx
+            ON {schema}.external_agent_session_creations(phase, updated_at, creation_id);"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL external agent session creation records",
+            error,
+        )
+    })
 }
 
 fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {

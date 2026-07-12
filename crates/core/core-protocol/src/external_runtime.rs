@@ -5,8 +5,8 @@
 //! pretending a native turn is a direct-brain wake.
 
 use crate::{
-    AgentId, CoreError, CoreErrorKind, CoreResult, DenRuntimeReference, IsoTimestamp, RunId,
-    SessionId,
+    AgentId, CoreError, CoreErrorKind, CoreResult, DenRuntimeReference, IsoTimestamp, ProfileId,
+    RunId, SessionId, SessionStatus,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,7 @@ external_string_id!(ExternalControlId);
 external_string_id!(ExternalInteractionId);
 external_string_id!(AgentRoundId);
 external_string_id!(AgentMessageDeliveryId);
+external_string_id!(ExternalAgentSessionCreationId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -212,6 +213,69 @@ impl ExternalAgentBinding {
             && self.session_id.is_some()
             && self.agent_id.is_some()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalAgentSessionCreationPhase {
+    Prepared,
+    BindingReady,
+    NativeStarting,
+    RecoveryRequired,
+    Ready,
+}
+
+impl ExternalAgentSessionCreationPhase {
+    pub fn can_transition_to(self, next: Self) -> bool {
+        match (self, next) {
+            (current, next) if current == next => true,
+            (Self::Prepared, Self::BindingReady | Self::RecoveryRequired) => true,
+            (Self::BindingReady, Self::NativeStarting | Self::RecoveryRequired) => true,
+            (Self::NativeStarting, Self::RecoveryRequired | Self::Ready) => true,
+            (Self::RecoveryRequired, Self::NativeStarting | Self::Ready) => true,
+            (Self::Ready, Self::Ready) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentSessionCreationRequest {
+    pub idempotency_key: String,
+    pub runtime_id: ExternalRuntimeId,
+    pub profile_id: ProfileId,
+    pub cwd: String,
+    pub task_ref: Option<DenRuntimeReference>,
+    pub label: Option<String>,
+    pub requested_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentSessionIdentity {
+    pub session_id: SessionId,
+    pub agent_id: AgentId,
+    pub profile_id: ProfileId,
+    pub status: SessionStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentSessionCreationRecord {
+    pub creation_id: ExternalAgentSessionCreationId,
+    pub request: ExternalAgentSessionCreationRequest,
+    pub request_fingerprint: String,
+    pub session: ExternalAgentSessionIdentity,
+    pub binding: ExternalAgentBinding,
+    pub native_thread_source: String,
+    pub native_thread_id: Option<String>,
+    pub phase: ExternalAgentSessionCreationPhase,
+    pub reason_code: Option<String>,
+    pub reason_message: Option<String>,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

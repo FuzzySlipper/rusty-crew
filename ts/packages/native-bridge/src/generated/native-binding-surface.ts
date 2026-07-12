@@ -105,6 +105,10 @@ export interface NativeBridgeBinding {
   bindExternalAgentJson(inputJson: string): string
   listExternalBindingsJson(): string
   getExternalBindingJson(bindingId: string): string
+  prepareExternalAgentSessionCreationJson(inputJson: string): string
+  markExternalAgentSessionNativeStartingJson(inputJson: string): string
+  completeExternalAgentSessionCreationJson(inputJson: string): string
+  recordExternalAgentSessionCreationFailureJson(inputJson: string): string
   getExternalTurnJson(requestId: string): string
   listActiveExternalTurnsJson(): string
   transitionExternalTurnJson(inputJson: string): string
@@ -775,7 +779,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 231,
+  "manifestOperationCount": 235,
   "methods": [
     {
       "name": "deliverAgentMessageJson",
@@ -1608,6 +1612,38 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_external_binding"
+    },
+    {
+      "name": "prepareExternalAgentSessionCreationJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "prepare_external_agent_session_creation"
+    },
+    {
+      "name": "markExternalAgentSessionNativeStartingJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "mark_external_agent_session_native_starting"
+    },
+    {
+      "name": "completeExternalAgentSessionCreationJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "complete_external_agent_session_creation"
+    },
+    {
+      "name": "recordExternalAgentSessionCreationFailureJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "record_external_agent_session_creation_failure"
     },
     {
       "name": "getExternalTurnJson",

@@ -332,6 +332,44 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_external_agent_session_creation(
+        &self,
+        record: &ExternalAgentSessionCreationRecord,
+    ) -> CoreResult<ExternalAgentSessionCreationRecord> {
+        match self {
+            Self::Sqlite(store) => store.create_external_agent_session_creation(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.create_external_agent_session_creation(record),
+        }
+    }
+
+    pub fn get_external_agent_session_creation(
+        &self,
+        creation_id: &ExternalAgentSessionCreationId,
+    ) -> CoreResult<Option<ExternalAgentSessionCreationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_agent_session_creation(creation_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_agent_session_creation(creation_id),
+        }
+    }
+
+    pub fn update_external_agent_session_creation(
+        &self,
+        next: &ExternalAgentSessionCreationRecord,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalAgentSessionCreationRecord> {
+        match self {
+            Self::Sqlite(store) => {
+                store.update_external_agent_session_creation(next, expected_revision)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.update_external_agent_session_creation(next, expected_revision)
+            }
+        }
+    }
+
     pub fn create_external_turn(
         &self,
         record: &ExternalTurnCorrelation,

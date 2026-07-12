@@ -12,6 +12,10 @@ type ExternalRuntimeMethodName =
   | "bindExternalAgent"
   | "listExternalBindings"
   | "getExternalBinding"
+  | "prepareExternalAgentSessionCreation"
+  | "markExternalAgentSessionNativeStarting"
+  | "completeExternalAgentSessionCreation"
+  | "recordExternalAgentSessionCreationFailure"
   | "getExternalTurn"
   | "listActiveExternalTurns"
   | "transitionExternalTurn"
@@ -82,6 +86,38 @@ export function createNativeBridgeExternalRuntimeMethods(
             ReturnType<NativeBridgeModule["getExternalBinding"]>
           >);
     },
+    prepareExternalAgentSessionCreation: async (request) =>
+      JSON.parse(
+        binding.prepareExternalAgentSessionCreationJson(
+          JSON.stringify(request),
+        ),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["prepareExternalAgentSessionCreation"]>
+      >,
+    markExternalAgentSessionNativeStarting: async (input) =>
+      JSON.parse(
+        binding.markExternalAgentSessionNativeStartingJson(
+          JSON.stringify(input),
+        ),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["markExternalAgentSessionNativeStarting"]>
+      >,
+    completeExternalAgentSessionCreation: async (input) =>
+      JSON.parse(
+        binding.completeExternalAgentSessionCreationJson(JSON.stringify(input)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["completeExternalAgentSessionCreation"]>
+      >,
+    recordExternalAgentSessionCreationFailure: async (input) =>
+      JSON.parse(
+        binding.recordExternalAgentSessionCreationFailureJson(
+          JSON.stringify(input),
+        ),
+      ) as Awaited<
+        ReturnType<
+          NativeBridgeModule["recordExternalAgentSessionCreationFailure"]
+        >
+      >,
     getExternalTurn: async (requestId) => {
       const value = binding.getExternalTurnJson(requestId);
       return value === null || value === undefined

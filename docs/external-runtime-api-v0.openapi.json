@@ -7,6 +7,53 @@
   },
   "security": [{ "AdminBearer": [] }],
   "paths": {
+    "/v1/external-agent-sessions": {
+      "post": {
+        "operationId": "createExternalAgentSession",
+        "tags": ["external-runtime"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAgentSessionCreateWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalAgentSessionCreateResult"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.agent_sessions.create",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
     "/v1/external-runtimes": {
       "get": {
         "operationId": "listExternalRuntimes",
@@ -2040,6 +2087,86 @@
         ],
         "type": "object"
       },
+      "ExternalAgentSessionCreationPhase": {
+        "enum": [
+          "prepared",
+          "binding_ready",
+          "native_starting",
+          "recovery_required",
+          "ready"
+        ],
+        "type": "string"
+      },
+      "ExternalAgentSessionCreationRecord": {
+        "properties": {
+          "binding": { "$ref": "#/components/schemas/ExternalAgentBinding" },
+          "createdAt": { "type": "string" },
+          "creationId": { "type": "string" },
+          "nativeThreadId": { "type": ["string", "null"] },
+          "nativeThreadSource": { "type": "string" },
+          "phase": {
+            "$ref": "#/components/schemas/ExternalAgentSessionCreationPhase"
+          },
+          "reasonCode": { "type": ["string", "null"] },
+          "reasonMessage": { "type": ["string", "null"] },
+          "request": {
+            "$ref": "#/components/schemas/ExternalAgentSessionCreationRequest"
+          },
+          "requestFingerprint": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "session": {
+            "$ref": "#/components/schemas/ExternalAgentSessionIdentity"
+          },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "creationId",
+          "request",
+          "requestFingerprint",
+          "session",
+          "binding",
+          "nativeThreadSource",
+          "phase",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalAgentSessionCreationRequest": {
+        "properties": {
+          "cwd": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "label": { "type": ["string", "null"] },
+          "profileId": { "type": "string" },
+          "requestedAt": { "type": "string" },
+          "runtimeId": { "type": "string" },
+          "taskRef": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DenRuntimeReference" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "runtimeId",
+          "profileId",
+          "cwd",
+          "requestedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalAgentSessionIdentity": {
+        "properties": {
+          "agentId": { "type": "string" },
+          "profileId": { "type": "string" },
+          "sessionId": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/SessionStatus" }
+        },
+        "required": ["sessionId", "agentId", "profileId", "status"],
+        "type": "object"
+      },
       "ExternalBindingPurpose": {
         "enum": ["crew_agent", "imported_observer"],
         "type": "string"
@@ -3525,6 +3652,37 @@
         },
         "additionalProperties": false
       },
+      "ExternalAgentSessionCreateWrite": {
+        "type": "object",
+        "required": ["idempotencyKey", "runtimeId", "profileId", "cwd"],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "runtimeId": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "profileId": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "taskRef": { "$ref": "#/components/schemas/DenRuntimeReference" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "additionalProperties": false
+      },
+      "ExternalAgentSessionCreateResult": {
+        "type": "object",
+        "required": ["creation", "runtime", "thread"],
+        "properties": {
+          "creation": {
+            "$ref": "#/components/schemas/ExternalAgentSessionCreationRecord"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+          },
+          "thread": { "$ref": "#/components/schemas/ExternalThreadProjection" }
+        },
+        "additionalProperties": false
+      },
       "ExternalBindingFleet": {
         "type": "object",
         "required": ["bindings"],
@@ -3788,7 +3946,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 17,
+    "operation_count": 18,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

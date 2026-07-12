@@ -127,6 +127,17 @@
     ],
     "capabilities": [
       {
+        "id": "external.agent_sessions.create",
+        "method": "POST",
+        "path_template": "/v1/external-agent-sessions",
+        "description": "Atomically create or recover a Crew session, binding, and native Codex app-server thread.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "profile"],
+        "public": true
+      },
+      {
         "id": "external.runtimes.list",
         "method": "GET",
         "path_template": "/v1/external-runtimes",
@@ -1870,6 +1881,13 @@
   },
   "route_coverage": {
     "capability_routes": [
+      {
+        "capability_id": "external.agent_sessions.create",
+        "method": "POST",
+        "path_template": "/v1/external-agent-sessions",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
       {
         "capability_id": "external.runtimes.list",
         "method": "GET",

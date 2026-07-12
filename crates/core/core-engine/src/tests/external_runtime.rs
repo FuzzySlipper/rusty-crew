@@ -2,16 +2,200 @@ use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
     AgentMessageDeliveryStatus, AgentRoundCommand, AgentRoundId, AgentRoundStatus,
-    ExternalAgentBinding, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
-    ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlRequest,
-    ExternalControllerContext, ExternalControllerLease, ExternalEndpoint,
-    ExternalEndpointTransport, ExternalProcessOwnership, ExternalRuntimeDesiredState,
-    ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
-    ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalRuntimeRegistration,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
-    TurnInputProvenanceKind,
+    ExternalAgentBinding, ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRequest,
+    ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode,
+    ExternalControlId, ExternalControlKind, ExternalControlRequest, ExternalControllerContext,
+    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
+    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
+    ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    TurnInputProvenance, TurnInputProvenanceKind,
 };
 use serde_json::json;
+
+#[test]
+fn external_agent_session_creation_is_idempotent_and_recovers_native_start() {
+    let engine = test_engine();
+    let controller = ready_external_creation_dependencies(&engine);
+    let request = external_creation_request("create-agent-1");
+
+    let prepared = engine
+        .prepare_external_agent_session_creation(request.clone())
+        .unwrap();
+    assert_eq!(
+        prepared.phase,
+        ExternalAgentSessionCreationPhase::BindingReady
+    );
+    assert_eq!(prepared.session.profile_id, ProfileId::new("codex-profile"));
+    assert_eq!(
+        prepared.binding.session_id,
+        Some(prepared.session.session_id.clone())
+    );
+    assert_eq!(prepared.binding.native_thread_id, None);
+    assert_eq!(
+        prepared.native_thread_source.len(),
+        "rusty-crew:".len() + 24
+    );
+
+    let mut retry = request.clone();
+    retry.requested_at = "2026-06-19T00:00:05Z".into();
+    assert_eq!(
+        engine
+            .prepare_external_agent_session_creation(retry)
+            .unwrap(),
+        prepared
+    );
+
+    let starting = engine
+        .mark_external_agent_session_native_starting(
+            &controller,
+            &prepared.creation_id,
+            prepared.revision,
+            "2026-06-19T00:00:06Z".into(),
+        )
+        .unwrap();
+    let recovering = engine
+        .record_external_agent_session_creation_failure(
+            &controller,
+            &starting.creation_id,
+            starting.revision,
+            "external_agent_creation_native_start_failed".into(),
+            "native transport disconnected".into(),
+            "2026-06-19T00:00:07Z".into(),
+        )
+        .unwrap();
+    assert_eq!(
+        recovering.phase,
+        ExternalAgentSessionCreationPhase::RecoveryRequired
+    );
+
+    let restarting = engine
+        .mark_external_agent_session_native_starting(
+            &controller,
+            &recovering.creation_id,
+            recovering.revision,
+            "2026-06-19T00:00:08Z".into(),
+        )
+        .unwrap();
+    let ready = engine
+        .complete_external_agent_session_creation(
+            &controller,
+            &restarting.creation_id,
+            restarting.revision,
+            "native-thread-created".into(),
+            "2026-06-19T00:00:09Z".into(),
+        )
+        .unwrap();
+    assert_eq!(ready.phase, ExternalAgentSessionCreationPhase::Ready);
+    assert_eq!(
+        ready.binding.native_thread_id.as_deref(),
+        Some("native-thread-created")
+    );
+    assert_eq!(
+        engine
+            .prepare_external_agent_session_creation(request)
+            .unwrap(),
+        ready
+    );
+}
+
+#[test]
+fn external_agent_session_creation_rejects_changed_retry_and_invalid_dependencies() {
+    let engine = test_engine();
+    ready_external_creation_dependencies(&engine);
+    let request = external_creation_request("create-agent-conflict");
+    engine
+        .prepare_external_agent_session_creation(request.clone())
+        .unwrap();
+
+    let mut changed = request;
+    changed.label = Some("different label".into());
+    let conflict = engine
+        .prepare_external_agent_session_creation(changed)
+        .unwrap_err();
+    assert_eq!(conflict.kind, CoreErrorKind::AlreadyExists);
+    assert!(conflict
+        .message
+        .contains("external_agent_creation_idempotency_conflict"));
+
+    let missing_runtime = test_engine();
+    missing_runtime
+        .create_profile_registry_record(&profile_registry_write(
+            "codex-profile",
+            "gpt",
+            "configured-codex-session",
+        ))
+        .unwrap();
+    let error = missing_runtime
+        .prepare_external_agent_session_creation(external_creation_request("missing-runtime"))
+        .unwrap_err();
+    assert!(error
+        .message
+        .contains("external_agent_creation_runtime_unavailable"));
+
+    let missing_profile = test_engine();
+    missing_profile
+        .register_external_runtime(&runtime(), None)
+        .unwrap();
+    missing_profile
+        .acquire_external_runtime_controller(
+            &external_controller_lease(),
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+    let error = missing_profile
+        .prepare_external_agent_session_creation(external_creation_request("missing-profile"))
+        .unwrap_err();
+    assert!(error
+        .message
+        .contains("external_agent_creation_profile_invalid"));
+
+    let mut invalid_cwd = external_creation_request("invalid-cwd");
+    invalid_cwd.cwd = "/home/dev/../dev/rusty-crew".into();
+    let error = engine
+        .prepare_external_agent_session_creation(invalid_cwd)
+        .unwrap_err();
+    assert!(error
+        .message
+        .contains("external_agent_creation_cwd_invalid"));
+}
+
+#[test]
+fn external_agent_session_creation_recovers_binding_correlation_before_ready_record() {
+    let engine = test_engine();
+    let controller = ready_external_creation_dependencies(&engine);
+    let request = external_creation_request("binding-correlated-before-ready");
+    let prepared = engine
+        .prepare_external_agent_session_creation(request.clone())
+        .unwrap();
+    let starting = engine
+        .mark_external_agent_session_native_starting(
+            &controller,
+            &prepared.creation_id,
+            prepared.revision,
+            "2026-06-19T00:00:02Z".into(),
+        )
+        .unwrap();
+    let mut correlated_binding = starting.binding.clone();
+    correlated_binding.native_thread_id = Some("native-thread-before-ready".into());
+    correlated_binding.updated_at = "2026-06-19T00:00:03Z".into();
+    engine
+        .bind_external_agent(&correlated_binding, Some(starting.binding.revision))
+        .unwrap();
+
+    let recovered = engine
+        .prepare_external_agent_session_creation(request)
+        .unwrap();
+    assert_eq!(recovered.phase, ExternalAgentSessionCreationPhase::Ready);
+    assert_eq!(
+        recovered.native_thread_id.as_deref(),
+        Some("native-thread-before-ready")
+    );
+    assert_eq!(
+        recovered.binding.native_thread_id,
+        recovered.native_thread_id
+    );
+}
 
 #[test]
 fn handshake_and_runtime_event_replay_require_current_controller_authority() {
@@ -821,6 +1005,51 @@ fn binding() -> ExternalAgentBinding {
         revision: 0,
         created_at: "2026-06-19T00:00:00Z".into(),
         updated_at: "2026-06-19T00:00:00Z".into(),
+    }
+}
+
+fn external_controller_lease() -> ExternalControllerLease {
+    ExternalControllerLease {
+        runtime_id: ExternalRuntimeId::new("codex-local"),
+        holder_instance_id: "controller-a".into(),
+        generation: 0,
+        acquired_at: "2026-06-19T00:00:00Z".into(),
+        renewed_at: "2026-06-19T00:00:00Z".into(),
+        expires_at: "2026-06-19T00:10:00Z".into(),
+        revision: 0,
+    }
+}
+
+fn ready_external_creation_dependencies(engine: &CoreEngine) -> ExternalControllerContext {
+    engine
+        .create_profile_registry_record(&profile_registry_write(
+            "codex-profile",
+            "gpt",
+            "configured-codex-session",
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let lease = engine
+        .acquire_external_runtime_controller(
+            &external_controller_lease(),
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+    ExternalControllerContext {
+        holder_instance_id: lease.holder_instance_id,
+        generation: lease.generation,
+    }
+}
+
+fn external_creation_request(idempotency_key: &str) -> ExternalAgentSessionCreationRequest {
+    ExternalAgentSessionCreationRequest {
+        idempotency_key: idempotency_key.into(),
+        runtime_id: ExternalRuntimeId::new("codex-local"),
+        profile_id: ProfileId::new("codex-profile"),
+        cwd: "/home/dev/rusty-crew".into(),
+        task_ref: None,
+        label: Some("Codex implementation agent".into()),
+        requested_at: "2026-06-19T00:00:01Z".into(),
     }
 }
 

@@ -16,6 +16,36 @@ struct RevisionedBindingWrite {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ExternalAgentSessionCreationTransition {
+    controller: ExternalControllerContext,
+    creation_id: ExternalAgentSessionCreationId,
+    expected_revision: u64,
+    now: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalAgentSessionCreationCompletion {
+    controller: ExternalControllerContext,
+    creation_id: ExternalAgentSessionCreationId,
+    expected_revision: u64,
+    native_thread_id: String,
+    now: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalAgentSessionCreationFailure {
+    controller: ExternalControllerContext,
+    creation_id: ExternalAgentSessionCreationId,
+    expected_revision: u64,
+    reason_code: String,
+    reason_message: String,
+    now: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ControllerAcquire {
     lease: ExternalControllerLease,
     now: String,
@@ -221,6 +251,88 @@ impl NativeBridgeBinding {
                 .engine()
                 .map_err(to_napi_error)?
                 .get_external_binding(&ExternalBindingId::new(binding_id))
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn prepare_external_agent_session_creation_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let request = parse_json::<ExternalAgentSessionCreationRequest>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .prepare_external_agent_session_creation(request)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn mark_external_agent_session_native_starting_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<ExternalAgentSessionCreationTransition>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .mark_external_agent_session_native_starting(
+                    &input.controller,
+                    &input.creation_id,
+                    input.expected_revision,
+                    input.now,
+                )
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn complete_external_agent_session_creation_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<ExternalAgentSessionCreationCompletion>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .complete_external_agent_session_creation(
+                    &input.controller,
+                    &input.creation_id,
+                    input.expected_revision,
+                    input.native_thread_id,
+                    input.now,
+                )
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn record_external_agent_session_creation_failure_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<ExternalAgentSessionCreationFailure>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .record_external_agent_session_creation_failure(
+                    &input.controller,
+                    &input.creation_id,
+                    input.expected_revision,
+                    input.reason_code,
+                    input.reason_message,
+                    input.now,
+                )
                 .map_err(to_napi_error)?,
         )
     }

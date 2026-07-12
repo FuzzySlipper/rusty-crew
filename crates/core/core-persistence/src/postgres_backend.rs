@@ -1665,6 +1665,10 @@ impl PostgresBackendStore {
                     rows: self.table_rows("external_agent_bindings")?,
                 },
                 RuntimeStorageTableCount {
+                    table: "external_agent_session_creations".to_string(),
+                    rows: self.table_rows("external_agent_session_creations")?,
+                },
+                RuntimeStorageTableCount {
                     table: "external_turns".to_string(),
                     rows: self.table_rows("external_turns")?,
                 },
@@ -14908,6 +14912,30 @@ mod tests {
         };
         let schema = unique_schema("rusty_crew_external_runtime");
         let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        store
+            .create_profile_registry_record(&ProfileRegistryWrite {
+                profile_id: ProfileId::new("codex-profile"),
+                lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+                display_name: Some("Codex profile".into()),
+                summary: None,
+                default_session_kind: Some(SessionKind::Full),
+                agent_id: Some(AgentId::new("codex-agent")),
+                owner_id: None,
+                prompt_soul_markdown: None,
+                prompt_memory_markdown: None,
+                active_runtime_settings_json: json!({}),
+                source_asset_refs: Vec::new(),
+                derived_runtime_refs: Vec::new(),
+                import_export: ProfileRegistryImportExportMetadata {
+                    imported_from: None,
+                    imported_at: None,
+                    exported_to: None,
+                    exported_at: None,
+                    metadata_json: json!({}),
+                },
+                now: "2026-07-10T00:00:00Z".into(),
+            })
+            .unwrap();
         let session = SessionState {
             handle: SessionHandle::new(1),
             session_id: SessionId::new("codex-session"),
@@ -14976,7 +15004,7 @@ mod tests {
             session_id: Some(session.session_id.clone()),
             agent_id: Some(session.agent_id.clone()),
             purpose: rusty_crew_core_protocol::ExternalBindingPurpose::CrewAgent,
-            native_thread_id: Some("native-thread".into()),
+            native_thread_id: None,
             cwd: None,
             task_ref: None,
             effective_config_fingerprint: "config".into(),
@@ -14985,11 +15013,80 @@ mod tests {
             created_at: "2026-07-10T00:00:00Z".into(),
             updated_at: "2026-07-10T00:00:00Z".into(),
         };
-        store.put_external_agent_binding(&binding, None).unwrap();
+        let binding = store.put_external_agent_binding(&binding, None).unwrap();
         assert!(store
             .get_external_binding_for_agent(&session.agent_id)
             .unwrap()
             .is_some());
+        let creation = rusty_crew_core_protocol::ExternalAgentSessionCreationRecord {
+            creation_id: rusty_crew_core_protocol::ExternalAgentSessionCreationId::new(
+                "external-creation-a",
+            ),
+            request: rusty_crew_core_protocol::ExternalAgentSessionCreationRequest {
+                idempotency_key: "external-creation-key-a".into(),
+                runtime_id: runtime.runtime_id.clone(),
+                profile_id: session.profile_id.clone(),
+                cwd: "/home/dev/rusty-crew".into(),
+                task_ref: None,
+                label: Some("PostgreSQL external creation".into()),
+                requested_at: "2026-07-10T00:00:01Z".into(),
+            },
+            request_fingerprint: "external-creation-fingerprint-a".into(),
+            session: rusty_crew_core_protocol::ExternalAgentSessionIdentity {
+                session_id: session.session_id.clone(),
+                agent_id: session.agent_id.clone(),
+                profile_id: session.profile_id.clone(),
+                status: session.status,
+            },
+            binding: binding.clone(),
+            native_thread_source: "rusty-crew:postgres-test".into(),
+            native_thread_id: None,
+            phase: rusty_crew_core_protocol::ExternalAgentSessionCreationPhase::BindingReady,
+            reason_code: None,
+            reason_message: None,
+            revision: 1,
+            created_at: "2026-07-10T00:00:01Z".into(),
+            updated_at: "2026-07-10T00:00:01Z".into(),
+        };
+        assert_eq!(
+            store
+                .create_external_agent_session_creation(&creation)
+                .unwrap(),
+            creation
+        );
+        assert_eq!(
+            store
+                .create_external_agent_session_creation(&creation)
+                .unwrap(),
+            creation
+        );
+        let mut starting = creation.clone();
+        starting.phase =
+            rusty_crew_core_protocol::ExternalAgentSessionCreationPhase::NativeStarting;
+        starting.updated_at = "2026-07-10T00:00:02Z".into();
+        let starting = store
+            .update_external_agent_session_creation(&starting, creation.revision)
+            .unwrap();
+        let mut binding = binding;
+        binding.native_thread_id = Some("native-thread".into());
+        binding.updated_at = "2026-07-10T00:00:03Z".into();
+        let binding = store
+            .put_external_agent_binding(&binding, Some(binding.revision))
+            .unwrap();
+        let mut ready = starting.clone();
+        ready.binding = binding.clone();
+        ready.native_thread_id = binding.native_thread_id.clone();
+        ready.phase = rusty_crew_core_protocol::ExternalAgentSessionCreationPhase::Ready;
+        ready.updated_at = "2026-07-10T00:00:03Z".into();
+        let ready = store
+            .update_external_agent_session_creation(&ready, starting.revision)
+            .unwrap();
+        assert_eq!(
+            store
+                .get_external_agent_session_creation(&ready.creation_id)
+                .unwrap(),
+            Some(ready)
+        );
         let turn = rusty_crew_core_protocol::ExternalTurnCorrelation {
             request: rusty_crew_core_protocol::SessionTurnRequested {
                 request_id: rusty_crew_core_protocol::ExternalTurnRequestId::new("request-a"),

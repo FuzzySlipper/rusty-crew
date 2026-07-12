@@ -32,6 +32,8 @@ export type TaskId = Brand<string, "TaskId">;
 
 export type ExternalBindingId = Brand<string, "ExternalBindingId">;
 
+export type ExternalAgentSessionCreationId = Brand<string, "ExternalAgentSessionCreationId">;
+
 export type ExternalRuntimeId = Brand<string, "ExternalRuntimeId">;
 
 export type ExternalTurnRequestId = Brand<string, "ExternalTurnRequestId">;
@@ -547,6 +549,41 @@ export type ExternalAgentBinding = {
   status: ExternalBindingStatus;
   taskRef?: DenRuntimeReference | null;
   updatedAt: string;
+};
+
+export type ExternalAgentSessionCreationPhase = "prepared" | "binding_ready" | "native_starting" | "recovery_required" | "ready";
+
+export type ExternalAgentSessionCreationRecord = {
+  binding: ExternalAgentBinding;
+  createdAt: string;
+  creationId: string;
+  nativeThreadId?: string | null;
+  nativeThreadSource: string;
+  phase: ExternalAgentSessionCreationPhase;
+  reasonCode?: string | null;
+  reasonMessage?: string | null;
+  request: ExternalAgentSessionCreationRequest;
+  requestFingerprint: string;
+  revision: number;
+  session: ExternalAgentSessionIdentity;
+  updatedAt: string;
+};
+
+export type ExternalAgentSessionCreationRequest = {
+  cwd: string;
+  idempotencyKey: string;
+  label?: string | null;
+  profileId: string;
+  requestedAt: string;
+  runtimeId: string;
+  taskRef?: DenRuntimeReference | null;
+};
+
+export type ExternalAgentSessionIdentity = {
+  agentId: string;
+  profileId: string;
+  sessionId: string;
+  status: SessionStatus;
 };
 
 export type ExternalBindingPurpose = "crew_agent" | "imported_observer";

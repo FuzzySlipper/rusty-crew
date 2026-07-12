@@ -65,6 +65,8 @@ struct ProtocolContractRoots {
     external_runtime_state_observation: ExternalRuntimeStateObservation,
     external_controller_lease: ExternalControllerLease,
     external_agent_binding: ExternalAgentBinding,
+    external_agent_session_creation_request: ExternalAgentSessionCreationRequest,
+    external_agent_session_creation_record: ExternalAgentSessionCreationRecord,
     external_turn_correlation: ExternalTurnCorrelation,
     external_control_request: ExternalControlRequest,
     external_control_receipt: ExternalControlReceipt,
@@ -89,6 +91,7 @@ const STRING_BRANDS: &[&str] = &[
     "SessionId",
     "TaskId",
     "ExternalBindingId",
+    "ExternalAgentSessionCreationId",
     "ExternalRuntimeId",
     "ExternalTurnRequestId",
 ];

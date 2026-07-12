@@ -1,5 +1,7 @@
 import type {
   ExternalAgentBinding,
+  ExternalAgentSessionCreationRecord,
+  ExternalAgentSessionCreationRequest,
   ExternalControlReceipt,
   ExternalControlRequest,
   ExternalControlStatus,
@@ -49,6 +51,30 @@ export interface NativeExternalRuntimeBridgeMethods {
   getExternalBinding(
     bindingId: string,
   ): Promise<ExternalAgentBinding | undefined>;
+  prepareExternalAgentSessionCreation(
+    request: ExternalAgentSessionCreationRequest,
+  ): Promise<ExternalAgentSessionCreationRecord>;
+  markExternalAgentSessionNativeStarting(input: {
+    controller: ExternalControllerContext;
+    creationId: string;
+    expectedRevision: number;
+    now: string;
+  }): Promise<ExternalAgentSessionCreationRecord>;
+  completeExternalAgentSessionCreation(input: {
+    controller: ExternalControllerContext;
+    creationId: string;
+    expectedRevision: number;
+    nativeThreadId: string;
+    now: string;
+  }): Promise<ExternalAgentSessionCreationRecord>;
+  recordExternalAgentSessionCreationFailure(input: {
+    controller: ExternalControllerContext;
+    creationId: string;
+    expectedRevision: number;
+    reasonCode: string;
+    reasonMessage: string;
+    now: string;
+  }): Promise<ExternalAgentSessionCreationRecord>;
   getExternalTurn(
     requestId: string,
   ): Promise<ExternalTurnCorrelation | undefined>;

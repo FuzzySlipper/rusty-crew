@@ -105,6 +105,10 @@ export declare class NativeBridgeBinding {
   bindExternalAgentJson(inputJson: string): string
   listExternalBindingsJson(): string
   getExternalBindingJson(bindingId: string): string
+  prepareExternalAgentSessionCreationJson(inputJson: string): string
+  markExternalAgentSessionNativeStartingJson(inputJson: string): string
+  completeExternalAgentSessionCreationJson(inputJson: string): string
+  recordExternalAgentSessionCreationFailureJson(inputJson: string): string
   getExternalTurnJson(requestId: string): string
   listActiveExternalTurnsJson(): string
   transitionExternalTurnJson(inputJson: string): string

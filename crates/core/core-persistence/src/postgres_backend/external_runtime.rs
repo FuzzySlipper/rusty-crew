@@ -4,8 +4,9 @@ use super::*;
 use rusty_crew_core_protocol::{
     validate_external_runtime_registration, validate_external_turn_transition,
     AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
-    AgentRoundStatus, ExternalAgentBinding, ExternalBindingId, ExternalControlId,
-    ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
+    AgentRoundStatus, ExternalAgentBinding, ExternalAgentSessionCreationId,
+    ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRecord, ExternalBindingId,
+    ExternalControlId, ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
     ExternalInteractionStatus, ExternalRuntimeEventInput, ExternalRuntimeId,
     ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent,
@@ -333,6 +334,173 @@ impl PostgresBackendStore {
             &[],
             "list PostgreSQL external bindings",
         )
+    }
+
+    pub fn create_external_agent_session_creation(
+        &self,
+        record: &ExternalAgentSessionCreationRecord,
+    ) -> CoreResult<ExternalAgentSessionCreationRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL external agent session creation", error)
+        })?;
+        let existing = load_optional::<ExternalAgentSessionCreationRecord>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_agent_session_creations
+                 WHERE idempotency_key = $1 FOR UPDATE"
+            ),
+            &[&record.request.idempotency_key],
+            "load PostgreSQL idempotent external agent session creation",
+        )?;
+        if let Some(existing) = existing {
+            if existing.request_fingerprint == record.request_fingerprint {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "external_agent_creation_idempotency_conflict: idempotency key was reused with a different payload",
+            ));
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_agent_session_creations
+                    (creation_id, idempotency_key, request_fingerprint, runtime_id,
+                     profile_id, session_id, binding_id, phase, native_thread_id,
+                     revision, updated_at, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+            ),
+            &[
+                &record.creation_id.0,
+                &record.request.idempotency_key,
+                &record.request_fingerprint,
+                &record.request.runtime_id.0,
+                &record.request.profile_id.0,
+                &record.session.session_id.0,
+                &record.binding.binding_id.0,
+                &enum_json(&record.phase)?,
+                &record.native_thread_id,
+                &(record.revision as i64),
+                &record.updated_at,
+                &to_json_text(record)?,
+            ],
+        )
+        .map_err(|error| {
+            postgres_error("save PostgreSQL external agent session creation", error)
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL external agent session creation", error)
+        })?;
+        Ok(record.clone())
+    }
+
+    pub fn get_external_agent_session_creation(
+        &self,
+        creation_id: &ExternalAgentSessionCreationId,
+    ) -> CoreResult<Option<ExternalAgentSessionCreationRecord>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_agent_session_creations
+                 WHERE creation_id = $1"
+            ),
+            &[&creation_id.0],
+            "load PostgreSQL external agent session creation",
+        )
+    }
+
+    pub fn update_external_agent_session_creation(
+        &self,
+        next: &ExternalAgentSessionCreationRecord,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalAgentSessionCreationRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error(
+                "start update PostgreSQL external agent session creation",
+                error,
+            )
+        })?;
+        let current = load_required::<ExternalAgentSessionCreationRecord>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_agent_session_creations
+                 WHERE creation_id = $1 FOR UPDATE"
+            ),
+            &[&next.creation_id.0],
+            "external agent session creation",
+        )?;
+        if current == *next {
+            return Ok(current);
+        }
+        if current.revision != expected_revision {
+            return revision_conflict(
+                "external agent session creation",
+                expected_revision,
+                current.revision,
+            );
+        }
+        if !current.phase.can_transition_to(next.phase) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_phase_conflict: invalid creation phase transition",
+            ));
+        }
+        if current.phase == ExternalAgentSessionCreationPhase::Ready {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_ready_immutable: completed creation is immutable",
+            ));
+        }
+        if current.creation_id != next.creation_id
+            || current.request != next.request
+            || current.request_fingerprint != next.request_fingerprint
+            || current.session.session_id != next.session.session_id
+            || current.binding.binding_id != next.binding.binding_id
+            || current.native_thread_source != next.native_thread_source
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_identity_conflict: creation identity fields are immutable",
+            ));
+        }
+        if current.native_thread_id.is_some() && current.native_thread_id != next.native_thread_id {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_native_thread_conflict: native thread cannot be rebound",
+            ));
+        }
+        let mut saved = next.clone();
+        saved.revision = current.revision + 1;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.external_agent_session_creations SET phase = $1,
+                    native_thread_id = $2, revision = $3, updated_at = $4, record_json = $5
+                 WHERE creation_id = $6 AND revision = $7"
+            ),
+            &[
+                &enum_json(&saved.phase)?,
+                &saved.native_thread_id,
+                &(saved.revision as i64),
+                &saved.updated_at,
+                &to_json_text(&saved)?,
+                &saved.creation_id.0,
+                &(expected_revision as i64),
+            ],
+        )
+        .map_err(|error| {
+            postgres_error("update PostgreSQL external agent session creation", error)
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error(
+                "commit update PostgreSQL external agent session creation",
+                error,
+            )
+        })?;
+        Ok(saved)
     }
 
     pub fn create_external_turn(

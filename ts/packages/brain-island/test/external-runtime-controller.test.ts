@@ -12,7 +12,10 @@ import {
 } from "@rusty-crew/external-runtime-codex";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 
-import { ServiceExternalRuntimeController } from "../src/service-external-runtime.js";
+import {
+  ExternalAgentSessionCreationError,
+  ServiceExternalRuntimeController,
+} from "../src/service-external-runtime.js";
 
 class FakeTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
@@ -132,6 +135,250 @@ class FakeTransport implements CodexJsonRpcTransport {
     queueMicrotask(() => this.handlers?.onMessage(JSON.stringify(value)));
   }
 }
+
+class FakeCreationTransport implements CodexJsonRpcTransport {
+  handlers?: CodexTransportHandlers;
+  readonly sent: Array<Record<string, unknown>> = [];
+  readonly threads: Array<Record<string, unknown>> = [];
+  #loseFirstStartResponse: boolean;
+  readonly #startFailureMessage?: string;
+
+  constructor(loseFirstStartResponse = false, startFailureMessage?: string) {
+    this.#loseFirstStartResponse = loseFirstStartResponse;
+    this.#startFailureMessage = startFailureMessage;
+  }
+
+  setHandlers(handlers: CodexTransportHandlers): void {
+    this.handlers = handlers;
+  }
+
+  async open(): Promise<void> {}
+
+  async send(message: string): Promise<void> {
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    this.sent.push(parsed);
+    const params = (parsed.params ?? {}) as Record<string, unknown>;
+    if (parsed.method === "initialize") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          userAgent: `fake/${CODEX_APP_SERVER_PROTOCOL.cliVersion}`,
+          codexHome: "/tmp/fake-codex-home",
+          platformFamily: "unix",
+          platformOs: "linux",
+        },
+      });
+      return;
+    }
+    if (parsed.method === "thread/list") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          data: this.threads,
+          nextCursor: null,
+          backwardsCursor: null,
+        },
+      });
+      return;
+    }
+    if (parsed.method === "thread/start") {
+      if (this.#startFailureMessage !== undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: this.#startFailureMessage },
+        });
+        return;
+      }
+      const thread = fakeCreationThread(
+        `created-thread-${this.threads.length + 1}`,
+        String(params.cwd),
+        String(params.threadSource),
+      );
+      this.threads.push(thread);
+      if (this.#loseFirstStartResponse) {
+        this.#loseFirstStartResponse = false;
+        return;
+      }
+      this.emit({
+        id: parsed.id,
+        result: fakeThreadStartResponse(thread),
+      });
+      return;
+    }
+    if (parsed.method === "thread/read") {
+      const thread = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      this.emit({ id: parsed.id, result: { thread } });
+      return;
+    }
+    if (parsed.method === "thread/resume") {
+      const thread = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      this.emit({
+        id: parsed.id,
+        result: {
+          ...fakeThreadStartResponse(thread ?? {}),
+          initialTurnsPage: null,
+        },
+      });
+    }
+  }
+
+  async close(): Promise<void> {}
+
+  emit(value: unknown): void {
+    queueMicrotask(() => this.handlers?.onMessage(JSON.stringify(value)));
+  }
+}
+
+function fakeCreationThread(
+  id: string,
+  cwd: string,
+  threadSource: string,
+): Record<string, unknown> {
+  return {
+    id,
+    extra: null,
+    sessionId: `native-session-${id}`,
+    forkedFromId: null,
+    parentThreadId: null,
+    preview: "",
+    ephemeral: false,
+    historyMode: "paginated",
+    modelProvider: "openai",
+    createdAt: 1,
+    updatedAt: 1,
+    recencyAt: 1,
+    status: { type: "idle" },
+    path: null,
+    cwd,
+    cliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
+    source: "appServer",
+    threadSource,
+    agentNickname: null,
+    agentRole: null,
+    gitInfo: null,
+    name: null,
+    turns: [],
+  };
+}
+
+function fakeThreadStartResponse(
+  thread: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    thread,
+    model: "gpt-5.4",
+    modelProvider: "openai",
+    serviceTier: null,
+    cwd: thread.cwd,
+    runtimeWorkspaceRoots: [],
+    instructionSources: [],
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandbox: { type: "dangerFullAccess" },
+    activePermissionProfile: null,
+    reasoningEffort: null,
+    multiAgentMode: "explicitRequestOnly",
+  };
+}
+
+test("controller atomically creates and idempotently reuses an external agent session", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const request = {
+      idempotencyKey: "browser-create-1",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      label: "Browser Codex agent",
+      requestedAt: new Date().toISOString(),
+    } as const;
+    const created = await fixture.controller.createAgentSession(request);
+    assert.equal(created.creation.phase, "ready");
+    assert.equal(created.thread.threadId, "created-thread-1");
+    assert.equal(created.creation.session.profileId, fixture.profileId);
+    assert.equal(created.creation.binding.nativeThreadId, "created-thread-1");
+
+    const retried = await fixture.controller.createAgentSession({
+      ...request,
+      requestedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+    assert.equal(retried.creation.creationId, created.creation.creationId);
+    assert.equal(
+      fixture.transport.sent.filter(
+        (message) => message.method === "thread/start",
+      ).length,
+      1,
+    );
+
+    await assert.rejects(
+      fixture.controller.createAgentSession({
+        ...request,
+        label: "Changed intent",
+      }),
+      /external_agent_creation_idempotency_conflict/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller recovers a lost native thread start response without duplicating the thread", async () => {
+  const fixture = await externalCreationFixture(true);
+  try {
+    const request = {
+      idempotencyKey: "browser-create-lost-response",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    } as const;
+    await assert.rejects(
+      fixture.controller.createAgentSession(request),
+      /external_agent_creation_native_start_failed/,
+    );
+    const recovered = await fixture.controller.createAgentSession(request);
+    assert.equal(recovered.creation.phase, "ready");
+    assert.equal(recovered.thread.threadId, "created-thread-1");
+    assert.equal(fixture.transport.threads.length, 1);
+    assert.equal(
+      fixture.transport.sent.filter(
+        (message) => message.method === "thread\/start",
+      ).length,
+      1,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller reports native capacity rejection with a stable retryable reason", async () => {
+  const fixture = await externalCreationFixture(
+    false,
+    "resource exhausted: external runtime capacity reached",
+  );
+  try {
+    await assert.rejects(
+      fixture.controller.createAgentSession({
+        idempotencyKey: "browser-create-capacity",
+        runtimeId: fixture.runtimeId,
+        profileId: fixture.profileId,
+        cwd: fixture.dataDir,
+        requestedAt: new Date().toISOString(),
+      }),
+      (error: unknown) =>
+        error instanceof ExternalAgentSessionCreationError &&
+        error.reasonCode === "external_agent_creation_capacity_conflict" &&
+        error.retryable,
+    );
+    assert.equal(fixture.transport.threads.length, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
 
 test("controller resolves typed interactions and resets one-shot Plan mode", async () => {
   const dataDir = mkdtempSync(
@@ -350,6 +597,79 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+async function externalCreationFixture(
+  loseFirstStartResponse: boolean,
+  startFailureMessage?: string,
+) {
+  const dataDir = mkdtempSync(
+    join(tmpdir(), "rusty-crew-external-creation-controller-"),
+  );
+  const runtimeId = "creation-runtime";
+  const profileId = "creation-profile";
+  const bridge = await loadNativeBridge();
+  const engine = await bridge.initializeEngine({
+    engineDataDir: dataDir,
+    clock: "system",
+    defaultTurnBudget: 16,
+    defaultIdleTimeoutMs: 30_000,
+    storage: { backend: "sqlite" },
+  });
+  const transport = new FakeCreationTransport(
+    loseFirstStartResponse,
+    startFailureMessage,
+  );
+  const controller = new ServiceExternalRuntimeController({
+    bridge,
+    instanceId: "creation-test-controller",
+    driverFactory: (_registration, authority) =>
+      new CodexAppServerDriver(transport, authority, {
+        requestTimeoutMs: 50,
+      }),
+  });
+  const now = new Date().toISOString();
+  await bridge.createProfileRegistryRecord({
+    profileId,
+    lifecycleStatus: "active",
+    displayName: "Creation profile",
+    defaultSessionKind: "full",
+    agentId: profileId,
+    activeRuntimeSettingsJson: {},
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [],
+    importExport: { metadataJson: {} },
+    now,
+  });
+  await bridge.registerExternalRuntime({
+    registration: {
+      runtimeId,
+      kind: "codex_app_server",
+      endpoint: { transport: "unix_web_socket", address: "/tmp/fake.sock" },
+      processOwnership: "attached",
+      expectedCliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
+      executableSha256: CODEX_APP_SERVER_PROTOCOL.nativeExecutableSha256,
+      protocolSchemaSha256: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+      desiredState: "enabled",
+      observedState: "disconnected",
+      revision: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  await controller.connect(runtimeId);
+  return {
+    dataDir,
+    runtimeId,
+    profileId,
+    transport,
+    controller,
+    cleanup: async () => {
+      await controller.stop().catch(() => undefined);
+      await bridge.shutdownEngine({ engine, drainTimeoutMs: 5_000 });
+      rmSync(dataDir, { recursive: true, force: true });
+    },
+  };
+}
 
 async function waitUntil(
   predicate: () => Promise<boolean>,

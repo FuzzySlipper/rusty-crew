@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   ExternalAgentBinding,
+  ExternalAgentSessionCreationRequest,
   ExternalCollaborationMode,
   ExternalControlRequest,
   ExternalRuntimeRegistration,
@@ -14,7 +15,10 @@ import {
   successRoute,
   type ServiceRouteResult,
 } from "./service-route-results.js";
-import type { ServiceExternalRuntimeController } from "./service-external-runtime.js";
+import {
+  ExternalAgentSessionCreationError,
+  type ServiceExternalRuntimeController,
+} from "./service-external-runtime.js";
 
 export interface ExternalRuntimeRouteContext {
   readonly bridge: NativeBridgeModule;
@@ -31,6 +35,7 @@ export function isExternalRuntimeRoute(pathname: string): boolean {
   return (
     pathname === "/v1/external-runtimes" ||
     pathname.startsWith("/v1/external-runtimes/") ||
+    pathname === "/v1/external-agent-sessions" ||
     pathname === "/v1/external-bindings" ||
     pathname.startsWith("/v1/external-bindings/") ||
     pathname === "/v1/external-interactions" ||
@@ -48,6 +53,46 @@ export async function handleExternalRuntimeRequest(
   const requestId = context.requestId(request);
   const method = (request.method ?? "GET").toUpperCase();
   const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+
+  if (url.pathname === "/v1/external-agent-sessions") {
+    if (method !== "POST") return methodNotAllowed(requestId);
+    let creationRequest: ExternalAgentSessionCreationRequest;
+    try {
+      const body = requireRecord(await context.readJsonBody(request));
+      creationRequest = {
+        idempotencyKey: boundedRequiredString(
+          body.idempotencyKey,
+          256,
+          "idempotencyKey",
+        ),
+        runtimeId: boundedRequiredString(body.runtimeId, 256, "runtimeId"),
+        profileId: boundedRequiredString(body.profileId, 256, "profileId"),
+        cwd: boundedRequiredString(body.cwd, 4096, "cwd"),
+        ...(body.taskRef === undefined
+          ? {}
+          : { taskRef: optionalTaskReference(body.taskRef) }),
+        ...(body.label === undefined
+          ? {}
+          : { label: boundedRequiredString(body.label, 256, "label") }),
+        requestedAt: context.now(),
+      } as ExternalAgentSessionCreationRequest;
+    } catch (error) {
+      return failure(400, requestId, {
+        code: "invalid_input",
+        reason_code: "external_agent_creation_invalid_request",
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false,
+      });
+    }
+    try {
+      return successRoute(
+        requestId,
+        await context.controller.createAgentSession(creationRequest),
+      );
+    } catch (error) {
+      return externalAgentSessionCreationFailure(requestId, error);
+    }
+  }
 
   if (url.pathname === "/v1/external-runtimes") {
     if (method === "GET") {
@@ -405,6 +450,112 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== ""
     ? value.trim()
     : undefined;
+}
+
+function boundedRequiredString(
+  value: unknown,
+  maxLength: number,
+  field: string,
+): string {
+  const parsed = optionalString(value);
+  if (parsed === undefined) throw new Error(`${field} is required`);
+  if (parsed.length > maxLength) {
+    throw new Error(`${field} exceeds ${maxLength} characters`);
+  }
+  return parsed;
+}
+
+function optionalTaskReference(value: unknown): {
+  projectId?: string;
+  taskId?: string;
+} {
+  const input = requireRecord(value);
+  const projectId = optionalString(input.projectId);
+  const taskId = optionalString(input.taskId);
+  if (projectId === undefined && taskId === undefined) {
+    throw new Error("taskRef requires projectId or taskId");
+  }
+  return {
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(taskId === undefined ? {} : { taskId }),
+  };
+}
+
+function externalAgentSessionCreationFailure(
+  requestId: string,
+  error: unknown,
+): ServiceRouteResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const knownReasonCodes = [
+    "external_agent_creation_idempotency_key_required",
+    "external_agent_creation_idempotency_conflict",
+    "external_agent_creation_runtime_unavailable",
+    "external_agent_creation_profile_invalid",
+    "external_agent_creation_cwd_invalid",
+    "external_agent_creation_revision_conflict",
+    "external_agent_creation_binding_conflict",
+    "external_agent_creation_native_thread_conflict",
+    "external_agent_creation_capacity_conflict",
+    "external_agent_creation_native_start_failed",
+    "external_agent_creation_recovery_required",
+  ] as const;
+  const reasonCode =
+    error instanceof ExternalAgentSessionCreationError
+      ? error.reasonCode
+      : knownReasonCodes.find((candidate) => message.includes(candidate));
+  if (
+    reasonCode === "external_agent_creation_idempotency_key_required" ||
+    reasonCode === "external_agent_creation_profile_invalid" ||
+    reasonCode === "external_agent_creation_cwd_invalid"
+  ) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: reasonCode,
+      message,
+      retryable: false,
+    });
+  }
+  if (
+    reasonCode === "external_agent_creation_idempotency_conflict" ||
+    reasonCode === "external_agent_creation_binding_conflict" ||
+    reasonCode === "external_agent_creation_native_thread_conflict"
+  ) {
+    return failure(409, requestId, {
+      code: "conflict",
+      reason_code: reasonCode,
+      message,
+      retryable: false,
+    });
+  }
+  if (reasonCode !== undefined) {
+    if (reasonCode === "external_agent_creation_capacity_conflict") {
+      return failure(409, requestId, {
+        code: "conflict",
+        reason_code: reasonCode,
+        message,
+        retryable: true,
+      });
+    }
+    return failure(
+      reasonCode === "external_agent_creation_native_start_failed" ? 502 : 409,
+      requestId,
+      {
+        code: "failed_precondition",
+        reason_code: reasonCode,
+        message,
+        retryable:
+          error instanceof ExternalAgentSessionCreationError
+            ? error.retryable
+            : true,
+      },
+    );
+  }
+  return failure(500, requestId, {
+    code: "internal_error",
+    reason_code: "external_agent_creation_internal_error",
+    message,
+    retryable: true,
+  });
 }
 
 function requiredInteger(value: unknown): number {

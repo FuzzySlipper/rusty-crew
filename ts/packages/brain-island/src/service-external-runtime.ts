@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentMessageDeliveryReceipt,
   ExternalAgentBinding,
+  ExternalAgentSessionCreationRecord,
+  ExternalAgentSessionCreationRequest,
   ExternalControlReceipt,
   ExternalControlRequest,
   ExternalControllerContext,
@@ -29,6 +31,7 @@ import {
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { resolveCodexCoordinationToolCall } from "./external-runtime-coordination.js";
 import type {
+  ExternalAgentSessionCreateResult,
   ExternalThreadItemProjection,
   ExternalThreadPage,
   ExternalThreadProjection,
@@ -68,6 +71,17 @@ export interface ExternalRuntimeControllerStatus {
   readonly controllerInstanceId: string;
   readonly controllerGeneration: number;
   readonly leaseExpiresAt: string;
+}
+
+export class ExternalAgentSessionCreationError extends Error {
+  constructor(
+    readonly reasonCode: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(`${reasonCode}: ${message}`);
+    this.name = "ExternalAgentSessionCreationError";
+  }
 }
 
 export class ServiceExternalRuntimeController {
@@ -152,6 +166,7 @@ export class ServiceExternalRuntimeController {
   async connect(runtimeId: string): Promise<ExternalRuntimeControllerStatus> {
     const existing = this.#controlled.get(runtimeId);
     if (existing !== undefined && existing.driver.state === "ready") {
+      existing.lease = await this.#acquireLease(runtimeId);
       return this.#status(existing);
     }
     const registration = await this.#bridge.getExternalRuntime(runtimeId);
@@ -228,6 +243,105 @@ export class ServiceExternalRuntimeController {
       params as Parameters<CodexAppServerDriver["threadRead"]>[0],
     );
     return { thread: projectExternalThread(result.thread) };
+  }
+
+  async createAgentSession(
+    request: ExternalAgentSessionCreationRequest,
+  ): Promise<ExternalAgentSessionCreateResult> {
+    const controlled = await this.#requireControlled(request.runtimeId).catch(
+      (error: unknown) => {
+        throw new ExternalAgentSessionCreationError(
+          "external_agent_creation_runtime_unavailable",
+          String(error),
+          true,
+        );
+      },
+    );
+    let creation =
+      await this.#bridge.prepareExternalAgentSessionCreation(request);
+    if (creation.phase === "ready") {
+      return this.#externalAgentSessionCreationResult(controlled, creation);
+    }
+
+    let nativeThreadId: string | undefined;
+    try {
+      creation = await this.#bridge.markExternalAgentSessionNativeStarting({
+        controller: this.#controllerContext(controlled),
+        creationId: creation.creationId,
+        expectedRevision: creation.revision,
+        now: this.#now().toISOString(),
+      });
+      const recovered = await this.#findThreadBySource(
+        controlled,
+        creation.nativeThreadSource,
+      );
+      if (recovered !== undefined) {
+        nativeThreadId = recovered.id;
+        const resumed = await controlled.driver.threadResume({
+          threadId: recovered.id,
+          cwd: creation.request.cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          excludeTurns: true,
+        });
+        controlled.threadSettings.set(recovered.id, {
+          model: resumed.model,
+          reasoning_effort: resumed.reasoningEffort,
+          developer_instructions: null,
+        });
+      } else {
+        const started = await controlled.driver.threadStart({
+          cwd: creation.request.cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          ephemeral: false,
+          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+          threadSource: creation.nativeThreadSource,
+        });
+        nativeThreadId = started.thread.id;
+        controlled.threadSettings.set(nativeThreadId, {
+          model: started.model,
+          reasoning_effort: started.reasoningEffort,
+          developer_instructions: null,
+        });
+      }
+      creation = await this.#bridge.completeExternalAgentSessionCreation({
+        controller: this.#controllerContext(controlled),
+        creationId: creation.creationId,
+        expectedRevision: creation.revision,
+        nativeThreadId,
+        now: this.#now().toISOString(),
+      });
+      return this.#externalAgentSessionCreationResult(controlled, creation);
+    } catch (error) {
+      const failureReason = externalAgentSessionCreationFailureReason(
+        error,
+        nativeThreadId,
+      );
+      const reconciled = await this.#bridge
+        .prepareExternalAgentSessionCreation(request)
+        .catch(() => undefined);
+      if (reconciled?.phase === "ready") {
+        return this.#externalAgentSessionCreationResult(controlled, reconciled);
+      }
+      if (reconciled !== undefined) {
+        await this.#bridge
+          .recordExternalAgentSessionCreationFailure({
+            controller: this.#controllerContext(controlled),
+            creationId: reconciled.creationId,
+            expectedRevision: reconciled.revision,
+            reasonCode: failureReason,
+            reasonMessage: String(error),
+            now: this.#now().toISOString(),
+          })
+          .catch(() => undefined);
+      }
+      throw new ExternalAgentSessionCreationError(
+        failureReason,
+        String(error),
+        true,
+      );
+    }
   }
 
   async executeControl(
@@ -392,6 +506,67 @@ export class ServiceExternalRuntimeController {
         developer_instructions: null,
       });
     }
+  }
+
+  async #findThreadBySource(
+    controlled: ControlledRuntime,
+    threadSource: string,
+  ) {
+    let cursor: string | null = null;
+    for (let page = 0; page < 100; page += 1) {
+      const result = await controlled.driver.threadList({
+        cursor,
+        limit: 100,
+        sortKey: "created_at",
+        sortDirection: "desc",
+        archived: false,
+        useStateDbOnly: true,
+      });
+      const found = result.data.find(
+        (candidate) => candidate.threadSource === threadSource,
+      );
+      if (found !== undefined) return found;
+      cursor = result.nextCursor;
+      if (cursor === null) return undefined;
+    }
+    throw new ExternalAgentSessionCreationError(
+      "external_agent_creation_recovery_required",
+      "Codex threadSource recovery exceeded the bounded thread listing window",
+      true,
+    );
+  }
+
+  async #externalAgentSessionCreationResult(
+    controlled: ControlledRuntime,
+    creation: ExternalAgentSessionCreationRecord,
+  ): Promise<ExternalAgentSessionCreateResult> {
+    if (
+      creation.phase !== "ready" ||
+      typeof creation.nativeThreadId !== "string"
+    ) {
+      throw new ExternalAgentSessionCreationError(
+        "external_agent_creation_recovery_required",
+        "external agent session creation is not ready",
+        true,
+      );
+    }
+    const read = await controlled.driver
+      .threadRead({
+        threadId: creation.nativeThreadId,
+        includeTurns: false,
+      })
+      .catch((error: unknown) => {
+        throw new ExternalAgentSessionCreationError(
+          "external_agent_creation_recovery_required",
+          `native thread projection failed: ${String(error)}`,
+          true,
+        );
+      });
+    return {
+      creation,
+      runtime: controlled.registration,
+      thread: projectExternalThread(read.thread),
+    };
   }
 
   async #startAcceptedTurn(
@@ -890,8 +1065,7 @@ export class ServiceExternalRuntimeController {
     controlled.rawDetails.set(detail.detailId, detail);
     while (controlled.rawDetails.size > RAW_DETAIL_LIMIT) {
       const oldest = controlled.rawDetails.keys().next().value as
-        | string
-        | undefined;
+        string | undefined;
       if (oldest === undefined) break;
       controlled.rawDetails.delete(oldest);
     }
@@ -906,6 +1080,27 @@ export class ServiceExternalRuntimeController {
       leaseExpiresAt: controlled.lease.expiresAt,
     };
   }
+}
+
+function externalAgentSessionCreationFailureReason(
+  error: unknown,
+  nativeThreadId: string | undefined,
+): string {
+  if (error instanceof ExternalAgentSessionCreationError) {
+    return error.reasonCode;
+  }
+  const message = String(error).toLowerCase();
+  if (
+    message.includes("capacity") ||
+    message.includes("too many pending") ||
+    message.includes("max pending") ||
+    message.includes("resource exhausted")
+  ) {
+    return "external_agent_creation_capacity_conflict";
+  }
+  return nativeThreadId === undefined
+    ? "external_agent_creation_native_start_failed"
+    : "external_agent_creation_recovery_required";
 }
 
 function projectExternalThread(value: unknown): ExternalThreadProjection {

@@ -667,6 +667,22 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         Option<protocol::ExternalAgentBinding>
     );
     schema!(
+        "prepare_external_agent_session_creation",
+        protocol::ExternalAgentSessionCreationRecord
+    );
+    schema!(
+        "mark_external_agent_session_native_starting",
+        protocol::ExternalAgentSessionCreationRecord
+    );
+    schema!(
+        "complete_external_agent_session_creation",
+        protocol::ExternalAgentSessionCreationRecord
+    );
+    schema!(
+        "record_external_agent_session_creation_failure",
+        protocol::ExternalAgentSessionCreationRecord
+    );
+    schema!(
         "get_external_turn",
         Option<protocol::ExternalTurnCorrelation>
     );

@@ -1,9 +1,15 @@
+import type {
+  ExternalAgentSessionCreationRecord,
+  ExternalRuntimeRegistration,
+} from "@rusty-crew/contracts";
+
 export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.1.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
 
 export const EXTERNAL_RUNTIME_API_PATHS = {
+  agentSessions: "/v1/external-agent-sessions",
   runtimes: "/v1/external-runtimes",
   runtime: "/v1/external-runtimes/{runtime_id}",
   connect: "/v1/external-runtimes/{runtime_id}/connect",
@@ -66,6 +72,12 @@ export interface ExternalThreadReadResult {
   readonly thread: ExternalThreadProjection;
 }
 
+export interface ExternalAgentSessionCreateResult {
+  readonly creation: ExternalAgentSessionCreationRecord;
+  readonly runtime: ExternalRuntimeRegistration;
+  readonly thread: ExternalThreadProjection;
+}
+
 type JsonSchema = Record<string, unknown> | boolean;
 
 interface OperationContract {
@@ -85,6 +97,14 @@ interface QueryParameter {
 }
 
 export const EXTERNAL_RUNTIME_API_OPERATIONS = [
+  operation(
+    "external.agent_sessions.create",
+    "createExternalAgentSession",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.agentSessions,
+    "ExternalAgentSessionCreateResult",
+    "ExternalAgentSessionCreateWrite",
+  ),
   operation(
     "external.runtimes.list",
     "listExternalRuntimes",
@@ -521,6 +541,33 @@ function routeSchemas(): Record<string, JsonSchema> {
           $ref: "#/components/schemas/ExternalRuntimeRegistration",
         },
         expectedRevision: { type: "integer", minimum: 0 },
+      },
+      additionalProperties: false,
+    },
+    ExternalAgentSessionCreateWrite: {
+      type: "object",
+      required: ["idempotencyKey", "runtimeId", "profileId", "cwd"],
+      properties: {
+        idempotencyKey: { type: "string", minLength: 1, maxLength: 256 },
+        runtimeId: { type: "string", minLength: 1, maxLength: 256 },
+        profileId: { type: "string", minLength: 1, maxLength: 256 },
+        cwd: { type: "string", minLength: 1, maxLength: 4096 },
+        taskRef: { $ref: "#/components/schemas/DenRuntimeReference" },
+        label: { type: "string", minLength: 1, maxLength: 256 },
+      },
+      additionalProperties: false,
+    },
+    ExternalAgentSessionCreateResult: {
+      type: "object",
+      required: ["creation", "runtime", "thread"],
+      properties: {
+        creation: {
+          $ref: "#/components/schemas/ExternalAgentSessionCreationRecord",
+        },
+        runtime: {
+          $ref: "#/components/schemas/ExternalRuntimeRegistration",
+        },
+        thread: { $ref: "#/components/schemas/ExternalThreadProjection" },
       },
       additionalProperties: false,
     },

@@ -16003,6 +16003,247 @@ export const bridgeWireSchemaArtifact = {
       "title": "ExternalAgentBinding",
       "type": "object"
     },
+    "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord": {
+      "properties": {
+        "binding": {
+          "properties": {
+            "agentId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "bindingId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "effectiveConfigFingerprint": {
+              "type": "string"
+            },
+            "nativeThreadId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "purpose": {
+              "enum": [
+                "crew_agent",
+                "imported_observer"
+              ],
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "runtimeId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "active",
+                "paused",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "taskRef": {
+              "properties": {
+                "project_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "bindingId",
+            "runtimeId",
+            "purpose",
+            "effectiveConfigFingerprint",
+            "status",
+            "revision",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "creationId": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeThreadSource": {
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "prepared",
+            "binding_ready",
+            "native_starting",
+            "recovery_required",
+            "ready"
+          ],
+          "type": "string"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasonMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "requestedAt": {
+              "type": "string"
+            },
+            "runtimeId": {
+              "type": "string"
+            },
+            "taskRef": {
+              "properties": {
+                "project_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "idempotencyKey",
+            "runtimeId",
+            "profileId",
+            "cwd",
+            "requestedAt"
+          ],
+          "type": "object"
+        },
+        "requestFingerprint": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session": {
+          "properties": {
+            "agentId": {
+              "type": "string"
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "active",
+                "idle",
+                "archived"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "agentId",
+            "profileId",
+            "status"
+          ],
+          "type": "object"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "creationId",
+        "request",
+        "requestFingerprint",
+        "session",
+        "binding",
+        "nativeThreadSource",
+        "phase",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ExternalAgentSessionCreationRecord",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt": {
       "properties": {
         "outcome": true,
@@ -19740,6 +19981,7 @@ export const bridgeWireSchemaArtifact = {
     "capture_lore_fact": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "chat_read_model_page": "rusty_crew_core_persistence::contracts::ChatReadModelPage",
     "claim_scheduled_host_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "complete_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "complete_external_control": "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt",
     "create_chat_attachment": "rusty_crew_core_persistence::contracts::CreateChatAttachmentResult",
     "create_chat_conversation_branch": "rusty_crew_core_persistence::contracts::ConversationBranchRecord",
@@ -19781,6 +20023,7 @@ export const bridgeWireSchemaArtifact = {
     "list_scheduled_jobs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput>",
     "list_scheduled_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "lore_entry_provenance_events": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreProvenanceEvent>",
+    "mark_external_agent_session_native_starting": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "merge_roleplay_character": "rusty_crew_roleplay_core::RoleplayCharacter",
     "merge_roleplay_player_persona": "rusty_crew_roleplay_core::RoleplayPlayerPersona",
     "normalize_roleplay_lore_search_controls": "rusty_crew_roleplay_core::RoleplayLoreSearchControls",
@@ -19805,6 +20048,7 @@ export const bridgeWireSchemaArtifact = {
     "plan_runtime_graph": "rusty_crew_core_config::runtime_graph::RuntimeGraphPlan",
     "plan_tool_availability": "rusty_crew_core_tool_registry::ToolAvailabilityPlan",
     "plan_web_browser_resource_policy": "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan",
+    "prepare_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "promote_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "put_roleplay_character": "rusty_crew_core_persistence::contracts::RoleplayCharacterRecord",
     "put_roleplay_import": "rusty_crew_core_persistence::contracts::RoleplayImportRecord",
@@ -19829,6 +20073,7 @@ export const bridgeWireSchemaArtifact = {
     "read_conversation_tree": "rusty_crew_core_persistence::contracts::ConversationTreeReadResult",
     "read_roleplay_scene_state": "rusty_crew_roleplay_core::RoleplaySceneStateReadOutput",
     "recall_lore": "rusty_crew_core_persistence::contracts::LoreRecallResult",
+    "record_external_agent_session_creation_failure": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "record_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
     "record_external_runtime_event": "rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent",
     "record_external_runtime_state": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration",

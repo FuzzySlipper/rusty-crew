@@ -4,7 +4,8 @@ use super::super::*;
 use rusty_crew_core_protocol::{
     validate_external_runtime_registration, validate_external_turn_transition,
     AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
-    AgentRoundStatus, ExternalAgentBinding, ExternalBindingId, ExternalControlId,
+    AgentRoundStatus, ExternalAgentBinding, ExternalAgentSessionCreationId,
+    ExternalAgentSessionCreationRecord, ExternalBindingId, ExternalControlId,
     ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
     ExternalInteractionStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
     ExternalTurnCorrelation, ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
@@ -171,6 +172,33 @@ pub(crate) fn migrate_v36_add_agent_coordination(tx: &rusqlite::Transaction<'_>)
             ON agent_correlated_rounds(status, expires_at, recipient_agent_id);",
     )
     .map_err(|error| persistence_error("apply schema migration 36", error))
+}
+
+pub(crate) fn migrate_v38_add_external_agent_session_creations(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS external_agent_session_creations (
+            creation_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            request_fingerprint TEXT NOT NULL,
+            runtime_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            binding_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            native_thread_id TEXT,
+            revision INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            record_json TEXT NOT NULL,
+            FOREIGN KEY(runtime_id) REFERENCES external_runtime_registrations(runtime_id),
+            FOREIGN KEY(profile_id) REFERENCES profile_registry(profile_id),
+            FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+         );
+         CREATE INDEX IF NOT EXISTS external_agent_session_creations_phase_idx
+            ON external_agent_session_creations(phase, updated_at, creation_id);",
+    )
+    .map_err(|error| persistence_error("apply schema migration 38", error))
 }
 
 impl CoordinationStore {
@@ -457,6 +485,148 @@ impl CoordinationStore {
             [],
             "list external agent bindings",
         )
+    }
+
+    pub fn create_external_agent_session_creation(
+        &self,
+        record: &ExternalAgentSessionCreationRecord,
+    ) -> CoreResult<ExternalAgentSessionCreationRecord> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start external agent session creation", error))?;
+        let existing = load_json_optional::<ExternalAgentSessionCreationRecord, _>(
+            &tx,
+            "SELECT record_json FROM external_agent_session_creations
+             WHERE idempotency_key = ?1",
+            params![record.request.idempotency_key.as_str()],
+            "load idempotent external agent session creation",
+        )?;
+        if let Some(existing) = existing {
+            if existing.request_fingerprint == record.request_fingerprint {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "external_agent_creation_idempotency_conflict: idempotency key was reused with a different payload",
+            ));
+        }
+        tx.execute(
+            "INSERT INTO external_agent_session_creations
+                (creation_id, idempotency_key, request_fingerprint, runtime_id,
+                 profile_id, session_id, binding_id, phase, native_thread_id,
+                 revision, updated_at, record_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                record.creation_id.0,
+                record.request.idempotency_key,
+                record.request_fingerprint,
+                record.request.runtime_id.0,
+                record.request.profile_id.0,
+                record.session.session_id.0,
+                record.binding.binding_id.0,
+                enum_json(&record.phase)?,
+                record.native_thread_id,
+                record.revision as i64,
+                record.updated_at,
+                to_json_text(record)?,
+            ],
+        )
+        .map_err(|error| persistence_error("save external agent session creation", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit external agent session creation", error))?;
+        Ok(record.clone())
+    }
+
+    pub fn get_external_agent_session_creation(
+        &self,
+        creation_id: &ExternalAgentSessionCreationId,
+    ) -> CoreResult<Option<ExternalAgentSessionCreationRecord>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM external_agent_session_creations WHERE creation_id = ?1",
+            params![creation_id.0.as_str()],
+            "load external agent session creation",
+        )
+    }
+
+    pub fn update_external_agent_session_creation(
+        &self,
+        next: &ExternalAgentSessionCreationRecord,
+        expected_revision: u64,
+    ) -> CoreResult<ExternalAgentSessionCreationRecord> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction().map_err(|error| {
+            persistence_error("start update external agent session creation", error)
+        })?;
+        let current = load_json_required::<ExternalAgentSessionCreationRecord, _>(
+            &tx,
+            "SELECT record_json FROM external_agent_session_creations WHERE creation_id = ?1",
+            params![next.creation_id.0.as_str()],
+            "external agent session creation",
+        )?;
+        if current == *next {
+            return Ok(current);
+        }
+        if current.revision != expected_revision {
+            return revision_conflict(
+                "external agent session creation",
+                expected_revision,
+                current.revision,
+            );
+        }
+        if !current.phase.can_transition_to(next.phase) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_phase_conflict: invalid creation phase transition",
+            ));
+        }
+        if current.phase == rusty_crew_core_protocol::ExternalAgentSessionCreationPhase::Ready {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_ready_immutable: completed creation is immutable",
+            ));
+        }
+        if current.creation_id != next.creation_id
+            || current.request != next.request
+            || current.request_fingerprint != next.request_fingerprint
+            || current.session.session_id != next.session.session_id
+            || current.binding.binding_id != next.binding.binding_id
+            || current.native_thread_source != next.native_thread_source
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_identity_conflict: creation identity fields are immutable",
+            ));
+        }
+        if current.native_thread_id.is_some() && current.native_thread_id != next.native_thread_id {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_agent_creation_native_thread_conflict: native thread cannot be rebound",
+            ));
+        }
+        let mut saved = next.clone();
+        saved.revision = current.revision + 1;
+        tx.execute(
+            "UPDATE external_agent_session_creations SET phase = ?1,
+                native_thread_id = ?2, revision = ?3, updated_at = ?4, record_json = ?5
+             WHERE creation_id = ?6 AND revision = ?7",
+            params![
+                enum_json(&saved.phase)?,
+                saved.native_thread_id,
+                saved.revision as i64,
+                saved.updated_at,
+                to_json_text(&saved)?,
+                saved.creation_id.0,
+                expected_revision as i64,
+            ],
+        )
+        .map_err(|error| persistence_error("update external agent session creation", error))?;
+        tx.commit().map_err(|error| {
+            persistence_error("commit update external agent session creation", error)
+        })?;
+        Ok(saved)
     }
 
     pub fn create_external_turn(

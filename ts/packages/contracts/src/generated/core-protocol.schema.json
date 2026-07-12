@@ -2243,6 +2243,149 @@
       ],
       "type": "object"
     },
+    "ExternalAgentSessionCreationPhase": {
+      "enum": [
+        "prepared",
+        "binding_ready",
+        "native_starting",
+        "recovery_required",
+        "ready"
+      ],
+      "type": "string"
+    },
+    "ExternalAgentSessionCreationRecord": {
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ExternalAgentBinding"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "creationId": {
+          "type": "string"
+        },
+        "nativeThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeThreadSource": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/ExternalAgentSessionCreationPhase"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasonMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/ExternalAgentSessionCreationRequest"
+        },
+        "requestFingerprint": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session": {
+          "$ref": "#/$defs/ExternalAgentSessionIdentity"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "creationId",
+        "request",
+        "requestFingerprint",
+        "session",
+        "binding",
+        "nativeThreadSource",
+        "phase",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalAgentSessionCreationRequest": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "taskRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenRuntimeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "runtimeId",
+        "profileId",
+        "cwd",
+        "requestedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalAgentSessionIdentity": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SessionStatus"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agentId",
+        "profileId",
+        "status"
+      ],
+      "type": "object"
+    },
     "ExternalBindingPurpose": {
       "enum": [
         "crew_agent",
@@ -4733,6 +4876,12 @@
     "external_agent_binding": {
       "$ref": "#/$defs/ExternalAgentBinding"
     },
+    "external_agent_session_creation_record": {
+      "$ref": "#/$defs/ExternalAgentSessionCreationRecord"
+    },
+    "external_agent_session_creation_request": {
+      "$ref": "#/$defs/ExternalAgentSessionCreationRequest"
+    },
     "external_control_receipt": {
       "$ref": "#/$defs/ExternalControlReceipt"
     },
@@ -4903,6 +5052,8 @@
     "external_runtime_state_observation",
     "external_controller_lease",
     "external_agent_binding",
+    "external_agent_session_creation_request",
+    "external_agent_session_creation_record",
     "external_turn_correlation",
     "external_control_request",
     "external_control_receipt",

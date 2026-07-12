@@ -31,6 +31,7 @@ const bindingId = "codex-service-live-binding";
 const peerSessionId = "codex-service-live-peer-session";
 const peerAgentId = "codex-service-live-peer-agent";
 const peerBindingId = "codex-service-live-peer-binding";
+const browserProfileId = "codex-service-live-browser-profile";
 const now = (): string => new Date().toISOString();
 
 const bridge = await loadNativeBridge();
@@ -64,6 +65,18 @@ try {
       createdAt: now(),
       updatedAt: now(),
     },
+  });
+  await bridge.createProfileRegistryRecord({
+    profileId: browserProfileId,
+    lifecycleStatus: "active",
+    displayName: "Codex service live browser profile",
+    defaultSessionKind: "full",
+    agentId: browserProfileId,
+    activeRuntimeSettingsJson: {},
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [],
+    importExport: { metadataJson: {} },
+    now: now(),
   });
   await bridge.ensureConfiguredSession({
     sessionId,
@@ -183,6 +196,126 @@ try {
   const address = server.address();
   assert(address !== null && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const browserCreationRequest = {
+    idempotencyKey: "external-service-live-browser-create",
+    runtimeId,
+    profileId: browserProfileId,
+    cwd: dataDir,
+    label: "Live browser-created Codex agent",
+  };
+  const browserCreationResponse = await fetch(
+    `${baseUrl}/v1/external-agent-sessions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(browserCreationRequest),
+    },
+  );
+  assert.equal(browserCreationResponse.status, 200);
+  const browserCreation = (await browserCreationResponse.json()) as {
+    ok: boolean;
+    data: {
+      creation: {
+        creationId: string;
+        nativeThreadId: string;
+        phase: string;
+        session: { sessionId: string; profileId: string };
+        binding: { bindingId: string; nativeThreadId: string };
+      };
+      thread: { threadId: string };
+    };
+  };
+  assert.equal(browserCreation.ok, true);
+  assert.equal(browserCreation.data.creation.phase, "ready");
+  assert.equal(
+    browserCreation.data.creation.session.profileId,
+    browserProfileId,
+  );
+  assert.equal(
+    browserCreation.data.thread.threadId,
+    browserCreation.data.creation.nativeThreadId,
+  );
+
+  const browserCreationRetryResponse = await fetch(
+    `${baseUrl}/v1/external-agent-sessions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(browserCreationRequest),
+    },
+  );
+  assert.equal(browserCreationRetryResponse.status, 200);
+  const browserCreationRetry = (await browserCreationRetryResponse.json()) as {
+    data: { creation: { creationId: string; nativeThreadId: string } };
+  };
+  assert.equal(
+    browserCreationRetry.data.creation.creationId,
+    browserCreation.data.creation.creationId,
+  );
+  assert.equal(
+    browserCreationRetry.data.creation.nativeThreadId,
+    browserCreation.data.creation.nativeThreadId,
+  );
+
+  const browserCreationConflict = await fetch(
+    `${baseUrl}/v1/external-agent-sessions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...browserCreationRequest,
+        label: "Changed retry intent",
+      }),
+    },
+  );
+  assert.equal(browserCreationConflict.status, 409);
+  const browserConflictBody = (await browserCreationConflict.json()) as {
+    error: { reason_code: string };
+  };
+  assert.equal(
+    browserConflictBody.error.reason_code,
+    "external_agent_creation_idempotency_conflict",
+  );
+
+  const browserDelivery = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-browser-created",
+    "Reply with exactly EXTERNAL_BROWSER_CREATE_OK and nothing else.",
+    true,
+    undefined,
+    browserCreation.data.creation.binding.bindingId,
+  );
+  assert.equal(browserDelivery.activation?.type, "external_turn_requested");
+  const browserTurn = await waitForActiveTurn(
+    browserCreation.data.creation.session.sessionId,
+  );
+  const browserTerminal = await waitForTerminalEvent(browserTurn.nativeTurnId);
+  assert.equal(
+    browserTerminal.nativeThreadId,
+    browserCreation.data.creation.nativeThreadId,
+  );
+  const browserTurnText = (
+    await bridge.queryExternalRuntimeEvents({
+      runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    })
+  )
+    .filter(
+      (event) =>
+        event.nativeTurnId === browserTurn.nativeTurnId &&
+        event.kind === "assistant_text_delta",
+    )
+    .map((event) =>
+      typeof event.payload === "object" &&
+      event.payload !== null &&
+      "text" in event.payload
+        ? String(event.payload.text)
+        : "",
+    )
+    .join("");
+  assert.match(browserTurnText, /EXTERNAL_BROWSER_CREATE_OK/);
 
   const runtimeResponse = await fetch(
     `${baseUrl}/v1/external-runtimes/${runtimeId}`,
@@ -536,6 +669,15 @@ try {
         interruptedTurnId: interrupted.nativeTurnId,
         restartTurnId: restartTerminal.nativeTurnId,
         exactThreadRestartResume: true,
+        browserAgentSessionCreation: {
+          creationId: browserCreation.data.creation.creationId,
+          sessionId: browserCreation.data.creation.session.sessionId,
+          bindingId: browserCreation.data.creation.binding.bindingId,
+          nativeThreadId: browserCreation.data.creation.nativeThreadId,
+          nativeTurnId: browserTerminal.nativeTurnId,
+          duplicateRetryWasIdempotent: true,
+          changedRetryRejected: true,
+        },
         appServerRestarted,
         controllerGenerations: [
           controllerGenerationBeforeRestart,
@@ -611,13 +753,13 @@ async function waitForTerminalEvent(nativeTurnId?: string) {
   );
 }
 
-async function waitForActiveTurn() {
+async function waitForActiveTurn(targetSessionId = sessionId) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await controller.tick();
     const active = (await bridge.listActiveExternalTurns()).find(
       (turn) =>
-        turn.request.sessionId === sessionId &&
+        turn.request.sessionId === targetSessionId &&
         turn.phase === "active" &&
         typeof turn.nativeTurnId === "string",
     );
@@ -716,9 +858,10 @@ async function deliverLiveMessage(
   body: string,
   tick = true,
   collaborationMode?: "plan",
+  targetBindingId = bindingId,
 ) {
   const response = await fetch(
-    `${baseUrl}/v1/external-bindings/${bindingId}/messages`,
+    `${baseUrl}/v1/external-bindings/${targetBindingId}/messages`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

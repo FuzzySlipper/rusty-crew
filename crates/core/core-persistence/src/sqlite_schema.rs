@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 37;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 38;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -203,6 +203,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 37,
         description: "add typed bounded chat message ingest receipts",
         apply: repos::conversations::migrate_v37_add_chat_message_ingest_receipts,
+    },
+    SchemaMigration {
+        version: 38,
+        description: "add idempotent external agent session creation records",
+        apply: repos::external_runtime::migrate_v38_add_external_agent_session_creations,
     },
 ];
 

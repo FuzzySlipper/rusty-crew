@@ -165,7 +165,7 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         correctness_sensitive: true,
         backend_requirements: &[TXN, JSON, ROW_CLAIMS, SIZE, PLAN],
         notes: &[
-            "Owns runtime registrations, controller leases, agent bindings, turns, controls, interactions, replay cursors, and correlated rounds.",
+            "Owns runtime registrations, controller leases, idempotent agent-session creations, agent bindings, turns, controls, interactions, replay cursors, and correlated rounds.",
             "Lease generations, idempotency receipts, terminal-state immutability, and expiry must match on SQLite and PostgreSQL.",
         ],
     },

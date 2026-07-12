@@ -688,6 +688,18 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     bindExternalAgent: unavailable("bind_external_agent"),
     listExternalBindings: unavailable("list_external_bindings"),
     getExternalBinding: unavailable("get_external_binding"),
+    prepareExternalAgentSessionCreation: unavailable(
+      "prepare_external_agent_session_creation",
+    ),
+    markExternalAgentSessionNativeStarting: unavailable(
+      "mark_external_agent_session_native_starting",
+    ),
+    completeExternalAgentSessionCreation: unavailable(
+      "complete_external_agent_session_creation",
+    ),
+    recordExternalAgentSessionCreationFailure: unavailable(
+      "record_external_agent_session_creation_failure",
+    ),
     getExternalTurn: unavailable("get_external_turn"),
     listActiveExternalTurns: unavailable("list_active_external_turns"),
     transitionExternalTurn: unavailable("transition_external_turn"),
