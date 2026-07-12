@@ -45,6 +45,7 @@ impl CoreEngine {
         engine.cleanup_orphaned_delegated_sessions()?;
         engine.expire_delegated_sessions()?;
         engine.reactivate_active_roleplay_sessions()?;
+        engine.reactivate_active_external_sessions()?;
         Ok(engine)
     }
 
@@ -82,11 +83,15 @@ impl CoreEngine {
     }
 
     pub fn shutdown_with_timeout(self, drain_timeout_ms: u32) -> CoreResult<ShutdownSummary> {
+        let active_external_session_ids = self.active_external_session_ids()?;
         let active_sessions = self
             .sessions
             .all_sessions()?
             .into_iter()
-            .filter(|session| session.status != SessionStatus::Archived)
+            .filter(|session| {
+                session.status != SessionStatus::Archived
+                    && !active_external_session_ids.contains(&session.session_id)
+            })
             .collect::<Vec<_>>();
         let archived_sessions = active_sessions.len() as u32;
         for session in active_sessions {

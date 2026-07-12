@@ -329,7 +329,8 @@ fn mid_turn_controls_require_exact_native_turn_identity() {
 
 #[test]
 fn archived_session_allows_binding_archival_but_not_reactivation() {
-    let engine = test_engine();
+    let data_dir = unique_data_dir("external-explicit-archive");
+    let engine = test_engine_with_data_dir(data_dir.clone());
     engine
         .create_session(session_config(
             "codex-session",
@@ -339,28 +340,130 @@ fn archived_session_allows_binding_archival_but_not_reactivation() {
         ))
         .unwrap();
     engine.register_external_runtime(&runtime(), None).unwrap();
-    let saved = engine.bind_external_agent(&binding(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
     engine
         .archive_session(&SessionId::new("codex-session"))
         .unwrap();
 
-    let mut active = saved.clone();
+    let archived = engine
+        .get_external_binding(&ExternalBindingId::new("codex-binding"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(archived.status, ExternalBindingStatus::Archived);
+
+    let mut active = archived.clone();
+    active.status = ExternalBindingStatus::Active;
     active.updated_at = "2026-06-19T00:00:01Z".into();
     assert_eq!(
         engine
-            .bind_external_agent(&active, Some(saved.revision))
+            .bind_external_agent(&active, Some(archived.revision))
             .unwrap_err()
             .kind,
         CoreErrorKind::SessionExpired
     );
 
-    let mut archived = saved.clone();
-    archived.status = ExternalBindingStatus::Archived;
-    archived.updated_at = "2026-06-19T00:00:02Z".into();
-    let archived = engine
-        .bind_external_agent(&archived, Some(saved.revision))
+    drop(engine);
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    assert_eq!(
+        restarted
+            .get_session(&SessionId::new("codex-session"))
+            .unwrap()
+            .status,
+        SessionStatus::Archived
+    );
+    assert_eq!(
+        restarted
+            .get_external_binding(&ExternalBindingId::new("codex-binding"))
+            .unwrap()
+            .unwrap()
+            .status,
+        ExternalBindingStatus::Archived
+    );
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn shutdown_preserves_active_external_session_and_native_thread_binding() {
+    let data_dir = unique_data_dir("external-clean-restart");
+    {
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        engine
+            .create_session(session_config(
+                "codex-session",
+                "codex-agent",
+                "codex-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine.register_external_runtime(&runtime(), None).unwrap();
+        engine.bind_external_agent(&binding(), None).unwrap();
+
+        let summary = engine.shutdown_with_timeout(25).unwrap();
+        assert_eq!(summary.archived_sessions, 0);
+    }
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    assert_ne!(
+        restarted
+            .get_session(&SessionId::new("codex-session"))
+            .unwrap()
+            .status,
+        SessionStatus::Archived
+    );
+    let binding = restarted
+        .get_external_binding(&ExternalBindingId::new("codex-binding"))
+        .unwrap()
         .unwrap();
-    assert_eq!(archived.status, ExternalBindingStatus::Archived);
+    assert_eq!(binding.status, ExternalBindingStatus::Active);
+    assert_eq!(binding.native_thread_id.as_deref(), Some("native-thread-7"));
+    assert!(matches!(
+        restarted
+            .activate_agent_execution(activation("codex-agent", "restart-request"))
+            .unwrap(),
+        AgentActivation::ExternalTurnRequested { .. }
+    ));
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn restart_repairs_legacy_active_binding_with_archived_session() {
+    let data_dir = unique_data_dir("external-legacy-archive-repair");
+    {
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        engine
+            .create_session(session_config(
+                "codex-session",
+                "codex-agent",
+                "codex-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine.register_external_runtime(&runtime(), None).unwrap();
+        engine.bind_external_agent(&binding(), None).unwrap();
+
+        let archived = engine
+            .sessions
+            .archive_session(&SessionId::new("codex-session"), engine.now())
+            .unwrap();
+        save_engine_session(&engine.store, &archived).unwrap();
+    }
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let session = restarted
+        .get_session(&SessionId::new("codex-session"))
+        .unwrap();
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.handle.get(), 1);
+    let binding = restarted
+        .get_external_binding(&ExternalBindingId::new("codex-binding"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(binding.status, ExternalBindingStatus::Active);
+    assert_eq!(binding.native_thread_id.as_deref(), Some("native-thread-7"));
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 #[test]

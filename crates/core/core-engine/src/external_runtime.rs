@@ -47,6 +47,79 @@ pub struct ExternalRuntimeHydrationReport {
 }
 
 impl CoreEngine {
+    pub(crate) fn active_external_session_ids(&self) -> CoreResult<HashSet<SessionId>> {
+        Ok(self
+            .store
+            .list_external_agent_bindings()?
+            .into_iter()
+            .filter(ExternalAgentBinding::is_routable)
+            .filter_map(|binding| binding.session_id)
+            .collect())
+    }
+
+    pub(crate) fn reactivate_active_external_sessions(&self) -> CoreResult<()> {
+        let configs = load_engine_session_configs(&self.store)?
+            .into_iter()
+            .map(|config| (config.session_id.clone(), config))
+            .collect::<HashMap<_, _>>();
+        let mut ensured = HashSet::new();
+        for binding in self
+            .store
+            .list_external_agent_bindings()?
+            .into_iter()
+            .filter(ExternalAgentBinding::is_routable)
+        {
+            let session_id = binding.session_id.as_ref().expect("routable session id");
+            if !ensured.insert(session_id.clone()) {
+                continue;
+            }
+            let config = configs.get(session_id).cloned().ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!(
+                        "active external binding {} has no persisted session config",
+                        binding.binding_id.0
+                    ),
+                )
+            })?;
+            if binding.agent_id.as_ref() != Some(&config.agent_id) {
+                return Err(CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!(
+                        "active external binding {} does not match persisted session agent",
+                        binding.binding_id.0
+                    ),
+                ));
+            }
+            self.ensure_configured_session(config)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn archive_active_external_bindings_for_session(
+        &self,
+        session_id: &SessionId,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        for binding in self
+            .store
+            .list_external_agent_bindings()?
+            .into_iter()
+            .filter(|binding| {
+                binding.purpose == ExternalBindingPurpose::CrewAgent
+                    && binding.status == ExternalBindingStatus::Active
+                    && binding.session_id.as_ref() == Some(session_id)
+            })
+        {
+            let mut archived = binding.clone();
+            archived.status = ExternalBindingStatus::Archived;
+            archived.updated_at = now.clone();
+            self.store
+                .put_external_agent_binding(&archived, Some(binding.revision))?;
+        }
+        Ok(())
+    }
+
     fn validate_external_controller(
         &self,
         runtime_id: &ExternalRuntimeId,
