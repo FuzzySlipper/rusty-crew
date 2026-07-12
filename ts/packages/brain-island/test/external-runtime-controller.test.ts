@@ -10,7 +10,10 @@ import {
   type CodexJsonRpcTransport,
   type CodexTransportHandlers,
 } from "@rusty-crew/external-runtime-codex";
-import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import {
+  loadNativeBridge,
+  type NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
 
 import {
   ExternalAgentSessionCreationError,
@@ -380,6 +383,55 @@ test("controller reports native capacity rejection with a stable retryable reaso
   }
 });
 
+test("controller preserves a Rust revision conflict before native thread start", async () => {
+  const fixture = await externalCreationFixture(false, undefined, {
+    operation: "mark_native_starting",
+    message: "external_agent_creation_revision_conflict: expected 1, found 2",
+  });
+  try {
+    await assert.rejects(
+      fixture.controller.createAgentSession({
+        idempotencyKey: "browser-create-revision-conflict",
+        runtimeId: fixture.runtimeId,
+        profileId: fixture.profileId,
+        cwd: fixture.dataDir,
+        requestedAt: new Date().toISOString(),
+      }),
+      (error: unknown) =>
+        error instanceof ExternalAgentSessionCreationError &&
+        error.reasonCode === "external_agent_creation_revision_conflict",
+    );
+    assert.equal(fixture.transport.threads.length, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller preserves a Rust native thread conflict after native start", async () => {
+  const fixture = await externalCreationFixture(false, undefined, {
+    operation: "complete",
+    message:
+      "external_agent_creation_native_thread_conflict: creation is already bound to a different native thread",
+  });
+  try {
+    await assert.rejects(
+      fixture.controller.createAgentSession({
+        idempotencyKey: "browser-create-native-thread-conflict",
+        runtimeId: fixture.runtimeId,
+        profileId: fixture.profileId,
+        cwd: fixture.dataDir,
+        requestedAt: new Date().toISOString(),
+      }),
+      (error: unknown) =>
+        error instanceof ExternalAgentSessionCreationError &&
+        error.reasonCode === "external_agent_creation_native_thread_conflict",
+    );
+    assert.equal(fixture.transport.threads.length, 1);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("controller resolves typed interactions and resets one-shot Plan mode", async () => {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-controller-"),
@@ -601,6 +653,10 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
 async function externalCreationFixture(
   loseFirstStartResponse: boolean,
   startFailureMessage?: string,
+  bridgeFailure?: {
+    operation: "mark_native_starting" | "complete";
+    message: string;
+  },
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
@@ -608,6 +664,27 @@ async function externalCreationFixture(
   const runtimeId = "creation-runtime";
   const profileId = "creation-profile";
   const bridge = await loadNativeBridge();
+  const controllerBridge = new Proxy(bridge, {
+    get(target, property, receiver) {
+      if (
+        bridgeFailure?.operation === "mark_native_starting" &&
+        property === "markExternalAgentSessionNativeStarting"
+      ) {
+        return async () => {
+          throw new Error(bridgeFailure.message);
+        };
+      }
+      if (
+        bridgeFailure?.operation === "complete" &&
+        property === "completeExternalAgentSessionCreation"
+      ) {
+        return async () => {
+          throw new Error(bridgeFailure.message);
+        };
+      }
+      return Reflect.get(target, property, receiver) as unknown;
+    },
+  }) as NativeBridgeModule;
   const engine = await bridge.initializeEngine({
     engineDataDir: dataDir,
     clock: "system",
@@ -620,7 +697,7 @@ async function externalCreationFixture(
     startFailureMessage,
   );
   const controller = new ServiceExternalRuntimeController({
-    bridge,
+    bridge: controllerBridge,
     instanceId: "creation-test-controller",
     driverFactory: (_registration, authority) =>
       new CodexAppServerDriver(transport, authority, {

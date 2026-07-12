@@ -16,6 +16,7 @@ import {
   type ServiceRouteResult,
 } from "./service-route-results.js";
 import {
+  EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES,
   ExternalAgentSessionCreationError,
   type ServiceExternalRuntimeController,
 } from "./service-external-runtime.js";
@@ -486,23 +487,12 @@ function externalAgentSessionCreationFailure(
   error: unknown,
 ): ServiceRouteResult {
   const message = error instanceof Error ? error.message : String(error);
-  const knownReasonCodes = [
-    "external_agent_creation_idempotency_key_required",
-    "external_agent_creation_idempotency_conflict",
-    "external_agent_creation_runtime_unavailable",
-    "external_agent_creation_profile_invalid",
-    "external_agent_creation_cwd_invalid",
-    "external_agent_creation_revision_conflict",
-    "external_agent_creation_binding_conflict",
-    "external_agent_creation_native_thread_conflict",
-    "external_agent_creation_capacity_conflict",
-    "external_agent_creation_native_start_failed",
-    "external_agent_creation_recovery_required",
-  ] as const;
   const reasonCode =
     error instanceof ExternalAgentSessionCreationError
       ? error.reasonCode
-      : knownReasonCodes.find((candidate) => message.includes(candidate));
+      : EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES.find((candidate) =>
+          message.includes(candidate),
+        );
   if (
     reasonCode === "external_agent_creation_idempotency_key_required" ||
     reasonCode === "external_agent_creation_profile_invalid" ||

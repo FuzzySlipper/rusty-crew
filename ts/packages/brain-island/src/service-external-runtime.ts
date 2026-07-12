@@ -41,6 +41,19 @@ import type {
 
 const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
+export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
+  "external_agent_creation_idempotency_key_required",
+  "external_agent_creation_idempotency_conflict",
+  "external_agent_creation_runtime_unavailable",
+  "external_agent_creation_profile_invalid",
+  "external_agent_creation_cwd_invalid",
+  "external_agent_creation_revision_conflict",
+  "external_agent_creation_binding_conflict",
+  "external_agent_creation_native_thread_conflict",
+  "external_agent_creation_capacity_conflict",
+  "external_agent_creation_native_start_failed",
+  "external_agent_creation_recovery_required",
+] as const;
 
 interface ControlledRuntime {
   registration: ExternalRuntimeRegistration;
@@ -1091,6 +1104,12 @@ function externalAgentSessionCreationFailureReason(
     return error.reasonCode;
   }
   const message = String(error).toLowerCase();
+  const stableReasonCode = EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES.find(
+    (candidate) => message.includes(candidate),
+  );
+  if (stableReasonCode !== undefined) {
+    return stableReasonCode;
+  }
   if (
     message.includes("capacity") ||
     message.includes("too many pending") ||
