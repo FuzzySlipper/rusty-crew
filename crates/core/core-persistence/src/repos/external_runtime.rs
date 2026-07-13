@@ -1869,6 +1869,7 @@ mod tests {
             purpose: ExternalBindingPurpose::CrewAgent,
             native_thread_id: Some("native-thread-a".into()),
             cwd: Some("/home/dev/rusty-crew".into()),
+            label: None,
             task_ref: None,
             effective_config_fingerprint: "config-a".into(),
             status: ExternalBindingStatus::Active,

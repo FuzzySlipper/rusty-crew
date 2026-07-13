@@ -668,6 +668,14 @@ export const API_CAPABILITIES = [
     "admin",
     ["session", "profile"],
   ),
+  writeCapability(
+    "external.bindings.metadata.write",
+    "POST",
+    "/v1/external-bindings/{binding_id}/metadata",
+    "Revise only an external binding's operator label and Den task mapping with optimistic concurrency.",
+    "admin",
+    ["session", "config"],
+  ),
   controlApiCapability(
     "external.bindings.control",
     "POST",

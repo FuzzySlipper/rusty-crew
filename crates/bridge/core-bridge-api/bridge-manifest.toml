@@ -487,6 +487,15 @@ errors = "core_protocol::CoreError"
 summary = "List durable Crew-to-native external runtime bindings."
 
 [[operation]]
+name = "update_external_binding_metadata"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalAgentBindingMetadataWrite"
+output = "core_protocol::ExternalAgentBinding"
+errors = "core_protocol::CoreError"
+summary = "Update only operator label and Den task mapping under optimistic revision authority."
+
+[[operation]]
 name = "get_external_binding"
 surface = "stable"
 direction = "ts_to_rust"

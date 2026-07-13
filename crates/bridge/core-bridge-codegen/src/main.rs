@@ -664,6 +664,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         Vec<protocol::ExternalAgentBinding>
     );
     schema!(
+        "update_external_binding_metadata",
+        protocol::ExternalAgentBinding
+    );
+    schema!(
         "get_external_binding",
         Option<protocol::ExternalAgentBinding>
     );

@@ -9230,7 +9230,7 @@ mod tests {
     use crate::{
         ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, ChatTranscriptSearchScope,
         CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
-        RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
+        ProjectId, RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
         RoleplayLoreVisibility,
     };
     use postgres::NoTls;
@@ -15038,6 +15038,7 @@ mod tests {
             purpose: rusty_crew_core_protocol::ExternalBindingPurpose::CrewAgent,
             native_thread_id: None,
             cwd: None,
+            label: None,
             task_ref: None,
             effective_config_fingerprint: "config".into(),
             status: rusty_crew_core_protocol::ExternalBindingStatus::Active,
@@ -15046,6 +15047,25 @@ mod tests {
             updated_at: "2026-07-10T00:00:00Z".into(),
         };
         let binding = store.put_external_agent_binding(&binding, None).unwrap();
+        let mut labeled_binding = binding.clone();
+        labeled_binding.label = Some("PostgreSQL operator label".into());
+        labeled_binding.task_ref = Some(rusty_crew_core_protocol::DenRuntimeReference {
+            project_id: Some(ProjectId::new("rusty-crew")),
+            task_id: Some(TaskId::new("5765")),
+        });
+        labeled_binding.updated_at = "2026-07-10T00:00:00.500Z".into();
+        let binding = store
+            .put_external_agent_binding(&labeled_binding, Some(binding.revision))
+            .unwrap();
+        let persisted_binding = store
+            .get_external_agent_binding(&binding.binding_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            persisted_binding.label.as_deref(),
+            Some("PostgreSQL operator label")
+        );
+        assert_eq!(persisted_binding.task_ref, binding.task_ref);
         assert!(store
             .get_external_binding_for_agent(&session.agent_id)
             .unwrap()

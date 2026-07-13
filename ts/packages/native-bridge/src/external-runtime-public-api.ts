@@ -1,5 +1,6 @@
 import type {
   ExternalAgentBinding,
+  ExternalAgentBindingMetadataWrite,
   ExternalAgentSessionCreationRecord,
   ExternalAgentSessionCreationRequest,
   ExternalControlReceipt,
@@ -47,6 +48,9 @@ export interface NativeExternalRuntimeBridgeMethods {
     binding: ExternalAgentBinding;
     expectedRevision?: number;
   }): Promise<ExternalAgentBinding>;
+  updateExternalBindingMetadata(
+    write: ExternalAgentBindingMetadataWrite,
+  ): Promise<ExternalAgentBinding>;
   listExternalBindings(): Promise<ExternalAgentBinding[]>;
   getExternalBinding(
     bindingId: string,

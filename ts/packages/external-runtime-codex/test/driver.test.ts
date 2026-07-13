@@ -142,6 +142,7 @@ test("driver authorizes exact handshake before exposing typed requests", async (
     nextCursor: null,
   }));
   transport.responders.set("thread/settings/update", () => ({}));
+  transport.responders.set("thread/name/set", () => ({}));
   const driver = new CodexAppServerDriver(transport, authority);
 
   const initialized = await driver.connect();
@@ -153,12 +154,17 @@ test("driver authorizes exact handshake before exposing typed requests", async (
     model: "gpt-5.4",
     effort: "high",
   });
+  const nameUpdate = await driver.threadSetName({
+    threadId: "thread-1",
+    name: "Operator label",
+  });
 
   assert.equal(initialized.userAgent, "codex_cli_rs/0.144.1");
   assert.deepEqual(listed.data, []);
   assert.equal(collaborationModes.data[0]?.mode, "plan");
   assert.deepEqual(models, { data: [], nextCursor: null });
   assert.deepEqual(settingsUpdate, {});
+  assert.deepEqual(nameUpdate, {});
   assert.equal(driver.state, "ready");
   assert.deepEqual(
     transport.sent
@@ -170,6 +176,7 @@ test("driver authorizes exact handshake before exposing typed requests", async (
       "collaborationMode/list",
       "model/list",
       "thread/settings/update",
+      "thread/name/set",
     ],
   );
   await driver.close();

@@ -292,6 +292,17 @@
         "public": true
       },
       {
+        "id": "external.bindings.metadata.write",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/metadata",
+        "description": "Revise only an external binding's operator label and Den task mapping with optimistic concurrency.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "config"],
+        "public": true
+      },
+      {
         "id": "external.bindings.control",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/controls",
@@ -2346,6 +2357,13 @@
         "capability_id": "external.bindings.write",
         "method": "POST",
         "path_template": "/v1/external-bindings",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.metadata.write",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/metadata",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

@@ -198,12 +198,48 @@ pub struct ExternalAgentBinding {
     pub purpose: ExternalBindingPurpose,
     pub native_thread_id: Option<String>,
     pub cwd: Option<String>,
+    pub label: Option<String>,
     pub task_ref: Option<DenRuntimeReference>,
     pub effective_config_fingerprint: String,
     pub status: ExternalBindingStatus,
     pub revision: u64,
     pub created_at: IsoTimestamp,
     pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentBindingMetadataWrite {
+    pub binding_id: ExternalBindingId,
+    pub expected_revision: u64,
+    pub label: Option<String>,
+    pub task_ref: Option<DenRuntimeReference>,
+    pub updated_at: IsoTimestamp,
+}
+
+impl ExternalAgentBindingMetadataWrite {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_non_empty("binding_id", &self.binding_id.0)?;
+        validate_non_empty("updated_at", &self.updated_at)?;
+        if let Some(label) = &self.label {
+            validate_non_empty("label", label)?;
+            if label.chars().count() > 256 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "external binding label exceeds 256 characters",
+                ));
+            }
+        }
+        if let Some(task_ref) = &self.task_ref {
+            if task_ref.project_id.is_none() && task_ref.task_id.is_none() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "external binding task_ref requires project_id or task_id",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ExternalAgentBinding {
@@ -794,6 +830,7 @@ mod tests {
             purpose: ExternalBindingPurpose::ImportedObserver,
             native_thread_id: Some("thread".into()),
             cwd: None,
+            label: None,
             task_ref: None,
             effective_config_fingerprint: "config".into(),
             status: ExternalBindingStatus::Active,

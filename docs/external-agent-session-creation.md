@@ -63,6 +63,22 @@ Repeating the same key and intent returns the original creation. Reusing the
 key with changed runtime, profile, cwd, task reference, or label fails with
 `external_agent_creation_idempotency_conflict`.
 
+## Binding Metadata
+
+After creation, clients update the durable display label and optional Den task
+mapping through:
+
+```text
+POST /v1/external-bindings/{binding_id}/metadata
+```
+
+The body requires `expectedRevision` plus explicit nullable `label` and
+`taskRef` fields. Non-empty labels are synchronized to the native Codex thread
+name. Clearing `label` restores Crew's unnamed projection; Codex app-server does
+not currently expose a native name-clear operation, so clients must treat the
+Crew projection as authoritative. Both list and read projections use this
+durable metadata, including after service restart.
+
 ## Stable Reason Codes
 
 - `external_agent_creation_idempotency_key_required`
@@ -96,3 +112,12 @@ npm run smoke:external-runtime-service-live -w @rusty-crew/brain-island
 It creates an active profile, calls the browser endpoint, repeats and conflicts
 the request, sends a message through the generated binding, and requires a real
 Codex app-server LLM turn to complete with the expected response.
+
+The deployed debug-service metadata certification is:
+
+```bash
+npm run smoke:external-binding-metadata-live-debug-service -w @rusty-crew/brain-island
+```
+
+It verifies create, rename, Den remapping, stale revision rejection, clear,
+restart persistence, native thread naming, and cleanup against port `9348`.

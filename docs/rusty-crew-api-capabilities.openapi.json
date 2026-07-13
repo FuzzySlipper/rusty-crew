@@ -4138,6 +4138,32 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/external-bindings/{binding_id}/metadata": {
+      "post": {
+        "operationId": "externalBindingsMetadataWrite",
+        "summary": "Revise only an external binding's operator label and Den task mapping with optimistic concurrency.",
+        "tags": ["session", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.metadata.write",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/external-interactions": {
       "get": {
         "operationId": "externalInteractionsList",
@@ -4782,7 +4808,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 188,
+    "capability_count": 189,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

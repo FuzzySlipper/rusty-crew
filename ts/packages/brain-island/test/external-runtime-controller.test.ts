@@ -158,6 +158,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   readonly threads: Array<Record<string, unknown>> = [];
   readonly resumeFailureThreadIds = new Set<string>();
   settingsUpdateError?: { code: number; message: string };
+  nameSetError?: { code: number; message: string };
   readonly archivedThreadIds = new Set<string>();
   readonly unmaterializedThreadIds = new Set<string>();
   readonly threadSettings = new Map<
@@ -402,6 +403,18 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       });
       return;
     }
+    if (parsed.method === "thread/name/set") {
+      if (this.nameSetError !== undefined) {
+        this.emit({ id: parsed.id, error: this.nameSetError });
+        return;
+      }
+      const thread = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      if (thread !== undefined) thread.name = params.name;
+      this.emit({ id: parsed.id, result: {} });
+      return;
+    }
     if (parsed.method === "thread/compact/start") {
       this.emit({ id: parsed.id, result: {} });
       this.emit({
@@ -555,6 +568,8 @@ test("controller atomically creates and idempotently reuses an external agent se
     assert.equal(created.thread.effectiveModel, "gpt-5.4");
     assert.equal(created.creation.session.profileId, fixture.profileId);
     assert.equal(created.creation.binding.nativeThreadId, "created-thread-1");
+    assert.equal(created.creation.binding.label, "Browser Codex agent");
+    assert.equal(created.thread.name, "Browser Codex agent");
     assert.deepEqual(created.creation.request.taskRef, {
       project_id: "rusty-crew",
       task_id: "5678",
@@ -570,6 +585,43 @@ test("controller atomically creates and idempotently reuses an external agent se
       project_id: "rusty-crew",
       task_id: "5678",
     });
+    assert.equal(persistedBinding?.label, "Browser Codex agent");
+
+    const renamed = await fixture.controller.updateBindingMetadata({
+      bindingId: created.creation.binding.bindingId,
+      expectedRevision: created.creation.binding.revision,
+      label: "Asha planning follow-up",
+      taskRef: null,
+    });
+    assert.equal(renamed.label, "Asha planning follow-up");
+    assert.equal(renamed.taskRef, null);
+    const renamedThreads = await fixture.controller.listThreads(
+      fixture.runtimeId,
+      { limit: 10 },
+    );
+    assert.equal(renamedThreads.items[0]?.name, "Asha planning follow-up");
+
+    const cleared = await fixture.controller.updateBindingMetadata({
+      bindingId: renamed.bindingId,
+      expectedRevision: renamed.revision,
+      label: null,
+      taskRef: null,
+    });
+    assert.equal(cleared.label, null);
+    const clearedThreads = await fixture.controller.listThreads(
+      fixture.runtimeId,
+      { limit: 10 },
+    );
+    assert.equal(clearedThreads.items[0]?.name, null);
+    await assert.rejects(
+      fixture.controller.updateBindingMetadata({
+        bindingId: cleared.bindingId,
+        expectedRevision: renamed.revision,
+        label: "stale rename",
+        taskRef: null,
+      }),
+      /external_binding_metadata_revision_conflict/,
+    );
 
     const retried = await fixture.controller.createAgentSession({
       ...request,
@@ -582,6 +634,30 @@ test("controller atomically creates and idempotently reuses an external agent se
       ).length,
       1,
     );
+
+    const beforeFailedRename = await fixture.bridge.getExternalBinding(
+      created.creation.binding.bindingId,
+    );
+    assert.ok(beforeFailedRename);
+    fixture.transport.nameSetError = {
+      code: -32000,
+      message: "native naming unavailable",
+    };
+    await assert.rejects(
+      fixture.controller.updateBindingMetadata({
+        bindingId: beforeFailedRename.bindingId,
+        expectedRevision: beforeFailedRename.revision,
+        label: "must roll back",
+        taskRef: null,
+      }),
+      /external_binding_metadata_native_sync_failed/,
+    );
+    fixture.transport.nameSetError = undefined;
+    const afterFailedRename = await fixture.bridge.getExternalBinding(
+      beforeFailedRename.bindingId,
+    );
+    assert.equal(afterFailedRename?.label, beforeFailedRename.label);
+    assert.deepEqual(afterFailedRename?.taskRef, beforeFailedRename.taskRef);
 
     await assert.rejects(
       fixture.controller.createAgentSession({

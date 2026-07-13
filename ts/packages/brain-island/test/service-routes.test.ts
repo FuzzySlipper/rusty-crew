@@ -196,6 +196,52 @@ test("external session route translates generated Den task reference wire fields
   assert.equal(captured?.requestedAt, "2026-07-11T20:00:00.000Z");
 });
 
+test("external binding metadata route requires explicit nullable fields", async () => {
+  let captured: Record<string, unknown> | undefined;
+  const context = {
+    bridge: {},
+    controller: {
+      async updateBindingMetadata(input: Record<string, unknown>) {
+        captured = input;
+        return { bindingId: input.bindingId, revision: 3 };
+      },
+    },
+    requestId: () => "req-external-binding-metadata",
+    readJsonBody: async () => ({
+      expectedRevision: 2,
+      label: null,
+      taskRef: { project_id: "asha", task_id: "4281" },
+    }),
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/metadata"),
+    context,
+  );
+  assert.equal((result as AdminRouteResult).status, 200);
+  assert.deepEqual(captured, {
+    bindingId: "binding-1",
+    expectedRevision: 2,
+    label: null,
+    taskRef: { projectId: "asha", taskId: "4281" },
+  });
+
+  const invalid = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/metadata"),
+    {
+      ...context,
+      readJsonBody: async () => ({ expectedRevision: 2, label: null }),
+    },
+  );
+  assert.equal((invalid as AdminRouteResult).status, 400);
+  assert.equal(
+    errorReason(invalid as AdminRouteResult),
+    "external_binding_metadata_invalid_request",
+  );
+});
+
 test("external thread lifecycle routes expose archive, delete, restore, and archived listing", async () => {
   const calls: string[] = [];
   const context = {

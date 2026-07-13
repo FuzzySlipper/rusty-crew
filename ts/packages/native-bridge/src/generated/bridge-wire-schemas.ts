@@ -3145,6 +3145,12 @@ export const bridgeWireSchemaArtifact = {
           "effectiveConfigFingerprint": {
             "type": "string"
           },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "nativeThreadId": {
             "type": [
               "string",
@@ -5278,6 +5284,12 @@ export const bridgeWireSchemaArtifact = {
         },
         "effectiveConfigFingerprint": {
           "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "nativeThreadId": {
           "type": [
@@ -17221,6 +17233,12 @@ export const bridgeWireSchemaArtifact = {
         "effectiveConfigFingerprint": {
           "type": "string"
         },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nativeThreadId": {
           "type": [
             "string",
@@ -17317,6 +17335,12 @@ export const bridgeWireSchemaArtifact = {
             },
             "effectiveConfigFingerprint": {
               "type": "string"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "nativeThreadId": {
               "type": [
@@ -21532,6 +21556,7 @@ export const bridgeWireSchemaArtifact = {
     "tombstone_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
     "transition_external_turn": "rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation",
     "update_conversation_branch_head": "rusty_crew_core_persistence::contracts::UpdateBranchHeadResult",
+    "update_external_binding_metadata": "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding",
     "update_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "update_roleplay_mechanic_diagnostic_outcome": "rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord",
     "update_roleplay_mechanic_session_attachment": "rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord",

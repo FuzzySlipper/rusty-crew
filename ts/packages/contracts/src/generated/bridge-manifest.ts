@@ -53,6 +53,7 @@ export const bridgeOperations = [
   {"name":"release_external_controller","surface":"stable","direction":"ts_to_rust","input":"runtime_id + holder_instance_id + generation + now","output":"core_protocol::ExternalControllerLease","errors":"core_protocol::CoreError","summary":"Release the current external runtime controller lease without permitting stale generations."},
   {"name":"bind_external_agent","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalAgentBinding + expected_revision","output":"core_protocol::ExternalAgentBinding","errors":"core_protocol::CoreError","summary":"Bind an explicitly routable Crew agent or observer to a native external thread."},
   {"name":"list_external_bindings","surface":"stable","direction":"ts_to_rust","input":"unit","output":"vec<core_protocol::ExternalAgentBinding>","errors":"core_protocol::CoreError","summary":"List durable Crew-to-native external runtime bindings."},
+  {"name":"update_external_binding_metadata","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalAgentBindingMetadataWrite","output":"core_protocol::ExternalAgentBinding","errors":"core_protocol::CoreError","summary":"Update only operator label and Den task mapping under optimistic revision authority."},
   {"name":"get_external_binding","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalBindingId","output":"option<core_protocol::ExternalAgentBinding>","errors":"core_protocol::CoreError","summary":"Read one durable external runtime binding."},
   {"name":"prepare_external_agent_session_creation","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalAgentSessionCreationRequest","output":"core_protocol::ExternalAgentSessionCreationRecord","errors":"core_protocol::CoreError","summary":"Prepare or reconcile one idempotent Rust-owned external agent session creation."},
   {"name":"mark_external_agent_session_native_starting","surface":"stable","direction":"ts_to_rust","input":"controller + creation_id + expected_revision + now","output":"core_protocol::ExternalAgentSessionCreationRecord","errors":"core_protocol::CoreError","summary":"Fence the native app-server start phase under the current runtime controller lease."},
@@ -263,4 +264,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "545f0e6eaf60cdbf9ab66eea30f49a7942f15f05e29b1d9c952c33efd1d7088b" as const;
+export const bridgeWireShapeFingerprint = "09d11bd9946b8a6e205673bebdd541ad0bfd0472af77b304ccb85d3ccc3df82a" as const;

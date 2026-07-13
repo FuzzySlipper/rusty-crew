@@ -90,6 +90,16 @@ assert.equal(
   contract.paths[EXTERNAL_RUNTIME_API_PATHS.commands]?.post?.operationId,
   "executeExternalBindingCommand",
 );
+assert.equal(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.bindingMetadata]?.post?.operationId,
+  "writeExternalBindingMetadata",
+);
+assert.deepEqual(schema("ExternalBindingMetadataWrite").required, [
+  "expectedRevision",
+  "label",
+  "taskRef",
+]);
+assert.ok(schema("ExternalAgentBinding").properties?.label);
 assert.deepEqual(
   propertySchema("ExternalRuntimeEventPayload", "messagePhase").enum,
   ["commentary", "final_answer", "unknown"],

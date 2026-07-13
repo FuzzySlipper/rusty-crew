@@ -2,17 +2,83 @@ use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
     AgentMessageDeliveryStatus, AgentRoundCommand, AgentRoundId, AgentRoundStatus,
-    ExternalAgentBinding, ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRequest,
-    ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode,
-    ExternalControlId, ExternalControlKind, ExternalControlRequest, ExternalControlStatus,
-    ExternalControllerContext, ExternalControllerLease, ExternalEndpoint,
-    ExternalEndpointTransport, ExternalProcessOwnership, ExternalRuntimeDesiredState,
-    ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
-    ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalRuntimeRegistration,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
-    TurnInputProvenanceKind,
+    DenRuntimeReference, ExternalAgentBinding, ExternalAgentBindingMetadataWrite,
+    ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRequest, ExternalBindingId,
+    ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
+    ExternalControlKind, ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
+    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
+    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
+    ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    TurnInputProvenance, TurnInputProvenanceKind,
 };
 use serde_json::json;
+
+#[test]
+fn external_binding_metadata_is_revisioned_and_survives_restart() {
+    let data_dir = unique_data_dir("external-binding-metadata");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let binding = engine.bind_external_agent(&binding(), None).unwrap();
+
+    let saved = engine
+        .update_external_binding_metadata(&ExternalAgentBindingMetadataWrite {
+            binding_id: binding.binding_id.clone(),
+            expected_revision: binding.revision,
+            label: Some("Asha implementation".into()),
+            task_ref: Some(DenRuntimeReference {
+                project_id: Some(ProjectId::new("asha")),
+                task_id: Some(TaskId::new("4281")),
+            }),
+            updated_at: "2026-07-13T10:00:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(saved.label.as_deref(), Some("Asha implementation"));
+    assert_eq!(saved.revision, binding.revision + 1);
+
+    let stale = engine
+        .update_external_binding_metadata(&ExternalAgentBindingMetadataWrite {
+            binding_id: binding.binding_id.clone(),
+            expected_revision: binding.revision,
+            label: Some("stale".into()),
+            task_ref: None,
+            updated_at: "2026-07-13T10:00:01Z".into(),
+        })
+        .unwrap_err();
+    assert_eq!(stale.kind, CoreErrorKind::ActionRejected);
+    assert!(stale
+        .message
+        .contains("external_binding_metadata_revision_conflict"));
+
+    drop(engine);
+    let restarted = test_engine_with_data_dir(data_dir);
+    let hydrated = restarted
+        .get_external_binding(&binding.binding_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(hydrated.label, saved.label);
+    assert_eq!(hydrated.task_ref, saved.task_ref);
+
+    let cleared = restarted
+        .update_external_binding_metadata(&ExternalAgentBindingMetadataWrite {
+            binding_id: hydrated.binding_id,
+            expected_revision: hydrated.revision,
+            label: None,
+            task_ref: None,
+            updated_at: "2026-07-13T10:00:02Z".into(),
+        })
+        .unwrap();
+    assert_eq!(cleared.label, None);
+    assert_eq!(cleared.task_ref, None);
+}
 
 #[test]
 fn external_agent_session_creation_is_idempotent_and_recovers_native_start() {
@@ -1432,6 +1498,7 @@ fn binding() -> ExternalAgentBinding {
         purpose: ExternalBindingPurpose::CrewAgent,
         native_thread_id: Some("native-thread-7".into()),
         cwd: Some("/home/dev/rusty-crew".into()),
+        label: None,
         task_ref: None,
         effective_config_fingerprint: "config-fingerprint".into(),
         status: ExternalBindingStatus::Active,

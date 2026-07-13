@@ -25,6 +25,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   stream: "/v1/external-runtimes/{runtime_id}/stream",
   rawDetail: "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
   bindings: "/v1/external-bindings",
+  bindingMetadata: "/v1/external-bindings/{binding_id}/metadata",
   controls: "/v1/external-bindings/{binding_id}/controls",
   commands: "/v1/external-bindings/{binding_id}/commands",
   messages: "/v1/external-bindings/{binding_id}/messages",
@@ -366,6 +367,14 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.bindings,
     "ExternalAgentBinding",
     "ExternalBindingWrite",
+  ),
+  operation(
+    "external.bindings.metadata.write",
+    "writeExternalBindingMetadata",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.bindingMetadata,
+    "ExternalAgentBinding",
+    "ExternalBindingMetadataWrite",
   ),
   operation(
     "external.bindings.control",
@@ -789,6 +798,26 @@ function routeSchemas(): Record<string, JsonSchema> {
       properties: {
         binding: { $ref: "#/components/schemas/ExternalAgentBinding" },
         expectedRevision: { type: "integer", minimum: 0 },
+      },
+      additionalProperties: false,
+    },
+    ExternalBindingMetadataWrite: {
+      type: "object",
+      required: ["expectedRevision", "label", "taskRef"],
+      properties: {
+        expectedRevision: { type: "integer", minimum: 1 },
+        label: {
+          anyOf: [
+            { type: "string", minLength: 1, maxLength: 256 },
+            { type: "null" },
+          ],
+        },
+        taskRef: {
+          anyOf: [
+            { $ref: "#/components/schemas/DenRuntimeReference" },
+            { type: "null" },
+          ],
+        },
       },
       additionalProperties: false,
     },

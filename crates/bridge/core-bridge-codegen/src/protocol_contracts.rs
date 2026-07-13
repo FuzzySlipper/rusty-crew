@@ -66,6 +66,7 @@ struct ProtocolContractRoots {
     external_runtime_state_observation: ExternalRuntimeStateObservation,
     external_controller_lease: ExternalControllerLease,
     external_agent_binding: ExternalAgentBinding,
+    external_agent_binding_metadata_write: ExternalAgentBindingMetadataWrite,
     external_agent_session_creation_request: ExternalAgentSessionCreationRequest,
     external_agent_session_creation_record: ExternalAgentSessionCreationRecord,
     external_turn_correlation: ExternalTurnCorrelation,

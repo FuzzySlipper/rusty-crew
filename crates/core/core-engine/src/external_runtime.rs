@@ -3,16 +3,16 @@
 use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentMessageDeliveryStatus, AgentRoundStatus, ExternalAgentBinding,
-    ExternalAgentSessionCreationId, ExternalAgentSessionCreationPhase,
-    ExternalAgentSessionCreationRecord, ExternalAgentSessionCreationRequest,
-    ExternalAgentSessionIdentity, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
-    ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlReceipt,
-    ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
-    ExternalControllerLease, ExternalInteractionRecord, ExternalInteractionStatus,
-    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
-    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
-    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    ExternalAgentBindingMetadataWrite, ExternalAgentSessionCreationId,
+    ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRecord,
+    ExternalAgentSessionCreationRequest, ExternalAgentSessionIdentity, ExternalBindingId,
+    ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
+    ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
+    ExternalControllerContext, ExternalControllerLease, ExternalInteractionRecord,
+    ExternalInteractionStatus, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
+    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
+    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
+    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -286,7 +286,8 @@ impl CoreEngine {
             purpose: ExternalBindingPurpose::CrewAgent,
             native_thread_id: None,
             cwd: Some(cwd),
-            task_ref: request.task_ref.clone(),
+            label: None,
+            task_ref: None,
             effective_config_fingerprint: external_agent_effective_config_fingerprint(
                 &runtime, &profile, &request,
             )?,
@@ -960,6 +961,37 @@ impl CoreEngine {
         }
         self.store
             .put_external_agent_binding(binding, expected_revision)
+    }
+
+    pub fn update_external_binding_metadata(
+        &self,
+        write: &ExternalAgentBindingMetadataWrite,
+    ) -> CoreResult<ExternalAgentBinding> {
+        write.validate()?;
+        let current = self
+            .store
+            .get_external_agent_binding(&write.binding_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("external binding {} was not found", write.binding_id.0),
+                )
+            })?;
+        if current.revision != write.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "external_binding_metadata_revision_conflict: expected {}, found {}",
+                    write.expected_revision, current.revision
+                ),
+            ));
+        }
+        let mut next = current;
+        next.label = write.label.clone();
+        next.task_ref = write.task_ref.clone();
+        next.updated_at = write.updated_at.clone();
+        self.store
+            .put_external_agent_binding(&next, Some(write.expected_revision))
     }
 
     pub fn activate_agent_execution(

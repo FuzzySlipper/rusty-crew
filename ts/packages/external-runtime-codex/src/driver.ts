@@ -26,6 +26,8 @@ import type { ThreadStartParams } from "../protocol/0.144.1/ts/v2/ThreadStartPar
 import type { ThreadStartResponse } from "../protocol/0.144.1/ts/v2/ThreadStartResponse.js";
 import type { ThreadSettingsUpdateParams } from "../protocol/0.144.1/ts/v2/ThreadSettingsUpdateParams.js";
 import type { ThreadSettingsUpdateResponse } from "../protocol/0.144.1/ts/v2/ThreadSettingsUpdateResponse.js";
+import type { ThreadSetNameParams } from "../protocol/0.144.1/ts/v2/ThreadSetNameParams.js";
+import type { ThreadSetNameResponse } from "../protocol/0.144.1/ts/v2/ThreadSetNameResponse.js";
 import type { ThreadTurnsListParams } from "../protocol/0.144.1/ts/v2/ThreadTurnsListParams.js";
 import type { ThreadTurnsListResponse } from "../protocol/0.144.1/ts/v2/ThreadTurnsListResponse.js";
 import type { TurnInterruptParams } from "../protocol/0.144.1/ts/v2/TurnInterruptParams.js";
@@ -251,6 +253,13 @@ export class CodexAppServerDriver {
     signal?: AbortSignal,
   ): Promise<ThreadResumeResponse> {
     return this.#request("thread/resume", params, signal);
+  }
+
+  threadSetName(
+    params: ThreadSetNameParams,
+    signal?: AbortSignal,
+  ): Promise<ThreadSetNameResponse> {
+    return this.#request("thread/name/set", params, signal);
   }
 
   threadTurnsList(

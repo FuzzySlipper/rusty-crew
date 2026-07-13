@@ -560,12 +560,21 @@ export type ExternalAgentBinding = {
   createdAt: string;
   cwd?: string | null;
   effectiveConfigFingerprint: string;
+  label?: string | null;
   nativeThreadId?: string | null;
   purpose: ExternalBindingPurpose;
   revision: number;
   runtimeId: string;
   sessionId?: string | null;
   status: ExternalBindingStatus;
+  taskRef?: DenRuntimeReference | null;
+  updatedAt: string;
+};
+
+export type ExternalAgentBindingMetadataWrite = {
+  bindingId: string;
+  expectedRevision: number;
+  label?: string | null;
   taskRef?: DenRuntimeReference | null;
   updatedAt: string;
 };

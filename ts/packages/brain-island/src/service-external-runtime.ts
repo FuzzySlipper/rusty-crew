@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type {
   AgentMessageDeliveryReceipt,
+  DenRuntimeReference,
   ExternalAgentBinding,
   ExternalAgentSessionCreationRecord,
   ExternalAgentSessionCreationRequest,
@@ -171,6 +172,21 @@ export class ExternalRuntimeCommandError extends Error {
   }
 }
 
+export class ExternalBindingMetadataError extends Error {
+  constructor(
+    readonly reasonCode:
+      | "external_binding_not_found"
+      | "external_binding_metadata_revision_conflict"
+      | "external_binding_metadata_native_sync_failed"
+      | "external_binding_metadata_compensation_failed",
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(`${reasonCode}: ${message}`);
+    this.name = "ExternalBindingMetadataError";
+  }
+}
+
 class ExternalTurnDispatchError extends Error {
   constructor(
     readonly phase: "failed" | "outcome_unknown",
@@ -333,6 +349,7 @@ export class ServiceExternalRuntimeController {
     const controlled = await this.#requireControlled(runtimeId);
     const input = params as Parameters<CodexAppServerDriver["threadList"]>[0];
     const result = await controlled.driver.threadList(input);
+    const bindingsByThread = await this.#bindingsByThread(runtimeId);
     const items: ExternalThreadProjection[] = [];
     for (const thread of result.data) {
       if (input.archived === true) {
@@ -345,6 +362,7 @@ export class ServiceExternalRuntimeController {
           controlled,
           thread,
           input.archived === true,
+          bindingsByThread.get(thread.id),
         ),
       );
     }
@@ -372,9 +390,89 @@ export class ServiceExternalRuntimeController {
         }
         throw error;
       });
+    const bindingsByThread = await this.#bindingsByThread(runtimeId);
     return {
-      thread: await this.#projectExternalThread(controlled, result.thread),
+      thread: await this.#projectExternalThread(
+        controlled,
+        result.thread,
+        false,
+        bindingsByThread.get(result.thread.id),
+      ),
     };
+  }
+
+  async updateBindingMetadata(input: {
+    bindingId: string;
+    expectedRevision: number;
+    label: string | null;
+    taskRef: DenRuntimeReference | null;
+  }): Promise<ExternalAgentBinding> {
+    const current = await this.#bridge.getExternalBinding(input.bindingId);
+    if (current === undefined) {
+      throw new ExternalBindingMetadataError(
+        "external_binding_not_found",
+        `external binding ${input.bindingId} was not found`,
+      );
+    }
+    if (current.revision !== input.expectedRevision) {
+      throw new ExternalBindingMetadataError(
+        "external_binding_metadata_revision_conflict",
+        `expected ${input.expectedRevision}, found ${current.revision}`,
+      );
+    }
+    const updatedAt = this.#now().toISOString();
+    let saved: ExternalAgentBinding;
+    try {
+      saved = await this.#bridge.updateExternalBindingMetadata({
+        bindingId: input.bindingId,
+        expectedRevision: input.expectedRevision,
+        label: input.label,
+        taskRef: input.taskRef,
+        updatedAt,
+      });
+    } catch (error) {
+      if (
+        String(error).includes("external_binding_metadata_revision_conflict")
+      ) {
+        throw new ExternalBindingMetadataError(
+          "external_binding_metadata_revision_conflict",
+          String(error),
+        );
+      }
+      throw error;
+    }
+
+    if (input.label !== null && typeof saved.nativeThreadId === "string") {
+      try {
+        const controlled = await this.#requireControlled(saved.runtimeId);
+        await controlled.driver.threadSetName({
+          threadId: saved.nativeThreadId,
+          name: input.label,
+        });
+      } catch (error) {
+        try {
+          await this.#bridge.updateExternalBindingMetadata({
+            bindingId: current.bindingId,
+            expectedRevision: saved.revision,
+            label: current.label ?? null,
+            taskRef: current.taskRef ?? null,
+            updatedAt: this.#now().toISOString(),
+          });
+        } catch (compensationError) {
+          throw new ExternalBindingMetadataError(
+            "external_binding_metadata_compensation_failed",
+            `native label synchronization failed: ${String(error)}; durable rollback failed: ${String(compensationError)}`,
+            true,
+          );
+        }
+        throw new ExternalBindingMetadataError(
+          "external_binding_metadata_native_sync_failed",
+          String(error),
+          true,
+        );
+      }
+    }
+    return saved;
   }
 
   async archiveThread(
@@ -1043,6 +1141,12 @@ export class ServiceExternalRuntimeController {
           reasoning_effort: resumed.reasoningEffort,
           developer_instructions: null,
         });
+        if (typeof binding.label === "string") {
+          await controlled.driver.threadSetName({
+            threadId: binding.nativeThreadId,
+            name: binding.label,
+          });
+        }
       } catch (error) {
         controlled.bindingResumeFailures.push({
           bindingId: binding.bindingId,
@@ -1114,6 +1218,39 @@ export class ServiceExternalRuntimeController {
         true,
       );
     }
+    const currentBinding = await this.#bridge.getExternalBinding(
+      creation.binding.bindingId,
+    );
+    if (currentBinding === undefined) {
+      throw new ExternalAgentSessionCreationError(
+        "external_agent_creation_recovery_required",
+        `external binding ${creation.binding.bindingId} was not found`,
+        true,
+      );
+    }
+    const requestedLabel = creation.request.label ?? null;
+    const requestedTaskRef = creation.request.taskRef ?? null;
+    const binding = bindingMetadataMatches(
+      currentBinding,
+      requestedLabel,
+      requestedTaskRef,
+    )
+      ? currentBinding
+      : await this.updateBindingMetadata({
+          bindingId: currentBinding.bindingId,
+          expectedRevision: currentBinding.revision,
+          label: requestedLabel,
+          taskRef: requestedTaskRef,
+        });
+    if (
+      requestedLabel !== null &&
+      bindingMetadataMatches(currentBinding, requestedLabel, requestedTaskRef)
+    ) {
+      await controlled.driver.threadSetName({
+        threadId: creation.nativeThreadId,
+        name: requestedLabel,
+      });
+    }
     const read = await controlled.driver
       .threadRead({
         threadId: creation.nativeThreadId,
@@ -1127,9 +1264,14 @@ export class ServiceExternalRuntimeController {
         );
       });
     return {
-      creation,
+      creation: { ...creation, binding },
       runtime: controlled.registration,
-      thread: await this.#projectExternalThread(controlled, read.thread),
+      thread: await this.#projectExternalThread(
+        controlled,
+        read.thread,
+        false,
+        binding,
+      ),
     };
   }
 
@@ -1293,6 +1435,7 @@ export class ServiceExternalRuntimeController {
     controlled: ControlledRuntime,
     value: unknown,
     forceUnavailable = false,
+    binding?: ExternalAgentBinding,
   ): Promise<ExternalThreadProjection> {
     const thread = requireNativeRecord(value, "thread");
     const threadId = requireNativeString(thread.id, "thread.id");
@@ -1304,7 +1447,11 @@ export class ServiceExternalRuntimeController {
       controlled.archivedThreadIds.has(threadId) ||
       !loaded
     ) {
-      return projectExternalThread(thread, null);
+      return projectExternalThread(
+        thread,
+        null,
+        binding === undefined ? undefined : (binding.label ?? null),
+      );
     }
 
     let settings = controlled.threadSettings.get(threadId);
@@ -1316,7 +1463,11 @@ export class ServiceExternalRuntimeController {
         });
         settings = threadSettingsFromResume(resumed);
       } catch {
-        return projectExternalThread(thread, null);
+        return projectExternalThread(
+          thread,
+          null,
+          binding === undefined ? undefined : (binding.label ?? null),
+        );
       }
     } else {
       settings = {
@@ -1326,7 +1477,36 @@ export class ServiceExternalRuntimeController {
       };
     }
     controlled.threadSettings.set(threadId, settings);
-    return projectExternalThread(thread, settings.model);
+    return projectExternalThread(
+      thread,
+      settings.model,
+      binding === undefined ? undefined : (binding.label ?? null),
+    );
+  }
+
+  async #bindingsByThread(
+    runtimeId: string,
+  ): Promise<Map<string, ExternalAgentBinding>> {
+    const result = new Map<string, ExternalAgentBinding>();
+    for (const binding of await this.#bridge.listExternalBindings()) {
+      if (
+        binding.runtimeId !== runtimeId ||
+        typeof binding.nativeThreadId !== "string"
+      ) {
+        continue;
+      }
+      const existing = result.get(binding.nativeThreadId);
+      if (
+        existing === undefined ||
+        (existing.purpose !== "crew_agent" &&
+          binding.purpose === "crew_agent") ||
+        (binding.purpose === existing.purpose &&
+          binding.revision > existing.revision)
+      ) {
+        result.set(binding.nativeThreadId, binding);
+      }
+    }
+    return result;
   }
 
   async #applyThreadCommand(
@@ -2365,6 +2545,27 @@ function externalAgentSessionCreationFailureReason(
     : "external_agent_creation_recovery_required";
 }
 
+function bindingMetadataMatches(
+  binding: ExternalAgentBinding,
+  label: string | null,
+  taskRef: DenRuntimeReference | null,
+): boolean {
+  return (
+    (binding.label ?? null) === label &&
+    denRuntimeReferenceKey(binding.taskRef ?? null) ===
+      denRuntimeReferenceKey(taskRef)
+  );
+}
+
+function denRuntimeReferenceKey(reference: DenRuntimeReference | null): string {
+  if (reference === null) return "";
+  const raw = reference as DenRuntimeReference & {
+    project_id?: string;
+    task_id?: string;
+  };
+  return `${reference.projectId ?? raw.project_id ?? ""}\u0000${reference.taskId ?? raw.task_id ?? ""}`;
+}
+
 function projectExternalRuntimeModel(model: Model): ExternalRuntimeModelOption {
   return {
     id: model.id,
@@ -2448,6 +2649,7 @@ function commandExecutionResult(
 function projectExternalThread(
   value: unknown,
   effectiveModel: string | null,
+  managedLabel?: string | null,
 ): ExternalThreadProjection {
   const thread = requireNativeRecord(value, "thread");
   return {
@@ -2463,7 +2665,10 @@ function projectExternalThread(
     status: projectNativeStatus(thread.status),
     cwd: nativeString(thread.cwd) ?? "/home",
     cliVersion: nativeString(thread.cliVersion) ?? "unknown",
-    name: nullableNativeString(thread.name),
+    name:
+      managedLabel === undefined
+        ? nullableNativeString(thread.name)
+        : managedLabel,
     agentNickname: nullableNativeString(thread.agentNickname),
     agentRole: nullableNativeString(thread.agentRole),
     turns: Array.isArray(thread.turns)

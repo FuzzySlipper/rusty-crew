@@ -21,6 +21,7 @@ import {
 import {
   EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES,
   ExternalAgentSessionCreationError,
+  ExternalBindingMetadataError,
   ExternalRuntimeCommandError,
   ExternalThreadLifecycleError,
   type ServiceExternalRuntimeController,
@@ -147,6 +148,41 @@ export async function handleExternalRuntimeRequest(
       );
     }
     return methodNotAllowed(requestId);
+  }
+
+  if (
+    parts[1] === "external-bindings" &&
+    parts.length === 4 &&
+    parts[3] === "metadata"
+  ) {
+    if (method !== "POST") return methodNotAllowed(requestId);
+    try {
+      const body = requireRecord(await context.readJsonBody(request));
+      if (!Object.hasOwn(body, "label") || !Object.hasOwn(body, "taskRef")) {
+        throw new Error("label and taskRef must be explicit nullable fields");
+      }
+      const expectedRevision = requiredInteger(body.expectedRevision);
+      if (expectedRevision < 1) {
+        throw new Error("expectedRevision must be a positive integer");
+      }
+      const label =
+        body.label === null
+          ? null
+          : boundedRequiredString(body.label, 256, "label");
+      const taskRef =
+        body.taskRef === null ? null : optionalTaskReference(body.taskRef);
+      return successRoute(
+        requestId,
+        await context.controller.updateBindingMetadata({
+          bindingId: parts[2] ?? "",
+          expectedRevision,
+          label,
+          taskRef,
+        }),
+      );
+    } catch (error) {
+      return externalBindingMetadataFailure(requestId, error);
+    }
   }
 
   if (url.pathname === "/v1/external-interactions") {
@@ -672,6 +708,38 @@ function externalAgentSessionCreationFailure(
     reason_code: "external_agent_creation_internal_error",
     message,
     retryable: true,
+  });
+}
+
+function externalBindingMetadataFailure(
+  requestId: string,
+  error: unknown,
+): ServiceRouteResult {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof ExternalBindingMetadataError) {
+    const status =
+      error.reasonCode === "external_binding_not_found"
+        ? 404
+        : error.reasonCode === "external_binding_metadata_revision_conflict"
+          ? 409
+          : 502;
+    return failure(status, requestId, {
+      code:
+        status === 404
+          ? "not_found"
+          : status === 409
+            ? "conflict"
+            : "failed_precondition",
+      reason_code: error.reasonCode,
+      message,
+      retryable: error.retryable,
+    });
+  }
+  return failure(400, requestId, {
+    code: "invalid_input",
+    reason_code: "external_binding_metadata_invalid_request",
+    message,
+    retryable: false,
   });
 }
 

@@ -2283,6 +2283,12 @@
         "effectiveConfigFingerprint": {
           "type": "string"
         },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nativeThreadId": {
           "type": [
             "string",
@@ -2331,6 +2337,43 @@
         "status",
         "revision",
         "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalAgentBindingMetadataWrite": {
+      "properties": {
+        "bindingId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taskRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenRuntimeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "expectedRevision",
         "updatedAt"
       ],
       "type": "object"
@@ -4972,6 +5015,9 @@
     "external_agent_binding": {
       "$ref": "#/$defs/ExternalAgentBinding"
     },
+    "external_agent_binding_metadata_write": {
+      "$ref": "#/$defs/ExternalAgentBindingMetadataWrite"
+    },
     "external_agent_session_creation_record": {
       "$ref": "#/$defs/ExternalAgentSessionCreationRecord"
     },
@@ -5149,6 +5195,7 @@
     "external_runtime_state_observation",
     "external_controller_lease",
     "external_agent_binding",
+    "external_agent_binding_metadata_write",
     "external_agent_session_creation_request",
     "external_agent_session_creation_record",
     "external_turn_correlation",

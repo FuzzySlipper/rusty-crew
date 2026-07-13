@@ -244,6 +244,22 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn update_external_binding_metadata_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let write = parse_json::<ExternalAgentBindingMetadataWrite>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .update_external_binding_metadata(&write)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
     pub fn get_external_binding_json(&self, binding_id: String) -> napi::Result<String> {
         serialize_json(
             &self
