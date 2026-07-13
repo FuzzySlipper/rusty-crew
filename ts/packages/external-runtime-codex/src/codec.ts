@@ -32,6 +32,7 @@ export type DecodedServerMessage =
 
 const responseSchemaByMethod: Readonly<Record<string, string>> = Object.freeze({
   initialize: "v1/InitializeResponse.json",
+  "model/list": "v2/ModelListResponse.json",
   "thread/list": "v2/ThreadListResponse.json",
   "thread/read": "v2/ThreadReadResponse.json",
   "thread/archive": "v2/ThreadArchiveResponse.json",
@@ -45,6 +46,7 @@ const responseSchemaByMethod: Readonly<Record<string, string>> = Object.freeze({
   "turn/steer": "v2/TurnSteerResponse.json",
   "turn/interrupt": "v2/TurnInterruptResponse.json",
   "thread/compact/start": "v2/ThreadCompactStartResponse.json",
+  "thread/settings/update": "v2/ThreadSettingsUpdateResponse.json",
 });
 
 const serverRequestResponseSchemaByMethod: Readonly<Record<string, string>> =

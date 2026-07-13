@@ -8,6 +8,7 @@ for (const [itemType, expectedKind] of [
   ["fileChange", "file_activity"],
   ["mcpToolCall", "mcp_activity"],
   ["dynamicToolCall", "dynamic_tool_activity"],
+  ["contextCompaction", "compaction"],
 ] as const) {
   test(`generic item lifecycle projects ${itemType} as ${expectedKind}`, () => {
     const event = mapNotification(

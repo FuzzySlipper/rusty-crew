@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -782,6 +782,104 @@
           }
         },
         "x-rusty-crew-capability-id": "external.bindings.control",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-bindings/{binding_id}/commands": {
+      "get": {
+        "operationId": "listExternalBindingCommands",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeCommandCatalog"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.commands.list",
+        "x-rusty-crew-contract-detail": "wire"
+      },
+      "post": {
+        "operationId": "executeExternalBindingCommand",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalRuntimeCommandWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeCommandExecutionResult"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.commands.execute",
         "x-rusty-crew-contract-detail": "wire"
       }
     },
@@ -2431,6 +2529,7 @@
           "steer_turn",
           "interrupt_turn",
           "compact_thread",
+          "execute_thread_command",
           "resolve_interaction",
           "reconcile_runtime",
           "archive_binding"
@@ -3984,6 +4083,250 @@
         },
         "additionalProperties": false
       },
+      "ExternalRuntimeCommandWrite": {
+        "type": "object",
+        "required": ["input", "idempotencyKey"],
+        "properties": {
+          "input": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expectedBindingRevision": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeCommandDescriptor": {
+        "type": "object",
+        "required": [
+          "name",
+          "aliases",
+          "usage",
+          "description",
+          "mutates",
+          "requiredCapabilities",
+          "available",
+          "unavailableReasonCode"
+        ],
+        "properties": {
+          "name": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "usage": { "type": "string" },
+          "description": { "type": "string" },
+          "mutates": { "type": "boolean" },
+          "requiredCapabilities": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "available": { "type": "boolean" },
+          "unavailableReasonCode": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeReasoningEffortOption": {
+        "type": "object",
+        "required": ["value", "description"],
+        "properties": {
+          "value": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeModelOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "model",
+          "displayName",
+          "description",
+          "hidden",
+          "isDefault",
+          "defaultEffort",
+          "supportedEfforts"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "model": { "type": "string" },
+          "displayName": { "type": "string" },
+          "description": { "type": "string" },
+          "hidden": { "type": "boolean" },
+          "isDefault": { "type": "boolean" },
+          "defaultEffort": { "type": "string" },
+          "supportedEfforts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeReasoningEffortOption"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadSettingsProjection": {
+        "type": "object",
+        "required": ["model", "modelProvider", "effort"],
+        "properties": {
+          "model": { "type": "string" },
+          "modelProvider": { "type": "string" },
+          "effort": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadUsageProjection": {
+        "type": "object",
+        "required": [
+          "total",
+          "last",
+          "modelContextWindow",
+          "contextWindowUsedPercent"
+        ],
+        "properties": {
+          "total": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          },
+          "last": {
+            "type": "object",
+            "additionalProperties": { "type": "number" }
+          },
+          "modelContextWindow": { "type": ["number", "null"] },
+          "contextWindowUsedPercent": { "type": ["number", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadCommandStatus": {
+        "type": "object",
+        "required": [
+          "runtimeId",
+          "runtimeKind",
+          "runtimeObservedState",
+          "controller",
+          "bindingId",
+          "bindingRevision",
+          "bindingStatus",
+          "sessionId",
+          "agentId",
+          "nativeThreadId",
+          "activeNativeTurnId",
+          "settings",
+          "usage"
+        ],
+        "properties": {
+          "runtimeId": { "type": "string" },
+          "runtimeKind": { "type": "string" },
+          "runtimeObservedState": { "type": "string" },
+          "controller": {
+            "$ref": "#/components/schemas/ExternalRuntimeControllerStatus"
+          },
+          "bindingId": { "type": "string" },
+          "bindingRevision": { "type": "integer", "minimum": 0 },
+          "bindingStatus": { "type": "string" },
+          "sessionId": { "type": ["string", "null"] },
+          "agentId": { "type": ["string", "null"] },
+          "nativeThreadId": { "type": "string" },
+          "activeNativeTurnId": { "type": ["string", "null"] },
+          "settings": {
+            "$ref": "#/components/schemas/ExternalThreadSettingsProjection"
+          },
+          "usage": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalThreadUsageProjection" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeCommandCatalog": {
+        "type": "object",
+        "required": [
+          "contractVersion",
+          "runtimeId",
+          "bindingId",
+          "nativeThreadId",
+          "commands",
+          "settings",
+          "models"
+        ],
+        "properties": {
+          "contractVersion": { "type": "string" },
+          "runtimeId": { "type": "string" },
+          "bindingId": { "type": "string" },
+          "nativeThreadId": { "type": "string" },
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeCommandDescriptor"
+            }
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ExternalThreadSettingsProjection"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeModelOption"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeCommandResultData": {
+        "type": "object",
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/ExternalRuntimeCommandCatalog"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalThreadCommandStatus"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ExternalThreadSettingsProjection"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeModelOption"
+            }
+          },
+          "validEfforts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeReasoningEffortOption"
+            }
+          },
+          "nativeResult": true
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeCommandExecutionResult": {
+        "type": "object",
+        "required": [
+          "commandId",
+          "input",
+          "command",
+          "argument",
+          "status",
+          "reasonCode",
+          "message",
+          "result",
+          "receipt"
+        ],
+        "properties": {
+          "commandId": { "type": "string" },
+          "input": { "type": "string" },
+          "command": { "type": "string" },
+          "argument": { "type": ["string", "null"] },
+          "status": { "$ref": "#/components/schemas/ExternalControlStatus" },
+          "reasonCode": { "type": ["string", "null"] },
+          "message": { "type": "string" },
+          "result": {
+            "$ref": "#/components/schemas/ExternalRuntimeCommandResultData"
+          },
+          "receipt": { "$ref": "#/components/schemas/ExternalControlReceipt" }
+        },
+        "additionalProperties": false
+      },
       "ExternalBindingMessageWrite": {
         "type": "object",
         "required": ["body"],
@@ -4037,6 +4380,9 @@
           "text": { "type": "string" },
           "message": { "type": "string" },
           "command": { "type": "string" },
+          "argument": { "type": ["string", "null"] },
+          "controlId": { "type": "string" },
+          "reasonCode": { "type": ["string", "null"] },
           "cwd": { "type": "string" },
           "output": { "type": "string" },
           "exitCode": { "type": "number" },
@@ -4061,9 +4407,24 @@
               "additionalProperties": false
             }
           },
+          "settings": {
+            "$ref": "#/components/schemas/ExternalThreadSettingsProjection"
+          },
           "usage": {
             "type": "object",
-            "additionalProperties": { "type": "number" }
+            "required": ["total", "last", "modelContextWindow"],
+            "properties": {
+              "total": {
+                "type": "object",
+                "additionalProperties": { "type": "number" }
+              },
+              "last": {
+                "type": "object",
+                "additionalProperties": { "type": "number" }
+              },
+              "modelContextWindow": { "type": ["number", "null"] }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -4294,7 +4655,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 22,
+    "operation_count": 24,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

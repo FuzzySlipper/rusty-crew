@@ -4,6 +4,7 @@ import type {
   JsonRpcId,
   NeutralExternalEventKind,
   NeutralExternalRuntimeEvent,
+  NeutralExternalRuntimeEventPayload,
 } from "./types.js";
 
 export function mapNotification(
@@ -132,7 +133,22 @@ function projectPayload(
             }),
       };
     case "usage":
-      return { ...base, usage: numericRecord(params) };
+      return { ...base, usage: projectTokenUsage(params.tokenUsage) };
+    case "thread_lifecycle": {
+      if (method !== "thread/settings/updated") return base;
+      const settings = asRecord(params.threadSettings);
+      const model = stringValue(settings.model);
+      const modelProvider = stringValue(settings.modelProvider);
+      if (model === undefined || modelProvider === undefined) return base;
+      return {
+        ...base,
+        settings: {
+          model,
+          modelProvider,
+          effort: stringValue(settings.effort) ?? null,
+        },
+      };
+    }
     case "runtime_warning": {
       const message = stringValue(params.message);
       return {
@@ -176,6 +192,17 @@ function numericRecord(value: Record<string, unknown>): Record<string, number> {
   );
 }
 
+function projectTokenUsage(
+  value: unknown,
+): NonNullable<NeutralExternalRuntimeEventPayload["usage"]> {
+  const usage = asRecord(value);
+  return {
+    total: numericRecord(asRecord(usage.total)),
+    last: numericRecord(asRecord(usage.last)),
+    modelContextWindow: numberValue(usage.modelContextWindow) ?? null,
+  };
+}
+
 function statusValue(value: unknown): string | undefined {
   return stringValue(value) ?? stringValue(asRecord(value).type);
 }
@@ -198,6 +225,13 @@ function classifyNotification(
   }
   if (method.startsWith("thread/tokenUsage")) return "usage";
   if (method === "thread/compacted") return "compaction";
+  if (
+    itemType === "contextCompaction" ||
+    itemType === "context_compaction" ||
+    method.includes("contextCompaction")
+  ) {
+    return "compaction";
+  }
   if (method.startsWith("thread/")) return "thread_lifecycle";
   if (method.startsWith("turn/")) return "turn_lifecycle";
   if (

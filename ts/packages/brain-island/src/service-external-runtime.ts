@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   AgentMessageDeliveryReceipt,
@@ -24,6 +24,7 @@ import {
   type CollaborationMode,
   type CodexControllerAuthority,
   type CodexInitializeIdentity,
+  type Model,
   type CodexProtocolFault,
   type CodexServerRequestContext,
   type NeutralExternalRuntimeEvent,
@@ -31,10 +32,23 @@ import {
 } from "@rusty-crew/external-runtime-codex";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { resolveCodexCoordinationToolCall } from "./external-runtime-coordination.js";
+import {
+  EXTERNAL_RUNTIME_COMMAND_DEFINITIONS,
+  ExternalRuntimeCommandInputError,
+  parseExternalRuntimeCommand,
+  type ParsedExternalRuntimeCommand,
+} from "./external-runtime-commands.js";
 import type {
   ExternalAgentSessionCreateResult,
   ExternalAgentMessagePhase,
   ExternalThreadDeleteReceipt,
+  ExternalRuntimeCommandCatalog,
+  ExternalRuntimeCommandExecutionResult,
+  ExternalRuntimeCommandResultData,
+  ExternalRuntimeModelOption,
+  ExternalThreadCommandStatus,
+  ExternalThreadSettingsProjection,
+  ExternalThreadUsageProjection,
   ExternalThreadItemProjection,
   ExternalThreadLifecycleReceipt,
   ExternalThreadPage,
@@ -66,8 +80,13 @@ interface ControlledRuntime {
   handshakeIdentity?: CodexInitializeIdentity;
   bindingResumeFailures: ExternalBindingResumeFailure[];
   rawDetails: Map<string, ExternalRuntimeRawDetail>;
-  threadSettings: Map<string, CollaborationMode["settings"]>;
+  threadSettings: Map<string, ControlledThreadSettings>;
+  threadUsage: Map<string, ExternalThreadUsageProjection>;
 }
+
+type ControlledThreadSettings = CollaborationMode["settings"] & {
+  readonly modelProvider: string;
+};
 
 interface PendingInteractionResolution {
   resolve(value: ServerRequestResolution): void;
@@ -133,6 +152,21 @@ export class ExternalThreadLifecycleError extends Error {
   ) {
     super(`${reasonCode}: ${message}`);
     this.name = "ExternalThreadLifecycleError";
+  }
+}
+
+export class ExternalRuntimeCommandError extends Error {
+  constructor(
+    readonly reasonCode:
+      | "external_command_capability_unavailable"
+      | "external_command_model_invalid"
+      | "external_command_effort_invalid"
+      | "external_command_settings_unavailable",
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(`${reasonCode}: ${message}`);
+    this.name = "ExternalRuntimeCommandError";
   }
 }
 
@@ -267,6 +301,7 @@ export class ServiceExternalRuntimeController {
       bindingResumeFailures: [],
       rawDetails: new Map(),
       threadSettings: new Map(),
+      threadUsage: new Map(),
     };
     const authority = this.#authority(controlled);
     controlled.driver = this.#driverFactory(registration, authority);
@@ -321,6 +356,13 @@ export class ServiceExternalRuntimeController {
         }
         throw error;
       });
+    const current = controlled.threadSettings.get(result.thread.id);
+    if (current !== undefined) {
+      controlled.threadSettings.set(result.thread.id, {
+        ...current,
+        modelProvider: result.thread.modelProvider,
+      });
+    }
     return { thread: projectExternalThread(result.thread) };
   }
 
@@ -556,6 +598,115 @@ export class ServiceExternalRuntimeController {
     );
   }
 
+  async commandCatalog(
+    bindingId: string,
+  ): Promise<ExternalRuntimeCommandCatalog> {
+    const binding = await this.#requireCommandBinding(bindingId);
+    const controlled = await this.#requireControlled(binding.runtimeId);
+    const settings = await this.#effectiveThreadSettings(controlled, binding);
+    const modelResult = await this.#tryModelCatalog(controlled);
+    return {
+      contractVersion: "0.6.0",
+      runtimeId: binding.runtimeId,
+      bindingId: binding.bindingId,
+      nativeThreadId: binding.nativeThreadId,
+      commands: EXTERNAL_RUNTIME_COMMAND_DEFINITIONS.map((definition) => {
+        const requiresModels = definition.requiredCapabilities.some(
+          (capability) =>
+            capability === "model/list" ||
+            capability === "thread/settings/update",
+        );
+        return {
+          ...definition,
+          available: !requiresModels || modelResult.reasonCode === null,
+          unavailableReasonCode: requiresModels ? modelResult.reasonCode : null,
+        };
+      }),
+      settings: projectThreadSettings(settings),
+      models: modelResult.models,
+    };
+  }
+
+  async executeCommand(input: {
+    bindingId: string;
+    commandInput: string;
+    idempotencyKey: string;
+    expectedBindingRevision?: number;
+  }): Promise<ExternalRuntimeCommandExecutionResult> {
+    const parsed = parseExternalRuntimeCommand(input.commandInput);
+    const binding = await this.#requireCommandBinding(input.bindingId);
+    const controlled = await this.#requireControlled(binding.runtimeId);
+    const commandId = `external-command:${createHash("sha256")
+      .update(`${binding.bindingId}\0${input.idempotencyKey}`)
+      .digest("hex")
+      .slice(0, 32)}`;
+    const request: ExternalControlRequest = {
+      controlId: commandId,
+      idempotencyKey: input.idempotencyKey,
+      bindingId: binding.bindingId,
+      expectedBindingRevision:
+        input.expectedBindingRevision ?? binding.revision,
+      kind: "execute_thread_command",
+      payload: {
+        command: parsed.command,
+        argument: parsed.argument,
+      },
+      requestedAt: this.#now().toISOString(),
+    };
+    let receipt = await this.#bridge.submitExternalControl(request);
+    if (receipt.status !== "pending") {
+      return commandExecutionResult(parsed, receipt);
+    }
+    await this.#recordCommandEvent(
+      controlled,
+      binding,
+      receipt,
+      "command_started",
+    );
+    try {
+      const outcome = browserSafeNativeValue(
+        await this.#applyThreadCommand(controlled, binding, parsed),
+      );
+      receipt = await this.#bridge.completeExternalControl({
+        controller: this.#controllerContext(controlled),
+        controlId: receipt.request.controlId,
+        status: "applied",
+        outcome,
+        now: this.#now().toISOString(),
+      });
+      await this.#recordCommandEvent(
+        controlled,
+        binding,
+        receipt,
+        "command_completed",
+      );
+    } catch (error) {
+      const commandError =
+        error instanceof ExternalRuntimeCommandError
+          ? error
+          : codexCapabilityError(error);
+      receipt = await this.#bridge.completeExternalControl({
+        controller: this.#controllerContext(controlled),
+        controlId: receipt.request.controlId,
+        status: commandError === undefined ? "failed" : "rejected",
+        reasonCode:
+          commandError?.reasonCode ?? "external_command_driver_failed",
+        outcome: {
+          message:
+            commandError?.message ?? "external command driver call failed",
+        },
+        now: this.#now().toISOString(),
+      });
+      await this.#recordCommandEvent(
+        controlled,
+        binding,
+        receipt,
+        "command_failed",
+      );
+    }
+    return commandExecutionResult(parsed, receipt);
+  }
+
   async createAgentSession(
     request: ExternalAgentSessionCreationRequest,
   ): Promise<ExternalAgentSessionCreateResult> {
@@ -597,6 +748,7 @@ export class ServiceExternalRuntimeController {
         });
         controlled.threadSettings.set(recovered.id, {
           model: resumed.model,
+          modelProvider: resumed.modelProvider,
           reasoning_effort: resumed.reasoningEffort,
           developer_instructions: null,
         });
@@ -612,6 +764,7 @@ export class ServiceExternalRuntimeController {
         nativeThreadId = started.thread.id;
         controlled.threadSettings.set(nativeThreadId, {
           model: started.model,
+          modelProvider: started.modelProvider,
           reasoning_effort: started.reasoningEffort,
           developer_instructions: null,
         });
@@ -870,6 +1023,7 @@ export class ServiceExternalRuntimeController {
         });
         controlled.threadSettings.set(binding.nativeThreadId, {
           model: resumed.model,
+          modelProvider: resumed.modelProvider,
           reasoning_effort: resumed.reasoningEffort,
           developer_instructions: null,
         });
@@ -1051,6 +1205,269 @@ export class ServiceExternalRuntimeController {
     };
   }
 
+  async #modelCatalog(
+    controlled: ControlledRuntime,
+  ): Promise<ExternalRuntimeModelOption[]> {
+    const models: ExternalRuntimeModelOption[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    for (let page = 0; page < 100; page += 1) {
+      const response = await controlled.driver.modelList({
+        cursor,
+        limit: 100,
+        includeHidden: true,
+      });
+      models.push(...response.data.map(projectExternalRuntimeModel));
+      if (response.nextCursor === null) return models;
+      if (seenCursors.has(response.nextCursor)) {
+        throw new ExternalRuntimeCommandError(
+          "external_command_capability_unavailable",
+          "Codex model/list returned a repeated pagination cursor",
+          true,
+        );
+      }
+      seenCursors.add(response.nextCursor);
+      cursor = response.nextCursor;
+    }
+    throw new ExternalRuntimeCommandError(
+      "external_command_capability_unavailable",
+      "Codex model/list exceeded the 100-page safety bound",
+      true,
+    );
+  }
+
+  async #tryModelCatalog(controlled: ControlledRuntime): Promise<{
+    models: ExternalRuntimeModelOption[];
+    reasonCode: string | null;
+  }> {
+    try {
+      return { models: await this.#modelCatalog(controlled), reasonCode: null };
+    } catch {
+      return {
+        models: [],
+        reasonCode: "external_command_capability_unavailable",
+      };
+    }
+  }
+
+  async #effectiveThreadSettings(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding & { nativeThreadId: string },
+  ): Promise<ControlledThreadSettings> {
+    const current = controlled.threadSettings.get(binding.nativeThreadId);
+    if (current !== undefined) return current;
+    try {
+      const resumed = await controlled.driver.threadResume({
+        threadId: binding.nativeThreadId,
+        excludeTurns: true,
+      });
+      const settings = threadSettingsFromResume(resumed);
+      controlled.threadSettings.set(binding.nativeThreadId, settings);
+      return settings;
+    } catch (error) {
+      throw new ExternalRuntimeCommandError(
+        "external_command_settings_unavailable",
+        `Codex thread settings could not be read: ${String(error)}`,
+        true,
+      );
+    }
+  }
+
+  async #applyThreadCommand(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding & { nativeThreadId: string },
+    command: ParsedExternalRuntimeCommand,
+  ): Promise<{ message: string; result: ExternalRuntimeCommandResultData }> {
+    switch (command.command) {
+      case "help":
+      case "commands": {
+        const catalog = await this.commandCatalog(binding.bindingId);
+        return {
+          message: catalog.commands
+            .map((entry) => `${entry.usage} - ${entry.description}`)
+            .join("\n"),
+          result: { catalog },
+        };
+      }
+      case "status": {
+        const status = await this.#threadCommandStatus(controlled, binding);
+        const usage = status.usage;
+        return {
+          message: [
+            `Runtime: ${status.runtimeId} (${status.controller.driverState})`,
+            `Thread: ${status.nativeThreadId}`,
+            `Model: ${status.settings.model} via ${status.settings.modelProvider}`,
+            `Effort: ${status.settings.effort ?? "default"}`,
+            `Active turn: ${status.activeNativeTurnId ?? "none"}`,
+            usage === null
+              ? "Context usage: not reported yet"
+              : `Context usage: ${usage.total.totalTokens ?? 0}/${usage.modelContextWindow ?? "unknown"}${usage.contextWindowUsedPercent === null ? "" : ` (${usage.contextWindowUsedPercent.toFixed(1)}%)`}`,
+          ].join("\n"),
+          result: { status },
+        };
+      }
+      case "model": {
+        const settings = await this.#effectiveThreadSettings(
+          controlled,
+          binding,
+        );
+        const models = await this.#modelCatalog(controlled);
+        if (command.argument === null) {
+          return {
+            message: `Current model: ${settings.model}\nAvailable models: ${models.map((model) => model.id).join(", ")}`,
+            result: { settings: projectThreadSettings(settings), models },
+          };
+        }
+        const selected = models.find(
+          (model) =>
+            model.id === command.argument || model.model === command.argument,
+        );
+        if (selected === undefined) {
+          throw new ExternalRuntimeCommandError(
+            "external_command_model_invalid",
+            `model ${command.argument} is not in the live Codex model catalog`,
+          );
+        }
+        const selectedEffort = selected.supportedEfforts.some(
+          (effort) => effort.value === settings.reasoning_effort,
+        )
+          ? settings.reasoning_effort
+          : selected.defaultEffort;
+        await controlled.driver.threadSettingsUpdate({
+          threadId: binding.nativeThreadId,
+          model: selected.model,
+          effort: selectedEffort,
+        });
+        const readback = await this.#refreshThreadSettings(
+          controlled,
+          binding.nativeThreadId,
+          {
+            model: selected.model,
+            effort: selectedEffort,
+          },
+        );
+        return {
+          message: `Model set to ${readback.model}; effort is ${readback.reasoning_effort ?? "default"}.`,
+          result: { settings: projectThreadSettings(readback), models },
+        };
+      }
+      case "effort": {
+        const settings = await this.#effectiveThreadSettings(
+          controlled,
+          binding,
+        );
+        const models = await this.#modelCatalog(controlled);
+        const selectedModel = models.find(
+          (model) =>
+            model.id === settings.model || model.model === settings.model,
+        );
+        if (selectedModel === undefined) {
+          throw new ExternalRuntimeCommandError(
+            "external_command_model_invalid",
+            `current model ${settings.model} is not in the live Codex model catalog`,
+          );
+        }
+        if (command.argument === null) {
+          return {
+            message: `Current effort: ${settings.reasoning_effort ?? "default"}\nValid efforts: ${selectedModel.supportedEfforts.map((effort) => effort.value).join(", ")}`,
+            result: {
+              settings: projectThreadSettings(settings),
+              validEfforts: selectedModel.supportedEfforts,
+            },
+          };
+        }
+        if (
+          !selectedModel.supportedEfforts.some(
+            (effort) => effort.value === command.argument,
+          )
+        ) {
+          throw new ExternalRuntimeCommandError(
+            "external_command_effort_invalid",
+            `effort ${command.argument} is not supported by ${selectedModel.id}`,
+          );
+        }
+        await controlled.driver.threadSettingsUpdate({
+          threadId: binding.nativeThreadId,
+          effort: command.argument,
+        });
+        const readback = await this.#refreshThreadSettings(
+          controlled,
+          binding.nativeThreadId,
+          { effort: command.argument },
+        );
+        return {
+          message: `Reasoning effort set to ${readback.reasoning_effort ?? "default"}.`,
+          result: {
+            settings: projectThreadSettings(readback),
+            validEfforts: selectedModel.supportedEfforts,
+          },
+        };
+      }
+      case "compact": {
+        const nativeResult = await controlled.driver.compactThread({
+          threadId: binding.nativeThreadId,
+        });
+        return {
+          message: "Native Codex compaction started.",
+          result: { nativeResult },
+        };
+      }
+    }
+  }
+
+  async #refreshThreadSettings(
+    controlled: ControlledRuntime,
+    threadId: string,
+    expected: {
+      readonly model?: string;
+      readonly effort?: string | null;
+    },
+  ): Promise<ControlledThreadSettings> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const settings = controlled.threadSettings.get(threadId);
+      if (
+        settings !== undefined &&
+        (expected.model === undefined || settings.model === expected.model) &&
+        (expected.effort === undefined ||
+          settings.reasoning_effort === expected.effort)
+      ) {
+        return settings;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new ExternalRuntimeCommandError(
+      "external_command_settings_unavailable",
+      "Codex accepted thread/settings/update but did not emit matching authoritative settings",
+      true,
+    );
+  }
+
+  async #threadCommandStatus(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding & { nativeThreadId: string },
+  ): Promise<ExternalThreadCommandStatus> {
+    const settings = await this.#effectiveThreadSettings(controlled, binding);
+    const activeTurn = (await this.#bridge.listActiveExternalTurns()).find(
+      (turn) => turn.request.bindingId === binding.bindingId,
+    );
+    return {
+      runtimeId: controlled.registration.runtimeId,
+      runtimeKind: controlled.registration.kind,
+      runtimeObservedState: controlled.registration.observedState,
+      controller: this.#status(controlled),
+      bindingId: binding.bindingId,
+      bindingRevision: binding.revision,
+      bindingStatus: binding.status,
+      sessionId: binding.sessionId ?? null,
+      agentId: binding.agentId ?? null,
+      nativeThreadId: binding.nativeThreadId,
+      activeNativeTurnId: activeTurn?.nativeTurnId ?? null,
+      settings: projectThreadSettings(settings),
+      usage: controlled.threadUsage.get(binding.nativeThreadId) ?? null,
+    };
+  }
+
   async #applyControl(
     controlled: ControlledRuntime,
     binding: ExternalAgentBinding,
@@ -1065,6 +1482,7 @@ export class ServiceExternalRuntimeController {
           });
           controlled.threadSettings.set(binding.nativeThreadId, {
             model: resumed.model,
+            modelProvider: resumed.modelProvider,
             reasoning_effort: resumed.reasoningEffort,
             developer_instructions: null,
           });
@@ -1080,6 +1498,7 @@ export class ServiceExternalRuntimeController {
         });
         controlled.threadSettings.set(started.thread.id, {
           model: started.model,
+          modelProvider: started.modelProvider,
           reasoning_effort: started.reasoningEffort,
           developer_instructions: null,
         });
@@ -1109,6 +1528,25 @@ export class ServiceExternalRuntimeController {
             CodexAppServerDriver["compactThread"]
           >[0],
         );
+      case "execute_thread_command": {
+        const payload = isRecord(request.payload) ? request.payload : {};
+        const command = stringValue(payload.command);
+        const argument =
+          payload.argument === null ? null : stringValue(payload.argument);
+        if (command === undefined || argument === undefined) {
+          throw new ExternalRuntimeCommandInputError(
+            "external_command_invalid_input",
+            "external command control payload is malformed",
+          );
+        }
+        return this.#applyThreadCommand(
+          controlled,
+          await this.#requireCommandBinding(binding.bindingId),
+          parseExternalRuntimeCommand(
+            `/${command}${argument === null ? "" : ` ${argument}`}`,
+          ),
+        );
+      }
       case "reconcile_runtime":
         return typeof binding.nativeThreadId !== "string"
           ? { reconciled: true, nativeThreadId: null }
@@ -1180,6 +1618,20 @@ export class ServiceExternalRuntimeController {
     controlled: ControlledRuntime,
     event: NeutralExternalRuntimeEvent,
   ): Promise<void> {
+    if (event.threadId !== undefined && event.payload.settings !== undefined) {
+      controlled.threadSettings.set(event.threadId, {
+        model: event.payload.settings.model,
+        modelProvider: event.payload.settings.modelProvider,
+        reasoning_effort: event.payload.settings.effort,
+        developer_instructions: null,
+      });
+    }
+    if (event.threadId !== undefined && event.payload.usage !== undefined) {
+      controlled.threadUsage.set(
+        event.threadId,
+        projectThreadUsage(event.payload.usage),
+      );
+    }
     const detailId = `${controlled.registration.runtimeId}:${controlled.lease.generation}:${event.transportSequence}`;
     this.#rememberRawDetail(controlled, {
       detailId,
@@ -1215,6 +1667,45 @@ export class ServiceExternalRuntimeController {
       },
     });
     await this.#applyTerminalEvent(controlled, saved);
+  }
+
+  async #recordCommandEvent(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding & { nativeThreadId: string },
+    receipt: ExternalControlReceipt,
+    kind: "command_started" | "command_completed" | "command_failed",
+  ): Promise<void> {
+    const payload = isRecord(receipt.request.payload)
+      ? receipt.request.payload
+      : {};
+    const outcome = isRecord(receipt.outcome) ? receipt.outcome : {};
+    const message = stringValue(outcome.message);
+    await this.#bridge.recordExternalRuntimeEvent({
+      controller: this.#controllerContext(controlled),
+      event: {
+        eventId: `${receipt.request.controlId}:${kind}`,
+        ...(binding.sessionId === undefined
+          ? {}
+          : { sessionId: binding.sessionId }),
+        createdAt:
+          kind === "command_started"
+            ? receipt.request.requestedAt
+            : receipt.updatedAt,
+        kind,
+        runtimeId: binding.runtimeId,
+        nativeThreadId: binding.nativeThreadId,
+        requestId: receipt.request.controlId,
+        payload: {
+          nativeMethod: "rustyCrew/externalCommand",
+          status: kind === "command_started" ? "pending" : receipt.status,
+          command: stringValue(payload.command) ?? "unknown",
+          argument: payload.argument ?? null,
+          controlId: receipt.request.controlId,
+          reasonCode: receipt.reasonCode ?? null,
+          ...(message === undefined ? {} : { message }),
+        },
+      },
+    });
   }
 
   async #applyTerminalEvent(
@@ -1729,6 +2220,25 @@ export class ServiceExternalRuntimeController {
     return binding;
   }
 
+  async #requireCommandBinding(
+    bindingId: string,
+  ): Promise<ExternalAgentBinding & { nativeThreadId: string }> {
+    const binding = await this.#requireBinding(bindingId);
+    if (binding.status !== "active") {
+      throw new ExternalRuntimeCommandError(
+        "external_command_settings_unavailable",
+        `external binding ${bindingId} is not active`,
+      );
+    }
+    if (binding.nativeThreadId === undefined) {
+      throw new ExternalRuntimeCommandError(
+        "external_command_settings_unavailable",
+        `external binding ${bindingId} has no native thread`,
+      );
+    }
+    return binding as ExternalAgentBinding & { nativeThreadId: string };
+  }
+
   #rememberRawDetail(
     controlled: ControlledRuntime,
     detail: ExternalRuntimeRawDetail,
@@ -1782,6 +2292,86 @@ function externalAgentSessionCreationFailureReason(
   return nativeThreadId === undefined
     ? "external_agent_creation_native_start_failed"
     : "external_agent_creation_recovery_required";
+}
+
+function projectExternalRuntimeModel(model: Model): ExternalRuntimeModelOption {
+  return {
+    id: model.id,
+    model: model.model,
+    displayName: model.displayName,
+    description: model.description,
+    hidden: model.hidden,
+    isDefault: model.isDefault,
+    defaultEffort: model.defaultReasoningEffort,
+    supportedEfforts: model.supportedReasoningEfforts.map((option) => ({
+      value: option.reasoningEffort,
+      description: option.description,
+    })),
+  };
+}
+
+function threadSettingsFromResume(
+  resumed: Awaited<ReturnType<CodexAppServerDriver["threadResume"]>>,
+): ControlledThreadSettings {
+  return {
+    model: resumed.model,
+    modelProvider: resumed.modelProvider,
+    reasoning_effort: resumed.reasoningEffort,
+    developer_instructions: null,
+  };
+}
+
+function projectThreadSettings(
+  settings: ControlledThreadSettings,
+): ExternalThreadSettingsProjection {
+  return {
+    model: settings.model,
+    modelProvider: settings.modelProvider,
+    effort: settings.reasoning_effort,
+  };
+}
+
+function projectThreadUsage(
+  usage: NonNullable<NeutralExternalRuntimeEvent["payload"]["usage"]>,
+): ExternalThreadUsageProjection {
+  const totalTokens = usage.total.totalTokens;
+  const contextWindowUsedPercent =
+    typeof totalTokens === "number" &&
+    usage.modelContextWindow !== null &&
+    usage.modelContextWindow > 0
+      ? (totalTokens / usage.modelContextWindow) * 100
+      : null;
+  return {
+    total: usage.total,
+    last: usage.last,
+    modelContextWindow: usage.modelContextWindow,
+    contextWindowUsedPercent,
+  };
+}
+
+function commandExecutionResult(
+  command: ParsedExternalRuntimeCommand,
+  receipt: ExternalControlReceipt,
+): ExternalRuntimeCommandExecutionResult {
+  const outcome = isRecord(receipt.outcome) ? receipt.outcome : {};
+  const result = isRecord(outcome.result)
+    ? (outcome.result as ExternalRuntimeCommandResultData)
+    : {};
+  return {
+    commandId: receipt.request.controlId,
+    input: command.input,
+    command: command.command,
+    argument: command.argument,
+    status: receipt.status,
+    reasonCode: receipt.reasonCode ?? null,
+    message:
+      stringValue(outcome.message) ??
+      (receipt.status === "applied"
+        ? `/${command.command} completed.`
+        : `/${command.command} ${receipt.status}.`),
+    result,
+    receipt,
+  };
 }
 
 function projectExternalThread(value: unknown): ExternalThreadProjection {
@@ -1852,6 +2442,22 @@ function isUnmaterializedThreadRead(error: unknown): boolean {
     error.message.includes(
       "is not materialized yet; includeTurns is unavailable before first user message",
     )
+  );
+}
+
+function codexCapabilityError(
+  error: unknown,
+): ExternalRuntimeCommandError | undefined {
+  if (!(error instanceof CodexRpcError)) return undefined;
+  if (
+    error.code !== -32601 &&
+    !(error.code === -32600 && error.message.includes("experimentalApi"))
+  ) {
+    return undefined;
+  }
+  return new ExternalRuntimeCommandError(
+    "external_command_capability_unavailable",
+    `Codex app-server did not accept the command capability: ${error.message}`,
   );
 }
 

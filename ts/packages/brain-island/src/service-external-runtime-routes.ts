@@ -21,9 +21,14 @@ import {
 import {
   EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES,
   ExternalAgentSessionCreationError,
+  ExternalRuntimeCommandError,
   ExternalThreadLifecycleError,
   type ServiceExternalRuntimeController,
 } from "./service-external-runtime.js";
+import {
+  ExternalRuntimeCommandInputError,
+  isRecognizedExternalRuntimeCommandInput,
+} from "./external-runtime-commands.js";
 
 export interface ExternalRuntimeRouteContext {
   readonly bridge: NativeBridgeModule;
@@ -198,6 +203,47 @@ export async function handleExternalRuntimeRequest(
   if (
     parts[1] === "external-bindings" &&
     parts.length === 4 &&
+    parts[3] === "commands"
+  ) {
+    const bindingId = parts[2] ?? "";
+    try {
+      if (method === "GET") {
+        return successRoute(
+          requestId,
+          await context.controller.commandCatalog(bindingId),
+        );
+      }
+      if (method === "POST") {
+        const body = requireRecord(await context.readJsonBody(request));
+        return successRoute(
+          requestId,
+          await context.controller.executeCommand({
+            bindingId,
+            commandInput: boundedRequiredString(body.input, 512, "input"),
+            idempotencyKey: boundedRequiredString(
+              body.idempotencyKey,
+              256,
+              "idempotencyKey",
+            ),
+            ...(numberValue(body.expectedBindingRevision) === undefined
+              ? {}
+              : {
+                  expectedBindingRevision: numberValue(
+                    body.expectedBindingRevision,
+                  ),
+                }),
+          }),
+        );
+      }
+      return methodNotAllowed(requestId);
+    } catch (error) {
+      return externalCommandFailure(requestId, error);
+    }
+  }
+
+  if (
+    parts[1] === "external-bindings" &&
+    parts.length === 4 &&
     parts[3] === "controls"
   ) {
     if (method !== "POST") return methodNotAllowed(requestId);
@@ -255,6 +301,15 @@ export async function handleExternalRuntimeRequest(
       optionalString(body.idempotencyKey) ?? `operator-message:${deliveryId}`;
     const messageId = optionalString(body.messageId) ?? `message:${deliveryId}`;
     const messageBody = requiredString(body.body);
+    if (isRecognizedExternalRuntimeCommandInput(messageBody)) {
+      return failure(409, requestId, {
+        code: "failed_precondition",
+        reason_code: "external_command_requires_command_route",
+        message:
+          "recognized external commands must use the binding command endpoint",
+        retryable: false,
+      });
+    }
     const collaborationMode = optionalCollaborationMode(body.collaborationMode);
     const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
     if (
@@ -401,6 +456,34 @@ export async function handleExternalRuntimeRequest(
     code: "not_found",
     reason_code: "unknown_external_runtime_route",
     message: `unknown external runtime route ${url.pathname}`,
+    retryable: false,
+  });
+}
+
+function externalCommandFailure(
+  requestId: string,
+  error: unknown,
+): ServiceRouteResult {
+  if (error instanceof ExternalRuntimeCommandInputError) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: error.reasonCode,
+      message: error.message,
+      retryable: false,
+    });
+  }
+  if (error instanceof ExternalRuntimeCommandError) {
+    return failure(error.retryable ? 503 : 409, requestId, {
+      code: error.retryable ? "failed_precondition" : "conflict",
+      reason_code: error.reasonCode,
+      message: error.message,
+      retryable: error.retryable,
+    });
+  }
+  return failure(409, requestId, {
+    code: "conflict",
+    reason_code: "external_command_rejected",
+    message: error instanceof Error ? error.message : String(error),
     retryable: false,
   });
 }

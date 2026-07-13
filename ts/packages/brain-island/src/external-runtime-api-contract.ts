@@ -1,9 +1,10 @@
 import type {
   ExternalAgentSessionCreationRecord,
+  ExternalControlReceipt,
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.5.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.6.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -25,6 +26,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   rawDetail: "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
   bindings: "/v1/external-bindings",
   controls: "/v1/external-bindings/{binding_id}/controls",
+  commands: "/v1/external-bindings/{binding_id}/commands",
   messages: "/v1/external-bindings/{binding_id}/messages",
   interactions: "/v1/external-interactions",
   interactionResolve: "/v1/external-interactions/{interaction_id}/resolve",
@@ -113,6 +115,107 @@ export interface ExternalAgentSessionCreateResult {
   readonly creation: ExternalAgentSessionCreationRecord;
   readonly runtime: ExternalRuntimeRegistration;
   readonly thread: ExternalThreadProjection;
+}
+
+export interface ExternalRuntimeCommandDescriptor {
+  readonly name: string;
+  readonly aliases: readonly string[];
+  readonly usage: string;
+  readonly description: string;
+  readonly mutates: boolean;
+  readonly requiredCapabilities: readonly string[];
+  readonly available: boolean;
+  readonly unavailableReasonCode: string | null;
+}
+
+export interface ExternalRuntimeReasoningEffortOption {
+  readonly value: string;
+  readonly description: string;
+}
+
+export interface ExternalRuntimeModelOption {
+  readonly id: string;
+  readonly model: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly hidden: boolean;
+  readonly isDefault: boolean;
+  readonly defaultEffort: string;
+  readonly supportedEfforts: readonly ExternalRuntimeReasoningEffortOption[];
+}
+
+export interface ExternalThreadSettingsProjection {
+  readonly model: string;
+  readonly modelProvider: string;
+  readonly effort: string | null;
+}
+
+export interface ExternalThreadUsageProjection {
+  readonly total: Readonly<Record<string, number>>;
+  readonly last: Readonly<Record<string, number>>;
+  readonly modelContextWindow: number | null;
+  readonly contextWindowUsedPercent: number | null;
+}
+
+export interface ExternalRuntimeControllerStatus {
+  readonly runtimeId: string;
+  readonly driverState: string;
+  readonly controllerInstanceId: string;
+  readonly controllerGeneration: number;
+  readonly leaseExpiresAt: string;
+  readonly bindingResumeFailures: readonly {
+    readonly bindingId: string;
+    readonly nativeThreadId: string;
+    readonly reason: string;
+    readonly observedAt: string;
+  }[];
+}
+
+export interface ExternalThreadCommandStatus {
+  readonly runtimeId: string;
+  readonly runtimeKind: string;
+  readonly runtimeObservedState: string;
+  readonly controller: ExternalRuntimeControllerStatus;
+  readonly bindingId: string;
+  readonly bindingRevision: number;
+  readonly bindingStatus: string;
+  readonly sessionId: string | null;
+  readonly agentId: string | null;
+  readonly nativeThreadId: string;
+  readonly activeNativeTurnId: string | null;
+  readonly settings: ExternalThreadSettingsProjection;
+  readonly usage: ExternalThreadUsageProjection | null;
+}
+
+export interface ExternalRuntimeCommandCatalog {
+  readonly contractVersion: string;
+  readonly runtimeId: string;
+  readonly bindingId: string;
+  readonly nativeThreadId: string;
+  readonly commands: readonly ExternalRuntimeCommandDescriptor[];
+  readonly settings: ExternalThreadSettingsProjection;
+  readonly models: readonly ExternalRuntimeModelOption[];
+}
+
+export interface ExternalRuntimeCommandResultData {
+  readonly catalog?: ExternalRuntimeCommandCatalog;
+  readonly status?: ExternalThreadCommandStatus;
+  readonly settings?: ExternalThreadSettingsProjection;
+  readonly models?: readonly ExternalRuntimeModelOption[];
+  readonly validEfforts?: readonly ExternalRuntimeReasoningEffortOption[];
+  readonly nativeResult?: unknown;
+}
+
+export interface ExternalRuntimeCommandExecutionResult {
+  readonly commandId: string;
+  readonly input: string;
+  readonly command: string;
+  readonly argument: string | null;
+  readonly status: ExternalControlReceipt["status"];
+  readonly reasonCode: string | null;
+  readonly message: string;
+  readonly result: ExternalRuntimeCommandResultData;
+  readonly receipt: ExternalControlReceipt;
 }
 
 type JsonSchema = Record<string, unknown> | boolean;
@@ -269,6 +372,21 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.controls,
     "ExternalControlReceipt",
     "ExternalControlWrite",
+  ),
+  operation(
+    "external.bindings.commands.list",
+    "listExternalBindingCommands",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.commands,
+    "ExternalRuntimeCommandCatalog",
+  ),
+  operation(
+    "external.bindings.commands.execute",
+    "executeExternalBindingCommand",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.commands,
+    "ExternalRuntimeCommandExecutionResult",
+    "ExternalRuntimeCommandWrite",
   ),
   operation(
     "external.bindings.messages.create",
@@ -685,6 +803,234 @@ function routeSchemas(): Record<string, JsonSchema> {
       },
       additionalProperties: false,
     },
+    ExternalRuntimeCommandWrite: {
+      type: "object",
+      required: ["input", "idempotencyKey"],
+      properties: {
+        input: { type: "string", minLength: 1, maxLength: 512 },
+        idempotencyKey: { type: "string", minLength: 1, maxLength: 256 },
+        expectedBindingRevision: { type: "integer", minimum: 0 },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeCommandDescriptor: {
+      type: "object",
+      required: [
+        "name",
+        "aliases",
+        "usage",
+        "description",
+        "mutates",
+        "requiredCapabilities",
+        "available",
+        "unavailableReasonCode",
+      ],
+      properties: {
+        name: { type: "string" },
+        aliases: { type: "array", items: { type: "string" } },
+        usage: { type: "string" },
+        description: { type: "string" },
+        mutates: { type: "boolean" },
+        requiredCapabilities: {
+          type: "array",
+          items: { type: "string" },
+        },
+        available: { type: "boolean" },
+        unavailableReasonCode: nullableString,
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeReasoningEffortOption: {
+      type: "object",
+      required: ["value", "description"],
+      properties: {
+        value: { type: "string" },
+        description: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeModelOption: {
+      type: "object",
+      required: [
+        "id",
+        "model",
+        "displayName",
+        "description",
+        "hidden",
+        "isDefault",
+        "defaultEffort",
+        "supportedEfforts",
+      ],
+      properties: {
+        id: { type: "string" },
+        model: { type: "string" },
+        displayName: { type: "string" },
+        description: { type: "string" },
+        hidden: { type: "boolean" },
+        isDefault: { type: "boolean" },
+        defaultEffort: { type: "string" },
+        supportedEfforts: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalRuntimeReasoningEffortOption",
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadSettingsProjection: {
+      type: "object",
+      required: ["model", "modelProvider", "effort"],
+      properties: {
+        model: { type: "string" },
+        modelProvider: { type: "string" },
+        effort: nullableString,
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadUsageProjection: {
+      type: "object",
+      required: [
+        "total",
+        "last",
+        "modelContextWindow",
+        "contextWindowUsedPercent",
+      ],
+      properties: {
+        total: { type: "object", additionalProperties: { type: "number" } },
+        last: { type: "object", additionalProperties: { type: "number" } },
+        modelContextWindow: { type: ["number", "null"] },
+        contextWindowUsedPercent: { type: ["number", "null"] },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadCommandStatus: {
+      type: "object",
+      required: [
+        "runtimeId",
+        "runtimeKind",
+        "runtimeObservedState",
+        "controller",
+        "bindingId",
+        "bindingRevision",
+        "bindingStatus",
+        "sessionId",
+        "agentId",
+        "nativeThreadId",
+        "activeNativeTurnId",
+        "settings",
+        "usage",
+      ],
+      properties: {
+        runtimeId: { type: "string" },
+        runtimeKind: { type: "string" },
+        runtimeObservedState: { type: "string" },
+        controller: {
+          $ref: "#/components/schemas/ExternalRuntimeControllerStatus",
+        },
+        bindingId: { type: "string" },
+        bindingRevision: { type: "integer", minimum: 0 },
+        bindingStatus: { type: "string" },
+        sessionId: nullableString,
+        agentId: nullableString,
+        nativeThreadId: { type: "string" },
+        activeNativeTurnId: nullableString,
+        settings: {
+          $ref: "#/components/schemas/ExternalThreadSettingsProjection",
+        },
+        usage: {
+          anyOf: [
+            { $ref: "#/components/schemas/ExternalThreadUsageProjection" },
+            { type: "null" },
+          ],
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeCommandCatalog: {
+      type: "object",
+      required: [
+        "contractVersion",
+        "runtimeId",
+        "bindingId",
+        "nativeThreadId",
+        "commands",
+        "settings",
+        "models",
+      ],
+      properties: {
+        contractVersion: { type: "string" },
+        runtimeId: { type: "string" },
+        bindingId: { type: "string" },
+        nativeThreadId: { type: "string" },
+        commands: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalRuntimeCommandDescriptor",
+          },
+        },
+        settings: {
+          $ref: "#/components/schemas/ExternalThreadSettingsProjection",
+        },
+        models: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalRuntimeModelOption" },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeCommandResultData: {
+      type: "object",
+      properties: {
+        catalog: {
+          $ref: "#/components/schemas/ExternalRuntimeCommandCatalog",
+        },
+        status: { $ref: "#/components/schemas/ExternalThreadCommandStatus" },
+        settings: {
+          $ref: "#/components/schemas/ExternalThreadSettingsProjection",
+        },
+        models: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalRuntimeModelOption" },
+        },
+        validEfforts: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalRuntimeReasoningEffortOption",
+          },
+        },
+        nativeResult: true,
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeCommandExecutionResult: {
+      type: "object",
+      required: [
+        "commandId",
+        "input",
+        "command",
+        "argument",
+        "status",
+        "reasonCode",
+        "message",
+        "result",
+        "receipt",
+      ],
+      properties: {
+        commandId: { type: "string" },
+        input: { type: "string" },
+        command: { type: "string" },
+        argument: nullableString,
+        status: { $ref: "#/components/schemas/ExternalControlStatus" },
+        reasonCode: nullableString,
+        message: { type: "string" },
+        result: {
+          $ref: "#/components/schemas/ExternalRuntimeCommandResultData",
+        },
+        receipt: { $ref: "#/components/schemas/ExternalControlReceipt" },
+      },
+      additionalProperties: false,
+    },
     ExternalBindingMessageWrite: {
       type: "object",
       required: ["body"],
@@ -731,6 +1077,9 @@ function routeSchemas(): Record<string, JsonSchema> {
         text: { type: "string" },
         message: { type: "string" },
         command: { type: "string" },
+        argument: nullableString,
+        controlId: { type: "string" },
+        reasonCode: nullableString,
         cwd: { type: "string" },
         output: { type: "string" },
         exitCode: { type: "number" },
@@ -755,9 +1104,24 @@ function routeSchemas(): Record<string, JsonSchema> {
             additionalProperties: false,
           },
         },
+        settings: {
+          $ref: "#/components/schemas/ExternalThreadSettingsProjection",
+        },
         usage: {
           type: "object",
-          additionalProperties: { type: "number" },
+          required: ["total", "last", "modelContextWindow"],
+          properties: {
+            total: {
+              type: "object",
+              additionalProperties: { type: "number" },
+            },
+            last: {
+              type: "object",
+              additionalProperties: { type: "number" },
+            },
+            modelContextWindow: { type: ["number", "null"] },
+          },
+          additionalProperties: false,
         },
       },
       additionalProperties: false,

@@ -1,5 +1,7 @@
 import type { InitializeParams } from "../protocol/0.144.1/ts/InitializeParams.js";
 import type { InitializeResponse } from "../protocol/0.144.1/ts/InitializeResponse.js";
+import type { ModelListParams } from "../protocol/0.144.1/ts/v2/ModelListParams.js";
+import type { ModelListResponse } from "../protocol/0.144.1/ts/v2/ModelListResponse.js";
 import type { ThreadCompactStartParams } from "../protocol/0.144.1/ts/v2/ThreadCompactStartParams.js";
 import type { ThreadCompactStartResponse } from "../protocol/0.144.1/ts/v2/ThreadCompactStartResponse.js";
 import type { ThreadArchiveParams } from "../protocol/0.144.1/ts/v2/ThreadArchiveParams.js";
@@ -22,6 +24,8 @@ import type { ThreadResumeParams } from "../protocol/0.144.1/ts/v2/ThreadResumeP
 import type { ThreadResumeResponse } from "../protocol/0.144.1/ts/v2/ThreadResumeResponse.js";
 import type { ThreadStartParams } from "../protocol/0.144.1/ts/v2/ThreadStartParams.js";
 import type { ThreadStartResponse } from "../protocol/0.144.1/ts/v2/ThreadStartResponse.js";
+import type { ThreadSettingsUpdateParams } from "../protocol/0.144.1/ts/v2/ThreadSettingsUpdateParams.js";
+import type { ThreadSettingsUpdateResponse } from "../protocol/0.144.1/ts/v2/ThreadSettingsUpdateResponse.js";
 import type { ThreadTurnsListParams } from "../protocol/0.144.1/ts/v2/ThreadTurnsListParams.js";
 import type { ThreadTurnsListResponse } from "../protocol/0.144.1/ts/v2/ThreadTurnsListResponse.js";
 import type { TurnInterruptParams } from "../protocol/0.144.1/ts/v2/TurnInterruptParams.js";
@@ -186,6 +190,13 @@ export class CodexAppServerDriver {
     return this.#request("thread/list", params, signal);
   }
 
+  modelList(
+    params: ModelListParams = {},
+    signal?: AbortSignal,
+  ): Promise<ModelListResponse> {
+    return this.#request("model/list", params, signal);
+  }
+
   collaborationModeList(
     params: CollaborationModeListParams = {},
     signal?: AbortSignal,
@@ -282,6 +293,13 @@ export class CodexAppServerDriver {
     signal?: AbortSignal,
   ): Promise<ThreadCompactStartResponse> {
     return this.#request("thread/compact/start", params, signal);
+  }
+
+  threadSettingsUpdate(
+    params: ThreadSettingsUpdateParams,
+    signal?: AbortSignal,
+  ): Promise<ThreadSettingsUpdateResponse> {
+    return this.#request("thread/settings/update", params, signal);
   }
 
   async close(): Promise<void> {

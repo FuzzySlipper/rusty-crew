@@ -611,7 +611,7 @@ export type ExternalBindingStatus = "active" | "paused" | "archived";
 
 export type ExternalCollaborationMode = "plan";
 
-export type ExternalControlKind = "start_or_resume_thread" | "start_turn" | "steer_turn" | "interrupt_turn" | "compact_thread" | "resolve_interaction" | "reconcile_runtime" | "archive_binding";
+export type ExternalControlKind = "start_or_resume_thread" | "start_turn" | "steer_turn" | "interrupt_turn" | "compact_thread" | "execute_thread_command" | "resolve_interaction" | "reconcile_runtime" | "archive_binding";
 
 export type ExternalControlReceipt = {
   outcome?: unknown;

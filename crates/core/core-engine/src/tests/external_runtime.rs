@@ -4,12 +4,13 @@ use rusty_crew_core_protocol::{
     AgentMessageDeliveryStatus, AgentRoundCommand, AgentRoundId, AgentRoundStatus,
     ExternalAgentBinding, ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRequest,
     ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode,
-    ExternalControlId, ExternalControlKind, ExternalControlRequest, ExternalControllerContext,
-    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
-    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
-    ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
-    ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
-    TurnInputProvenance, TurnInputProvenanceKind,
+    ExternalControlId, ExternalControlKind, ExternalControlRequest, ExternalControlStatus,
+    ExternalControllerContext, ExternalControllerLease, ExternalEndpoint,
+    ExternalEndpointTransport, ExternalProcessOwnership, ExternalRuntimeDesiredState,
+    ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
+    ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalRuntimeRegistration,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
+    TurnInputProvenanceKind,
 };
 use serde_json::json;
 
@@ -323,6 +324,81 @@ fn mid_turn_controls_require_exact_native_turn_identity() {
     };
     assert_eq!(
         engine.submit_external_control(request).unwrap_err().kind,
+        CoreErrorKind::InvalidInput
+    );
+}
+
+#[test]
+fn external_thread_commands_are_validated_and_replay_by_semantic_idempotency() {
+    let engine = test_engine();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+
+    let request = ExternalControlRequest {
+        control_id: ExternalControlId::new("command-status-a"),
+        idempotency_key: "command-status-key".into(),
+        binding_id: ExternalBindingId::new("codex-binding"),
+        expected_binding_revision: 1,
+        expected_native_turn_id: None,
+        kind: ExternalControlKind::ExecuteThreadCommand,
+        payload: json!({"command": "status", "argument": null}),
+        requested_at: "2026-06-19T00:00:00Z".into(),
+    };
+    let first = engine.submit_external_control(request.clone()).unwrap();
+    assert_eq!(first.status, ExternalControlStatus::Pending);
+
+    let mut replay = request.clone();
+    replay.control_id = ExternalControlId::new("command-status-retry");
+    replay.requested_at = "2026-06-19T00:00:05Z".into();
+    assert_eq!(engine.submit_external_control(replay).unwrap(), first);
+
+    let mut conflict = request;
+    conflict.control_id = ExternalControlId::new("command-status-conflict");
+    conflict.payload = json!({"command": "model", "argument": "gpt-5.4"});
+    assert_eq!(
+        engine.submit_external_control(conflict).unwrap_err().kind,
+        CoreErrorKind::AlreadyExists
+    );
+
+    let current_binding = engine
+        .get_external_binding(&ExternalBindingId::new("codex-binding"))
+        .unwrap()
+        .unwrap();
+    let mut revised_binding = current_binding.clone();
+    revised_binding.updated_at = "2026-06-19T00:00:04Z".into();
+    engine
+        .bind_external_agent(&revised_binding, Some(current_binding.revision))
+        .unwrap();
+    let mut replay_after_revision = first.request.clone();
+    replay_after_revision.expected_binding_revision = revised_binding.revision;
+    replay_after_revision.requested_at = "2026-06-19T00:00:05Z".into();
+    assert_eq!(
+        engine
+            .submit_external_control(replay_after_revision)
+            .unwrap(),
+        first
+    );
+
+    let invalid = ExternalControlRequest {
+        control_id: ExternalControlId::new("command-unknown"),
+        idempotency_key: "command-unknown-key".into(),
+        binding_id: ExternalBindingId::new("codex-binding"),
+        expected_binding_revision: 2,
+        expected_native_turn_id: None,
+        kind: ExternalControlKind::ExecuteThreadCommand,
+        payload: json!({"command": "future-command", "argument": null}),
+        requested_at: "2026-06-19T00:00:06Z".into(),
+    };
+    assert_eq!(
+        engine.submit_external_control(invalid).unwrap_err().kind,
         CoreErrorKind::InvalidInput
     );
 }

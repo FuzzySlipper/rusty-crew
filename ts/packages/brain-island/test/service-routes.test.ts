@@ -24,6 +24,7 @@ import {
   type CoordinationOperatorRouteContext,
 } from "../src/service-coordination-operator-routes.js";
 import { ExternalThreadLifecycleError } from "../src/service-external-runtime.js";
+import { parseExternalRuntimeCommand } from "../src/external-runtime-commands.js";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
 import {
@@ -323,6 +324,95 @@ test("external thread lifecycle routes expose archive, delete, restore, and arch
     errorReason(conflict as AdminRouteResult),
     "external_thread_active",
   );
+});
+
+test("external command routes are typed and recognized commands cannot leak to messages", async () => {
+  let body: Record<string, unknown> = {};
+  let delivered = false;
+  const context = {
+    bridge: {
+      async getExternalBinding() {
+        return {
+          bindingId: "binding-1",
+          runtimeId: "runtime-1",
+          agentId: "agent-1",
+          nativeThreadId: "thread-1",
+          revision: 3,
+        };
+      },
+      async getAgentMessageDelivery() {
+        return undefined;
+      },
+      async deliverAgentMessage() {
+        delivered = true;
+        return {};
+      },
+    },
+    controller: {
+      async commandCatalog() {
+        return { bindingId: "binding-1", commands: [{ name: "status" }] };
+      },
+      async executeCommand(input: {
+        commandInput: string;
+        idempotencyKey: string;
+      }) {
+        const parsed = parseExternalRuntimeCommand(input.commandInput);
+        return {
+          command: parsed.command,
+          idempotencyKey: input.idempotencyKey,
+        };
+      },
+    },
+    now: () => "2026-07-12T00:00:00.000Z",
+    requestId: () => "req-external-command",
+    readJsonBody: async () => body,
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const catalog = await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/commands"),
+    context,
+  );
+  assert.deepEqual(
+    okData<{ commands: unknown[] }>(catalog as AdminRouteResult).commands,
+    [{ name: "status" }],
+  );
+
+  body = { input: "/status", idempotencyKey: "view-command-1" };
+  const executed = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/commands"),
+    context,
+  );
+  assert.deepEqual(okData(executed as AdminRouteResult), {
+    command: "status",
+    idempotencyKey: "view-command-1",
+  });
+
+  body = { input: "/not-a-command", idempotencyKey: "view-command-2" };
+  const unknown = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/commands"),
+    context,
+  );
+  assert.equal((unknown as AdminRouteResult).status, 400);
+  assert.equal(
+    errorReason(unknown as AdminRouteResult),
+    "external_command_unknown",
+  );
+
+  body = { body: "/status" };
+  const leaked = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/messages"),
+    context,
+  );
+  assert.equal((leaked as AdminRouteResult).status, 409);
+  assert.equal(
+    errorReason(leaked as AdminRouteResult),
+    "external_command_requires_command_route",
+  );
+  assert.equal(delivered, false);
 });
 
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {

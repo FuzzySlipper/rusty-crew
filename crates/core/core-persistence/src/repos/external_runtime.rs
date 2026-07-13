@@ -811,9 +811,7 @@ impl CoordinationStore {
             "load external control receipt",
         )?;
         if let Some(existing) = existing {
-            if existing.request_fingerprint == receipt.request_fingerprint
-                && existing.request == receipt.request
-            {
+            if existing.request_fingerprint == receipt.request_fingerprint {
                 return Ok(existing);
             }
             return Err(CoreError::new(

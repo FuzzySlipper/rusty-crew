@@ -137,22 +137,127 @@ test("driver authorizes exact handshake before exposing typed requests", async (
       },
     ],
   }));
+  transport.responders.set("model/list", () => ({
+    data: [],
+    nextCursor: null,
+  }));
+  transport.responders.set("thread/settings/update", () => ({}));
   const driver = new CodexAppServerDriver(transport, authority);
 
   const initialized = await driver.connect();
   const listed = await driver.threadList({ limit: 5 });
   const collaborationModes = await driver.collaborationModeList();
+  const models = await driver.modelList({ limit: 50 });
+  const settingsUpdate = await driver.threadSettingsUpdate({
+    threadId: "thread-1",
+    model: "gpt-5.4",
+    effort: "high",
+  });
 
   assert.equal(initialized.userAgent, "codex_cli_rs/0.144.1");
   assert.deepEqual(listed.data, []);
   assert.equal(collaborationModes.data[0]?.mode, "plan");
+  assert.deepEqual(models, { data: [], nextCursor: null });
+  assert.deepEqual(settingsUpdate, {});
   assert.equal(driver.state, "ready");
   assert.deepEqual(
     transport.sent
       .filter((message) => "method" in message)
       .map((message) => message.method),
-    ["initialize", "thread/list", "collaborationMode/list"],
+    [
+      "initialize",
+      "thread/list",
+      "collaborationMode/list",
+      "model/list",
+      "thread/settings/update",
+    ],
   );
+  await driver.close();
+});
+
+test("settings and token usage notifications retain browser-safe native authority", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport);
+  const driver = new CodexAppServerDriver(transport, authority);
+  await driver.connect();
+
+  transport.emit({
+    method: "thread/settings/updated",
+    params: {
+      threadId: "thread-settings-1",
+      threadSettings: {
+        cwd: "/home",
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        activePermissionProfile: null,
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        serviceTier: null,
+        effort: "high",
+        summary: null,
+        collaborationMode: {
+          mode: "default",
+          settings: {
+            model: "gpt-5.4",
+            reasoning_effort: "high",
+            developer_instructions: null,
+          },
+        },
+        multiAgentMode: "explicitRequestOnly",
+        personality: null,
+      },
+    },
+  });
+  transport.emit({
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId: "thread-settings-1",
+      turnId: "turn-1",
+      tokenUsage: {
+        total: {
+          totalTokens: 500,
+          inputTokens: 400,
+          cachedInputTokens: 100,
+          outputTokens: 100,
+          reasoningOutputTokens: 40,
+        },
+        last: {
+          totalTokens: 100,
+          inputTokens: 80,
+          cachedInputTokens: 20,
+          outputTokens: 20,
+          reasoningOutputTokens: 10,
+        },
+        modelContextWindow: 200000,
+      },
+    },
+  });
+  await settle();
+
+  assert.deepEqual(authority.events[0]?.payload.settings, {
+    model: "gpt-5.4",
+    modelProvider: "openai",
+    effort: "high",
+  });
+  assert.deepEqual(authority.events[1]?.payload.usage, {
+    total: {
+      totalTokens: 500,
+      inputTokens: 400,
+      cachedInputTokens: 100,
+      outputTokens: 100,
+      reasoningOutputTokens: 40,
+    },
+    last: {
+      totalTokens: 100,
+      inputTokens: 80,
+      cachedInputTokens: 20,
+      outputTokens: 20,
+      reasoningOutputTokens: 10,
+    },
+    modelContextWindow: 200000,
+  });
   await driver.close();
 });
 

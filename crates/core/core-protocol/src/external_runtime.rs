@@ -447,6 +447,7 @@ pub enum ExternalControlKind {
     SteerTurn,
     InterruptTurn,
     CompactThread,
+    ExecuteThreadCommand,
     ResolveInteraction,
     ReconcileRuntime,
     ArchiveBinding,

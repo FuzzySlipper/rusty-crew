@@ -148,6 +148,7 @@
     "smoke:pi-agent-brain-events": "tsx smokes/smoke-pi-agent-brain-events.ts",
     "smoke:brain-island-entrypoint-surface": "tsx smokes/smoke-brain-island-entrypoint-surface.ts",
     "smoke:external-runtime-service-live": "tsx smokes/external-runtime-service-live.ts",
+    "smoke:external-runtime-commands-live": "tsx smokes/external-runtime-commands-live.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
     "agent:coordination": "tsx src/coordination-operator-production-cli.ts",

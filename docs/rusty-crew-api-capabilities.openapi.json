@@ -3648,6 +3648,56 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/external-bindings/{binding_id}/commands": {
+      "get": {
+        "operationId": "externalBindingsCommandsList",
+        "summary": "List capability-gated commands, native models, and effort options for an external thread.",
+        "tags": ["session", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.commands.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "externalBindingsCommandsExecute",
+        "summary": "Execute a durable Rust-validated command without creating an external-runtime user turn.",
+        "tags": ["session", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.commands.execute",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/external-bindings/{binding_id}/controls": {
       "post": {
         "operationId": "externalBindingsControl",
@@ -4344,7 +4394,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 169,
+    "capability_count": 171,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

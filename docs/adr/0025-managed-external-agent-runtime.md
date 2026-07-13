@@ -4,7 +4,7 @@ Status: Accepted
 
 Date: 2026-07-10
 
-Related tasks: `#5515`, `#5517`, `#5518`, `#5610`
+Related tasks: `#5515`, `#5517`, `#5518`, `#5610`, `#5739`
 
 Related evidence:
 
@@ -316,6 +316,7 @@ enum ExternalControlKind {
     SteerTurn,
     InterruptTurn,
     CompactThread,
+    ExecuteThreadCommand,
     ResolveInteraction,
     ReconcileRuntime,
     ArchiveBinding,
@@ -337,6 +338,34 @@ Each control has an idempotent receipt. Repeating the same key and payload
 returns the same result. Reusing a key with a different payload is a conflict.
 Steer and interrupt require the expected active native turn ID. Compact requires
 an idle thread unless an exact-version capability explicitly proves otherwise.
+
+`ExecuteThreadCommand` carries one allow-listed command name plus an optional
+bounded argument. Rust validates the command envelope and persists its receipt;
+the exact-version TypeScript adapter performs the native protocol call. The
+browser command endpoint requires an idempotency key, and recognized command
+text is rejected by the ordinary external-message endpoint so it cannot become
+native user input accidentally.
+
+### Thread commands and context ownership
+
+Crew exposes a binding-scoped command catalog and execution endpoint for
+`/help`, `/commands`, `/status`, `/model`, `/effort`, and `/compact`. The catalog
+is derived from controller readiness plus native `model/list`; model names and
+model-specific effort values are never copied into browser code.
+
+Codex remains authoritative for effective thread settings, token accounting,
+automatic context management, and compaction. Crew consumes thread start/resume
+readback and `thread/settings/updated`, `thread/tokenUsage/updated`, and
+compaction notifications. It may cache those projections for status rendering,
+but it does not persist a competing model/effort configuration or implement a
+second compaction threshold. Explicit model/effort changes use
+`thread/settings/update`, then reconcile from native readback. Explicit
+`/compact` is only a passthrough to `thread/compact/start`.
+
+Each command emits Rust-sequenced `command_started`, `command_completed`, or
+`command_failed` events keyed by its durable control ID. Native settings, usage,
+and compaction notifications remain separate event facts on the same replay
+stream.
 
 ### Interactions
 

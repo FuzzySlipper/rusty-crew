@@ -675,6 +675,21 @@ export const API_CAPABILITIES = [
     "Submit an idempotent Rust-validated external runtime control.",
     ["session"],
   ),
+  readCapability(
+    "external.bindings.commands.list",
+    "GET",
+    "/v1/external-bindings/{binding_id}/commands",
+    "List capability-gated commands, native models, and effort options for an external thread.",
+    "admin",
+    ["session", "config"],
+  ),
+  controlApiCapability(
+    "external.bindings.commands.execute",
+    "POST",
+    "/v1/external-bindings/{binding_id}/commands",
+    "Execute a durable Rust-validated command without creating an external-runtime user turn.",
+    ["session", "config"],
+  ),
   writeCapability(
     "external.bindings.messages.create",
     "POST",

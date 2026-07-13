@@ -157,8 +157,13 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   readonly sent: Array<Record<string, unknown>> = [];
   readonly threads: Array<Record<string, unknown>> = [];
   readonly resumeFailureThreadIds = new Set<string>();
+  settingsUpdateError?: { code: number; message: string };
   readonly archivedThreadIds = new Set<string>();
   readonly unmaterializedThreadIds = new Set<string>();
+  readonly threadSettings = new Map<
+    string,
+    { model: string; modelProvider: string; effort: string | null }
+  >();
   deleteFailureMessage?: string;
   loseNextDeleteResponse = false;
   #loseFirstStartResponse: boolean;
@@ -202,6 +207,19 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
           ),
           nextCursor: null,
           backwardsCursor: null,
+        },
+      });
+      return;
+    }
+    if (parsed.method === "model/list") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          data: [
+            fakeModel("gpt-5.4", ["low", "medium", "high"], "medium", true),
+            fakeModel("gpt-5.4-mini", ["low", "medium"], "low", false),
+          ],
+          nextCursor: null,
         },
       });
       return;
@@ -293,13 +311,21 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
         String(params.threadSource),
       );
       this.threads.push(thread);
+      this.threadSettings.set(String(thread.id), {
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        effort: null,
+      });
       if (this.#loseFirstStartResponse) {
         this.#loseFirstStartResponse = false;
         return;
       }
       this.emit({
         id: parsed.id,
-        result: fakeThreadStartResponse(thread),
+        result: fakeThreadStartResponse(
+          thread,
+          this.threadSettings.get(String(thread.id)),
+        ),
       });
       return;
     }
@@ -340,9 +366,47 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       this.emit({
         id: parsed.id,
         result: {
-          ...fakeThreadStartResponse(thread ?? {}),
+          ...fakeThreadStartResponse(
+            thread ?? {},
+            this.threadSettings.get(String(params.threadId)),
+          ),
           initialTurnsPage: null,
         },
+      });
+      return;
+    }
+    if (parsed.method === "thread/settings/update") {
+      if (this.settingsUpdateError !== undefined) {
+        this.emit({ id: parsed.id, error: this.settingsUpdateError });
+        return;
+      }
+      const threadId = String(params.threadId);
+      const current = this.threadSettings.get(threadId) ?? {
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        effort: null,
+      };
+      const next = {
+        ...current,
+        ...(typeof params.model === "string" ? { model: params.model } : {}),
+        ...(typeof params.effort === "string" ? { effort: params.effort } : {}),
+      };
+      this.threadSettings.set(threadId, next);
+      this.emit({ id: parsed.id, result: {} });
+      this.emit({
+        method: "thread/settings/updated",
+        params: {
+          threadId,
+          threadSettings: fakeNativeThreadSettings(next),
+        },
+      });
+      return;
+    }
+    if (parsed.method === "thread/compact/start") {
+      this.emit({ id: parsed.id, result: {} });
+      this.emit({
+        method: "thread/compacted",
+        params: { threadId: String(params.threadId), turnId: "compact-turn-1" },
       });
     }
   }
@@ -388,11 +452,16 @@ function fakeCreationThread(
 
 function fakeThreadStartResponse(
   thread: Record<string, unknown>,
+  settings: {
+    model: string;
+    modelProvider: string;
+    effort: string | null;
+  } = { model: "gpt-5.4", modelProvider: "openai", effort: null },
 ): Record<string, unknown> {
   return {
     thread,
-    model: "gpt-5.4",
-    modelProvider: "openai",
+    model: settings.model,
+    modelProvider: settings.modelProvider,
     serviceTier: null,
     cwd: thread.cwd,
     runtimeWorkspaceRoots: [],
@@ -401,8 +470,66 @@ function fakeThreadStartResponse(
     approvalsReviewer: "user",
     sandbox: { type: "dangerFullAccess" },
     activePermissionProfile: null,
-    reasoningEffort: null,
+    reasoningEffort: settings.effort,
     multiAgentMode: "explicitRequestOnly",
+  };
+}
+
+function fakeModel(
+  id: string,
+  efforts: readonly string[],
+  defaultEffort: string,
+  isDefault: boolean,
+): Record<string, unknown> {
+  return {
+    id,
+    model: id,
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName: id,
+    description: `${id} test model`,
+    hidden: false,
+    supportedReasoningEfforts: efforts.map((reasoningEffort) => ({
+      reasoningEffort,
+      description: `${reasoningEffort} reasoning`,
+    })),
+    defaultReasoningEffort: defaultEffort,
+    inputModalities: ["text"],
+    supportsPersonality: true,
+    additionalSpeedTiers: [],
+    serviceTiers: [],
+    defaultServiceTier: null,
+    isDefault,
+  };
+}
+
+function fakeNativeThreadSettings(settings: {
+  model: string;
+  modelProvider: string;
+  effort: string | null;
+}): Record<string, unknown> {
+  return {
+    cwd: "/home",
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandboxPolicy: { type: "dangerFullAccess" },
+    activePermissionProfile: null,
+    model: settings.model,
+    modelProvider: settings.modelProvider,
+    serviceTier: null,
+    effort: settings.effort,
+    summary: null,
+    collaborationMode: {
+      mode: "default",
+      settings: {
+        model: settings.model,
+        reasoning_effort: settings.effort,
+        developer_instructions: null,
+      },
+    },
+    multiAgentMode: "explicitRequestOnly",
+    personality: null,
   };
 }
 
@@ -460,6 +587,153 @@ test("controller atomically creates and idempotently reuses an external agent se
         label: "Changed intent",
       }),
       /external_agent_creation_idempotency_conflict/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("external commands use native catalogs and settings without creating turns", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "command-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const bindingId = created.creation.binding.bindingId;
+    const threadId = created.thread.threadId;
+
+    const catalog = await fixture.controller.commandCatalog(bindingId);
+    assert.deepEqual(
+      catalog.models.map((model) => model.id),
+      ["gpt-5.4", "gpt-5.4-mini"],
+    );
+    assert.deepEqual(
+      catalog.models[1]?.supportedEfforts.map((effort) => effort.value),
+      ["low", "medium"],
+    );
+
+    fixture.transport.emit({
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId,
+        turnId: "usage-turn-1",
+        tokenUsage: {
+          total: {
+            totalTokens: 10_000,
+            inputTokens: 9_000,
+            cachedInputTokens: 1_000,
+            outputTokens: 1_000,
+            reasoningOutputTokens: 400,
+          },
+          last: {
+            totalTokens: 1_000,
+            inputTokens: 900,
+            cachedInputTokens: 100,
+            outputTokens: 100,
+            reasoningOutputTokens: 40,
+          },
+          modelContextWindow: 200_000,
+        },
+      },
+    });
+    await waitUntil(
+      async () =>
+        (
+          await fixture.bridge.queryExternalRuntimeEvents({
+            runtimeId: fixture.runtimeId,
+            afterSequence: 0,
+            limit: 1_000,
+          })
+        ).some((event) => event.kind === "usage"),
+      "usage event",
+    );
+
+    const status = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/status",
+      idempotencyKey: "command-status",
+    });
+    assert.equal(status.status, "applied");
+    assert.equal(status.result.status?.usage?.contextWindowUsedPercent, 5);
+    assert.equal(
+      fixture.transport.sent.some((message) => message.method === "turn/start"),
+      false,
+    );
+    const replay = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/status",
+      idempotencyKey: "command-status",
+    });
+    assert.equal(replay.commandId, status.commandId);
+
+    const model = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/model gpt-5.4-mini",
+      idempotencyKey: "command-model-mini",
+    });
+    assert.equal(model.status, "applied");
+    assert.equal(model.result.settings?.model, "gpt-5.4-mini");
+    assert.equal(model.result.settings?.effort, "low");
+
+    const effort = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/effort medium",
+      idempotencyKey: "command-effort-medium",
+    });
+    assert.equal(effort.status, "applied");
+    assert.equal(effort.result.settings?.effort, "medium");
+
+    const invalid = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/effort high",
+      idempotencyKey: "command-effort-invalid",
+    });
+    assert.equal(invalid.status, "rejected");
+    assert.equal(invalid.reasonCode, "external_command_effort_invalid");
+
+    fixture.transport.settingsUpdateError = {
+      code: -32601,
+      message: "method not found: thread/settings/update",
+    };
+    const unavailable = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/model gpt-5.4",
+      idempotencyKey: "command-model-unavailable",
+    });
+    assert.equal(unavailable.status, "rejected");
+    assert.equal(
+      unavailable.reasonCode,
+      "external_command_capability_unavailable",
+    );
+    fixture.transport.settingsUpdateError = undefined;
+
+    const compact = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/compact",
+      idempotencyKey: "command-compact",
+    });
+    assert.equal(compact.status, "applied");
+    await waitUntil(async () => {
+      const events = await fixture.bridge.queryExternalRuntimeEvents({
+        runtimeId: fixture.runtimeId,
+        afterSequence: 0,
+        limit: 1_000,
+      });
+      return (
+        events.some((event) => event.kind === "command_started") &&
+        events.some((event) => event.kind === "command_completed") &&
+        events.some((event) => event.kind === "command_failed") &&
+        events.some((event) => event.kind === "thread_lifecycle") &&
+        events.some((event) => event.kind === "compaction")
+      );
+    }, "command lifecycle events");
+    assert.equal(
+      fixture.transport.sent.some((message) => message.method === "turn/start"),
+      false,
     );
   } finally {
     await fixture.cleanup();

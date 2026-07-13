@@ -18,7 +18,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.5.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.6.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -70,6 +70,18 @@ assert.ok(schema("ExternalThreadItemProjection").properties?.text);
 assert.deepEqual(
   propertySchema("ExternalThreadItemProjection", "messagePhase").enum,
   ["commentary", "final_answer", "unknown"],
+);
+assert.ok(schema("ExternalRuntimeCommandCatalog").properties?.models);
+assert.ok(schema("ExternalRuntimeCommandExecutionResult").properties?.receipt);
+assert.ok(schema("ExternalRuntimeEventPayload").properties?.settings);
+assert.ok(schema("ExternalRuntimeEventPayload").properties?.usage);
+assert.equal(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.commands]?.get?.operationId,
+  "listExternalBindingCommands",
+);
+assert.equal(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.commands]?.post?.operationId,
+  "executeExternalBindingCommand",
 );
 assert.deepEqual(
   propertySchema("ExternalRuntimeEventPayload", "messagePhase").enum,

@@ -614,6 +614,34 @@ impl CoreEngine {
         &self,
         request: ExternalControlRequest,
     ) -> CoreResult<ExternalControlReceipt> {
+        let mut request_fingerprint_input = serde_json::json!({
+            "bindingId": request.binding_id,
+            "expectedNativeTurnId": request.expected_native_turn_id,
+            "kind": request.kind,
+            "payload": request.payload,
+        });
+        if request.kind != ExternalControlKind::ExecuteThreadCommand {
+            request_fingerprint_input["expectedBindingRevision"] =
+                serde_json::json!(request.expected_binding_revision);
+        }
+        let request_fingerprint = hash_json(
+            &request_fingerprint_input,
+            "fingerprint external control request",
+        )?;
+        if let Some(existing) = self
+            .store
+            .get_external_control_receipt(&request.control_id)?
+        {
+            if existing.request.idempotency_key == request.idempotency_key
+                && existing.request_fingerprint == request_fingerprint
+            {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "external control identity conflicts with a different request",
+            ));
+        }
         let binding = self
             .store
             .get_external_agent_binding(&request.binding_id)?
@@ -652,7 +680,20 @@ impl CoreEngine {
                 "mid-turn external control requires expected_native_turn_id",
             ));
         }
-        if request.kind == ExternalControlKind::CompactThread && active_turn.is_some() {
+        if request.kind == ExternalControlKind::ExecuteThreadCommand {
+            if binding.native_thread_id.is_none() {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "external thread command requires a bound native thread",
+                ));
+            }
+            validate_external_thread_command(&request.payload)?;
+        }
+        if (request.kind == ExternalControlKind::CompactThread
+            || (request.kind == ExternalControlKind::ExecuteThreadCommand
+                && external_thread_command_name(&request.payload) == Some("compact")))
+            && active_turn.is_some()
+        {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 "external thread compaction requires an idle binding",
@@ -669,11 +710,9 @@ impl CoreEngine {
                 ));
             }
         }
-        let request_json = serde_json::to_vec(&request)
-            .map_err(|error| CoreError::new(CoreErrorKind::InternalError, error.to_string()))?;
         let receipt = ExternalControlReceipt {
             request,
-            request_fingerprint: format!("{:x}", Sha256::digest(request_json)),
+            request_fingerprint,
             status: ExternalControlStatus::Pending,
             outcome: None,
             reason_code: None,
@@ -1301,6 +1340,68 @@ fn hash_json(value: &serde_json::Value, action: &str) -> CoreResult<String> {
 
 fn hex_sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn external_thread_command_name(payload: &serde_json::Value) -> Option<&str> {
+    payload.get("command")?.as_str()
+}
+
+fn validate_external_thread_command(payload: &serde_json::Value) -> CoreResult<()> {
+    let object = payload.as_object().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external thread command payload must be an object",
+        )
+    })?;
+    if object
+        .keys()
+        .any(|key| key != "command" && key != "argument")
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external thread command payload contains unsupported fields",
+        ));
+    }
+    let command = object
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external thread command requires command",
+            )
+        })?;
+    if !matches!(
+        command,
+        "help" | "commands" | "status" | "model" | "effort" | "compact"
+    ) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external thread command is not recognized",
+        ));
+    }
+    let argument = object.get("argument").filter(|value| !value.is_null());
+    if let Some(argument) = argument {
+        let argument = argument.as_str().ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external thread command argument must be a string or null",
+            )
+        })?;
+        if argument.trim().is_empty() || argument.len() > 256 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external thread command argument must contain 1 to 256 characters",
+            ));
+        }
+        if !matches!(command, "model" | "effort") {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external thread command does not accept an argument",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn normalized_external_agent_cwd(raw: &str) -> CoreResult<String> {

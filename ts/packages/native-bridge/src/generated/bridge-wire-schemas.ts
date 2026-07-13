@@ -16399,6 +16399,7 @@ export const bridgeWireSchemaArtifact = {
                 "steer_turn",
                 "interrupt_turn",
                 "compact_thread",
+                "execute_thread_command",
                 "resolve_interaction",
                 "reconcile_runtime",
                 "archive_binding"

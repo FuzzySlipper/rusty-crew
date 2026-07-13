@@ -303,6 +303,28 @@
         "public": true
       },
       {
+        "id": "external.bindings.commands.list",
+        "method": "GET",
+        "path_template": "/v1/external-bindings/{binding_id}/commands",
+        "description": "List capability-gated commands, native models, and effort options for an external thread.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "config"],
+        "public": true
+      },
+      {
+        "id": "external.bindings.commands.execute",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/commands",
+        "description": "Execute a durable Rust-validated command without creating an external-runtime user turn.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session", "config"],
+        "public": true
+      },
+      {
         "id": "external.bindings.messages.create",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/messages",
@@ -2144,6 +2166,20 @@
         "capability_id": "external.bindings.control",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/controls",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.commands.list",
+        "method": "GET",
+        "path_template": "/v1/external-bindings/{binding_id}/commands",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.commands.execute",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/commands",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

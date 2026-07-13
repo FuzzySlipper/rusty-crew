@@ -72,7 +72,16 @@ export interface NeutralExternalRuntimeEventPayload {
     readonly kind?: string;
     readonly status?: string;
   }[];
-  readonly usage?: Readonly<Record<string, number>>;
+  readonly settings?: {
+    readonly model: string;
+    readonly modelProvider: string;
+    readonly effort: string | null;
+  };
+  readonly usage?: {
+    readonly total: Readonly<Record<string, number>>;
+    readonly last: Readonly<Record<string, number>>;
+    readonly modelContextWindow: number | null;
+  };
 }
 
 export interface NeutralExternalRuntimeEvent {
