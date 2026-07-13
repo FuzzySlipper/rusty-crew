@@ -875,6 +875,54 @@ export const bridgeWireSchemaArtifact = {
             "minimum": 0,
             "type": "integer"
           },
+          "entry_decisions": {
+            "default": [],
+            "items": {
+              "properties": {
+                "included": {
+                  "type": "boolean"
+                },
+                "is_constant": {
+                  "type": "boolean"
+                },
+                "layer_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": [
+                    "included",
+                    "excluded_subject",
+                    "constant_reserve_exceeded",
+                    "token_budget_exceeded"
+                  ],
+                  "type": "string"
+                },
+                "record_id": {
+                  "type": "string"
+                },
+                "score": {
+                  "format": "float",
+                  "type": "number"
+                },
+                "token_estimate": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "record_id",
+                "layer_id",
+                "score",
+                "token_estimate",
+                "is_constant",
+                "included",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "excluded_subjects": {
             "items": {
               "type": "string"
@@ -2404,6 +2452,36 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "narratorDiagnostic": {
+            "default": null,
+            "properties": {
+              "relevantLoreRecordIds": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "sceneBrief": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "wakeId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "wakeId",
+              "sceneBrief",
+              "updatedAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "playerPersonaId": {
             "default": null,
             "type": [
@@ -3452,6 +3530,54 @@ export const bridgeWireSchemaArtifact = {
           "minimum": 0,
           "type": "integer"
         },
+        "entry_decisions": {
+          "default": [],
+          "items": {
+            "properties": {
+              "included": {
+                "type": "boolean"
+              },
+              "is_constant": {
+                "type": "boolean"
+              },
+              "layer_id": {
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "included",
+                  "excluded_subject",
+                  "constant_reserve_exceeded",
+                  "token_budget_exceeded"
+                ],
+                "type": "string"
+              },
+              "record_id": {
+                "type": "string"
+              },
+              "score": {
+                "format": "float",
+                "type": "number"
+              },
+              "token_estimate": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "record_id",
+              "layer_id",
+              "score",
+              "token_estimate",
+              "is_constant",
+              "included",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "excluded_subjects": {
           "items": {
             "type": "string"
@@ -4151,6 +4277,36 @@ export const bridgeWireSchemaArtifact = {
           "default": null,
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "narratorDiagnostic": {
+          "default": null,
+          "properties": {
+            "relevantLoreRecordIds": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "sceneBrief": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "wakeId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "wakeId",
+            "sceneBrief",
+            "updatedAt"
+          ],
+          "type": [
+            "object",
             "null"
           ]
         },
@@ -12748,6 +12904,54 @@ export const bridgeWireSchemaArtifact = {
               "minimum": 0,
               "type": "integer"
             },
+            "entry_decisions": {
+              "default": [],
+              "items": {
+                "properties": {
+                  "included": {
+                    "type": "boolean"
+                  },
+                  "is_constant": {
+                    "type": "boolean"
+                  },
+                  "layer_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "enum": [
+                      "included",
+                      "excluded_subject",
+                      "constant_reserve_exceeded",
+                      "token_budget_exceeded"
+                    ],
+                    "type": "string"
+                  },
+                  "record_id": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "format": "float",
+                    "type": "number"
+                  },
+                  "token_estimate": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "record_id",
+                  "layer_id",
+                  "score",
+                  "token_estimate",
+                  "is_constant",
+                  "included",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
             "excluded_subjects": {
               "items": {
                 "type": "string"
@@ -14148,6 +14352,36 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "narratorDiagnostic": {
+          "default": null,
+          "properties": {
+            "relevantLoreRecordIds": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "sceneBrief": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "wakeId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "wakeId",
+            "sceneBrief",
+            "updatedAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "playerPersonaId": {
           "default": null,
           "type": [
@@ -14298,6 +14532,36 @@ export const bridgeWireSchemaArtifact = {
               "default": null,
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "narratorDiagnostic": {
+              "default": null,
+              "properties": {
+                "relevantLoreRecordIds": {
+                  "default": [],
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "sceneBrief": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "wakeId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "wakeId",
+                "sceneBrief",
+                "updatedAt"
+              ],
+              "type": [
+                "object",
                 "null"
               ]
             },
@@ -19914,6 +20178,35 @@ export const bridgeWireSchemaArtifact = {
                 "null"
               ]
             },
+            "narratorDiagnostic": {
+              "properties": {
+                "relevantLoreRecordIds": {
+                  "default": [],
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "sceneBrief": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "wakeId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "wakeId",
+                "sceneBrief",
+                "updatedAt"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
             "playerPersonaId": {
               "type": [
                 "string",
@@ -20006,6 +20299,35 @@ export const bridgeWireSchemaArtifact = {
             "displayName": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "narratorDiagnostic": {
+              "properties": {
+                "relevantLoreRecordIds": {
+                  "default": [],
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "sceneBrief": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "wakeId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "wakeId",
+                "sceneBrief",
+                "updatedAt"
+              ],
+              "type": [
+                "object",
                 "null"
               ]
             },
@@ -20765,6 +21087,17 @@ export const bridgeWireSchemaArtifact = {
           "created_at": "2026-07-02T00:00:00.000Z",
           "entries_considered": 3,
           "entries_returned": 1,
+          "entry_decisions": [
+            {
+              "included": true,
+              "is_constant": true,
+              "layer_id": "validation-layer",
+              "reason": "included",
+              "record_id": "validation-lore",
+              "score": 0.949999988079071,
+              "token_estimate": 240
+            }
+          ],
           "excluded_subjects": [
             "validation-excluded"
           ],

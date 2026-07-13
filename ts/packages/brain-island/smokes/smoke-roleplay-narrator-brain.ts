@@ -28,6 +28,12 @@ async function runSmoke(): Promise<void> {
     "Moonlight gathered around Katheryn as her hand closed on empty ribbon.",
   ]);
   const submittedEvents: BrainEventEnvelope[] = [];
+  const persistedDiagnostics: Array<{
+    wakeId: string;
+    sessionId: string;
+    sceneBrief: string;
+    relevantLoreRecordIds: string[];
+  }> = [];
 
   const brain = createRoleplayNarratorBrain({
     narratorFsm,
@@ -35,6 +41,9 @@ async function runSmoke(): Promise<void> {
     resolveTools: () => ALL_TOOLS,
     submitEvent: async (event) => {
       submittedEvents.push(event);
+    },
+    persistDiagnostic: async (diagnostic) => {
+      persistedDiagnostics.push(diagnostic);
     },
     planActions: ({ wake, events }) => [
       {
@@ -163,6 +172,12 @@ async function runSmoke(): Promise<void> {
     ),
     false,
   );
+  assert.equal(persistedDiagnostics.length, 1);
+  assert.equal(persistedDiagnostics[0]?.wakeId, "roleplay-narrator-wake");
+  assert.match(persistedDiagnostics[0]?.sceneBrief ?? "", /Moonlit Garden/);
+  assert.deepEqual(persistedDiagnostics[0]?.relevantLoreRecordIds, [
+    "moonlit-garden",
+  ]);
 
   const bufferedFactory = new RecordingPhaseBrainFactory([
     '{"sceneBrief":{"location":"Moonlit Garden"}}',

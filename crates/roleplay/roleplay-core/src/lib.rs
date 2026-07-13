@@ -207,8 +207,23 @@ pub struct RoleplaySessionMetadata {
     pub active_layer_ids: Vec<String>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrator_diagnostic: Option<RoleplayNarratorDiagnostic>,
     #[serde(alias = "created_at")]
     pub created_at: String,
+    #[serde(alias = "updated_at")]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayNarratorDiagnostic {
+    #[serde(alias = "wake_id")]
+    pub wake_id: String,
+    #[serde(alias = "scene_brief")]
+    pub scene_brief: String,
+    #[serde(default, alias = "relevant_lore_record_ids")]
+    pub relevant_lore_record_ids: Vec<String>,
     #[serde(alias = "updated_at")]
     pub updated_at: String,
 }
@@ -1607,6 +1622,7 @@ fn plan_session_create(
         character_id: None,
         active_layer_ids: Vec::new(),
         archived: false,
+        narrator_diagnostic: None,
         created_at: input.now.clone(),
         updated_at: input.now.clone(),
     };
@@ -1758,6 +1774,7 @@ fn plan_session_fork(
         character_id: source_metadata.character_id,
         active_layer_ids: source_metadata.active_layer_ids,
         archived: false,
+        narrator_diagnostic: source_metadata.narrator_diagnostic,
         created_at: input.now.clone(),
         updated_at: input.now.clone(),
     };
@@ -5187,6 +5204,7 @@ mod tests {
             character_id: Some("character-1".to_string()),
             active_layer_ids,
             archived: false,
+            narrator_diagnostic: None,
             created_at: "2026-07-07T00:00:00Z".to_string(),
             updated_at: "2026-07-07T00:00:00Z".to_string(),
         }

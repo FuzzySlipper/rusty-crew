@@ -60,6 +60,38 @@ export function createPiAgentBrainHost(
       submitEvent: async (event) => {
         await context.bridge?.submitBrainEvent(event);
       },
+      persistDiagnostic: async (input) => {
+        if (!context.bridge) return;
+        const current = (await context.bridge.getRoleplaySessionMetadata(
+          input.sessionId,
+        )) as
+          | {
+              profileId: string;
+              revision: number;
+              [key: string]: unknown;
+            }
+          | undefined;
+        if (!current) return;
+        if (current.profileId !== input.profileId) {
+          throw new Error(
+            `roleplay narrator session ${input.sessionId} belongs to profile ${current.profileId}, not ${input.profileId}`,
+          );
+        }
+        const now = new Date().toISOString();
+        await context.bridge.putRoleplaySessionMetadata({
+          record: {
+            ...current,
+            narratorDiagnostic: {
+              wakeId: input.wakeId,
+              sceneBrief: input.sceneBrief,
+              relevantLoreRecordIds: input.relevantLoreRecordIds,
+              updatedAt: now,
+            },
+            updatedAt: now,
+          },
+          expected_revision: current.revision,
+        });
+      },
     });
   }
   return createRustPiAgentBrainHostExecutor(context, {

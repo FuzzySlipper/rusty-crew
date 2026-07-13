@@ -4449,6 +4449,15 @@ fn sample_lore_recall_trace_record() -> persistence::LoreRecallTraceRecord {
         entries_returned: 1,
         token_budget: Some(1600),
         tokens_consumed: 240,
+        entry_decisions: vec![persistence::LoreRecallTraceEntryDecision {
+            record_id: "validation-lore".to_owned(),
+            layer_id: "validation-layer".to_owned(),
+            score: 0.95,
+            token_estimate: 240,
+            is_constant: true,
+            included: true,
+            reason: persistence::LoreRecallTraceDecisionReason::Included,
+        }],
         created_at: sample_timestamp(),
     }
 }
@@ -4487,6 +4496,12 @@ fn sample_roleplay_session_metadata() -> roleplay::RoleplaySessionMetadata {
         character_id: Some("validation-character".to_owned()),
         active_layer_ids: vec!["validation-layer".to_owned()],
         archived: false,
+        narrator_diagnostic: Some(roleplay::RoleplayNarratorDiagnostic {
+            wake_id: "validation-wake".to_owned(),
+            scene_brief: "Validation scene brief.".to_owned(),
+            relevant_lore_record_ids: vec!["validation-lore".to_owned()],
+            updated_at: sample_timestamp(),
+        }),
         created_at: sample_timestamp(),
         updated_at: sample_timestamp(),
     }

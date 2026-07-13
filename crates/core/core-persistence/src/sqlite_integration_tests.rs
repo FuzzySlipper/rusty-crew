@@ -1487,6 +1487,12 @@ fn roleplay_lore_layers_configs_entries_and_chat_links_round_trip() {
     let trace = store.get_recall_trace("trace-moonlit-1").unwrap().unwrap();
     assert_eq!(trace.entries_returned, 1);
     assert_eq!(trace.tokens_consumed, recall.tokens_consumed);
+    assert_eq!(trace.entry_decisions.len(), 1);
+    assert!(trace.entry_decisions[0].included);
+    assert_eq!(
+        trace.entry_decisions[0].reason,
+        LoreRecallTraceDecisionReason::Included
+    );
 
     store
         .archive_lore_layer(&RoleplayLoreLayerArchive {

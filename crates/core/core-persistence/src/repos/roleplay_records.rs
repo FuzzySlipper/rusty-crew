@@ -682,6 +682,12 @@ mod tests {
                     character_id: Some(replaced.id.clone()),
                     active_layer_ids: vec!["layer-one".into()],
                     archived: false,
+                    narrator_diagnostic: Some(RoleplayNarratorDiagnosticRecord {
+                        wake_id: "wake-one".into(),
+                        scene_brief: "The observatory door is open.".into(),
+                        relevant_lore_record_ids: vec!["lore-one".into()],
+                        updated_at: "2026-07-10T00:00:00Z".into(),
+                    }),
                     revision: 0,
                     created_at: "2026-07-10T00:00:00Z".into(),
                     updated_at: "2026-07-10T00:00:00Z".into(),
@@ -690,6 +696,13 @@ mod tests {
             })
             .unwrap();
         assert_eq!(session.revision, 1);
+        assert_eq!(
+            session
+                .narrator_diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.wake_id.as_str()),
+            Some("wake-one")
+        );
         let import = store
             .put_roleplay_import(&RoleplayImportWrite {
                 record: RoleplayImportRecord {
@@ -768,6 +781,7 @@ mod tests {
             character_id: None,
             active_layer_ids: vec!["layer-one".into()],
             archived: false,
+            narrator_diagnostic: None,
             revision: 0,
             created_at: now.clone(),
             updated_at: now.clone(),

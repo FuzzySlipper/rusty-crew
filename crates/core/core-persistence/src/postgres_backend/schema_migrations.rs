@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 24;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 25;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -135,7 +135,28 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "allow system operator correlated rounds without fake sessions",
         apply: Some(apply_postgres_operator_agent_rounds),
     },
+    PostgresSchemaMigration {
+        version: 25,
+        description: "add roleplay lore recall entry decisions",
+        apply: Some(apply_postgres_roleplay_lore_recall_entry_decisions),
+    },
 ];
+
+fn apply_postgres_roleplay_lore_recall_entry_decisions(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.module_roleplay_lore_recall_traces
+            ADD COLUMN IF NOT EXISTS entry_decisions JSONB NOT NULL DEFAULT '[]'::jsonb;"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "apply PostgreSQL roleplay lore recall entry decisions migration",
+            error,
+        )
+    })
+}
 
 #[cfg(test)]
 pub(super) fn postgres_schema_migration_count() -> usize {

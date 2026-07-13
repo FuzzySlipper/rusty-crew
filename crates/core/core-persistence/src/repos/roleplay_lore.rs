@@ -911,6 +911,7 @@ impl CoordinationStore {
         });
         let mut remaining = token_budget;
         let mut entries = Vec::new();
+        let mut entry_decisions = Vec::new();
         let mut seen_records = BTreeSet::new();
         let mut entries_considered = 0_u32;
 
@@ -920,15 +921,38 @@ impl CoordinationStore {
             for mut entry in constants {
                 entries_considered += 1;
                 if excluded_subject_match(&entry.record, &query.excluded_subjects) {
+                    entry_decisions.push(lore_recall_decision(
+                        &entry,
+                        false,
+                        LoreRecallTraceDecisionReason::ExcludedSubject,
+                    ));
                     continue;
                 }
                 entry.token_estimate = estimate_lore_tokens(&entry.record);
-                if entry.token_estimate > remaining || entry.token_estimate > reserve_remaining {
+                if entry.token_estimate > remaining {
+                    entry_decisions.push(lore_recall_decision(
+                        &entry,
+                        false,
+                        LoreRecallTraceDecisionReason::TokenBudgetExceeded,
+                    ));
+                    continue;
+                }
+                if entry.token_estimate > reserve_remaining {
+                    entry_decisions.push(lore_recall_decision(
+                        &entry,
+                        false,
+                        LoreRecallTraceDecisionReason::ConstantReserveExceeded,
+                    ));
                     continue;
                 }
                 remaining -= entry.token_estimate;
                 reserve_remaining -= entry.token_estimate;
                 seen_records.insert(entry.record.record_id.clone());
+                entry_decisions.push(lore_recall_decision(
+                    &entry,
+                    true,
+                    LoreRecallTraceDecisionReason::Included,
+                ));
                 entries.push(entry);
             }
         }
@@ -954,9 +978,19 @@ impl CoordinationStore {
         });
         for entry in scored {
             if entry.token_estimate > remaining {
+                entry_decisions.push(lore_recall_decision(
+                    &entry,
+                    false,
+                    LoreRecallTraceDecisionReason::TokenBudgetExceeded,
+                ));
                 continue;
             }
             remaining -= entry.token_estimate;
+            entry_decisions.push(lore_recall_decision(
+                &entry,
+                true,
+                LoreRecallTraceDecisionReason::Included,
+            ));
             entries.push(entry);
         }
 
@@ -976,6 +1010,7 @@ impl CoordinationStore {
                 entries_returned: entries.len() as u32,
                 token_budget: Some(token_budget),
                 tokens_consumed,
+                entry_decisions,
                 created_at: query.now.clone(),
             };
             insert_lore_recall_trace_in_tx(&tx, &trace)?;
@@ -1006,6 +1041,22 @@ impl CoordinationStore {
         validate_roleplay_lore_identifier("roleplay lore recall trace_id", trace_id)?;
         let conn = self.conn()?;
         get_lore_recall_trace(&conn, trace_id)
+    }
+}
+
+pub(crate) fn lore_recall_decision(
+    entry: &LoreRecallEntry,
+    included: bool,
+    reason: LoreRecallTraceDecisionReason,
+) -> LoreRecallTraceEntryDecision {
+    LoreRecallTraceEntryDecision {
+        record_id: entry.record.record_id.clone(),
+        layer_id: entry.layer_id.clone(),
+        score: entry.score,
+        token_estimate: entry.token_estimate,
+        is_constant: entry.is_constant,
+        included,
+        reason,
     }
 }
 
@@ -2315,6 +2366,7 @@ fn insert_lore_recall_trace_in_tx(
     let active_subjects = to_json_text(&trace.active_subjects)?;
     let excluded_subjects = to_json_text(&trace.excluded_subjects)?;
     let config_snapshot = to_json_text(&trace.config_snapshot)?;
+    let entry_decisions = to_json_text(&trace.entry_decisions)?;
     tx.execute(
         "INSERT INTO module_roleplay_lore_recall_traces (
             trace_id,
@@ -2328,8 +2380,9 @@ fn insert_lore_recall_trace_in_tx(
             entries_returned,
             token_budget,
             tokens_consumed,
+            entry_decisions,
             created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             trace.trace_id.as_str(),
             trace.session_id.as_ref().map(|value| value.0.as_str()),
@@ -2342,6 +2395,7 @@ fn insert_lore_recall_trace_in_tx(
             trace.entries_returned as i64,
             trace.token_budget.map(|value| value as i64),
             trace.tokens_consumed as i64,
+            entry_decisions,
             trace.created_at.as_str(),
         ],
     )
@@ -2373,6 +2427,7 @@ fn list_lore_recall_traces(
                     entries_returned,
                     token_budget,
                     tokens_consumed,
+                    entry_decisions,
                     created_at
              FROM module_roleplay_lore_recall_traces
              WHERE (?1 IS NULL OR session_id = ?1)
@@ -2412,6 +2467,7 @@ fn get_lore_recall_trace(
                 entries_returned,
                 token_budget,
                 tokens_consumed,
+                entry_decisions,
                 created_at
          FROM module_roleplay_lore_recall_traces
          WHERE trace_id = ?1",
@@ -2563,6 +2619,7 @@ fn row_to_lore_recall_trace(row: &rusqlite::Row<'_>) -> rusqlite::Result<LoreRec
     let active_subjects_json: String = row.get(4)?;
     let excluded_subjects_json: String = row.get(5)?;
     let config_snapshot_json: String = row.get(6)?;
+    let entry_decisions_json: String = row.get(11)?;
     Ok(LoreRecallTraceRecord {
         trace_id: row.get(0)?,
         session_id: row.get::<_, Option<String>>(1)?.map(SessionId::new),
@@ -2575,7 +2632,8 @@ fn row_to_lore_recall_trace(row: &rusqlite::Row<'_>) -> rusqlite::Result<LoreRec
         entries_returned: row.get::<_, i64>(8)? as u32,
         token_budget: row.get::<_, Option<i64>>(9)?.map(|value| value as u32),
         tokens_consumed: row.get::<_, i64>(10)? as u32,
-        created_at: row.get(11)?,
+        entry_decisions: from_json_text(&entry_decisions_json).map_err(to_sql_error)?,
+        created_at: row.get(12)?,
     })
 }
 

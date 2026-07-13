@@ -61,7 +61,14 @@ try {
   });
   assert.deepEqual(
     mechanic.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    ["get_mechanic_capabilities"],
+    [
+      "search_lore",
+      "list_lore_layers",
+      "get_mechanic_capabilities",
+      "inspect_roleplay_transcript",
+      "inspect_roleplay_scene",
+      "inspect_lore_retrieval",
+    ],
   );
 
   const narrator = await loadProfileContext({
@@ -71,7 +78,9 @@ try {
   });
   assert.equal(
     narrator.toolSelection.toolProfile.tools.some(
-      (tool) => tool.name === "get_mechanic_capabilities",
+      (tool) =>
+        tool.name.startsWith("inspect_") ||
+        tool.name === "get_mechanic_capabilities",
     ),
     false,
   );

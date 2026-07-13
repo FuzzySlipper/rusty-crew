@@ -1,6 +1,8 @@
 //! PostgreSQL profile memory, session memory, memory governance, and roleplay lore repositories.
 
 use super::*;
+use crate::repos::roleplay_lore::lore_recall_decision;
+use crate::LoreRecallTraceDecisionReason;
 
 impl PostgresBackendStore {
     pub fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
@@ -1553,6 +1555,7 @@ impl PostgresBackendStore {
         });
         let mut remaining = token_budget;
         let mut entries = Vec::new();
+        let mut entry_decisions = Vec::new();
         let mut seen_records = BTreeSet::new();
         let mut entries_considered = 0_u32;
 
@@ -1563,15 +1566,38 @@ impl PostgresBackendStore {
             for mut entry in constants {
                 entries_considered += 1;
                 if excluded_subject_match(&entry.record, &query.excluded_subjects) {
+                    entry_decisions.push(lore_recall_decision(
+                        &entry,
+                        false,
+                        LoreRecallTraceDecisionReason::ExcludedSubject,
+                    ));
                     continue;
                 }
                 entry.token_estimate = estimate_lore_tokens(&entry.record);
-                if entry.token_estimate > remaining || entry.token_estimate > reserve_remaining {
+                if entry.token_estimate > remaining {
+                    entry_decisions.push(lore_recall_decision(
+                        &entry,
+                        false,
+                        LoreRecallTraceDecisionReason::TokenBudgetExceeded,
+                    ));
+                    continue;
+                }
+                if entry.token_estimate > reserve_remaining {
+                    entry_decisions.push(lore_recall_decision(
+                        &entry,
+                        false,
+                        LoreRecallTraceDecisionReason::ConstantReserveExceeded,
+                    ));
                     continue;
                 }
                 remaining -= entry.token_estimate;
                 reserve_remaining -= entry.token_estimate;
                 seen_records.insert(entry.record.record_id.clone());
+                entry_decisions.push(lore_recall_decision(
+                    &entry,
+                    true,
+                    LoreRecallTraceDecisionReason::Included,
+                ));
                 entries.push(entry);
             }
         }
@@ -1589,9 +1615,19 @@ impl PostgresBackendStore {
         });
         for entry in scored {
             if entry.token_estimate > remaining {
+                entry_decisions.push(lore_recall_decision(
+                    &entry,
+                    false,
+                    LoreRecallTraceDecisionReason::TokenBudgetExceeded,
+                ));
                 continue;
             }
             remaining -= entry.token_estimate;
+            entry_decisions.push(lore_recall_decision(
+                &entry,
+                true,
+                LoreRecallTraceDecisionReason::Included,
+            ));
             entries.push(entry);
         }
 
@@ -1611,6 +1647,7 @@ impl PostgresBackendStore {
                 entries_returned: entries.len() as u32,
                 token_budget: Some(token_budget),
                 tokens_consumed,
+                entry_decisions,
                 created_at: query.now.clone(),
             };
             insert_lore_recall_trace(&mut tx, &schema, &trace)?;

@@ -1639,8 +1639,20 @@ pub struct RoleplaySessionMetadataRecord {
     pub active_layer_ids: Vec<String>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub narrator_diagnostic: Option<RoleplayNarratorDiagnosticRecord>,
     pub revision: u64,
     pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayNarratorDiagnosticRecord {
+    pub wake_id: String,
+    pub scene_brief: String,
+    #[serde(default)]
+    pub relevant_lore_record_ids: Vec<String>,
     pub updated_at: String,
 }
 
@@ -2063,7 +2075,29 @@ pub struct LoreRecallTraceRecord {
     pub entries_returned: u32,
     pub token_budget: Option<u32>,
     pub tokens_consumed: u32,
+    #[serde(default)]
+    pub entry_decisions: Vec<LoreRecallTraceEntryDecision>,
     pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LoreRecallTraceEntryDecision {
+    pub record_id: String,
+    pub layer_id: String,
+    pub score: f32,
+    pub token_estimate: u32,
+    pub is_constant: bool,
+    pub included: bool,
+    pub reason: LoreRecallTraceDecisionReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoreRecallTraceDecisionReason {
+    Included,
+    ExcludedSubject,
+    ConstantReserveExceeded,
+    TokenBudgetExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]

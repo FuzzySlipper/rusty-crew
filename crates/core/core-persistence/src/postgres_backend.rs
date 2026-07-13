@@ -8669,6 +8669,7 @@ fn insert_lore_recall_trace<C: GenericClient>(
     let active_subjects = to_json_text(&trace.active_subjects)?;
     let excluded_subjects = to_json_text(&trace.excluded_subjects)?;
     let config_snapshot = to_json_text(&trace.config_snapshot)?;
+    let entry_decisions = to_json_text(&trace.entry_decisions)?;
     let entries_considered = trace.entries_considered as i64;
     let entries_returned = trace.entries_returned as i64;
     let token_budget = trace.token_budget.map(|value| value as i64);
@@ -8687,6 +8688,7 @@ fn insert_lore_recall_trace<C: GenericClient>(
             &entries_returned,
             &token_budget,
             &tokens_consumed,
+            &entry_decisions,
             &trace.created_at,
         ];
         conn.execute(
@@ -8703,8 +8705,9 @@ fn insert_lore_recall_trace<C: GenericClient>(
                     entries_returned,
                     token_budget,
                     tokens_consumed,
+                    entry_decisions,
                     created_at
-                 ) VALUES ($1::text, $2::text, ($3::text)::jsonb, $4::text, ($5::text)::jsonb, ($6::text)::jsonb, ($7::text)::jsonb, $8::bigint, $9::bigint, $10::bigint, $11::bigint, $12::text)"
+                 ) VALUES ($1::text, $2::text, ($3::text)::jsonb, $4::text, ($5::text)::jsonb, ($6::text)::jsonb, ($7::text)::jsonb, $8::bigint, $9::bigint, $10::bigint, $11::bigint, ($12::text)::jsonb, $13::text)"
             ),
             params,
         )
@@ -8720,6 +8723,7 @@ fn insert_lore_recall_trace<C: GenericClient>(
             &entries_returned,
             &token_budget,
             &tokens_consumed,
+            &entry_decisions,
             &trace.created_at,
         ];
         conn.execute(
@@ -8736,8 +8740,9 @@ fn insert_lore_recall_trace<C: GenericClient>(
                     entries_returned,
                     token_budget,
                     tokens_consumed,
+                    entry_decisions,
                     created_at
-                 ) VALUES ($1::text, NULL, ($2::text)::jsonb, $3::text, ($4::text)::jsonb, ($5::text)::jsonb, ($6::text)::jsonb, $7::bigint, $8::bigint, $9::bigint, $10::bigint, $11::text)"
+                 ) VALUES ($1::text, NULL, ($2::text)::jsonb, $3::text, ($4::text)::jsonb, ($5::text)::jsonb, ($6::text)::jsonb, $7::bigint, $8::bigint, $9::bigint, $10::bigint, ($11::text)::jsonb, $12::text)"
             ),
             params,
         )
@@ -8773,6 +8778,7 @@ fn list_lore_recall_traces<C: GenericClient>(
                         entries_returned,
                         token_budget,
                         tokens_consumed,
+                        entry_decisions::text,
                         created_at
                  FROM {schema}.module_roleplay_lore_recall_traces
                  WHERE ($1::text IS NULL OR session_id = $1)
@@ -8805,6 +8811,7 @@ fn get_lore_recall_trace<C: GenericClient>(
                         entries_returned,
                         token_budget,
                         tokens_consumed,
+                        entry_decisions::text,
                         created_at
                  FROM {schema}.module_roleplay_lore_recall_traces
                  WHERE trace_id = $1"
@@ -8919,6 +8926,7 @@ fn row_to_lore_recall_trace(row: &Row) -> CoreResult<LoreRecallTraceRecord> {
     let entries_returned: i64 = row.get(8);
     let token_budget: Option<i64> = row.get(9);
     let tokens_consumed: i64 = row.get(10);
+    let entry_decisions_json: String = row.get(11);
     Ok(LoreRecallTraceRecord {
         trace_id: row.get(0),
         session_id: row.get::<_, Option<String>>(1).map(SessionId::new),
@@ -8940,7 +8948,11 @@ fn row_to_lore_recall_trace(row: &Row) -> CoreResult<LoreRecallTraceRecord> {
         entries_returned: entries_returned as u32,
         token_budget: token_budget.map(|value| value as u32),
         tokens_consumed: tokens_consumed as u32,
-        created_at: row.get(11),
+        entry_decisions: parse_postgres_json(
+            &entry_decisions_json,
+            "roleplay lore trace entry_decisions",
+        )?,
+        created_at: row.get(12),
     })
 }
 
@@ -10904,6 +10916,12 @@ mod tests {
             character_id: None,
             active_layer_ids: vec!["layer-pg".into()],
             archived: false,
+            narrator_diagnostic: Some(crate::RoleplayNarratorDiagnosticRecord {
+                wake_id: "wake-pg".into(),
+                scene_brief: "The observatory door is open.".into(),
+                relevant_lore_record_ids: vec!["lore-pg".into()],
+                updated_at: now.clone(),
+            }),
             revision: 0,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -10925,6 +10943,14 @@ mod tests {
                 }),
             })
             .unwrap();
+        assert_eq!(
+            projection
+                .metadata
+                .narrator_diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.wake_id.as_str()),
+            Some("wake-pg")
+        );
         let mut invalid = projection.metadata.clone();
         invalid.display_name = Some("Rollback".into());
         assert_eq!(
@@ -12114,6 +12140,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].entry_decisions.len(), 1);
+        assert!(traces[0].entry_decisions[0].included);
         assert_eq!(
             store
                 .get_recall_trace(&traces[0].trace_id)

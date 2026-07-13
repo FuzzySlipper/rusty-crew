@@ -205,6 +205,7 @@ fn restart_reactivates_only_roleplay_sessions_with_active_metadata() {
                         character_id: None,
                         active_layer_ids: Vec::new(),
                         archived,
+                        narrator_diagnostic: None,
                         revision: 1,
                         created_at: "2026-06-19T00:00:00Z".to_string(),
                         updated_at: "2026-06-19T00:00:00Z".to_string(),

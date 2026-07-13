@@ -102,6 +102,12 @@ interface RoleplaySessionMetadata {
   characterId?: string;
   activeLayerIds: string[];
   archived: boolean;
+  narratorDiagnostic?: {
+    wakeId: string;
+    sceneBrief: string;
+    relevantLoreRecordIds: string[];
+    updatedAt: string;
+  };
   revision: number;
   createdAt: string;
   updatedAt: string;

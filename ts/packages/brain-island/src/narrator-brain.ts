@@ -41,6 +41,13 @@ export interface RoleplayNarratorBrainOptions {
   toolProfile?: ToolProfile;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
+  persistDiagnostic?: (input: {
+    wakeId: string;
+    sessionId: string;
+    profileId: string;
+    sceneBrief: string;
+    relevantLoreRecordIds: string[];
+  }) => Promise<void>;
 }
 
 export type RoleplayNarratorPhase = RoleplayNarratorProviderPhase;
@@ -133,6 +140,19 @@ export function createRoleplayNarratorBrain(
         throw new Error(
           "roleplay narrator FSM completed without compose phase",
         );
+      }
+
+      const sceneBrief = receipt.state.sceneBrief?.trim();
+      if (sceneBrief && options.persistDiagnostic) {
+        await options.persistDiagnostic({
+          wakeId: receipt.wakeId,
+          sessionId: receipt.sessionId,
+          profileId: receipt.state.profileId,
+          sceneBrief,
+          relevantLoreRecordIds: receipt.state.relevantLore.map(
+            (source) => source.source_id,
+          ),
+        });
       }
 
       const visibleEvents = options.submitEvent ? [] : phaseEvents;

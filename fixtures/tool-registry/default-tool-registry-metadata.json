@@ -428,7 +428,7 @@
       "name": "search_lore",
       "description": "Search roleplay lore entries and optionally narrow results to chat or explicit layers.",
       "category": "memory",
-      "toolsets": ["roleplay_lore_read"],
+      "toolsets": ["roleplay_lore_read", "roleplay_mechanic"],
       "surfaces": ["brain"],
       "safety": ["read_only", "coordination_action"],
       "output_shape": "roleplay.lore_search_result.v1",
@@ -438,7 +438,7 @@
       "name": "list_lore_layers",
       "description": "List roleplay lore layers available to a profile.",
       "category": "memory",
-      "toolsets": ["roleplay_lore_read"],
+      "toolsets": ["roleplay_lore_read", "roleplay_mechanic"],
       "surfaces": ["brain"],
       "safety": ["read_only", "coordination_action"],
       "output_shape": "roleplay.lore_layer_list_result.v1",
@@ -482,6 +482,36 @@
       "surfaces": ["brain", "diagnostic"],
       "safety": ["read_only"],
       "output_shape": "roleplay.mechanic_capabilities.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "inspect_roleplay_transcript",
+      "description": "Read selected roleplay transcript messages with speaker and variant provenance.",
+      "category": "diagnostics",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["read_only"],
+      "output_shape": "roleplay.mechanic_transcript.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "inspect_roleplay_scene",
+      "description": "Read scene state, narrator diagnostics, active layers, and narrator profile configuration.",
+      "category": "diagnostics",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["read_only"],
+      "output_shape": "roleplay.mechanic_scene.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "inspect_lore_retrieval",
+      "description": "Read lore retrieval traces with candidate scores, decisions, budgets, and config snapshots.",
+      "category": "diagnostics",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["read_only"],
+      "output_shape": "roleplay.mechanic_lore_retrieval.v1",
       "version": "0.1.0"
     },
     {
