@@ -415,6 +415,14 @@ impl PostgresBackendStore {
         .map_err(|error| postgres_error("collect PostgreSQL worker items", error))?;
 
         let mut counts = Vec::new();
+        postgres_purge_delete(&mut tx, &mut counts, "external_interactions", &format!("DELETE FROM {schema}.external_interactions WHERE binding_id IN (SELECT binding_id FROM {schema}.external_agent_bindings WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions) OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)) OR request_id IN (SELECT request_id FROM {schema}.external_turns WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions))"), &[])?;
+        postgres_purge_delete(&mut tx, &mut counts, "external_control_receipts", &format!("DELETE FROM {schema}.external_control_receipts WHERE binding_id IN (SELECT binding_id FROM {schema}.external_agent_bindings WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions) OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents))"), &[])?;
+        postgres_purge_delete(&mut tx, &mut counts, "external_runtime_events", &format!("DELETE FROM {schema}.external_runtime_events WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"), &[])?;
+        postgres_purge_delete(&mut tx, &mut counts, "external_turns", &format!("DELETE FROM {schema}.external_turns WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions) OR binding_id IN (SELECT binding_id FROM {schema}.external_agent_bindings WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions) OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents))"), &[])?;
+        postgres_purge_delete(&mut tx, &mut counts, "external_agent_session_creations", &format!("DELETE FROM {schema}.external_agent_session_creations WHERE profile_id = $1 OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"), &[&profile_id.0])?;
+        postgres_purge_delete(&mut tx, &mut counts, "agent_correlated_rounds", &format!("DELETE FROM {schema}.agent_correlated_rounds WHERE sender_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions) OR recipient_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"), &[])?;
+        postgres_purge_delete(&mut tx, &mut counts, "agent_message_delivery_receipts", &format!("DELETE FROM {schema}.agent_message_delivery_receipts WHERE from_agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents) OR to_agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)"), &[])?;
+        postgres_purge_delete(&mut tx, &mut counts, "external_agent_bindings", &format!("DELETE FROM {schema}.external_agent_bindings WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions) OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)"), &[])?;
         postgres_purge_delete(
             &mut tx,
             &mut counts,

@@ -2683,6 +2683,46 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
         .create_profile_registry_record(&profile_registry_write("other-profile"))
         .unwrap();
     store.save_session_with_config(&state, &config).unwrap();
+    let external_runtime = rusty_crew_core_protocol::ExternalRuntimeRegistration {
+        runtime_id: rusty_crew_core_protocol::ExternalRuntimeId::new("profile-purge-runtime"),
+        kind: rusty_crew_core_protocol::ExternalRuntimeKind::CodexAppServer,
+        endpoint: rusty_crew_core_protocol::ExternalEndpoint {
+            transport: rusty_crew_core_protocol::ExternalEndpointTransport::UnixWebSocket,
+            address: "/tmp/profile-purge-codex.sock".into(),
+        },
+        process_ownership: rusty_crew_core_protocol::ExternalProcessOwnership::Attached,
+        codex_home_ref: None,
+        expected_cli_version: "0.144.1".into(),
+        executable_sha256: "a".repeat(64),
+        protocol_schema_sha256: "b".repeat(64),
+        desired_state: rusty_crew_core_protocol::ExternalRuntimeDesiredState::Enabled,
+        observed_state: rusty_crew_core_protocol::ExternalRuntimeObservedState::Ready,
+        observed_reason_code: None,
+        revision: 0,
+        created_at: "2026-06-20T05:00:00Z".into(),
+        updated_at: "2026-06-20T05:00:00Z".into(),
+    };
+    store
+        .put_external_runtime_registration(&external_runtime, None)
+        .unwrap();
+    let external_binding = rusty_crew_core_protocol::ExternalAgentBinding {
+        binding_id: rusty_crew_core_protocol::ExternalBindingId::new("profile-purge-binding"),
+        runtime_id: external_runtime.runtime_id,
+        session_id: Some(state.session_id.clone()),
+        agent_id: Some(state.agent_id.clone()),
+        purpose: rusty_crew_core_protocol::ExternalBindingPurpose::CrewAgent,
+        native_thread_id: Some("profile-purge-thread".into()),
+        cwd: Some("/home/dev/rusty-crew".into()),
+        task_ref: None,
+        effective_config_fingerprint: "profile-purge-config".into(),
+        status: rusty_crew_core_protocol::ExternalBindingStatus::Archived,
+        revision: 0,
+        created_at: "2026-06-20T05:00:00Z".into(),
+        updated_at: "2026-06-20T05:00:00Z".into(),
+    };
+    store
+        .put_external_agent_binding(&external_binding, None)
+        .unwrap();
     store
         .add_profile_memory(
             &ProfileMemoryWrite {
@@ -2746,6 +2786,7 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
     assert_eq!(store.count_rows("profile_registry").unwrap(), 2);
     assert_eq!(store.count_rows("message_slots").unwrap(), 1);
     assert_eq!(store.count_rows("profile_memories").unwrap(), 1);
+    assert_eq!(store.count_rows("external_agent_bindings").unwrap(), 1);
 
     let report = store
         .purge_profile(&ProfileId::new("full-profile"))
@@ -2775,6 +2816,11 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
     assert_eq!(store.count_rows("messages").unwrap(), 0);
     assert_eq!(store.count_rows("message_blocks").unwrap(), 0);
     assert_eq!(store.count_rows("profile_memories").unwrap(), 0);
+    assert_eq!(store.count_rows("external_agent_bindings").unwrap(), 0);
+    assert!(report
+        .table_counts
+        .iter()
+        .any(|count| { count.table == "external_agent_bindings" && count.rows_deleted == 1 }));
     assert_eq!(store.count_rows("profile_registry").unwrap(), 1);
 
     remove_temp_db(&db_path);

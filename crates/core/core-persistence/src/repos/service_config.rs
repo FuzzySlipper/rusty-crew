@@ -378,6 +378,91 @@ fn purge_profile_in_tx(
     purge_delete(
         tx,
         &mut counts,
+        "external_interactions",
+        "DELETE FROM external_interactions
+         WHERE binding_id IN (
+             SELECT binding_id FROM external_agent_bindings
+             WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+         )
+            OR request_id IN (
+                SELECT request_id FROM external_turns
+                WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            )",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "external_control_receipts",
+        "DELETE FROM external_control_receipts
+         WHERE binding_id IN (
+             SELECT binding_id FROM external_agent_bindings
+             WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+         )",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "external_runtime_events",
+        "DELETE FROM external_runtime_events
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "external_turns",
+        "DELETE FROM external_turns
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR binding_id IN (
+                SELECT binding_id FROM external_agent_bindings
+                WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                   OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+            )",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "external_agent_session_creations",
+        "DELETE FROM external_agent_session_creations
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "agent_correlated_rounds",
+        "DELETE FROM agent_correlated_rounds
+         WHERE sender_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR recipient_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "agent_message_delivery_receipts",
+        "DELETE FROM agent_message_delivery_receipts
+         WHERE from_agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+            OR to_agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "external_agent_bindings",
+        "DELETE FROM external_agent_bindings
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
         "memory_governance_decisions",
         "DELETE FROM memory_governance_decisions
          WHERE proposal_id IN (
