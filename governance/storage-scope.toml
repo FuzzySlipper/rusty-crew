@@ -12,8 +12,9 @@ owns = [
   "runtime_import_batches",
   "legacy_id_mappings",
   "rusty_crew_storage_metadata",
+  "agent_correlated_rounds_v39",
 ]
-notes = "Migrations, backend diagnostics, maintenance, logical import/export batch metadata."
+notes = "Migrations, backend diagnostics, maintenance, logical import/export batch metadata, and explicitly named migration-only rebuild tables."
 
 [[scope]]
 id = "sessions_identities"
