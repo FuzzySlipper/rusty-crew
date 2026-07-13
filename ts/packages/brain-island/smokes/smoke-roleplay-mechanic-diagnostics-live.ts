@@ -112,11 +112,13 @@ try {
     mechanicSessionId,
     [
       `Use sessionId ${narratorSessionId} for every call.`,
-      "Call inspect_roleplay_transcript, inspect_roleplay_scene, and inspect_lore_retrieval before answering.",
+      `Call search_lore with query "blue bell" and chatId ${narratorSessionId}.`,
+      "Also call inspect_roleplay_transcript, inspect_roleplay_scene, and inspect_lore_retrieval before answering.",
       `Then write ${marker} and briefly identify the observed scene, lore decision evidence, and selected transcript state.`,
     ].join("\n"),
   );
   for (const toolName of [
+    "search_lore",
     "inspect_roleplay_transcript",
     "inspect_roleplay_scene",
     "inspect_lore_retrieval",

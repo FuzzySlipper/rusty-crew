@@ -70,6 +70,7 @@ try {
       "inspect_lore_retrieval",
       "inspect_roleplay_proposals",
       "propose_roleplay_change",
+      "record_roleplay_diagnostic",
     ],
   );
 

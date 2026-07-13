@@ -58,7 +58,8 @@ cargo test -p rusty-crew-core-persistence roleplay_lore --features postgres-back
 
 The debug-only live certification creates disposable narrator and mechanic
 profiles, writes real lore, runs a narrator turn, restarts the service, and
-requires a live mechanic model to call all three diagnostic tools:
+requires a live mechanic model to call the three diagnostic tools plus the
+shared `search_lore` operation against the active chat layers:
 
 ```bash
 npm run smoke:roleplay-mechanic-diagnostics-live -w @rusty-crew/brain-island
