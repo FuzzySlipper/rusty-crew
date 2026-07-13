@@ -193,6 +193,32 @@ if (apply) {
       ),
     );
   }
+
+  const [
+    activeThreadsAfter,
+    archivedThreadsAfter,
+    bindingFleetAfter,
+    interactionFleetAfter,
+  ] = await Promise.all([
+    listThreads(false),
+    listThreads(true),
+    getJson("/v1/external-bindings"),
+    getJson("/v1/external-interactions"),
+  ]);
+  const bindingsAfter = bindingFleetAfter.bindings.filter(
+    (binding) => binding.runtimeId === runtimeId,
+  );
+  manifest.countsAfter = {
+    defaultThreads: activeThreadsAfter.length,
+    archivedThreads: archivedThreadsAfter.length,
+    bindings: bindingsAfter.length,
+    pendingInteractions: interactionFleetAfter.interactions.length,
+  };
+  manifest.stateAfter = {
+    defaultThreads: activeThreadsAfter.map(projectThreadState),
+    archivedThreads: archivedThreadsAfter.map(projectThreadState),
+    bindings: bindingsAfter.map(projectBinding),
+  };
 }
 
 process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
@@ -263,6 +289,21 @@ function projectBinding(binding) {
     sessionId: binding.sessionId,
     taskRef: binding.taskRef,
     cwd: binding.cwd,
+  };
+}
+
+function projectThreadState(thread) {
+  return {
+    threadId: thread.threadId,
+    sessionId: thread.sessionId,
+    name: thread.name,
+    cwd: thread.cwd,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    status: thread.status,
+    preview: thread.preview,
+    agentNickname: thread.agentNickname,
+    agentRole: thread.agentRole,
   };
 }
 

@@ -638,6 +638,77 @@ test("controller deletes native thread trees only after durable binding reconcil
   }
 });
 
+test("controller does not report a missing root deleted while descendants remain", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const root = await fixture.controller.createAgentSession({
+      idempotencyKey: "missing-delete-root-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const child = await fixture.controller.createAgentSession({
+      idempotencyKey: "surviving-delete-child-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const rootThreadId = root.thread.threadId;
+    const childThreadId = child.thread.threadId;
+    const childThread = fixture.transport.threads.find(
+      (thread) => thread.id === childThreadId,
+    );
+    assert.ok(childThread);
+    childThread.parentThreadId = rootThreadId;
+
+    const rootIndex = fixture.transport.threads.findIndex(
+      (thread) => thread.id === rootThreadId,
+    );
+    assert.notEqual(rootIndex, -1);
+    fixture.transport.threads.splice(rootIndex, 1);
+
+    childThread.status = { type: "active", activeFlags: [] };
+    await assert.rejects(
+      fixture.controller.deleteThread(fixture.runtimeId, rootThreadId),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode === "external_thread_active",
+    );
+    assert.equal(
+      (
+        await fixture.bridge.getExternalBinding(
+          child.creation.binding.bindingId,
+        )
+      )?.status,
+      "active",
+    );
+
+    childThread.status = { type: "idle" };
+    await assert.rejects(
+      fixture.controller.deleteThread(fixture.runtimeId, rootThreadId),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode === "external_thread_native_delete_failed",
+    );
+    assert.equal(
+      fixture.transport.threads.some((thread) => thread.id === childThreadId),
+      true,
+    );
+    assert.equal(
+      (
+        await fixture.bridge.getExternalBinding(
+          child.creation.binding.bindingId,
+        )
+      )?.status,
+      "active",
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("thread snapshots preserve message phase across controller reload", async () => {
   const fixture = await externalCreationFixture(false);
   let reloaded: ServiceExternalRuntimeController | undefined;

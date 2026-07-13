@@ -16,8 +16,10 @@ node ops/scripts/codex-thread-cleanup.mjs \
 
 The command is read-only unless `--apply` is present. It pages both native
 catalogs, joins Crew bindings and task references, includes source/name/cwd and
-timestamps, and preserves ambiguous records. The reviewed pre-apply selection
-is recorded in
+timestamps, and preserves ambiguous records. Apply mode also performs a fresh
+readback and emits `countsAfter` plus the complete default, archived, and
+binding state in `stateAfter`. The reviewed pre-apply selection and post-apply
+evidence are recorded in
 [`codex-thread-cleanup-5695-manifest.json`](codex-thread-cleanup-5695-manifest.json).
 
 ## Selection
@@ -71,6 +73,14 @@ All other records without an explicit marker were preserved.
 The three live bindings associated with completed View task `#5675` moved to
 `archived` revision 3. All 17 debug bindings are archived; the additional one
 is the already archived isolation-proof binding from task `#5694`.
+
+Manifest schema version 2 retains all 242 live and one debug dry-run thread
+records, including the 152 preserved live stable IDs. It also records all 90
+archived IDs and every selected binding's before/after revision. A later
+readback is embedded with content hashes. The live catalog still matched the
+historical `152` default and `90` archived counts exactly; debug-only records
+created by later certifications are labeled as later drift rather than cleanup
+output.
 
 Thread `019f55b8-32bb-7da2-bad3-a8f4d7445e8f` was restored through Crew,
 observed in the default list, and archived again. This proves the selected

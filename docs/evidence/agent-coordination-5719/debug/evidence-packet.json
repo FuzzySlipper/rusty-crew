@@ -1,0 +1,1400 @@
+{
+  "schemaVersion": 2,
+  "runId": "coordination-debug-1783918992360-62137418",
+  "createdAt": "2026-07-13T05:04:25.601Z",
+  "scenario": {
+    "id": "cross_runtime_agent_coordination",
+    "title": "Cross-runtime direct messaging and correlated rounds",
+    "prompt": "Exchange identity-bound messages and correlated replies across direct and Codex runtimes.",
+    "fixture": {
+      "kind": "directory",
+      "sourceRef": "service://debug/coordination"
+    },
+    "requiredCapabilities": [
+      "direct_agent_message",
+      "correlated_round",
+      "dynamic_tool_identity",
+      "durable_deduplication",
+      "ttl_expiry",
+      "restart_reconciliation"
+    ],
+    "permittedEffects": [
+      "debug_service_turns",
+      "debug_service_restart",
+      "durable_coordination_records"
+    ],
+    "expectedArtifacts": [
+      "delivery_ids",
+      "round_ids",
+      "native_thread_turn_tool_ids",
+      "restart_expiry_outcome"
+    ],
+    "validationCommands": [
+      "npm run smoke:coordination-live:debug -w @rusty-crew/capability-harness"
+    ],
+    "runtimeApplicability": {
+      "codex_app_server": {
+        "status": "applicable"
+      },
+      "direct_brain": {
+        "status": "applicable"
+      }
+    }
+  },
+  "runtimes": [
+    {
+      "runtimeId": "direct-pi-agent",
+      "runtimeKind": "direct_brain",
+      "backend": "http://127.0.0.1:9348",
+      "startedAt": "2026-07-13T05:03:24.167Z",
+      "finishedAt": "2026-07-13T05:03:46.785Z",
+      "durationMs": 22617,
+      "tools": [
+        "agent_round",
+        "send_agent_message"
+      ],
+      "lifecycleEvents": [
+        {
+          "event_id": "coordination-debug-1783918992360-62137418-direct-session:125",
+          "session_id": "coordination-debug-1783918992360-62137418-direct-session",
+          "sequence_id": 125,
+          "created_at": "2026-07-13T05:03:35.573Z",
+          "kind": "assistant_turn_started",
+          "payload": {
+            "wake_id": "service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2"
+          }
+        },
+        {
+          "event_id": "coordination-debug-1783918992360-62137418-direct-session:246",
+          "session_id": "coordination-debug-1783918992360-62137418-direct-session",
+          "sequence_id": 246,
+          "created_at": "2026-07-13T05:03:35.696Z",
+          "kind": "assistant_turn_finished",
+          "payload": {
+            "wake_id": "service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2"
+          }
+        }
+      ],
+      "toolEvents": [
+        {
+          "event_id": "coordination-debug-1783918992360-62137418-direct-session:147",
+          "session_id": "coordination-debug-1783918992360-62137418-direct-session",
+          "sequence_id": 147,
+          "created_at": "2026-07-13T05:03:35.575Z",
+          "kind": "tool_call_started",
+          "payload": {
+            "debug_detail_id": "tooldbg_d5aabdadf9ff93d66b2c8bde",
+            "metadata": {
+              "adapterId": null,
+              "bindingId": null,
+              "catalogRevision": "brain-tool-adapter",
+              "debugDetailId": "tooldbg_d5aabdadf9ff93d66b2c8bde",
+              "policy": {
+                "allowed": true,
+                "archiveCleanup": null,
+                "cancelled": null,
+                "denialReason": null,
+                "timeoutMs": null
+              },
+              "profileId": null,
+              "serverNames": [],
+              "source": "local",
+              "sourceToolName": "unknown",
+              "toolProfileKey": null
+            },
+            "tool_call_id": "tooldbg_d5aabdadf9ff93d66b2c8bde",
+            "tool_name": "agent_round",
+            "wake_id": "service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2"
+          }
+        },
+        {
+          "event_id": "coordination-debug-1783918992360-62137418-direct-session:148",
+          "session_id": "coordination-debug-1783918992360-62137418-direct-session",
+          "sequence_id": 148,
+          "created_at": "2026-07-13T05:03:35.575Z",
+          "kind": "tool_call_completed",
+          "payload": {
+            "debug_detail_id": "tooldbg_d5aabdadf9ff93d66b2c8bde",
+            "is_error": false,
+            "metadata": {
+              "adapterId": null,
+              "bindingId": null,
+              "catalogRevision": "brain-tool-adapter",
+              "debugDetailId": "tooldbg_d5aabdadf9ff93d66b2c8bde",
+              "policy": {
+                "allowed": true,
+                "archiveCleanup": null,
+                "cancelled": null,
+                "denialReason": null,
+                "timeoutMs": null
+              },
+              "profileId": null,
+              "serverNames": [],
+              "source": "local",
+              "sourceToolName": "unknown",
+              "toolProfileKey": null
+            },
+            "tool_call_id": "tooldbg_d5aabdadf9ff93d66b2c8bde",
+            "tool_name": "agent_round",
+            "wake_id": "service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2"
+          }
+        }
+      ],
+      "interactions": [
+        {
+          "direction": "direct_to_codex",
+          "roundId": "round:coordination-debug-1783918992360-62137418-direct-session:service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2:call_00_yrVZImqNAT7JqwPzZoIZ8554"
+        },
+        {
+          "direction": "codex_to_direct",
+          "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-00d9-79c3-aed1-4ef2edcaeeb9:exec-7662f557-7b24-4774-8228-a6747137a994"
+        }
+      ],
+      "coordination": {
+        "deliveries": [
+          {
+            "deliveryId": "round-delivery:round:coordination-debug-1783918992360-62137418-direct-session:service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2:call_00_yrVZImqNAT7JqwPzZoIZ8554",
+            "messageId": "round-message:coordination-debug-1783918992360-62137418-direct-session:service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2:call_00_yrVZImqNAT7JqwPzZoIZ8554",
+            "fromAgentId": "coordination-debug-1783918992360-62137418-direct-agent",
+            "toAgentId": "external-agent-e88ba35508cfd2f42af56d60",
+            "status": "accepted",
+            "activation": {
+              "type": "external_turn_requested",
+              "sessionId": "external-session-e88ba35508cfd2f42af56d60",
+              "requestId": "agent-message:round-message:coordination-debug-1783918992360-62137418-direct-session:service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2:call_00_yrVZImqNAT7JqwPzZoIZ8554",
+              "bindingId": "external-binding-e88ba35508cfd2f42af56d60"
+            }
+          }
+        ],
+        "rounds": [
+          {
+            "roundId": "round:coordination-debug-1783918992360-62137418-direct-session:service-coordination-debug-1783918992360-62137418-direct-session-1783919004313-2:call_00_yrVZImqNAT7JqwPzZoIZ8554",
+            "correlationId": "coordination-debug-1783918992360-62137418-direct-codex",
+            "senderAgentId": "coordination-debug-1783918992360-62137418-direct-agent",
+            "senderSessionId": "coordination-debug-1783918992360-62137418-direct-session",
+            "recipientAgentId": "external-agent-e88ba35508cfd2f42af56d60",
+            "recipientSessionId": "external-session-e88ba35508cfd2f42af56d60",
+            "status": "replied"
+          },
+          {
+            "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-00d9-79c3-aed1-4ef2edcaeeb9:exec-7662f557-7b24-4774-8228-a6747137a994",
+            "correlationId": "coordination-debug-1783918992360-62137418-codex-direct",
+            "senderAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "senderSessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+            "recipientAgentId": "coordination-debug-1783918992360-62137418-direct-agent",
+            "recipientSessionId": "coordination-debug-1783918992360-62137418-direct-session",
+            "status": "replied"
+          }
+        ],
+        "native": [
+          {
+            "runtimeId": "rv-live-codex-5516",
+            "bindingId": "external-binding-e88ba35508cfd2f42af56d60",
+            "threadId": "019f59db-9f8c-7fc1-a111-79776647596e",
+            "turnId": "019f59db-d9c9-7c81-bd5c-e9e22b65e8e8",
+            "toolCallId": "exec-cfc18f69-30f0-4c3c-a4be-0ef76e9e57d6"
+          }
+        ]
+      },
+      "restart": {
+        "exercised": true,
+        "recovered": true,
+        "evidence": "pending round codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-7608-77d1-bae0-9fd79c2a9e26:exec-cb817505-af0f-410d-89e8-3a2c4d87bf06 survived debug restart and became expired"
+      },
+      "effectiveConfig": {
+        "directSessionId": "coordination-debug-1783918992360-62137418-direct-session",
+        "directAgentId": "coordination-debug-1783918992360-62137418-direct-agent"
+      },
+      "model": "tester-chat",
+      "effort": "medium",
+      "commands": [],
+      "fileChanges": [],
+      "tests": [
+        {
+          "command": "durable coordination assertions",
+          "passed": true
+        }
+      ],
+      "capabilities": [
+        {
+          "capability": "direct_agent_message",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "correlated_round",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "dynamic_tool_identity",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "durable_deduplication",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "ttl_expiry",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "restart_reconciliation",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        }
+      ],
+      "failures": []
+    },
+    {
+      "runtimeId": "codex-app-server",
+      "runtimeKind": "codex_app_server",
+      "backend": "service:rv-live-codex-5516",
+      "startedAt": "2026-07-13T05:03:35.737Z",
+      "finishedAt": "2026-07-13T05:04:25.598Z",
+      "durationMs": 49854,
+      "tools": [
+        "rusty_crew.agent_round",
+        "rusty_crew.send_agent_message"
+      ],
+      "lifecycleEvents": [
+        {
+          "eventId": "rv-live-codex-5516:37:3050",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5188,
+          "createdAt": "2026-07-13T05:03:38.215Z",
+          "kind": "turn_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-00d9-79c3-aed1-4ef2edcaeeb9",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "turn/started",
+            "status": "inProgress"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3050"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3119",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5234,
+          "createdAt": "2026-07-13T05:03:46.530Z",
+          "kind": "turn_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-00d9-79c3-aed1-4ef2edcaeeb9",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "turn/completed",
+            "status": "completed"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3119"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3123",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5236,
+          "createdAt": "2026-07-13T05:03:48.214Z",
+          "kind": "turn_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-27e9-78d0-bf8b-91e621d59000",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "turn/started",
+            "status": "inProgress"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3123"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3193",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5302,
+          "createdAt": "2026-07-13T05:04:04.347Z",
+          "kind": "turn_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-27e9-78d0-bf8b-91e621d59000",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "turn/completed",
+            "status": "completed"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3193"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3207",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5314,
+          "createdAt": "2026-07-13T05:04:08.211Z",
+          "kind": "turn_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "turn/started",
+            "status": "inProgress"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3207"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3208",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5315,
+          "createdAt": "2026-07-13T05:04:08.220Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "019f59dc-7616-7692-95b6-b31d57dd268b",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/started"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3208"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3209",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5316,
+          "createdAt": "2026-07-13T05:04:08.224Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "019f59dc-7616-7692-95b6-b31d57dd268b",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/completed"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3209"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3210",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5317,
+          "createdAt": "2026-07-13T05:04:09.742Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "rs_038011479450da91016a5471c9b6fc819b95fdc41945deca0e",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/started"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3210"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3211",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5318,
+          "createdAt": "2026-07-13T05:04:10.209Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "rs_038011479450da91016a5471c9b6fc819b95fdc41945deca0e",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/completed"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3211"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3212",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5319,
+          "createdAt": "2026-07-13T05:04:10.210Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "messagePhase": "commentary",
+            "nativeMethod": "item/started",
+            "text": ""
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3212"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3213",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5320,
+          "createdAt": "2026-07-13T05:04:10.215Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "I"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3213"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3214",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5321,
+          "createdAt": "2026-07-13T05:04:10.216Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "’ll"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3214"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3215",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5322,
+          "createdAt": "2026-07-13T05:04:10.219Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " make"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3215"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3216",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5323,
+          "createdAt": "2026-07-13T05:04:10.220Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " the"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3216"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3217",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5324,
+          "createdAt": "2026-07-13T05:04:10.221Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " specified"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3217"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3218",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5325,
+          "createdAt": "2026-07-13T05:04:10.225Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " agent"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3218"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3219",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5326,
+          "createdAt": "2026-07-13T05:04:10.228Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "-round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3219"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3220",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5327,
+          "createdAt": "2026-07-13T05:04:10.242Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " call"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3220"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3221",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5328,
+          "createdAt": "2026-07-13T05:04:10.264Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " once"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3221"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3222",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5329,
+          "createdAt": "2026-07-13T05:04:10.353Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " with"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3222"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3223",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5330,
+          "createdAt": "2026-07-13T05:04:10.357Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " the"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3223"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3224",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5331,
+          "createdAt": "2026-07-13T05:04:10.368Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " "
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3224"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3225",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5332,
+          "createdAt": "2026-07-13T05:04:10.377Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "12"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3225"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3226",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5333,
+          "createdAt": "2026-07-13T05:04:10.378Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "-second"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3226"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3227",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5334,
+          "createdAt": "2026-07-13T05:04:10.379Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " timeout"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3227"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3228",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5335,
+          "createdAt": "2026-07-13T05:04:10.382Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": ","
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3228"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3229",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5336,
+          "createdAt": "2026-07-13T05:04:10.449Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " then"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3229"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3230",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5337,
+          "createdAt": "2026-07-13T05:04:10.450Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " finish"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3230"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3231",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5338,
+          "createdAt": "2026-07-13T05:04:10.450Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "."
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3231"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3232",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5339,
+          "createdAt": "2026-07-13T05:04:10.627Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471ca2e40819ba4de55059eac7045",
+          "requestId": null,
+          "payload": {
+            "messagePhase": "commentary",
+            "nativeMethod": "item/completed",
+            "text": "I’ll make the specified agent-round call once with the 12-second timeout, then finish."
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3232"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3233",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5340,
+          "createdAt": "2026-07-13T05:04:13.561Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "exec-cb817505-af0f-410d-89e8-3a2c4d87bf06",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/started",
+            "status": "inProgress",
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3233"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:8",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5344,
+          "createdAt": "2026-07-13T05:04:14.953Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "exec-cb817505-af0f-410d-89e8-3a2c4d87bf06",
+          "requestId": null,
+          "payload": {
+            "durationMs": 1386,
+            "nativeMethod": "item/completed",
+            "status": "failed",
+            "success": false,
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:8"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:9",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5345,
+          "createdAt": "2026-07-13T05:04:14.959Z",
+          "kind": "usage",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "thread/tokenUsage/updated",
+            "usage": {}
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:9"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:11",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5347,
+          "createdAt": "2026-07-13T05:04:15.938Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "messagePhase": "final_answer",
+            "nativeMethod": "item/started",
+            "text": ""
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:11"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:12",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5348,
+          "createdAt": "2026-07-13T05:04:15.941Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "The"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:12"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:13",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5349,
+          "createdAt": "2026-07-13T05:04:15.957Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " agent"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:13"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:14",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5350,
+          "createdAt": "2026-07-13T05:04:15.974Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "-round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:14"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:15",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5351,
+          "createdAt": "2026-07-13T05:04:15.975Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " call"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:15"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:16",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5352,
+          "createdAt": "2026-07-13T05:04:15.992Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " returned"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:16"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:17",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5353,
+          "createdAt": "2026-07-13T05:04:16.017Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": ":"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:17"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:18",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5354,
+          "createdAt": "2026-07-13T05:04:16.037Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " `"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:18"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:19",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5355,
+          "createdAt": "2026-07-13T05:04:16.059Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "dynamic"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:19"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:20",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5356,
+          "createdAt": "2026-07-13T05:04:16.076Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " tool"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:20"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:21",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5357,
+          "createdAt": "2026-07-13T05:04:16.101Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " request"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:21"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:22",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5358,
+          "createdAt": "2026-07-13T05:04:16.118Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": " failed"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:22"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:23",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5359,
+          "createdAt": "2026-07-13T05:04:16.135Z",
+          "kind": "assistant_text_delta",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/agentMessage/delta",
+            "text": "`"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:23"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:24",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5360,
+          "createdAt": "2026-07-13T05:04:16.236Z",
+          "kind": "item_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "msg_038011479450da91016a5471cfe8c4819ba575c3335e632f60",
+          "requestId": null,
+          "payload": {
+            "messagePhase": "final_answer",
+            "nativeMethod": "item/completed",
+            "text": "The agent-round call returned: `dynamic tool request failed`"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:24"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:25",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5361,
+          "createdAt": "2026-07-13T05:04:16.276Z",
+          "kind": "usage",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "thread/tokenUsage/updated",
+            "usage": {}
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:25"
+        },
+        {
+          "eventId": "rv-live-codex-5516:38:28",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5364,
+          "createdAt": "2026-07-13T05:04:16.280Z",
+          "kind": "turn_lifecycle",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": null,
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "turn/completed",
+            "status": "completed"
+          },
+          "rawDetailRef": "rv-live-codex-5516:38:28"
+        }
+      ],
+      "toolEvents": [
+        {
+          "eventId": "rv-live-codex-5516:37:3092",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5208,
+          "createdAt": "2026-07-13T05:03:43.678Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-00d9-79c3-aed1-4ef2edcaeeb9",
+          "itemId": "exec-7662f557-7b24-4774-8228-a6747137a994",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/started",
+            "status": "inProgress",
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3092"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3094",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5209,
+          "createdAt": "2026-07-13T05:03:45.387Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-00d9-79c3-aed1-4ef2edcaeeb9",
+          "itemId": "exec-7662f557-7b24-4774-8228-a6747137a994",
+          "requestId": null,
+          "payload": {
+            "durationMs": 1708,
+            "nativeMethod": "item/completed",
+            "status": "completed",
+            "success": true,
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3094"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3143",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5256,
+          "createdAt": "2026-07-13T05:03:54.829Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-27e9-78d0-bf8b-91e621d59000",
+          "itemId": "exec-76920c9e-e018-45db-81fe-6e13b69328ff",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/started",
+            "status": "inProgress",
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3143"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3167",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5276,
+          "createdAt": "2026-07-13T05:04:02.698Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-27e9-78d0-bf8b-91e621d59000",
+          "itemId": "exec-76920c9e-e018-45db-81fe-6e13b69328ff",
+          "requestId": null,
+          "payload": {
+            "durationMs": 7868,
+            "nativeMethod": "item/completed",
+            "status": "completed",
+            "success": true,
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3167"
+        },
+        {
+          "eventId": "rv-live-codex-5516:37:3233",
+          "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+          "sequenceId": 5340,
+          "createdAt": "2026-07-13T05:04:13.561Z",
+          "kind": "dynamic_tool_activity",
+          "runtimeId": "rv-live-codex-5516",
+          "nativeThreadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+          "nativeTurnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+          "itemId": "exec-cb817505-af0f-410d-89e8-3a2c4d87bf06",
+          "requestId": null,
+          "payload": {
+            "nativeMethod": "item/started",
+            "status": "inProgress",
+            "tool": "agent_round"
+          },
+          "rawDetailRef": "rv-live-codex-5516:37:3233"
+        }
+      ],
+      "interactions": [
+        {
+          "direction": "codex_to_direct",
+          "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-00d9-79c3-aed1-4ef2edcaeeb9:exec-7662f557-7b24-4774-8228-a6747137a994"
+        },
+        {
+          "direction": "codex_to_codex",
+          "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-27e9-78d0-bf8b-91e621d59000:exec-76920c9e-e018-45db-81fe-6e13b69328ff"
+        }
+      ],
+      "coordination": {
+        "deliveries": [
+          {
+            "deliveryId": "coordination-debug-1783918992360-62137418-codex-direct-trigger-delivery",
+            "messageId": "coordination-debug-1783918992360-62137418-codex-direct-trigger-message",
+            "fromAgentId": "rusty-view-operator",
+            "toAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "status": "accepted",
+            "activation": {
+              "type": "external_turn_requested",
+              "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+              "requestId": "agent-message:coordination-debug-1783918992360-62137418-codex-direct-trigger-message",
+              "bindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5"
+            }
+          },
+          {
+            "deliveryId": "coordination-debug-1783918992360-62137418-codex-codex-trigger-delivery",
+            "messageId": "coordination-debug-1783918992360-62137418-codex-codex-trigger-message",
+            "fromAgentId": "rusty-view-operator",
+            "toAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "status": "accepted",
+            "activation": {
+              "type": "external_turn_requested",
+              "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+              "requestId": "agent-message:coordination-debug-1783918992360-62137418-codex-codex-trigger-message",
+              "bindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5"
+            }
+          },
+          {
+            "deliveryId": "coordination-debug-1783918992360-62137418-restart-expiry-trigger-delivery",
+            "messageId": "coordination-debug-1783918992360-62137418-restart-expiry-trigger-message",
+            "fromAgentId": "rusty-view-operator",
+            "toAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "status": "accepted",
+            "activation": {
+              "type": "external_turn_requested",
+              "sessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+              "requestId": "agent-message:coordination-debug-1783918992360-62137418-restart-expiry-trigger-message",
+              "bindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5"
+            }
+          }
+        ],
+        "rounds": [
+          {
+            "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-00d9-79c3-aed1-4ef2edcaeeb9:exec-7662f557-7b24-4774-8228-a6747137a994",
+            "correlationId": "coordination-debug-1783918992360-62137418-codex-direct",
+            "senderAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "senderSessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+            "recipientAgentId": "coordination-debug-1783918992360-62137418-direct-agent",
+            "recipientSessionId": "coordination-debug-1783918992360-62137418-direct-session",
+            "status": "replied"
+          },
+          {
+            "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-27e9-78d0-bf8b-91e621d59000:exec-76920c9e-e018-45db-81fe-6e13b69328ff",
+            "correlationId": "coordination-debug-1783918992360-62137418-codex-codex",
+            "senderAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "senderSessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+            "recipientAgentId": "external-agent-e88ba35508cfd2f42af56d60",
+            "recipientSessionId": "external-session-e88ba35508cfd2f42af56d60",
+            "status": "replied"
+          },
+          {
+            "roundId": "codex-round:external-binding-1a338d8bea8e0a5bdd5ff3b5:019f59db-9cb3-7a03-beba-b5d312a28afe:019f59dc-7608-77d1-bae0-9fd79c2a9e26:exec-cb817505-af0f-410d-89e8-3a2c4d87bf06",
+            "correlationId": "coordination-debug-1783918992360-62137418-restart-expiry",
+            "senderAgentId": "external-agent-1a338d8bea8e0a5bdd5ff3b5",
+            "senderSessionId": "external-session-1a338d8bea8e0a5bdd5ff3b5",
+            "recipientAgentId": "coordination-debug-1783918992360-62137418-direct-agent",
+            "recipientSessionId": "coordination-debug-1783918992360-62137418-direct-session",
+            "status": "expired",
+            "terminalReasonCode": "agent_round_timeout"
+          }
+        ],
+        "native": [
+          {
+            "runtimeId": "rv-live-codex-5516",
+            "bindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5",
+            "threadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+            "turnId": "019f59dc-00d9-79c3-aed1-4ef2edcaeeb9",
+            "toolCallId": "exec-7662f557-7b24-4774-8228-a6747137a994"
+          },
+          {
+            "runtimeId": "rv-live-codex-5516",
+            "bindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5",
+            "threadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+            "turnId": "019f59dc-27e9-78d0-bf8b-91e621d59000",
+            "toolCallId": "exec-76920c9e-e018-45db-81fe-6e13b69328ff"
+          },
+          {
+            "runtimeId": "rv-live-codex-5516",
+            "bindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5",
+            "threadId": "019f59db-9cb3-7a03-beba-b5d312a28afe",
+            "turnId": "019f59dc-7608-77d1-bae0-9fd79c2a9e26",
+            "toolCallId": "exec-cb817505-af0f-410d-89e8-3a2c4d87bf06"
+          }
+        ],
+        "duplicate": {
+          "exercised": true,
+          "idempotent": true,
+          "deliveryId": "coordination-debug-1783918992360-62137418-restart-expiry-trigger-delivery"
+        },
+        "expiry": {
+          "exercised": true,
+          "status": "expired",
+          "reasonCode": "agent_round_timeout"
+        }
+      },
+      "restart": {
+        "exercised": true,
+        "recovered": true,
+        "evidence": "controller generation 37 -> 38; round terminal expired"
+      },
+      "effectiveConfig": {
+        "runtimeId": "rv-live-codex-5516",
+        "senderBindingId": "external-binding-1a338d8bea8e0a5bdd5ff3b5",
+        "peerBindingId": "external-binding-e88ba35508cfd2f42af56d60",
+        "exactThreadResume": true
+      },
+      "model": "codex-account-default",
+      "effort": "medium",
+      "commands": [],
+      "fileChanges": [],
+      "tests": [
+        {
+          "command": "durable coordination assertions",
+          "passed": true
+        }
+      ],
+      "capabilities": [
+        {
+          "capability": "direct_agent_message",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "correlated_round",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "dynamic_tool_identity",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "durable_deduplication",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "ttl_expiry",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        },
+        {
+          "capability": "restart_reconciliation",
+          "support": "supported",
+          "evidence": "durable live-service identities and terminal state observed"
+        }
+      ],
+      "failures": []
+    }
+  ],
+  "comparison": {
+    "scenarioPassedByRuntime": {
+      "direct-pi-agent": true,
+      "codex-app-server": true
+    },
+    "artifactQuality": {
+      "direct-pi-agent": "no_change",
+      "codex-app-server": "no_change"
+    },
+    "interventionCount": {
+      "direct-pi-agent": 2,
+      "codex-app-server": 2
+    },
+    "latencyMs": {
+      "direct-pi-agent": 22617,
+      "codex-app-server": 49854
+    },
+    "usageSignals": {
+      "direct-pi-agent": {},
+      "codex-app-server": {}
+    },
+    "recovery": {
+      "direct-pi-agent": "recovered",
+      "codex-app-server": "recovered"
+    },
+    "unsupportedCapabilities": {
+      "direct-pi-agent": [],
+      "codex-app-server": []
+    }
+  }
+}

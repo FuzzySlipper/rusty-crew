@@ -1539,8 +1539,6 @@ export class ServiceExternalRuntimeController {
     for (const entry of [...archived, ...active]) {
       catalog.set(entry.thread.id, entry);
     }
-    if (!catalog.has(threadId)) return [];
-
     const scope = new Set([threadId]);
     let changed = true;
     while (changed) {
