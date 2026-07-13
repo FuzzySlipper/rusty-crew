@@ -184,8 +184,7 @@ impl CoreEngine {
         let profile_id = ProfileId(profile_id.to_string());
         match create.kind {
             RoleplayMechanicProposalKind::NarratorConfig
-            | RoleplayMechanicProposalKind::Exemplar
-            | RoleplayMechanicProposalKind::ProviderFailurePattern => {
+            | RoleplayMechanicProposalKind::Exemplar => {
                 let profile = self
                     .get_profile_registry_record(&profile_id)?
                     .ok_or_else(|| {
@@ -274,8 +273,7 @@ impl CoreEngine {
     ) -> CoreResult<(Option<u64>, JsonValue)> {
         match proposal.kind {
             RoleplayMechanicProposalKind::NarratorConfig
-            | RoleplayMechanicProposalKind::Exemplar
-            | RoleplayMechanicProposalKind::ProviderFailurePattern => {
+            | RoleplayMechanicProposalKind::Exemplar => {
                 self.apply_profile_proposal(proposal, apply)
             }
             RoleplayMechanicProposalKind::LoreAdd => {
@@ -367,9 +365,7 @@ impl CoreEngine {
             .ok_or_else(|| target_conflict(proposal, None))?;
         let current_value =
             profile_target_value(&current.active_runtime_settings_json, proposal.kind);
-        if current_value
-            == proposal_target_after_value(proposal, &current.active_runtime_settings_json)?
-        {
+        if current_value == proposal_target_after_value(proposal)? {
             return Ok((
                 Some(current.revision),
                 json!({
@@ -572,28 +568,6 @@ fn normalize_proposed_value(create: &RoleplayMechanicProposalCreate) -> CoreResu
             }
             serde_json::to_value(write).map_err(json_error)
         }
-        RoleplayMechanicProposalKind::ProviderFailurePattern => {
-            let value = create.proposed_value.as_object().ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorKind::InvalidInput,
-                    "provider failure pattern must be an object",
-                )
-            })?;
-            let pattern = value
-                .get("pattern")
-                .and_then(JsonValue::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty() && value.len() <= 4_000)
-                .ok_or_else(|| {
-                    CoreError::new(
-                        CoreErrorKind::InvalidInput,
-                        "provider failure pattern requires pattern text up to 4000 bytes",
-                    )
-                })?;
-            let mut normalized = value.clone();
-            normalized.insert("pattern".to_string(), json!(pattern));
-            Ok(JsonValue::Object(normalized))
-        }
     }
 }
 
@@ -610,31 +584,14 @@ fn profile_target_value(settings: &JsonValue, kind: RoleplayMechanicProposalKind
             .and_then(|value| value.get("exemplar"))
             .cloned()
             .unwrap_or(JsonValue::Null),
-        RoleplayMechanicProposalKind::ProviderFailurePattern => settings
-            .and_then(|value| value.get("roleplayProviderFailurePatterns"))
-            .cloned()
-            .unwrap_or_else(|| json!([])),
         _ => JsonValue::Null,
     }
 }
 
-fn proposal_target_after_value(
-    proposal: &RoleplayMechanicProposalRecord,
-    settings: &JsonValue,
-) -> CoreResult<JsonValue> {
+fn proposal_target_after_value(proposal: &RoleplayMechanicProposalRecord) -> CoreResult<JsonValue> {
     match proposal.kind {
         RoleplayMechanicProposalKind::NarratorConfig | RoleplayMechanicProposalKind::Exemplar => {
             Ok(proposal.proposed_value.clone())
-        }
-        RoleplayMechanicProposalKind::ProviderFailurePattern => {
-            let mut patterns = profile_target_value(settings, proposal.kind)
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            if !patterns.contains(&proposal.proposed_value) {
-                patterns.push(proposal.proposed_value.clone());
-            }
-            Ok(JsonValue::Array(patterns))
         }
         _ => Err(CoreError::new(
             CoreErrorKind::InternalError,
@@ -665,10 +622,6 @@ fn apply_profile_target_value(
                 )
             })?;
             narrator.insert("exemplar".to_string(), proposal.proposed_value.clone());
-        }
-        RoleplayMechanicProposalKind::ProviderFailurePattern => {
-            let next = proposal_target_after_value(proposal, &JsonValue::Object(settings.clone()))?;
-            settings.insert("roleplayProviderFailurePatterns".to_string(), next);
         }
         _ => {
             return Err(CoreError::new(
@@ -744,7 +697,12 @@ fn lore_record_matches_proposal(
         && record.visibility == write.visibility
         && record.title == write.title
         && record.body == write.body
-        && record.content == write.content)
+        && record.content == write.content
+        && record.evidence_refs == write.evidence_refs
+        && record.source == write.source
+        && record.confidence == write.confidence
+        && record.durability_rationale == write.durability_rationale
+        && record.supersedes_record_id == write.supersedes_record_id)
 }
 
 fn layer_config_matches(

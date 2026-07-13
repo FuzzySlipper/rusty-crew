@@ -314,34 +314,8 @@ fn mechanic_diagnostics_link_applied_proposals_and_protect_outcome_revisions() {
 }
 
 #[test]
-fn mechanic_proposals_apply_every_supported_lore_and_provider_kind() {
+fn mechanic_proposals_apply_every_supported_lore_kind() {
     let engine = roleplay_proposal_engine();
-
-    approve_and_apply(
-        &engine,
-        RoleplayMechanicProposalCreate {
-            proposal_id: "proposal-provider-pattern".to_string(),
-            mechanic_session_id: SessionId::new("mechanic-session"),
-            roleplay_session_id: "roleplay-session".to_string(),
-            kind: RoleplayMechanicProposalKind::ProviderFailurePattern,
-            target_id: None,
-            proposed_value: serde_json::json!({
-                "pattern": "provider returned an empty narrative",
-                "classification": "empty_output"
-            }),
-            rationale: "Preserve a diagnosed provider failure signature.".to_string(),
-            diagnostic_context: serde_json::json!({"wakeId": "wake-provider"}),
-            now: "2026-07-13T03:00:00Z".to_string(),
-        },
-    );
-    let profile = engine
-        .get_profile_registry_record(&ProfileId::new("narrator-profile"))
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        profile.active_runtime_settings_json["roleplayProviderFailurePatterns"][0]["pattern"],
-        "provider returned an empty narrative"
-    );
 
     let lore_write = serde_json::json!({
         "record_id": "lore-observatory",
@@ -472,6 +446,99 @@ fn mechanic_proposals_apply_every_supported_lore_and_provider_kind() {
         .unwrap();
     assert_eq!(config.default_token_budget, 3200);
     assert_eq!(config.max_constants, 4);
+}
+
+#[test]
+fn lore_edit_recovery_rejects_concurrent_provenance_changes() {
+    let engine = roleplay_proposal_engine();
+    let write: rusty_crew_core_persistence::RoleplayLoreWrite =
+        serde_json::from_value(serde_json::json!({
+            "record_id": "lore-conflict",
+            "world_id": "world-one",
+            "entity_id": "observatory",
+            "session_id": "roleplay-session",
+            "branch_id": null,
+            "shape": { "shape_id": "lore_entry", "version": 1 },
+            "canon_status": "canon",
+            "visibility": "public",
+            "title": "Brass Observatory",
+            "body": "The blue bell opens the observatory door.",
+            "content": {
+                "world_id": "world-one",
+                "entity_id": "observatory",
+                "title": "Brass Observatory",
+                "body": "The blue bell opens the observatory door.",
+                "canon_status": "canon",
+                "visibility": "public",
+                "metadata_json": {},
+                "tags": ["observatory"]
+            },
+            "evidence_refs": [{
+                "evidence_type": "source_document",
+                "ref_id": "original-evidence"
+            }],
+            "source": "human",
+            "confidence": 1.0,
+            "durability_rationale": "Original lore evidence.",
+            "supersedes_record_id": null,
+            "now": "2026-07-13T06:00:00Z"
+        }))
+        .unwrap();
+    let record = engine.add_roleplay_lore_record(&write).unwrap();
+    let proposed = engine
+        .create_roleplay_mechanic_proposal(&proposal_with_target(
+            "proposal-provenance-conflict",
+            RoleplayMechanicProposalKind::LoreEdit,
+            &record.record_id,
+            serde_json::to_value(&write).unwrap(),
+        ))
+        .unwrap();
+
+    let mut concurrent = write.clone();
+    concurrent.evidence_refs = serde_json::from_value(serde_json::json!([{
+        "evidence_type": "source_document",
+        "ref_id": "concurrent-evidence"
+    }]))
+    .unwrap();
+    concurrent.now = "2026-07-13T06:00:01Z".to_string();
+    let concurrent_record = engine
+        .replace_roleplay_lore_record(&rusty_crew_core_persistence::RoleplayLoreReplace {
+            write: concurrent,
+            expected_revision: record.revision,
+        })
+        .unwrap();
+    let approved = engine
+        .decide_roleplay_mechanic_proposal(&RoleplayMechanicProposalDecision {
+            proposal_id: proposed.proposal_id.clone(),
+            decision: RoleplayMechanicProposalDecisionKind::Approve,
+            reviewer_id: "operator-conflict".to_string(),
+            note: None,
+            expected_revision: proposed.revision,
+            now: "2026-07-13T06:00:02Z".to_string(),
+        })
+        .unwrap();
+    let error = engine
+        .apply_roleplay_mechanic_proposal(&RoleplayMechanicProposalApply {
+            proposal_id: approved.proposal_id.clone(),
+            actor_id: "operator-conflict".to_string(),
+            now: "2026-07-13T06:00:03Z".to_string(),
+        })
+        .unwrap_err();
+    assert_eq!(error.kind, CoreErrorKind::ActionRejected);
+    let conflicted = engine
+        .get_roleplay_mechanic_proposal(&approved.proposal_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(conflicted.status, RoleplayMechanicProposalStatus::Approved);
+    assert_eq!(conflicted.outcome.unwrap()["status"], "conflict");
+    assert_eq!(
+        engine
+            .get_roleplay_lore_record(&record.record_id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        concurrent_record.revision
+    );
 }
 
 fn roleplay_proposal_engine() -> CoreEngine {

@@ -2992,12 +2992,6 @@ async function materializeRoleplayProposalRuntimeEffects(
     ...(settings.roleplayNarrator === undefined
       ? {}
       : { roleplayNarrator: settings.roleplayNarrator }),
-    ...(settings.roleplayProviderFailurePatterns === undefined
-      ? {}
-      : {
-          roleplayProviderFailurePatterns:
-            settings.roleplayProviderFailurePatterns,
-        }),
   });
   const applyResult = await state.applyServiceRuntimeConfigFromDisk({
     createMissingSessions: false,

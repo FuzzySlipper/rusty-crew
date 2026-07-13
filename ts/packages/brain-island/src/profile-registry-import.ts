@@ -162,7 +162,6 @@ function activeRuntimeSettingsJson(
     memoryConfig: profile.memoryConfig,
     roleplayNarrator: profile.roleplayNarrator,
     roleplayMechanic: profile.roleplayMechanic,
-    roleplayProviderFailurePatterns: profile.roleplayProviderFailurePatterns,
     sessionDefaults: profile.sessionDefaults,
     channelDefaults: profile.channelDefaults,
   });
@@ -566,7 +565,6 @@ const PROFILE_SCHEMA = schema(
     "memoryConfig",
     "roleplayNarrator",
     "roleplayMechanic",
-    "roleplayProviderFailurePatterns",
     "sessionDefaults",
     "channelDefaults",
   ],

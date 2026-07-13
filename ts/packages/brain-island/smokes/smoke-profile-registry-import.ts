@@ -98,9 +98,6 @@ backgroundReview:
           maxTurns: 3,
         },
         roleplayMechanic: { autoMonitor: false },
-        roleplayProviderFailurePatterns: [
-          { pattern: "provider returned an empty narrative", severity: "warn" },
-        ],
         futureKnob: true,
       },
       null,
@@ -260,11 +257,6 @@ backgroundReview:
   assert.deepEqual(
     flatPlan.registryWrite.activeRuntimeSettingsJson.roleplayMechanic,
     { autoMonitor: false },
-  );
-  assert.deepEqual(
-    flatPlan.registryWrite.activeRuntimeSettingsJson
-      .roleplayProviderFailurePatterns,
-    [{ pattern: "provider returned an empty narrative", severity: "warn" }],
   );
   assert.equal(
     flatPlan.diagnostics.some(

@@ -15,7 +15,8 @@ SQLite/Postgres persistence.
 4. Repeating the same create, decision, or successful apply is idempotent.
 
 Supported kinds are `narrator_config`, `exemplar`, `lore_add`, `lore_edit`,
-`lore_tags`, `layer_retrieval_config`, and `provider_failure_pattern`.
+`lore_tags`, and `layer_retrieval_config`. Proposal kinds are only exposed
+when their applied value has a production runtime consumer.
 
 ## Mechanic Tool Input
 

@@ -2518,8 +2518,7 @@ export const bridgeWireSchemaArtifact = {
               "lore_add",
               "lore_edit",
               "lore_tags",
-              "layer_retrieval_config",
-              "provider_failure_pattern"
+              "layer_retrieval_config"
             ],
             "type": "string"
           },
@@ -4658,8 +4657,7 @@ export const bridgeWireSchemaArtifact = {
             "lore_add",
             "lore_edit",
             "lore_tags",
-            "layer_retrieval_config",
-            "provider_failure_pattern"
+            "layer_retrieval_config"
           ],
           "type": "string"
         },
@@ -15042,8 +15040,7 @@ export const bridgeWireSchemaArtifact = {
             "lore_add",
             "lore_edit",
             "lore_tags",
-            "layer_retrieval_config",
-            "provider_failure_pattern"
+            "layer_retrieval_config"
           ],
           "type": "string"
         },

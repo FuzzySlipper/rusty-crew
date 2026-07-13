@@ -166,7 +166,6 @@ export interface ProfileConfig {
   memoryConfig?: ProfileMemoryConfig;
   roleplayNarrator?: RoleplayNarratorConfig;
   roleplayMechanic?: RoleplayMechanicConfig;
-  roleplayProviderFailurePatterns?: Array<Record<string, unknown>>;
   contextPolicy?: ContextStrategyPolicy;
   sessionDefaults?: ProfileSessionDefaultsConfig;
   channelDefaults?: ProfileChannelDefaultsConfig;
@@ -871,14 +870,6 @@ function validateProfileConfig(
     roleplayMechanic: isRecord(parsed.roleplayMechanic)
       ? roleplayMechanicConfig(parsed.roleplayMechanic, profileId, profilePath)
       : undefined,
-    roleplayProviderFailurePatterns:
-      parsed.roleplayProviderFailurePatterns === undefined
-        ? undefined
-        : roleplayProviderFailurePatterns(
-            parsed.roleplayProviderFailurePatterns,
-            profileId,
-            profilePath,
-          ),
     contextPolicy: isRecord(parsed.contextPolicy)
       ? profileContextPolicy(parsed.contextPolicy, profileId, profilePath)
       : isRecord(parsed.context_policy)
@@ -1091,30 +1082,6 @@ function roleplayMechanicConfig(
     );
   }
   return { autoMonitor: false };
-}
-
-function roleplayProviderFailurePatterns(
-  raw: unknown,
-  profileId: ProfileId,
-  profilePath: string,
-): Array<Record<string, unknown>> {
-  if (!Array.isArray(raw)) {
-    throw invalidProfile(
-      profileId,
-      profilePath,
-      "roleplayProviderFailurePatterns must be an array",
-    );
-  }
-  return raw.map((entry, index) => {
-    if (!isRecord(entry) || !optionalString(entry.pattern)) {
-      throw invalidProfile(
-        profileId,
-        profilePath,
-        `roleplayProviderFailurePatterns[${index}].pattern must be non-empty text`,
-      );
-    }
-    return { ...entry, pattern: optionalString(entry.pattern) };
-  });
 }
 
 function narratorTone(value: unknown): RoleplayNarratorTone | undefined {

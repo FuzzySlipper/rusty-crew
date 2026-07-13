@@ -248,6 +248,24 @@ assert.equal(
   "roleplay_mechanic_proposal_front_matter_required",
 );
 
+const unsupported = await proposeRoleplayChangeTool({
+  bridge,
+  profile,
+  mechanicSessionId: "mechanic-session",
+}).execute("unsupported", {
+  proposal: `---
+roleplay_session_id: rp-session
+change_kind: provider_failure_pattern
+rationale: This value has no production runtime consumer.
+---
+pattern: empty narrative`,
+});
+assert.equal(unsupported.details.ok, false);
+assert.equal(
+  unsupported.details.reasonCode,
+  "roleplay_mechanic_proposal_kind_invalid",
+);
+
 const missing = await inspectRoleplaySceneTool({ bridge, profile }).execute(
   "missing",
   { sessionId: "missing" },

@@ -468,8 +468,7 @@ interface ParsedRoleplayProposalDraft {
     | "lore_add"
     | "lore_edit"
     | "lore_tags"
-    | "layer_retrieval_config"
-    | "provider_failure_pattern";
+    | "layer_retrieval_config";
   targetId?: string;
   proposedValue: unknown;
   rationale: string;
@@ -483,7 +482,6 @@ const roleplayProposalKinds = new Set<ParsedRoleplayProposalDraft["kind"]>([
   "lore_edit",
   "lore_tags",
   "layer_retrieval_config",
-  "provider_failure_pattern",
 ]);
 
 interface ParsedRoleplayDiagnosticDraft {

@@ -329,7 +329,6 @@ pub(crate) fn roleplay_proposal_kind_as_str(kind: RoleplayMechanicProposalKind) 
         RoleplayMechanicProposalKind::LoreEdit => "lore_edit",
         RoleplayMechanicProposalKind::LoreTags => "lore_tags",
         RoleplayMechanicProposalKind::LayerRetrievalConfig => "layer_retrieval_config",
-        RoleplayMechanicProposalKind::ProviderFailurePattern => "provider_failure_pattern",
     }
 }
 

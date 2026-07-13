@@ -2126,7 +2126,6 @@ pub enum RoleplayMechanicProposalKind {
     LoreEdit,
     LoreTags,
     LayerRetrievalConfig,
-    ProviderFailurePattern,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
