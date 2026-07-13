@@ -15,6 +15,7 @@ rusty-crew-core-config = { path = "../core-config" }
 rusty-crew-core-persistence = { path = "../core-persistence" }
 rusty-crew-core-protocol = { path = "../core-protocol" }
 rusty-crew-core-session = { path = "../core-session" }
+rusty-crew-roleplay-core = { path = "../../roleplay/roleplay-core" }
 serde_json.workspace = true
 sha2.workspace = true
 time.workspace = true

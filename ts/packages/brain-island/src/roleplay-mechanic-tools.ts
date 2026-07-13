@@ -1,5 +1,7 @@
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
+import { randomUUID } from "node:crypto";
 import { Type, type Static } from "typebox";
+import { parse as parseYaml } from "yaml";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { ProfileConfig } from "./profile-loading.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
@@ -10,8 +12,10 @@ export interface RoleplayMechanicToolDetails {
     | "get_mechanic_capabilities"
     | "inspect_roleplay_transcript"
     | "inspect_roleplay_scene"
-    | "inspect_lore_retrieval";
-  action: "read" | "denied" | "failed";
+    | "inspect_lore_retrieval"
+    | "inspect_roleplay_proposals"
+    | "propose_roleplay_change";
+  action: "read" | "proposed" | "denied" | "failed";
   reasonCode?: string;
   result?: unknown;
 }
@@ -38,6 +42,12 @@ const sessionReadParameters = Type.Object(
   },
   { additionalProperties: false },
 );
+const proposalMarkdownParameters = Type.Object(
+  {
+    proposal: Type.String({ minLength: 1, maxLength: 200_000 }),
+  },
+  { additionalProperties: false },
+);
 
 type MechanicBridge = Pick<
   NativeBridgeModule,
@@ -49,18 +59,25 @@ type MechanicBridge = Pick<
   | "getProfileRegistryRecord"
   | "getChatLayers"
   | "listRecallTraces"
+  | "createRoleplayMechanicProposal"
+  | "listRoleplayMechanicProposals"
 >;
 
 export function createRoleplayMechanicToolResolver(input: {
   bridge?: MechanicBridge;
   profile: ProfileConfig;
 }): BrainToolResolver {
-  return () => [
-    getMechanicCapabilitiesTool(input),
-    inspectRoleplayTranscriptTool(input),
-    inspectRoleplaySceneTool(input),
-    inspectLoreRetrievalTool(input),
-  ];
+  return ({ wake }) => {
+    const mechanicSessionId = wake.state.session.sessionId;
+    return [
+      getMechanicCapabilitiesTool(input),
+      inspectRoleplayTranscriptTool(input),
+      inspectRoleplaySceneTool(input),
+      inspectLoreRetrievalTool(input),
+      inspectRoleplayProposalsTool(input),
+      proposeRoleplayChangeTool({ ...input, mechanicSessionId }),
+    ];
+  };
 }
 
 export function getMechanicCapabilitiesTool(input: {
@@ -219,6 +236,83 @@ export function inspectLoreRetrievalTool(input: {
   );
 }
 
+export function inspectRoleplayProposalsTool(input: {
+  bridge?: MechanicBridge;
+  profile: ProfileConfig;
+}): BrainTool<typeof sessionReadParameters, RoleplayMechanicToolDetails> {
+  return mechanicReadTool(
+    "inspect_roleplay_proposals",
+    "Inspect roleplay proposals",
+    "Read prior mechanic proposal outcomes and audit history for one roleplay session.",
+    input,
+    async (bridge, params) => {
+      await requireRoleplaySession(bridge, params.sessionId);
+      const proposals = await bridge.listRoleplayMechanicProposals({
+        roleplaySessionId: params.sessionId,
+        page: { limit: params.limit ?? 20, offset: 0 },
+      });
+      return {
+        sessionId: params.sessionId,
+        status: proposals.length > 0 ? "available" : "missing",
+        proposals,
+      };
+    },
+  );
+}
+
+export function proposeRoleplayChangeTool(input: {
+  bridge?: MechanicBridge;
+  profile: ProfileConfig;
+  mechanicSessionId: string;
+}): BrainTool<typeof proposalMarkdownParameters, RoleplayMechanicToolDetails> {
+  return {
+    name: "propose_roleplay_change",
+    label: "Propose roleplay change",
+    description:
+      "Create a reviewable roleplay change proposal from one Markdown document. Use YAML front matter with roleplay_session_id, change_kind, optional target_id, and optional evidence; put the proposed value in the body. This never applies the change.",
+    parameters: proposalMarkdownParameters,
+    executionMode: "sequential",
+    execute: async (_callId, params) => {
+      if (input.profile.roleplayMechanic === undefined) {
+        return mechanicResultFor("propose_roleplay_change", "denied", {
+          ok: false,
+          reasonCode: "roleplay_mechanic_profile_required",
+        });
+      }
+      if (!input.bridge) {
+        return mechanicResultFor("propose_roleplay_change", "failed", {
+          ok: false,
+          reasonCode: "roleplay_mechanic_bridge_unavailable",
+        });
+      }
+      try {
+        const draft = parseRoleplayProposalMarkdown(params.proposal);
+        const proposal = await input.bridge.createRoleplayMechanicProposal({
+          proposalId: `mechanic-proposal:${randomUUID()}`,
+          mechanicSessionId: input.mechanicSessionId,
+          roleplaySessionId: draft.roleplaySessionId,
+          kind: draft.kind,
+          targetId: draft.targetId,
+          proposedValue: draft.proposedValue,
+          rationale: draft.rationale,
+          diagnosticContext: draft.diagnosticContext,
+          now: new Date().toISOString(),
+        });
+        return mechanicResultFor("propose_roleplay_change", "proposed", {
+          ok: true,
+          result: proposal,
+        });
+      } catch (error) {
+        return mechanicResultFor("propose_roleplay_change", "failed", {
+          ok: false,
+          reasonCode: errorReasonCode(error),
+          result: { message: errorMessage(error) },
+        });
+      }
+    },
+  };
+}
+
 function mechanicReadTool(
   operation: Exclude<
     RoleplayMechanicToolDetails["operation"],
@@ -289,6 +383,118 @@ interface MessageVariant {
     body: string;
     created_at: string;
   };
+}
+
+interface ParsedRoleplayProposalDraft {
+  roleplaySessionId: string;
+  kind:
+    | "narrator_config"
+    | "exemplar"
+    | "lore_add"
+    | "lore_edit"
+    | "lore_tags"
+    | "layer_retrieval_config"
+    | "provider_failure_pattern";
+  targetId?: string;
+  proposedValue: unknown;
+  rationale: string;
+  diagnosticContext: unknown;
+}
+
+const roleplayProposalKinds = new Set<ParsedRoleplayProposalDraft["kind"]>([
+  "narrator_config",
+  "exemplar",
+  "lore_add",
+  "lore_edit",
+  "lore_tags",
+  "layer_retrieval_config",
+  "provider_failure_pattern",
+]);
+
+function parseRoleplayProposalMarkdown(
+  markdown: string,
+): ParsedRoleplayProposalDraft {
+  const match = markdown.match(
+    /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n([\s\S]*)$/,
+  );
+  if (!match) {
+    throw new Error(
+      "roleplay_mechanic_proposal_front_matter_required: proposal must begin with YAML front matter",
+    );
+  }
+  const header = parseYaml(match[1] ?? "");
+  if (!isRecord(header)) {
+    throw new Error(
+      "roleplay_mechanic_proposal_front_matter_invalid: front matter must be a YAML mapping",
+    );
+  }
+  const roleplaySessionId = requiredHeaderString(header, "roleplay_session_id");
+  const rawKind = requiredHeaderString(header, "change_kind");
+  if (
+    !roleplayProposalKinds.has(rawKind as ParsedRoleplayProposalDraft["kind"])
+  ) {
+    throw new Error(
+      `roleplay_mechanic_proposal_kind_invalid: unsupported change_kind ${rawKind}`,
+    );
+  }
+  const kind = rawKind as ParsedRoleplayProposalDraft["kind"];
+  const rationale = requiredHeaderString(header, "rationale");
+  const targetId = optionalHeaderString(header, "target_id");
+  const body = (match[2] ?? "").trim();
+  if (!body) {
+    throw new Error(
+      "roleplay_mechanic_proposal_value_required: proposal body must contain the proposed value",
+    );
+  }
+
+  const proposedValue = kind === "exemplar" ? body : parseYaml(body);
+  if (proposedValue === undefined) {
+    throw new Error(
+      "roleplay_mechanic_proposal_value_invalid: proposal body must contain valid YAML",
+    );
+  }
+  const diagnosticContext =
+    header.diagnostic_context !== undefined
+      ? header.diagnostic_context
+      : header.evidence !== undefined
+        ? { evidence: header.evidence }
+        : {};
+
+  return {
+    roleplaySessionId,
+    kind,
+    targetId,
+    proposedValue,
+    rationale,
+    diagnosticContext,
+  };
+}
+
+function requiredHeaderString(
+  header: Record<string, unknown>,
+  key: string,
+): string {
+  const value = optionalHeaderString(header, key);
+  if (!value) {
+    throw new Error(
+      `roleplay_mechanic_proposal_${key}_required: front matter requires ${key}`,
+    );
+  }
+  return value;
+}
+
+function optionalHeaderString(
+  header: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = header[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(
+      `roleplay_mechanic_proposal_${key}_invalid: ${key} must be non-empty text`,
+    );
+  }
+  return value.trim();
 }
 
 async function requireRoleplaySession(

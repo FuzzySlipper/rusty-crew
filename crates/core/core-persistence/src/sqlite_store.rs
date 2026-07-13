@@ -1067,6 +1067,61 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_roleplay_mechanic_proposal(
+        &self,
+        persist: &RoleplayMechanicProposalPersist,
+    ) -> CoreResult<RoleplayMechanicProposalRecord> {
+        match self {
+            Self::Sqlite(store) => store.create_roleplay_mechanic_proposal(persist),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.create_roleplay_mechanic_proposal(persist),
+        }
+    }
+
+    pub fn get_roleplay_mechanic_proposal(
+        &self,
+        proposal_id: &str,
+    ) -> CoreResult<Option<RoleplayMechanicProposalRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_roleplay_mechanic_proposal(proposal_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_roleplay_mechanic_proposal(proposal_id),
+        }
+    }
+
+    pub fn list_roleplay_mechanic_proposals(
+        &self,
+        query: &RoleplayMechanicProposalQuery,
+    ) -> CoreResult<Vec<RoleplayMechanicProposalRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_mechanic_proposals(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_mechanic_proposals(query),
+        }
+    }
+
+    pub fn decide_roleplay_mechanic_proposal(
+        &self,
+        decision: &RoleplayMechanicProposalDecision,
+    ) -> CoreResult<RoleplayMechanicProposalRecord> {
+        match self {
+            Self::Sqlite(store) => store.decide_roleplay_mechanic_proposal(decision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.decide_roleplay_mechanic_proposal(decision),
+        }
+    }
+
+    pub fn record_roleplay_mechanic_proposal_apply(
+        &self,
+        outcome: &RoleplayMechanicProposalApplyOutcome,
+    ) -> CoreResult<RoleplayMechanicProposalRecord> {
+        match self {
+            Self::Sqlite(store) => store.record_roleplay_mechanic_proposal_apply(outcome),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.record_roleplay_mechanic_proposal_apply(outcome),
+        }
+    }
+
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,

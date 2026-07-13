@@ -50,6 +50,7 @@
     "smoke:roleplay-mechanic-profile": "tsx smokes/smoke-roleplay-mechanic-profile.ts",
     "smoke:roleplay-mechanic-diagnostics": "tsx smokes/smoke-roleplay-mechanic-diagnostics.ts",
     "smoke:roleplay-mechanic-diagnostics-live": "tsx smokes/smoke-roleplay-mechanic-diagnostics-live.ts",
+    "smoke:roleplay-mechanic-proposals-live": "tsx smokes/smoke-roleplay-mechanic-proposals-live.ts",
     "smoke:roleplay-mechanic-profile-live": "tsx smokes/smoke-roleplay-mechanic-profile-live.ts",
     "smoke:roleplay-browser-api": "tsx ../../smokes/brain-island/smoke-roleplay-browser-api.ts",
     "smoke:roleplay-st-import-service-api": "tsx ../../smokes/brain-island/smoke-roleplay-st-import-service-api.ts",
@@ -161,8 +162,9 @@
     "generate:tool-registry-artifact": "tsx src/generate-tool-registry-artifact.ts"
   },
   "dependencies": {
-    "@rusty-crew/native-bridge": "0.1.0",
     "@rusty-crew/contracts": "0.1.0",
-    "@rusty-crew/external-runtime-codex": "0.1.0"
+    "@rusty-crew/external-runtime-codex": "0.1.0",
+    "@rusty-crew/native-bridge": "0.1.0",
+    "yaml": "^2.9.0"
   }
 }

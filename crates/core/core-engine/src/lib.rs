@@ -22,6 +22,7 @@ mod provider_runtime;
 mod provider_state_store;
 mod roleplay;
 mod roleplay_lore_store;
+mod roleplay_proposals;
 mod roleplay_records_store;
 mod runtime_admin;
 mod runtime_admin_store;

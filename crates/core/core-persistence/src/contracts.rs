@@ -2117,6 +2117,174 @@ pub struct LoreRecallResult {
     pub trace: Option<LoreRecallTraceRecord>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayMechanicProposalKind {
+    NarratorConfig,
+    Exemplar,
+    LoreAdd,
+    LoreEdit,
+    LoreTags,
+    LayerRetrievalConfig,
+    ProviderFailurePattern,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayMechanicProposalStatus {
+    Proposed,
+    Approved,
+    Rejected,
+    Applied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayMechanicProposalEventKind {
+    Proposed,
+    Approved,
+    Rejected,
+    ApplyConflict,
+    Applied,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalEvent {
+    pub event_id: String,
+    pub kind: RoleplayMechanicProposalEventKind,
+    pub actor_id: String,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub target_revision: Option<u64>,
+    #[serde(default)]
+    pub details: JsonValue,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalRecord {
+    pub proposal_id: String,
+    pub mechanic_session_id: SessionId,
+    pub roleplay_session_id: String,
+    pub profile_id: ProfileId,
+    pub kind: RoleplayMechanicProposalKind,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub target_revision: Option<u64>,
+    pub before_value: JsonValue,
+    pub proposed_value: JsonValue,
+    pub rationale: String,
+    #[serde(default)]
+    pub diagnostic_context: JsonValue,
+    pub status: RoleplayMechanicProposalStatus,
+    #[serde(default)]
+    pub reviewer_id: Option<String>,
+    #[serde(default)]
+    pub review_note: Option<String>,
+    #[serde(default)]
+    pub reviewed_at: Option<IsoTimestamp>,
+    #[serde(default)]
+    pub applied_at: Option<IsoTimestamp>,
+    #[serde(default)]
+    pub outcome: Option<JsonValue>,
+    pub revision: u64,
+    pub history: Vec<RoleplayMechanicProposalEvent>,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalCreate {
+    pub proposal_id: String,
+    pub mechanic_session_id: SessionId,
+    pub roleplay_session_id: String,
+    pub kind: RoleplayMechanicProposalKind,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    pub proposed_value: JsonValue,
+    pub rationale: String,
+    #[serde(default)]
+    pub diagnostic_context: JsonValue,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayMechanicProposalDecisionKind {
+    Approve,
+    Reject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalDecision {
+    pub proposal_id: String,
+    pub decision: RoleplayMechanicProposalDecisionKind,
+    pub reviewer_id: String,
+    #[serde(default)]
+    pub note: Option<String>,
+    pub expected_revision: u64,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalApply {
+    pub proposal_id: String,
+    pub actor_id: String,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalQuery {
+    #[serde(default)]
+    pub mechanic_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub roleplay_session_id: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<ProfileId>,
+    #[serde(default)]
+    pub status: Option<RoleplayMechanicProposalStatus>,
+    #[serde(default)]
+    pub kind: Option<RoleplayMechanicProposalKind>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalCapturedTarget {
+    pub profile_id: ProfileId,
+    #[serde(default)]
+    pub target_revision: Option<u64>,
+    pub before_value: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalPersist {
+    pub create: RoleplayMechanicProposalCreate,
+    pub captured: RoleplayMechanicProposalCapturedTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicProposalApplyOutcome {
+    pub proposal_id: String,
+    pub actor_id: String,
+    pub applied: bool,
+    #[serde(default)]
+    pub target_revision: Option<u64>,
+    pub outcome: JsonValue,
+    pub now: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleKvScope {
     pub scope_type: String,

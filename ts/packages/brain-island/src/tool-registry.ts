@@ -489,6 +489,18 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:roleplay-mechanic-diagnostics",
   },
   {
+    name: "inspect_roleplay_proposals",
+    implementationModule:
+      "./roleplay-mechanic-tools.js#inspectRoleplayProposalsTool",
+    inventoryTest: "smoke:roleplay-mechanic-diagnostics",
+  },
+  {
+    name: "propose_roleplay_change",
+    implementationModule:
+      "./roleplay-mechanic-tools.js#proposeRoleplayChangeTool",
+    inventoryTest: "smoke:roleplay-mechanic-diagnostics",
+  },
+  {
     name: "update_scene_state",
     implementationModule: "./scene-state-tool.js#updateSceneStateTool",
     inventoryTest: "smoke:scene-state-tool",

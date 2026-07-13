@@ -41,11 +41,6 @@ export const SERVICE_ROUTE_CATALOG_EXEMPTIONS = [
       "legacy MCP catalog route is route-table visible but not a Rusty View capability surface",
   },
   {
-    route_id: "roleplay",
-    reason:
-      "roleplay browser/admin capability metadata remains in its dedicated contract during the Rust domain migration",
-  },
-  {
     route_id: "admin.model_providers",
     reason:
       "model-provider admin capability metadata remains in its dedicated contract until it joins the shared catalog",

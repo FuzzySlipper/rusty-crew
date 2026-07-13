@@ -2247,6 +2247,170 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/roleplay/mechanic-proposals": {
+      "get": {
+        "operationId": "adminRoleplayMechanicProposalsList",
+        "summary": "List durable roleplay mechanic proposals and lifecycle state.",
+        "tags": ["profile", "governance", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "adminRoleplayMechanicProposalsCreate",
+        "summary": "Create a durable roleplay mechanic proposal without mutating its target.",
+        "tags": ["profile", "governance", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-proposals/{proposal_id}": {
+      "get": {
+        "operationId": "adminRoleplayMechanicProposalsRead",
+        "summary": "Read one durable roleplay mechanic proposal.",
+        "tags": ["profile", "governance", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/apply": {
+      "post": {
+        "operationId": "adminRoleplayMechanicProposalsApply",
+        "summary": "apply a durable roleplay mechanic proposal through Rust-owned lifecycle authority.",
+        "tags": ["profile", "governance", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.apply",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/approve": {
+      "post": {
+        "operationId": "adminRoleplayMechanicProposalsApprove",
+        "summary": "approve a durable roleplay mechanic proposal through Rust-owned lifecycle authority.",
+        "tags": ["profile", "governance", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.approve",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/history": {
+      "get": {
+        "operationId": "adminRoleplayMechanicProposalsHistory",
+        "summary": "Read the audit history for one roleplay mechanic proposal.",
+        "tags": ["profile", "governance", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.history",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/reject": {
+      "post": {
+        "operationId": "adminRoleplayMechanicProposalsReject",
+        "summary": "reject a durable roleplay mechanic proposal through Rust-owned lifecycle authority.",
+        "tags": ["profile", "governance", "storage"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.reject",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/scheduler/jobs": {
       "get": {
         "operationId": "adminSchedulerJobs",
@@ -4394,7 +4558,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 171,
+    "capability_count": 178,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

@@ -1404,6 +1404,51 @@ output = "Vec<core_persistence::RoleplayImportRecord>"
 errors = "core_protocol::CoreError"
 summary = "Query typed roleplay import receipts."
 
+[[operation]]
+name = "create_roleplay_mechanic_proposal"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicProposalCreate"
+output = "core_persistence::RoleplayMechanicProposalRecord"
+errors = "core_protocol::CoreError"
+summary = "Capture current roleplay target state and create a durable mechanic proposal without applying it."
+
+[[operation]]
+name = "get_roleplay_mechanic_proposal"
+surface = "stable"
+direction = "ts_to_rust"
+input = "proposal_id"
+output = "Option<core_persistence::RoleplayMechanicProposalRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one durable roleplay mechanic proposal and its audit history."
+
+[[operation]]
+name = "list_roleplay_mechanic_proposals"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicProposalQuery"
+output = "Vec<core_persistence::RoleplayMechanicProposalRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query durable roleplay mechanic proposals by owner, target, kind, or lifecycle state."
+
+[[operation]]
+name = "decide_roleplay_mechanic_proposal"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicProposalDecision"
+output = "core_persistence::RoleplayMechanicProposalRecord"
+errors = "core_protocol::CoreError"
+summary = "Approve or reject a proposed roleplay change with optimistic lifecycle revision checks."
+
+[[operation]]
+name = "apply_roleplay_mechanic_proposal"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicProposalApply"
+output = "core_persistence::RoleplayMechanicProposalRecord"
+errors = "core_protocol::CoreError"
+summary = "Apply an approved roleplay mechanic proposal through Rust-owned target write authorities."
+
 # Roleplay lore: persistence and recall surfaces for frontend/adaptor modules.
 
 [[operation]]

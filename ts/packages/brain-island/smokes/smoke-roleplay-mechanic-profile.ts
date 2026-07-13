@@ -68,6 +68,8 @@ try {
       "inspect_roleplay_transcript",
       "inspect_roleplay_scene",
       "inspect_lore_retrieval",
+      "inspect_roleplay_proposals",
+      "propose_roleplay_change",
     ],
   );
 
@@ -80,7 +82,8 @@ try {
     narrator.toolSelection.toolProfile.tools.some(
       (tool) =>
         tool.name.startsWith("inspect_") ||
-        tool.name === "get_mechanic_capabilities",
+        tool.name === "get_mechanic_capabilities" ||
+        tool.name === "propose_roleplay_change",
     ),
     false,
   );

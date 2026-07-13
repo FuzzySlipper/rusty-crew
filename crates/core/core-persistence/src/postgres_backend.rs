@@ -12,6 +12,7 @@ mod external_runtime;
 mod memory_lore;
 mod pool;
 mod profile_config;
+mod roleplay_proposals;
 mod roleplay_records;
 mod runtime_counters;
 mod schema_migrations;
@@ -15240,6 +15241,77 @@ mod tests {
             .iter()
             .any(|group| group.group_id == "external_agent_runtime"));
         store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_roleplay_mechanic_proposals_persist_review_history() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_roleplay_mechanic_proposals");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let persist = crate::RoleplayMechanicProposalPersist {
+            create: crate::RoleplayMechanicProposalCreate {
+                proposal_id: "proposal-pg".into(),
+                mechanic_session_id: SessionId::new("mechanic-pg"),
+                roleplay_session_id: "roleplay-pg".into(),
+                kind: crate::RoleplayMechanicProposalKind::Exemplar,
+                target_id: None,
+                proposed_value: serde_json::json!("PostgreSQL exemplar"),
+                rationale: "Prove backend parity.".into(),
+                diagnostic_context: serde_json::json!({"traceId": "trace-pg"}),
+                now: "2026-07-13T00:00:00Z".into(),
+            },
+            captured: crate::RoleplayMechanicProposalCapturedTarget {
+                profile_id: ProfileId::new("profile-pg"),
+                target_revision: Some(3),
+                before_value: serde_json::Value::Null,
+            },
+        };
+        let created = store.create_roleplay_mechanic_proposal(&persist).unwrap();
+        assert_eq!(
+            created.status,
+            crate::RoleplayMechanicProposalStatus::Proposed
+        );
+        assert_eq!(
+            store.create_roleplay_mechanic_proposal(&persist).unwrap(),
+            created
+        );
+        let approved = store
+            .decide_roleplay_mechanic_proposal(&crate::RoleplayMechanicProposalDecision {
+                proposal_id: created.proposal_id.clone(),
+                decision: crate::RoleplayMechanicProposalDecisionKind::Approve,
+                reviewer_id: "operator-pg".into(),
+                note: None,
+                expected_revision: created.revision,
+                now: "2026-07-13T00:00:01Z".into(),
+            })
+            .unwrap();
+        let applied = store
+            .record_roleplay_mechanic_proposal_apply(&crate::RoleplayMechanicProposalApplyOutcome {
+                proposal_id: approved.proposal_id.clone(),
+                actor_id: "operator-pg".into(),
+                applied: true,
+                target_revision: Some(4),
+                outcome: serde_json::json!({"status": "applied"}),
+                now: "2026-07-13T00:00:02Z".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            applied.status,
+            crate::RoleplayMechanicProposalStatus::Applied
+        );
+        assert_eq!(applied.history.len(), 3);
+        drop(store);
+        let reopened = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        assert_eq!(
+            reopened
+                .get_roleplay_mechanic_proposal("proposal-pg")
+                .unwrap(),
+            Some(applied)
+        );
+        reopened.drop_schema_for_test().unwrap();
     }
 
     fn postgres_test_database_url() -> Option<String> {

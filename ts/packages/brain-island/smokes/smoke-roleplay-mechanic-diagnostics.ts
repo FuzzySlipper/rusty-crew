@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import type { ProfileConfig } from "../src/profile-loading.js";
 import {
   inspectLoreRetrievalTool,
+  inspectRoleplayProposalsTool,
   inspectRoleplaySceneTool,
   inspectRoleplayTranscriptTool,
+  proposeRoleplayChangeTool,
 } from "../src/roleplay-mechanic-tools.js";
 
 const profile = {
@@ -110,6 +112,25 @@ const bridge = {
       },
     ];
   },
+  async listRoleplayMechanicProposals() {
+    return [
+      {
+        proposalId: "proposal-previous",
+        status: "rejected",
+        history: [{ kind: "rejected", actorId: "reviewer" }],
+      },
+    ];
+  },
+  async createRoleplayMechanicProposal(input: Record<string, unknown>) {
+    return {
+      ...input,
+      profileId: "narrator",
+      status: "proposed",
+      revision: 1,
+      beforeValue: null,
+      history: [{ kind: "proposed", actorId: "mechanic" }],
+    };
+  },
 } as never;
 
 const transcript = await inspectRoleplayTranscriptTool({
@@ -154,6 +175,48 @@ assert.equal(
   2,
 );
 
+const proposals = await inspectRoleplayProposalsTool({
+  bridge,
+  profile,
+}).execute("proposals", { sessionId: "rp-session" });
+assert.equal(proposals.details.ok, true);
+assert.equal(
+  (proposals.details.result as { proposals: unknown[] }).proposals.length,
+  1,
+);
+
+const proposed = await proposeRoleplayChangeTool({
+  bridge,
+  profile,
+  mechanicSessionId: "mechanic-session",
+}).execute("propose", {
+  proposal: `---
+roleplay_session_id: rp-session
+change_kind: exemplar
+rationale: The diagnostic trace shows the prose needs a concrete style anchor.
+evidence:
+  - trace-1
+---
+Rain tapped a patient rhythm against the observatory glass.`,
+});
+assert.equal(proposed.details.ok, true);
+assert.equal(proposed.details.action, "proposed");
+assert.equal(
+  (proposed.details.result as { proposedValue: unknown }).proposedValue,
+  "Rain tapped a patient rhythm against the observatory glass.",
+);
+
+const malformed = await proposeRoleplayChangeTool({
+  bridge,
+  profile,
+  mechanicSessionId: "mechanic-session",
+}).execute("malformed", { proposal: "No front matter" });
+assert.equal(malformed.details.ok, false);
+assert.equal(
+  malformed.details.reasonCode,
+  "roleplay_mechanic_proposal_front_matter_required",
+);
+
 const missing = await inspectRoleplaySceneTool({ bridge, profile }).execute(
   "missing",
   { sessionId: "missing" },
@@ -167,6 +230,8 @@ console.log(
     selectedAlternatePreserved: true,
     sceneBriefAvailable: true,
     traceDecisions: 2,
+    proposalHistoryAvailable: true,
+    markdownProposalCreated: true,
     missingSessionReason: missing.details.reasonCode,
   }),
 );

@@ -74,6 +74,41 @@ impl NativeBridge {
         self.engine()?.list_roleplay_imports(query)
     }
 
+    pub fn create_roleplay_mechanic_proposal(
+        &self,
+        create: &RoleplayMechanicProposalCreate,
+    ) -> CoreResult<RoleplayMechanicProposalRecord> {
+        self.engine()?.create_roleplay_mechanic_proposal(create)
+    }
+
+    pub fn get_roleplay_mechanic_proposal(
+        &self,
+        proposal_id: &str,
+    ) -> CoreResult<Option<RoleplayMechanicProposalRecord>> {
+        self.engine()?.get_roleplay_mechanic_proposal(proposal_id)
+    }
+
+    pub fn list_roleplay_mechanic_proposals(
+        &self,
+        query: &RoleplayMechanicProposalQuery,
+    ) -> CoreResult<Vec<RoleplayMechanicProposalRecord>> {
+        self.engine()?.list_roleplay_mechanic_proposals(query)
+    }
+
+    pub fn decide_roleplay_mechanic_proposal(
+        &self,
+        decision: &RoleplayMechanicProposalDecision,
+    ) -> CoreResult<RoleplayMechanicProposalRecord> {
+        self.engine()?.decide_roleplay_mechanic_proposal(decision)
+    }
+
+    pub fn apply_roleplay_mechanic_proposal(
+        &self,
+        apply: &RoleplayMechanicProposalApply,
+    ) -> CoreResult<RoleplayMechanicProposalRecord> {
+        self.engine()?.apply_roleplay_mechanic_proposal(apply)
+    }
+
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,

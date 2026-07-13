@@ -515,6 +515,26 @@
       "version": "0.1.0"
     },
     {
+      "name": "inspect_roleplay_proposals",
+      "description": "Read mechanic proposal state and durable audit history for a roleplay session.",
+      "category": "diagnostics",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["read_only"],
+      "output_shape": "roleplay.mechanic_proposal_list.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "propose_roleplay_change",
+      "description": "Create a reviewable mechanic proposal without applying the requested roleplay change.",
+      "category": "coordination",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["coordination_action"],
+      "output_shape": "roleplay.mechanic_proposal.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "update_scene_state",
       "description": "Update lightweight roleplay scene state for the current session.",
       "category": "memory",

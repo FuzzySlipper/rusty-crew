@@ -1038,6 +1038,26 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "get_recall_trace",
         Option<persistence::LoreRecallTraceRecord>
     );
+    schema!(
+        "create_roleplay_mechanic_proposal",
+        persistence::RoleplayMechanicProposalRecord
+    );
+    schema!(
+        "get_roleplay_mechanic_proposal",
+        Option<persistence::RoleplayMechanicProposalRecord>
+    );
+    schema!(
+        "list_roleplay_mechanic_proposals",
+        Vec<persistence::RoleplayMechanicProposalRecord>
+    );
+    schema!(
+        "decide_roleplay_mechanic_proposal",
+        persistence::RoleplayMechanicProposalRecord
+    );
+    schema!(
+        "apply_roleplay_mechanic_proposal",
+        persistence::RoleplayMechanicProposalRecord
+    );
 
     schema!(
         "plan_roleplay_assistant_alternative",

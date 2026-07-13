@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 40;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 41;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -219,7 +219,38 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add roleplay lore recall entry decisions",
         apply: migrate_v40_add_roleplay_lore_recall_entry_decisions,
     },
+    SchemaMigration {
+        version: 41,
+        description: "add durable roleplay mechanic proposals",
+        apply: migrate_v41_add_roleplay_mechanic_proposals,
+    },
 ];
+
+fn migrate_v41_add_roleplay_mechanic_proposals(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS module_roleplay_mechanic_proposals (
+            proposal_id TEXT PRIMARY KEY,
+            mechanic_session_id TEXT NOT NULL,
+            roleplay_session_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            target_id TEXT,
+            target_revision INTEGER,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_proposals_session_status
+            ON module_roleplay_mechanic_proposals(roleplay_session_id, status, updated_at DESC, proposal_id);
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_proposals_mechanic
+            ON module_roleplay_mechanic_proposals(mechanic_session_id, updated_at DESC, proposal_id);
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_proposals_profile_kind
+            ON module_roleplay_mechanic_proposals(profile_id, kind, updated_at DESC, proposal_id);",
+    )
+    .map_err(|error| persistence_error("add roleplay mechanic proposal persistence", error))
+}
 
 fn migrate_v40_add_roleplay_lore_recall_entry_decisions(
     tx: &rusqlite::Transaction<'_>,
@@ -1948,18 +1979,17 @@ fn apply_module_schema_migration_in_tx(
 ) -> CoreResult<()> {
     match bundle.module_id.as_str() {
         "simple_kv" => apply_simple_kv_module_schema_in_tx(tx, bundle, installed_version),
-        "roleplay" => {
-            if bundle.schema_version != 1 {
-                return Err(CoreError::new(
-                    CoreErrorKind::PersistenceFailure,
-                    format!(
-                        "roleplay schema version {} has no migration implementation",
-                        bundle.schema_version
-                    ),
-                ));
+        "roleplay" => match bundle.schema_version {
+            1 => repos::roleplay_records::migrate_v33_add_roleplay_records(tx),
+            2 => {
+                repos::roleplay_records::migrate_v33_add_roleplay_records(tx)?;
+                migrate_v41_add_roleplay_mechanic_proposals(tx)
             }
-            repos::roleplay_records::migrate_v33_add_roleplay_records(tx)
-        }
+            version => Err(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("roleplay schema version {version} has no migration implementation"),
+            )),
+        },
         "curator" => {
             if bundle.schema_version != 1 {
                 return Err(CoreError::new(
@@ -2343,12 +2373,18 @@ mod tests {
         ));
         let installed = store.installed_module_schemas().unwrap();
         assert_eq!(installed.len(), 3);
+        let registry = compiled_module_schema_registry();
         for module_id in ["curator", "roleplay", "simple_kv"] {
             let record = installed
                 .iter()
                 .find(|record| record.module_id.as_str() == module_id)
                 .unwrap_or_else(|| panic!("missing installed module schema {module_id}"));
-            assert_eq!(record.installed_version, 1);
+            let bundle = registry
+                .bundles()
+                .iter()
+                .find(|bundle| bundle.module_id.as_str() == module_id)
+                .unwrap_or_else(|| panic!("missing compiled module schema {module_id}"));
+            assert_eq!(record.installed_version, bundle.schema_version);
         }
 
         remove_temp_db(&db_path);

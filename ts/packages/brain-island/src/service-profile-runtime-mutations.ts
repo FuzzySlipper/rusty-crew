@@ -255,7 +255,10 @@ function nextProfileRegistryRuntimeConfigRecord(
 ): NativeProfileRegistryRecord {
   return {
     ...current,
-    activeRuntimeSettingsJson: profileRuntimeSettingsJson(runtimeConfig),
+    activeRuntimeSettingsJson: {
+      ...(current.activeRuntimeSettingsJson ?? {}),
+      ...profileRuntimeSettingsJson(runtimeConfig),
+    },
     derivedRuntimeRefs: [
       ...current.derivedRuntimeRefs.filter(
         (ref) => ref.refKind !== "mcp_binding",

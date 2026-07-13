@@ -181,6 +181,11 @@ export interface NativeBridgeBinding {
   putRoleplayImportJson(inputJson: string): string
   getRoleplayImportJson(id: string): string
   listRoleplayImportsJson(inputJson: string): string
+  createRoleplayMechanicProposalJson(inputJson: string): string
+  getRoleplayMechanicProposalJson(proposalId: string): string
+  listRoleplayMechanicProposalsJson(inputJson: string): string
+  decideRoleplayMechanicProposalJson(inputJson: string): string
+  applyRoleplayMechanicProposalJson(inputJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string
@@ -782,7 +787,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 238,
+  "manifestOperationCount": 243,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2199,6 +2204,46 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "list_roleplay_imports"
+    },
+    {
+      "name": "createRoleplayMechanicProposalJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "create_roleplay_mechanic_proposal"
+    },
+    {
+      "name": "getRoleplayMechanicProposalJson",
+      "parameterSource": "proposalId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_roleplay_mechanic_proposal"
+    },
+    {
+      "name": "listRoleplayMechanicProposalsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_roleplay_mechanic_proposals"
+    },
+    {
+      "name": "decideRoleplayMechanicProposalJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "decide_roleplay_mechanic_proposal"
+    },
+    {
+      "name": "applyRoleplayMechanicProposalJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "apply_roleplay_mechanic_proposal"
     },
     {
       "name": "addLoreEntryJson",

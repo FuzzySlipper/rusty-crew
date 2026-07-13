@@ -41,6 +41,7 @@ mod delegation_lifecycle;
 mod external_runtime;
 mod profile_admin;
 mod restart_hydration;
+mod roleplay_proposals;
 mod scheduler;
 
 fn test_engine() -> CoreEngine {

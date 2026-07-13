@@ -897,6 +897,83 @@
         "public": true
       },
       {
+        "id": "admin.roleplay.mechanic_proposals.list",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals",
+        "description": "List durable roleplay mechanic proposals and lifecycle state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "governance", "storage"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_proposals.create",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals",
+        "description": "Create a durable roleplay mechanic proposal without mutating its target.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["profile", "governance", "storage"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_proposals.read",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}",
+        "description": "Read one durable roleplay mechanic proposal.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "governance", "storage"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_proposals.history",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/history",
+        "description": "Read the audit history for one roleplay mechanic proposal.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "governance", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_proposals.approve",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/approve",
+        "description": "approve a durable roleplay mechanic proposal through Rust-owned lifecycle authority.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "governance", "storage"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_proposals.reject",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/reject",
+        "description": "reject a durable roleplay mechanic proposal through Rust-owned lifecycle authority.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "governance", "storage"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_proposals.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/apply",
+        "description": "apply a durable roleplay mechanic proposal through Rust-owned lifecycle authority.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "governance", "storage"],
+        "public": true
+      },
+      {
         "id": "admin.mcp.servers.create",
         "method": "POST",
         "path_template": "/v1/admin/mcp/servers",
@@ -2548,6 +2625,55 @@
         "auth_phase": "after_auth"
       },
       {
+        "capability_id": "admin.roleplay.mechanic_proposals.list",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_proposals.create",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_proposals.read",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_proposals.history",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/history",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_proposals.approve",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/approve",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_proposals.reject",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/reject",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_proposals.apply",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-proposals/{proposal_id}/apply",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
         "capability_id": "admin.mcp.servers.create",
         "method": "POST",
         "path_template": "/v1/admin/mcp/servers",
@@ -3267,10 +3393,6 @@
       {
         "route_id": "admin.mcp.catalog",
         "reason": "legacy MCP catalog route is route-table visible but not a Rusty View capability surface"
-      },
-      {
-        "route_id": "roleplay",
-        "reason": "roleplay browser/admin capability metadata remains in its dedicated contract during the Rust domain migration"
       },
       {
         "route_id": "admin.model_providers",

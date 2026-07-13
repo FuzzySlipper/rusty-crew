@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 25;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 26;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -140,7 +140,41 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add roleplay lore recall entry decisions",
         apply: Some(apply_postgres_roleplay_lore_recall_entry_decisions),
     },
+    PostgresSchemaMigration {
+        version: 26,
+        description: "add durable roleplay mechanic proposals",
+        apply: Some(apply_postgres_roleplay_mechanic_proposals),
+    },
 ];
+
+fn apply_postgres_roleplay_mechanic_proposals(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_mechanic_proposals (
+            proposal_id TEXT PRIMARY KEY,
+            mechanic_session_id TEXT NOT NULL,
+            roleplay_session_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            target_id TEXT,
+            target_revision BIGINT,
+            revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_proposals_session_status_idx
+            ON {schema}.module_roleplay_mechanic_proposals(roleplay_session_id, status, updated_at DESC, proposal_id);
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_proposals_mechanic_idx
+            ON {schema}.module_roleplay_mechanic_proposals(mechanic_session_id, updated_at DESC, proposal_id);
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_proposals_profile_kind_idx
+            ON {schema}.module_roleplay_mechanic_proposals(profile_id, kind, updated_at DESC, proposal_id);"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL roleplay mechanic proposals", error))
+}
 
 fn apply_postgres_roleplay_lore_recall_entry_decisions(
     tx: &mut Transaction<'_>,

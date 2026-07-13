@@ -425,10 +425,14 @@ pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {
         ("player_personas", "Roleplay player personas"),
         ("session_metadata", "Roleplay session metadata"),
         ("imports", "Roleplay import receipts and provenance"),
+        (
+            "mechanic_proposals",
+            "Reviewed roleplay mechanic change proposals",
+        ),
     ];
     ModuleSchemaBundle {
         module_id: ModuleId::new("roleplay").expect("valid roleplay module id"),
-        schema_version: 1,
+        schema_version: 2,
         owner: ModuleOwner {
             crate_name: "core_persistence".to_string(),
             rust_module: "roleplay_records".to_string(),
@@ -470,21 +474,42 @@ pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {
                 &["profile_id", "status", "imported_at"],
             ),
             roleplay_index("imports", "session", &["session_id", "imported_at"]),
+            roleplay_index(
+                "mechanic_proposals",
+                "session_status",
+                &["roleplay_session_id", "status", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_proposals",
+                "mechanic_session",
+                &["mechanic_session_id", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_proposals",
+                "profile_kind",
+                &["profile_id", "kind", "updated_at"],
+            ),
         ],
         retention: Vec::new(),
         capability_requirements: vec![
             ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
             ModuleCapabilityRequirement::required(ModuleSchemaCapability::JsonDocuments),
         ],
-        repository_contracts: ["character", "player_persona", "session_metadata", "import"]
-            .into_iter()
-            .flat_map(|name| {
-                ["put", "get", "list"].map(move |verb| RepositoryContractDescriptor {
-                    contract_name: format!("{verb}_roleplay_{name}"),
-                    description: format!("{verb} typed roleplay {name} records"),
-                })
+        repository_contracts: [
+            "character",
+            "player_persona",
+            "session_metadata",
+            "import",
+            "mechanic_proposal",
+        ]
+        .into_iter()
+        .flat_map(|name| {
+            ["put", "get", "list"].map(move |verb| RepositoryContractDescriptor {
+                contract_name: format!("{verb}_roleplay_{name}"),
+                description: format!("{verb} typed roleplay {name} records"),
             })
-            .collect(),
+        })
+        .collect(),
         query_catalog_entries: stores
             .iter()
             .map(|(name, description)| QueryCatalogEntryDescriptor {

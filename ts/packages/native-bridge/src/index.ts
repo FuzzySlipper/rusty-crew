@@ -54,6 +54,7 @@ import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 import { createNativeBridgeCuratorMethods } from "./curator-wrappers.js";
 import { createNativeBridgeSchedulerMethods } from "./scheduler-wrappers.js";
 import { createNativeBridgeRoleplayMethods } from "./roleplay-wrappers.js";
+import { createNativeBridgeRoleplayProposalMethods } from "./roleplay-proposal-wrappers.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
 import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
@@ -751,6 +752,11 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     putRoleplayImport: unavailable("initialize_engine"),
     getRoleplayImport: unavailable("initialize_engine"),
     listRoleplayImports: unavailable("initialize_engine"),
+    createRoleplayMechanicProposal: unavailable("initialize_engine"),
+    getRoleplayMechanicProposal: unavailable("initialize_engine"),
+    listRoleplayMechanicProposals: unavailable("initialize_engine"),
+    decideRoleplayMechanicProposal: unavailable("initialize_engine"),
+    applyRoleplayMechanicProposal: unavailable("initialize_engine"),
     createLoreLayer: unavailable("initialize_engine"),
     getLoreLayer: unavailable("initialize_engine"),
     listLoreLayers: unavailable("initialize_engine"),
@@ -1689,6 +1695,7 @@ function createNativeBridgeModule(
     gitHubGateEventCursor: async () => binding.githubGateEventCursor(),
     ...createNativeBridgeProfileProviderMethods(binding),
     ...createNativeBridgeRoleplayMethods(binding),
+    ...createNativeBridgeRoleplayProposalMethods(binding),
     ...createNativeBridgeMemoryMethods(binding),
     ...createNativeBridgeCuratorMethods(binding),
     ...createNativeBridgeChatMethods(binding),

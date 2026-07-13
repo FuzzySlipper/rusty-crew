@@ -263,6 +263,18 @@ interface RoleplayPromptContextOutput {
   stack?: Record<string, unknown>;
 }
 
+interface RoleplayMechanicProposalRecord {
+  proposalId: string;
+  mechanicSessionId: string;
+  roleplaySessionId: string;
+  profileId: string;
+  kind: string;
+  status: "proposed" | "approved" | "rejected" | "applied";
+  revision: number;
+  outcome?: Record<string, unknown>;
+  history: unknown[];
+}
+
 export async function handleAdminRoleplayRequest(
   request: IncomingMessage,
   state: RoleplayRouteContext,
@@ -325,6 +337,9 @@ export async function handleAdminRoleplayRequest(
   if (url.pathname.startsWith("/v1/admin/roleplay/sessions")) {
     return handleRoleplaySessionRequest(request, state, url);
   }
+  if (url.pathname.startsWith("/v1/admin/roleplay/mechanic-proposals")) {
+    return handleRoleplayMechanicProposalRequest(request, state, url);
+  }
   if (url.pathname.startsWith("/v1/admin/roleplay/lore/")) {
     return handleAdminRoleplayLoreRequest(request, state, url, {
       sessionMetadata: async (sessionId) => {
@@ -341,6 +356,152 @@ export async function handleAdminRoleplayRequest(
     message: `unknown roleplay route ${url.pathname}`,
     retryable: false,
   });
+}
+
+async function handleRoleplayMechanicProposalRequest(
+  request: IncomingMessage,
+  state: RoleplayRouteContext,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  const parts = url.pathname.split("/").filter(Boolean);
+  const proposalId = parts[4] ? decodeURIComponent(parts[4]) : undefined;
+  const action = parts[5];
+  try {
+    if (proposalId === undefined) {
+      if (method === "GET") {
+        return successRoute(
+          requestIdValue,
+          await state.bridge.listRoleplayMechanicProposals({
+            mechanicSessionId: optionalString(
+              url.searchParams.get("mechanic_session_id") ??
+                url.searchParams.get("mechanicSessionId"),
+            ),
+            roleplaySessionId: optionalString(
+              url.searchParams.get("roleplay_session_id") ??
+                url.searchParams.get("roleplaySessionId"),
+            ),
+            profileId: optionalString(
+              url.searchParams.get("profile_id") ??
+                url.searchParams.get("profileId"),
+            ),
+            status: optionalString(url.searchParams.get("status")),
+            kind: optionalString(url.searchParams.get("kind")),
+            page: {
+              limit: optionalQueryInteger(url.searchParams.get("limit")),
+              offset: optionalQueryInteger(url.searchParams.get("offset")),
+            },
+          }),
+        );
+      }
+      if (method === "POST") {
+        const body = recordBody(await readJsonBody(request));
+        return roleplaySuccess(
+          requestIdValue,
+          await state.bridge.createRoleplayMechanicProposal({
+            proposalId:
+              optionalString(body.proposalId ?? body.proposal_id) ??
+              stableRoleplayRecordId(
+                "mechanic-proposal",
+                `${requiredString(
+                  body.mechanicSessionId ?? body.mechanic_session_id,
+                  "mechanicSessionId",
+                )}:${state.now()}`,
+              ),
+            mechanicSessionId: requiredString(
+              body.mechanicSessionId ?? body.mechanic_session_id,
+              "mechanicSessionId",
+            ),
+            roleplaySessionId: requiredString(
+              body.roleplaySessionId ?? body.roleplay_session_id,
+              "roleplaySessionId",
+            ),
+            kind: requiredString(body.kind, "kind"),
+            targetId: optionalString(body.targetId ?? body.target_id),
+            proposedValue: body.proposedValue ?? body.proposed_value,
+            rationale: requiredString(body.rationale, "rationale"),
+            diagnosticContext:
+              body.diagnosticContext ?? body.diagnostic_context ?? {},
+            now: state.now(),
+          }),
+          201,
+        );
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay mechanic proposal collection supports GET and POST",
+      );
+    }
+
+    if (action === undefined && method === "GET") {
+      const proposal =
+        await state.bridge.getRoleplayMechanicProposal(proposalId);
+      return proposal === undefined
+        ? roleplayNotFound(
+            requestIdValue,
+            "roleplay_mechanic_proposal_not_found",
+            `roleplay mechanic proposal ${proposalId} was not found`,
+          )
+        : successRoute(requestIdValue, proposal);
+    }
+    if (action === "history" && method === "GET") {
+      const proposal = (await state.bridge.getRoleplayMechanicProposal(
+        proposalId,
+      )) as RoleplayMechanicProposalRecord | undefined;
+      return proposal === undefined
+        ? roleplayNotFound(
+            requestIdValue,
+            "roleplay_mechanic_proposal_not_found",
+            `roleplay mechanic proposal ${proposalId} was not found`,
+          )
+        : successRoute(requestIdValue, {
+            proposalId,
+            status: proposal.status,
+            revision: proposal.revision,
+            history: proposal.history,
+          });
+    }
+    if ((action === "approve" || action === "reject") && method === "POST") {
+      const body = recordBody(await readJsonBody(request));
+      return successRoute(
+        requestIdValue,
+        await state.bridge.decideRoleplayMechanicProposal({
+          proposalId,
+          decision: action,
+          reviewerId: requiredString(
+            body.reviewerId ?? body.reviewer_id,
+            "reviewerId",
+          ),
+          note: optionalString(body.note),
+          expectedRevision: requiredPositiveInteger(
+            body.expectedRevision ?? body.expected_revision,
+            "expectedRevision",
+          ),
+          now: state.now(),
+        }),
+      );
+    }
+    if (action === "apply" && method === "POST") {
+      const body = recordBody(await readJsonBody(request));
+      const proposal = (await state.bridge.applyRoleplayMechanicProposal({
+        proposalId,
+        actorId: requiredString(body.actorId ?? body.actor_id, "actorId"),
+        now: state.now(),
+      })) as RoleplayMechanicProposalRecord;
+      const effects = await materializeRoleplayProposalRuntimeEffects(
+        state,
+        proposal,
+      );
+      return successRoute(requestIdValue, { proposal, effects });
+    }
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay mechanic proposal supports GET, history GET, and approve/reject/apply POST",
+    );
+  } catch (error) {
+    return roleplayProposalError(requestIdValue, error);
+  }
 }
 
 async function handleRoleplayCharacterRequest(
@@ -2784,6 +2945,67 @@ function lastEventPreview(event: ChatEvent | undefined): string | undefined {
   return body === undefined ? undefined : body.slice(0, 180);
 }
 
+async function materializeRoleplayProposalRuntimeEffects(
+  state: RoleplayRouteContext,
+  proposal: RoleplayMechanicProposalRecord,
+): Promise<Record<string, unknown>> {
+  if (proposal.status !== "applied") {
+    return { action: "unchanged", reason: "proposal_not_applied" };
+  }
+  if (proposal.outcome?.requiresRuntimeMaterialization !== true) {
+    return { action: "not_required" };
+  }
+  const profile = await state.bridge.getProfileRegistryRecord(
+    proposal.profileId,
+  );
+  if (profile === undefined) {
+    throw new Error(
+      `applied roleplay mechanic proposal profile ${proposal.profileId} was not found`,
+    );
+  }
+  const settings = optionalRecord(profile.activeRuntimeSettingsJson) ?? {};
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    proposal.profileId,
+  );
+  if (profilePath === undefined) {
+    throw new Error(
+      `profile id ${proposal.profileId} is not a valid file profile id`,
+    );
+  }
+  const raw = JSON.parse(await readFile(profilePath, "utf8")) as unknown;
+  if (!isRecord(raw)) {
+    throw new Error(
+      `profile ${proposal.profileId} config root must be an object`,
+    );
+  }
+  await writeJsonFileAtomic(profilePath, {
+    ...raw,
+    profileId: proposal.profileId,
+    ...(settings.roleplayNarrator === undefined
+      ? {}
+      : { roleplayNarrator: settings.roleplayNarrator }),
+    ...(settings.roleplayProviderFailurePatterns === undefined
+      ? {}
+      : {
+          roleplayProviderFailurePatterns:
+            settings.roleplayProviderFailurePatterns,
+        }),
+  });
+  const applyResult = await state.applyServiceRuntimeConfigFromDisk({
+    createMissingSessions: false,
+    eventType: "roleplay_mechanic_proposal_applied",
+    summaryPrefix: `Roleplay mechanic proposal ${proposal.proposalId} applied`,
+  });
+  await state.rebuildBrainRuntime(proposal.profileId as ProfileId);
+  return {
+    action: "runtime_materialized",
+    profileId: proposal.profileId,
+    profilePath,
+    applyResult,
+  };
+}
+
 async function readRoleplayNarratorConfig(
   state: RoleplayRouteContext,
   profileId: string,
@@ -2829,6 +3051,9 @@ async function writeRoleplayNarratorConfig(
     createMissingSessions: false,
     eventType: "roleplay_narrator_config_updated",
     summaryPrefix: `Roleplay narrator config for ${profileId} updated`,
+  });
+  await syncRoleplayProfileRegistrySettings(state, profileId, {
+    roleplayNarrator: config,
   });
   await state.rebuildBrainRuntime(profileId as ProfileId);
   return config;
@@ -2953,6 +3178,9 @@ async function writeRoleplayMechanicConfig(
     eventType: "roleplay_mechanic_config_updated",
     summaryPrefix: `Roleplay mechanic config for ${profileId} updated`,
   });
+  await syncRoleplayProfileRegistrySettings(state, profileId, {
+    roleplayMechanic: plan.config,
+  });
   await state.rebuildBrainRuntime(profileId as ProfileId);
   return {
     configured: true,
@@ -2969,6 +3197,40 @@ async function planRoleplayMechanicProfile(
   return (await state.bridge.planRoleplayMechanicProfile(
     input,
   )) as BrowserRoleplayMechanicProfilePlan;
+}
+
+async function syncRoleplayProfileRegistrySettings(
+  state: RoleplayRouteContext,
+  profileId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const current = await state.bridge.getProfileRegistryRecord(profileId);
+  if (current === undefined) {
+    throw new Error(`profile registry record ${profileId} was not found`);
+  }
+  const now = state.now();
+  await state.bridge.updateProfileRegistryRecord({
+    write: {
+      profileId: current.profileId,
+      lifecycleStatus: current.lifecycleStatus,
+      displayName: current.displayName,
+      summary: current.summary,
+      defaultSessionKind: current.defaultSessionKind,
+      agentId: current.agentId,
+      ownerId: current.ownerId,
+      promptSoulMarkdown: current.promptSoulMarkdown,
+      promptMemoryMarkdown: current.promptMemoryMarkdown,
+      activeRuntimeSettingsJson: {
+        ...(optionalRecord(current.activeRuntimeSettingsJson) ?? {}),
+        ...patch,
+      },
+      sourceAssetRefs: current.sourceAssetRefs,
+      derivedRuntimeRefs: current.derivedRuntimeRefs,
+      importExport: current.importExport,
+      now,
+    },
+    expectedRevision: current.revision,
+  });
 }
 
 function numberValue(value: unknown): number {
@@ -3017,6 +3279,30 @@ function roleplayInputError(
   });
 }
 
+function roleplayProposalError(
+  requestIdValue: string,
+  error: unknown,
+): AdminRouteResult {
+  const message = errorMessage(
+    error,
+    "roleplay mechanic proposal request failed",
+  );
+  const conflict =
+    message.includes("revision mismatch") ||
+    message.includes("target changed") ||
+    message.includes("not approved") ||
+    message.includes("must be approved before apply") ||
+    message.includes("not proposed");
+  return failure(conflict ? 409 : 400, requestIdValue, {
+    code: conflict ? "conflict" : "invalid_input",
+    reason_code: conflict
+      ? "roleplay_mechanic_proposal_conflict"
+      : "roleplay_mechanic_proposal_request_failed",
+    message,
+    retryable: false,
+  });
+}
+
 function roleplayLoreMethodNotAllowed(
   requestIdValue: string,
   message: string,
@@ -3049,6 +3335,15 @@ function requiredPositiveInteger(value: unknown, fieldName: string): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error(`${fieldName} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function optionalQueryInteger(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error("query pagination values must be non-negative integers");
   }
   return parsed;
 }

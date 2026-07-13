@@ -332,6 +332,89 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_roleplay_mechanic_proposal_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let create = parse_json::<RoleplayMechanicProposalCreate>(
+            &input_json,
+            "roleplay mechanic proposal create",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .create_roleplay_mechanic_proposal(&create)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic proposal",
+        )
+    }
+
+    #[napi]
+    pub fn get_roleplay_mechanic_proposal_json(&self, proposal_id: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_mechanic_proposal(&proposal_id)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic proposal",
+        )
+    }
+
+    #[napi]
+    pub fn list_roleplay_mechanic_proposals_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let query = parse_json::<RoleplayMechanicProposalQuery>(
+            &input_json,
+            "roleplay mechanic proposal query",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_mechanic_proposals(&query)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic proposals",
+        )
+    }
+
+    #[napi]
+    pub fn decide_roleplay_mechanic_proposal_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let decision = parse_json::<RoleplayMechanicProposalDecision>(
+            &input_json,
+            "roleplay mechanic proposal decision",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .decide_roleplay_mechanic_proposal(&decision)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic proposal",
+        )
+    }
+
+    #[napi]
+    pub fn apply_roleplay_mechanic_proposal_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let apply = parse_json::<RoleplayMechanicProposalApply>(
+            &input_json,
+            "roleplay mechanic proposal apply",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .apply_roleplay_mechanic_proposal(&apply)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic proposal",
+        )
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;
