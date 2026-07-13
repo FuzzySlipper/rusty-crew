@@ -418,6 +418,42 @@ Allowed values:
 - `memoryDepth`: `shallow`, `medium`, `deep`
 - `stylePrompt`: direct narrator style guidance assembled by UI controls or
   edited by the user. The narrator treats it as instruction text.
+
+### Mechanic profile configuration
+
+- `GET /v1/admin/roleplay/profiles/{profileId}/mechanic-config`
+- `PATCH /v1/admin/roleplay/profiles/{profileId}/mechanic-config`
+- `POST /v1/admin/roleplay/profiles/{profileId}/mechanic-config`
+
+The mechanic route configures an existing Crew profile as a distinct OOC
+diagnostic agent. `name` updates the profile display name and `providerAlias`
+uses the normal service model-provider registry; neither value is duplicated
+inside a second roleplay-specific model registry. Applying the route selects
+the built-in `roleplay_mechanic` local tool profile and its isolated tool
+policy.
+
+Narrator profiles cannot be converted in place. The route rejects profiles
+that already carry narrator configuration so the narrator and mechanic retain
+separate identities, sessions, prompts, and tool policies.
+
+```json
+{
+  "config": {
+    "name": "Maren",
+    "providerAlias": "deepseek-flash",
+    "autoMonitor": false
+  }
+}
+```
+
+Readback returns normalized `config`, `configured`, `localToolProfileId`,
+`toolPolicyIsolated`, and `applies: "next_wake"`. `autoMonitor` is deliberately
+reported as `{ enabled: false, available: false, status: "inactive_future" }`.
+Requests that enable it fail closed until actual monitoring behavior exists.
+Rust owns normalization and the canonical mechanic prompt. Mechanic profiles
+are normal full-agent brains; their separate purpose and session association
+are represented by the roleplay runtime contracts rather than a parallel LLM
+loop.
 - `exemplar`: optional reference prose or turns. When both `stylePrompt` and
   `exemplar` are present, `stylePrompt` is binding guidance and `exemplar`
   remains rhythm/density reference material, not prose to copy.

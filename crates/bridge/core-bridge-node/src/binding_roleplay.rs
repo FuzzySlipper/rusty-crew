@@ -153,6 +153,13 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_roleplay_mechanic_profile_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<serde_json::Value>(&input_json, "roleplay mechanic profile")?;
+        let plan = plan_mechanic_profile(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&plan, "roleplay mechanic profile plan")
+    }
+
+    #[napi]
     pub fn start_roleplay_narrator_turn_json(&self, input_json: String) -> napi::Result<String> {
         let input =
             parse_json::<RoleplayNarratorStartInput>(&input_json, "roleplay narrator start input")?;

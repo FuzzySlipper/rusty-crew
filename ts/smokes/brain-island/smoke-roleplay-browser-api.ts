@@ -512,6 +512,39 @@ try {
     "Browser Player Revised",
   );
 
+  const mechanic = await patch(
+    "/v1/admin/roleplay/profiles/mechanic-profile/mechanic-config",
+    {
+      name: "Maren",
+      autoMonitor: false,
+    },
+  );
+  assert.equal(mechanic.status, 200, JSON.stringify(mechanic.body));
+  assert.equal(mechanic.body.data.config.name, "Maren");
+  assert.equal(mechanic.body.data.localToolProfileId, "roleplay_mechanic");
+  assert.equal(mechanic.body.data.toolPolicyIsolated, true);
+  assert.equal(mechanic.body.data.config.autoMonitor.available, false);
+  const mechanicReadback = await get(
+    "/v1/admin/roleplay/profiles/mechanic-profile/mechanic-config",
+  );
+  assert.equal(
+    mechanicReadback.status,
+    200,
+    JSON.stringify(mechanicReadback.body),
+  );
+  assert.equal(mechanicReadback.body.data.config.name, "Maren");
+  assert.equal(mechanicReadback.body.data.configured, true);
+  assert.equal(mechanicReadback.body.data.toolPolicyIsolated, true);
+  const mechanicNarratorConflict = await patch(
+    "/v1/admin/roleplay/profiles/mechanic-profile/narrator-config",
+    { tone: "wry" },
+  );
+  assert.equal(mechanicNarratorConflict.status, 400);
+  assert.match(
+    mechanicNarratorConflict.body.error.message,
+    /configured as a mechanic/,
+  );
+
   const narrator = await patch(
     "/v1/admin/roleplay/profiles/rp-profile/narrator-config",
     {
@@ -538,6 +571,15 @@ try {
   assert.equal(
     narratorReadback.body.data.config.exemplar,
     "Keep continuity clear.",
+  );
+  const narratorMechanicConflict = await patch(
+    "/v1/admin/roleplay/profiles/rp-profile/mechanic-config",
+    { name: "Not A Mechanic" },
+  );
+  assert.equal(narratorMechanicConflict.status, 400);
+  assert.match(
+    narratorMechanicConflict.body.error.message,
+    /configured as a narrator/,
   );
 
   const session = await post("/v1/admin/roleplay/sessions", {
@@ -1111,7 +1153,10 @@ function writeRuntimeConfig(root: string): void {
     JSON.stringify(
       {
         profilesDir,
-        brains: [{ profileId: "rp-profile" }],
+        brains: [
+          { profileId: "rp-profile" },
+          { profileId: "mechanic-profile" },
+        ],
         sessions: [
           {
             sessionId: "rp-session",
@@ -1133,6 +1178,24 @@ function writeRuntimeConfig(root: string): void {
       {
         profileId: "rp-profile",
         displayName: "RP Profile",
+        modelConfig: {
+          provider: "local",
+          modelName: "deepseek-flash",
+          baseUrl: "http://127.0.0.1:18082/v1",
+        },
+        brain: { module: "pi-agent" },
+        toolPolicy: { requestedTools: [] },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(profilesDir, "mechanic-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "mechanic-profile",
+        displayName: "Mechanic Profile",
         modelConfig: {
           provider: "local",
           modelName: "deepseek-flash",

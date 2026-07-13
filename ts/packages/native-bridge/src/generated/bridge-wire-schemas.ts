@@ -20080,6 +20080,63 @@ export const bridgeWireSchemaArtifact = {
       ],
       "title": "RoleplaySpeakerIdentitySnapshot",
       "type": "object"
+    },
+    "rusty_crew_roleplay_core::mechanic::RoleplayMechanicProfilePlan": {
+      "properties": {
+        "config": {
+          "properties": {
+            "autoMonitor": {
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "enum": [
+                    "inactive_future"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "enabled",
+                "available",
+                "status"
+              ],
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            },
+            "providerAlias": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "autoMonitor"
+          ],
+          "type": "object"
+        },
+        "localToolProfileId": {
+          "type": "string"
+        },
+        "systemPrompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config",
+        "systemPrompt",
+        "localToolProfileId"
+      ],
+      "title": "RoleplayMechanicProfilePlan",
+      "type": "object"
     }
   },
   "operationSchemaKeys": {
@@ -20162,6 +20219,7 @@ export const bridgeWireSchemaArtifact = {
     "plan_reload_mcp_control": "rusty_crew_core_config::ReloadMcpControlPlan",
     "plan_roleplay_assistant_alternative": "rusty_crew_roleplay_core::RoleplayAssistantAlternativePlan",
     "plan_roleplay_chat_layer_binding": "rusty_crew_roleplay_core::RoleplayChatLayerBindingPlan",
+    "plan_roleplay_mechanic_profile": "rusty_crew_roleplay_core::mechanic::RoleplayMechanicProfilePlan",
     "plan_roleplay_scene_state_update": "rusty_crew_roleplay_core::RoleplaySceneStateUpdatePlan",
     "plan_roleplay_session_lifecycle": "rusty_crew_roleplay_core::RoleplaySessionLifecyclePlan",
     "plan_runtime_config": "rusty_crew_core_config::RuntimeConfigPlan",

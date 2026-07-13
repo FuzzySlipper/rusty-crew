@@ -7,6 +7,7 @@ import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
 import { failure, successRoute } from "./service-route-results.js";
 import { loadProfileConfig } from "./profile-loading.js";
+import { createLocalToolProfileStore } from "./local-tool-profiles.js";
 import {
   handleAdminRoleplayLoreRequest,
   handleBrowserProfileLoreLayersRequest,
@@ -28,6 +29,7 @@ export interface RoleplayRouteContext {
     eventType: string;
     summaryPrefix: string;
   }): Promise<unknown>;
+  rebuildBrainRuntime(profileId: ProfileId): Promise<void>;
   serviceSessionById(sessionId: string): Promise<SessionState>;
   listChatEventsAfterCursor(
     session: SessionState,
@@ -236,6 +238,20 @@ interface BrowserRoleplayNarratorConfig {
   };
 }
 
+interface BrowserRoleplayMechanicProfilePlan {
+  config: {
+    name: string;
+    providerAlias?: string;
+    autoMonitor: {
+      enabled: false;
+      available: false;
+      status: "inactive_future";
+    };
+  };
+  systemPrompt: string;
+  localToolProfileId: "roleplay_mechanic";
+}
+
 interface RoleplayPromptContextOutput {
   prompt_context?: string;
   stack?: Record<string, unknown>;
@@ -285,6 +301,14 @@ export async function handleAdminRoleplayRequest(
     }
     if (parts[5] === "narrator-config") {
       return handleRoleplayNarratorConfigRequest(
+        request,
+        state,
+        url,
+        profileId,
+      );
+    }
+    if (parts[5] === "mechanic-config") {
+      return handleRoleplayMechanicConfigRequest(
         request,
         state,
         url,
@@ -765,6 +789,48 @@ async function handleRoleplayNarratorConfigRequest(
     return roleplayInputError(
       requestIdValue,
       "roleplay_narrator_config_request_failed",
+      error,
+    );
+  }
+}
+
+async function handleRoleplayMechanicConfigRequest(
+  request: IncomingMessage,
+  state: RoleplayRouteContext,
+  _url: URL,
+  profileId: string,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  try {
+    if (method === "GET") {
+      const result = await readRoleplayMechanicConfig(state, profileId);
+      return successRoute(requestIdValue, {
+        profileId,
+        ...result,
+        applies: "next_wake",
+      });
+    }
+    if (method === "PATCH" || method === "POST") {
+      const result = await writeRoleplayMechanicConfig(
+        state,
+        profileId,
+        recordBody(await readJsonBody(request)),
+      );
+      return successRoute(requestIdValue, {
+        profileId,
+        ...result,
+        applies: "next_wake",
+      });
+    }
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay mechanic config supports GET, PATCH, and POST",
+    );
+  } catch (error) {
+    return roleplayInputError(
+      requestIdValue,
+      "roleplay_mechanic_config_request_failed",
       error,
     );
   }
@@ -2743,6 +2809,11 @@ async function writeRoleplayNarratorConfig(
   if (!isRecord(raw)) {
     throw new Error(`profile ${profileId} config root must be an object`);
   }
+  if (isRecord(raw.roleplayMechanic)) {
+    throw new Error(
+      `profile ${profileId} is configured as a mechanic; create a separate narrator profile`,
+    );
+  }
   await writeJsonFileAtomic(profilePath, {
     ...raw,
     profileId,
@@ -2753,6 +2824,7 @@ async function writeRoleplayNarratorConfig(
     eventType: "roleplay_narrator_config_updated",
     summaryPrefix: `Roleplay narrator config for ${profileId} updated`,
   });
+  await state.rebuildBrainRuntime(profileId as ProfileId);
   return config;
 }
 
@@ -2763,6 +2835,134 @@ async function normalizeRoleplayNarratorConfig(
   return (await state.bridge.normalizeRoleplayNarratorConfig(
     recordBody(input),
   )) as BrowserRoleplayNarratorConfig;
+}
+
+async function readRoleplayMechanicConfig(
+  state: RoleplayRouteContext,
+  profileId: string,
+): Promise<{
+  configured: boolean;
+  config: BrowserRoleplayMechanicProfilePlan["config"];
+  localToolProfileId: string;
+  toolPolicyIsolated: boolean;
+}> {
+  const profile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId as ProfileId,
+  );
+  const plan = await planRoleplayMechanicProfile(state, {
+    name: profile.displayName ?? profile.profileId,
+    providerAlias: profile.providerAlias,
+    autoMonitor: profile.roleplayMechanic?.autoMonitor ?? false,
+  });
+  return {
+    configured: profile.roleplayMechanic !== undefined,
+    config: plan.config,
+    localToolProfileId: plan.localToolProfileId,
+    toolPolicyIsolated:
+      profile.localToolProfileId === plan.localToolProfileId &&
+      profile.toolPolicy?.requestedToolsets?.includes("roleplay_mechanic") ===
+        true,
+  };
+}
+
+async function writeRoleplayMechanicConfig(
+  state: RoleplayRouteContext,
+  profileId: string,
+  body: Record<string, unknown>,
+): Promise<{
+  configured: true;
+  config: BrowserRoleplayMechanicProfilePlan["config"];
+  localToolProfileId: string;
+  toolPolicyIsolated: true;
+}> {
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  if (profilePath === undefined) {
+    throw new Error(`profile id ${profileId} is not a valid file profile id`);
+  }
+  const raw = JSON.parse(await readFile(profilePath, "utf8")) as unknown;
+  if (!isRecord(raw)) {
+    throw new Error(`profile ${profileId} config root must be an object`);
+  }
+  const current = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId as ProfileId,
+  );
+  if (current.roleplayNarrator !== undefined) {
+    throw new Error(
+      `profile ${profileId} is configured as a narrator; create a separate mechanic profile`,
+    );
+  }
+  const configBody = isRecord(body.config) ? body.config : body;
+  const requestedProviderAlias =
+    optionalString(configBody.providerAlias ?? configBody.provider_alias) ??
+    current.providerAlias;
+  if (requestedProviderAlias !== undefined) {
+    const provider = await state.bridge.getModelProvider(
+      requestedProviderAlias,
+    );
+    if (provider === undefined) {
+      throw new Error(
+        `model provider alias ${requestedProviderAlias} was not found`,
+      );
+    }
+    if (provider.status !== "active") {
+      throw new Error(
+        `model provider alias ${requestedProviderAlias} is ${provider.status}; active provider required`,
+      );
+    }
+  }
+  const plan = await planRoleplayMechanicProfile(state, {
+    name:
+      optionalString(configBody.name ?? configBody.displayName) ??
+      current.displayName ??
+      profileId,
+    providerAlias: requestedProviderAlias,
+    autoMonitor:
+      configBody.autoMonitor ??
+      configBody.auto_monitor ??
+      current.roleplayMechanic?.autoMonitor ??
+      false,
+  });
+  const localToolProfile = await createLocalToolProfileStore({
+    bridge: state.bridge,
+    now: state.now,
+  }).resolve(plan.localToolProfileId);
+  await writeJsonFileAtomic(profilePath, {
+    ...raw,
+    profileId,
+    displayName: plan.config.name,
+    ...(plan.config.providerAlias === undefined
+      ? {}
+      : { providerAlias: plan.config.providerAlias }),
+    localToolProfileId: localToolProfile.id,
+    toolPolicy: localToolProfile.toolPolicy,
+    roleplayMechanic: { autoMonitor: false },
+  });
+  await state.applyServiceRuntimeConfigFromDisk({
+    createMissingSessions: false,
+    eventType: "roleplay_mechanic_config_updated",
+    summaryPrefix: `Roleplay mechanic config for ${profileId} updated`,
+  });
+  await state.rebuildBrainRuntime(profileId as ProfileId);
+  return {
+    configured: true,
+    config: plan.config,
+    localToolProfileId: plan.localToolProfileId,
+    toolPolicyIsolated: true,
+  };
+}
+
+async function planRoleplayMechanicProfile(
+  state: RoleplayRouteContext,
+  input: unknown,
+): Promise<BrowserRoleplayMechanicProfilePlan> {
+  return (await state.bridge.planRoleplayMechanicProfile(
+    input,
+  )) as BrowserRoleplayMechanicProfilePlan;
 }
 
 function numberValue(value: unknown): number {

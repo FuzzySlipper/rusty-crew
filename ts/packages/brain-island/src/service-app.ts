@@ -498,6 +498,9 @@ function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
     now: state.now,
     applyServiceRuntimeConfigFromDisk: (options) =>
       applyServiceRuntimeConfigFromDisk(state, options),
+    rebuildBrainRuntime: async (profileId) => {
+      await rebuildServiceBrainRuntime(state, profileId);
+    },
     serviceSessionById: (sessionId) => serviceSessionById(state, sessionId),
     listChatEventsAfterCursor: (session, afterCursor, limit) =>
       listChatEventsAfterCursorFromModule(
@@ -601,20 +604,7 @@ function runtimeRebuildContext(state: ServiceState) {
       summaryPrefix: string;
     }) => applyServiceRuntimeConfigFromDisk(state, options),
     rebuildBrainRuntime: (profileId: ProfileId) =>
-      rebuildConfiguredBrainRuntime({
-        serviceConfig: state.config,
-        runtimeConfig: state.runtimeConfig,
-        profileId,
-        bridge: state.bridge,
-        curatorExecutor: state.curator.executor,
-        mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
-        coordinationRuntime: createServiceCoordinationRuntime(() => state),
-        toolCallDebugStore: state.toolCallDebugStore,
-        providerRequestDebugStore: state.providerRequestDebugStore,
-        browserResources: state.browserResources,
-        onBrainWakeResult: (observation) =>
-          recordResponsesWakeMetrics(state, observation),
-      }),
+      rebuildServiceBrainRuntime(state, profileId),
     refreshMcpBindingsAfterRuntimeRebuild: (
       bindingIds: readonly string[],
       command: AdminControlCommand,
@@ -3144,6 +3134,33 @@ async function applyServiceRuntimeConfigFromDisk(
     summary: runtimeConfigApplySummary(options.summaryPrefix, nextApplyResult),
   });
   return nextApplyResult;
+}
+
+async function rebuildServiceBrainRuntime(
+  state: ServiceState,
+  profileId: ProfileId,
+) {
+  const rebuild = await rebuildConfiguredBrainRuntime({
+    serviceConfig: state.config,
+    runtimeConfig: state.runtimeConfig,
+    profileId,
+    bridge: state.bridge,
+    curatorExecutor: state.curator.executor,
+    mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
+    coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    toolCallDebugStore: state.toolCallDebugStore,
+    providerRequestDebugStore: state.providerRequestDebugStore,
+    browserResources: state.browserResources,
+    onBrainWakeResult: (observation) =>
+      recordResponsesWakeMetrics(state, observation),
+  });
+  state.runtimeConfigApplyResult.brainHandlesByProfileId[profileId] =
+    rebuild.handle;
+  state.runtimeConfigApplyResult.brainModulesByProfileId[profileId] =
+    rebuild.module;
+  state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[profileId] =
+    rebuild.diagnostics;
+  return rebuild;
 }
 
 async function buildDirectDebugContext(

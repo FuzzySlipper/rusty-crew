@@ -33,9 +33,11 @@ export function providerStateFingerprintMaterial(
   return {
     profile: {
       profileId: profile.profileId,
+      displayName: profile.displayName,
       moduleId: input.strategy.moduleId,
       strategyId: input.strategy.strategyId,
       prompt: profile.prompt,
+      roleplayMechanic: profile.roleplayMechanic,
       skills: input.profile.skills.map((skill) => ({
         slug: skill.slug,
         title: skill.title,

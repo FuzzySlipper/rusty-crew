@@ -1090,6 +1090,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         roleplay::RoleplayNarratorConfig
     );
     schema!(
+        "plan_roleplay_mechanic_profile",
+        roleplay::RoleplayMechanicProfilePlan
+    );
+    schema!(
         "start_roleplay_narrator_turn",
         roleplay::RoleplayNarratorTurnReceipt
     );
@@ -1552,6 +1556,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "merge_roleplay_player_persona",
         "patch_roleplay_session_metadata",
         "normalize_roleplay_narrator_config",
+        "plan_roleplay_mechanic_profile",
         "start_roleplay_narrator_turn",
         "advance_roleplay_narrator_turn",
         "create_lore_layer",
@@ -1597,6 +1602,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "merge_roleplay_player_persona",
         "patch_roleplay_session_metadata",
         "normalize_roleplay_narrator_config",
+        "plan_roleplay_mechanic_profile",
         "start_roleplay_narrator_turn",
         "advance_roleplay_narrator_turn",
         "create_lore_layer",
@@ -1860,6 +1866,8 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
     let roleplay_scene_state_update_plan =
         serde_json::to_value(sample_roleplay_scene_state_update_plan())?;
     let roleplay_narrator_config = serde_json::to_value(sample_roleplay_narrator_config())?;
+    let roleplay_mechanic_profile_plan =
+        serde_json::to_value(sample_roleplay_mechanic_profile_plan())?;
     let roleplay_narrator_tool_request =
         serde_json::to_value(sample_roleplay_narrator_tool_request())?;
     let roleplay_narrator_tool_observation =
@@ -2115,6 +2123,10 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
                     "RoleplaySceneStateUpdateInput": object_keys(&roleplay_scene_state_update_input)?,
                     "RoleplaySceneStateUpdatePlan": object_keys(&roleplay_scene_state_update_plan)?,
                     "RoleplayNarratorConfig": object_keys(&roleplay_narrator_config)?,
+                    "RoleplayMechanicProfilePlan": object_keys(&roleplay_mechanic_profile_plan)?,
+                    "RoleplayMechanicConfig": object_keys(
+                        required_value(&roleplay_mechanic_profile_plan, "config")?
+                    )?,
                     "RoleplayNarratorToolRequest": object_keys(&roleplay_narrator_tool_request)?,
                     "RoleplayNarratorToolObservation": object_keys(&roleplay_narrator_tool_observation)?,
                     "RoleplayNarratorStartInput": object_keys(&roleplay_narrator_start_input)?,
@@ -4842,6 +4854,22 @@ fn sample_roleplay_narrator_config() -> roleplay::RoleplayNarratorConfig {
             enabled: true,
             max_review_cycles: 2,
         },
+    }
+}
+
+fn sample_roleplay_mechanic_profile_plan() -> roleplay::RoleplayMechanicProfilePlan {
+    roleplay::RoleplayMechanicProfilePlan {
+        config: roleplay::RoleplayMechanicConfig {
+            name: "Maren".to_owned(),
+            provider_alias: Some("validation-provider".to_owned()),
+            auto_monitor: roleplay::RoleplayMechanicAutoMonitorConfig {
+                enabled: false,
+                available: false,
+                status: roleplay::RoleplayMechanicAutoMonitorStatus::InactiveFuture,
+            },
+        },
+        system_prompt: "You are Maren, the roleplay mechanic.".to_owned(),
+        local_tool_profile_id: "roleplay_mechanic".to_owned(),
     }
 }
 

@@ -64,6 +64,7 @@ import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import { resolveDelegationTools } from "./delegation-tools.js";
 import { resolveLoreMemoryTools } from "./lore-memory-tool.js";
 import { resolveSceneStateTools } from "./scene-state-tool.js";
+import { createRoleplayMechanicToolResolver } from "./roleplay-mechanic-tools.js";
 import type { BrainHostExecutor, BrainWakeResult } from "./index.js";
 import { createLocalCodeToolResolver } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
@@ -1532,6 +1533,10 @@ function createServiceToolResolver(
         options.browserResources.resourcePolicy.browser.maxScreenshotBytes,
     }),
     createMemoryToolResolver(profile, options),
+    createRoleplayMechanicToolResolver({
+      bridge: options.bridge,
+      profile: profile.profile,
+    }),
     options.mcpToolCatalog
       ? createServiceMcpToolResolver({
           catalog: options.mcpToolCatalog,

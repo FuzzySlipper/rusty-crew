@@ -138,6 +138,10 @@ export interface RoleplayNarratorConfig {
   review: RoleplayNarratorReviewConfig;
 }
 
+export interface RoleplayMechanicConfig {
+  autoMonitor: false;
+}
+
 export interface ProfileBrainConfig {
   module?: BrainModuleId;
   strategy?: string;
@@ -161,6 +165,7 @@ export interface ProfileConfig {
   backgroundReview?: ProfileBackgroundReviewConfig;
   memoryConfig?: ProfileMemoryConfig;
   roleplayNarrator?: RoleplayNarratorConfig;
+  roleplayMechanic?: RoleplayMechanicConfig;
   contextPolicy?: ContextStrategyPolicy;
   sessionDefaults?: ProfileSessionDefaultsConfig;
   channelDefaults?: ProfileChannelDefaultsConfig;
@@ -862,6 +867,9 @@ function validateProfileConfig(
     roleplayNarrator: isRecord(parsed.roleplayNarrator)
       ? roleplayNarratorConfig(parsed.roleplayNarrator)
       : undefined,
+    roleplayMechanic: isRecord(parsed.roleplayMechanic)
+      ? roleplayMechanicConfig(parsed.roleplayMechanic, profileId, profilePath)
+      : undefined,
     contextPolicy: isRecord(parsed.contextPolicy)
       ? profileContextPolicy(parsed.contextPolicy, profileId, profilePath)
       : isRecord(parsed.context_policy)
@@ -1056,6 +1064,24 @@ function roleplayNarratorConfig(
           : true,
     },
   };
+}
+
+function roleplayMechanicConfig(
+  raw: Record<string, unknown>,
+  profileId: ProfileId,
+  profilePath: string,
+): RoleplayMechanicConfig {
+  const autoMonitor = isRecord(raw.autoMonitor)
+    ? raw.autoMonitor.enabled
+    : (raw.autoMonitor ?? raw.auto_monitor);
+  if (autoMonitor !== undefined && autoMonitor !== false) {
+    throw invalidProfile(
+      profileId,
+      profilePath,
+      "roleplayMechanic.autoMonitor is not available and must be false",
+    );
+  }
+  return { autoMonitor: false };
 }
 
 function narratorTone(value: unknown): RoleplayNarratorTone | undefined {

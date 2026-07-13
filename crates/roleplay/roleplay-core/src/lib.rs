@@ -11,6 +11,13 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
+mod mechanic;
+
+pub use mechanic::{
+    plan_mechanic_profile, RoleplayMechanicAutoMonitorConfig, RoleplayMechanicAutoMonitorStatus,
+    RoleplayMechanicConfig, RoleplayMechanicProfilePlan, ROLEPLAY_MECHANIC_TOOL_PROFILE_ID,
+};
+
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 #[error("{message}")]
 pub struct RoleplayDomainError {
@@ -19,7 +26,7 @@ pub struct RoleplayDomainError {
 }
 
 impl RoleplayDomainError {
-    fn invalid(reason_code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn invalid(reason_code: &'static str, message: impl Into<String>) -> Self {
         Self {
             reason_code,
             message: message.into(),

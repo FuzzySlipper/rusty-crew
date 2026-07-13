@@ -1893,6 +1893,15 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Validate and normalize browser/admin roleplay narrator config writes and readbacks."
 
 [[operation]]
+name = "plan_roleplay_mechanic_profile"
+surface = "stable"
+direction = "ts_to_rust"
+input = "serde_json::Value"
+output = "roleplay_core::RoleplayMechanicProfilePlan"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate mechanic profile configuration and return the Rust-owned prompt and isolated local tool profile selection."
+
+[[operation]]
 name = "start_roleplay_narrator_turn"
 surface = "stable"
 direction = "ts_to_rust"

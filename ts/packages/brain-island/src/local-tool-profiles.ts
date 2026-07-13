@@ -324,6 +324,14 @@ function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
       tools: [],
     }),
     defaultProfile(now, {
+      id: "roleplay_mechanic",
+      displayName: "Roleplay Mechanic",
+      description:
+        "Read-only roleplay diagnostics and proposal creation for mechanic sessions.",
+      toolsets: ["roleplay_mechanic"],
+      tools: [],
+    }),
+    defaultProfile(now, {
       id: "full_agent",
       displayName: "Full Agent",
       description:

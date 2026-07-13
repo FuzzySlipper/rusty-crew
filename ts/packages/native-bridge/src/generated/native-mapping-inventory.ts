@@ -1517,6 +1517,16 @@ export const nativeMappingInventory = {
           "visibility",
           "world_id"
         ],
+        "RoleplayMechanicConfig": [
+          "autoMonitor",
+          "name",
+          "providerAlias"
+        ],
+        "RoleplayMechanicProfilePlan": [
+          "config",
+          "localToolProfileId",
+          "systemPrompt"
+        ],
         "RoleplayNarratorAdvanceInput": [
           "outcome",
           "receipt"
@@ -1707,6 +1717,7 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersonaJson",
         "patchRoleplaySessionMetadataJson",
         "normalizeRoleplayNarratorConfigJson",
+        "planRoleplayMechanicProfileJson",
         "startRoleplayNarratorTurnJson",
         "advanceRoleplayNarratorTurnJson",
         "createLoreLayerJson",
@@ -1744,6 +1755,7 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersona",
         "patchRoleplaySessionMetadata",
         "normalizeRoleplayNarratorConfig",
+        "planRoleplayMechanicProfile",
         "startRoleplayNarratorTurn",
         "advanceRoleplayNarratorTurn",
         "createLoreLayer",
@@ -1781,6 +1793,7 @@ export const nativeMappingInventory = {
         "merge_roleplay_player_persona",
         "patch_roleplay_session_metadata",
         "normalize_roleplay_narrator_config",
+        "plan_roleplay_mechanic_profile",
         "start_roleplay_narrator_turn",
         "advance_roleplay_narrator_turn",
         "create_lore_layer",
@@ -1826,6 +1839,7 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersona",
         "patchRoleplaySessionMetadata",
         "normalizeRoleplayNarratorConfig",
+        "planRoleplayMechanicProfile",
         "startRoleplayNarratorTurn",
         "advanceRoleplayNarratorTurn",
         "createLoreLayer",
@@ -1871,6 +1885,7 @@ export const nativeMappingInventory = {
         "mergeRoleplayPlayerPersonaJson",
         "patchRoleplaySessionMetadataJson",
         "normalizeRoleplayNarratorConfigJson",
+        "planRoleplayMechanicProfileJson",
         "startRoleplayNarratorTurnJson",
         "advanceRoleplayNarratorTurnJson",
         "createLoreLayerJson",

@@ -2362,6 +2362,7 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   mergeRoleplayPlayerPersona(input: unknown): Promise<unknown>;
   patchRoleplaySessionMetadata(input: unknown): Promise<unknown>;
   normalizeRoleplayNarratorConfig(input: unknown): Promise<unknown>;
+  planRoleplayMechanicProfile(input: unknown): Promise<unknown>;
   startRoleplayNarratorTurn(input: unknown): Promise<unknown>;
   advanceRoleplayNarratorTurn(input: unknown): Promise<unknown>;
   saveMessageSlot(input: unknown): Promise<void>;

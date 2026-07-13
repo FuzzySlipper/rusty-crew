@@ -1,0 +1,18 @@
+{
+  "profileId": "roleplay-mechanic",
+  "displayName": "Mechanic",
+  "providerAlias": "replace-with-provider-alias",
+  "brain": {
+    "module": "pi-agent",
+    "strategy": "default"
+  },
+  "localToolProfileId": "roleplay_mechanic",
+  "toolPolicy": {
+    "requestedToolsets": ["roleplay_mechanic"],
+    "requestedTools": []
+  },
+  "roleplayMechanic": {
+    "autoMonitor": false
+  },
+  "skills": []
+}

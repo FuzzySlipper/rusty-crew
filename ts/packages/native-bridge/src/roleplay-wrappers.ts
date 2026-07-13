@@ -66,6 +66,7 @@ type RoleplayMethodName =
   | "mergeRoleplayPlayerPersona"
   | "patchRoleplaySessionMetadata"
   | "normalizeRoleplayNarratorConfig"
+  | "planRoleplayMechanicProfile"
   | "startRoleplayNarratorTurn"
   | "advanceRoleplayNarratorTurn";
 
@@ -297,6 +298,10 @@ export function createNativeBridgeRoleplayMethods(
     normalizeRoleplayNarratorConfig: async (input) =>
       JSON.parse(
         binding.normalizeRoleplayNarratorConfigJson(JSON.stringify(input)),
+      ) as unknown,
+    planRoleplayMechanicProfile: async (input) =>
+      JSON.parse(
+        binding.planRoleplayMechanicProfileJson(JSON.stringify(input)),
       ) as unknown,
     startRoleplayNarratorTurn: async (input) =>
       JSON.parse(

@@ -465,6 +465,12 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:scene-state-tool",
   },
   {
+    name: "get_mechanic_capabilities",
+    implementationModule:
+      "./roleplay-mechanic-tools.js#getMechanicCapabilitiesTool",
+    inventoryTest: "smoke:roleplay-mechanic-profile",
+  },
+  {
     name: "update_scene_state",
     implementationModule: "./scene-state-tool.js#updateSceneStateTool",
     inventoryTest: "smoke:scene-state-tool",

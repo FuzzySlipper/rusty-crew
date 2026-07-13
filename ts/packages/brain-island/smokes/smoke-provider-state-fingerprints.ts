@@ -73,6 +73,25 @@ assert.notEqual(
   first.profileFingerprint,
   "tool identity should change the profile fingerprint",
 );
+
+const mechanicIdentityChanged = providerStateScopeForProfile({
+  profile: profileContext({
+    displayName: "Mechanic",
+    roleplayMechanic: { autoMonitor: false },
+  }),
+  strategy,
+  moduleStrategy,
+});
+assert.notEqual(
+  mechanicIdentityChanged.profileFingerprint,
+  first.profileFingerprint,
+  "mechanic identity and role should change the profile fingerprint",
+);
+assert.equal(
+  mechanicIdentityChanged.providerFingerprint,
+  first.providerFingerprint,
+  "mechanic identity and role should not change the provider fingerprint",
+);
 assert.equal(
   toolsChanged.providerFingerprint,
   first.providerFingerprint,
@@ -156,13 +175,16 @@ function profileContext(
     prompt?: LoadedProfileContext["profile"]["prompt"];
     modelConfig?: LoadedProfileContext["profile"]["modelConfig"];
     toolName?: string;
+    displayName?: string;
+    roleplayMechanic?: LoadedProfileContext["profile"]["roleplayMechanic"];
   } = {},
 ): LoadedProfileContext {
   const toolName = overrides.toolName ?? "read_file";
   return {
     profile: {
       profileId,
-      displayName: "Rusty Crew Runner",
+      displayName: overrides.displayName ?? "Rusty Crew Runner",
+      roleplayMechanic: overrides.roleplayMechanic,
       modelConfig:
         overrides.modelConfig ??
         ({

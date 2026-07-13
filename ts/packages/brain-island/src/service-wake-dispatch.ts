@@ -73,6 +73,7 @@ export interface ServiceWakeDispatchContext {
     | "buildBrainWakeRequestForSession"
     | "drainSubscriptionEvents"
     | "listSessions"
+    | "planRoleplayMechanicProfile"
     | "subscribeEvents"
     | "unsubscribeEvents"
     | "wakeBrain"
@@ -211,7 +212,32 @@ export async function dispatchWake(
     });
     const roleplayContext =
       await context.roleplayPromptContextForSession(session);
+    const mechanicPlan =
+      profileContext.profile.roleplayMechanic === undefined
+        ? undefined
+        : ((await context.bridge.planRoleplayMechanicProfile({
+            name:
+              profileContext.profile.displayName ??
+              profileContext.profile.profileId,
+            providerAlias: profileContext.profile.providerAlias,
+            autoMonitor: profileContext.profile.roleplayMechanic.autoMonitor,
+          })) as {
+            systemPrompt: string;
+            localToolProfileId: string;
+          });
+    if (
+      mechanicPlan !== undefined &&
+      profileContext.profile.localToolProfileId !==
+        mechanicPlan.localToolProfileId
+    ) {
+      throw new Error(
+        `roleplay mechanic profile ${profileContext.profile.profileId} must select local tool profile ${mechanicPlan.localToolProfileId}`,
+      );
+    }
     const roleInput: BuildProfileRoleAssemblyOptions = {
+      ...(mechanicPlan === undefined
+        ? {}
+        : { systemPromptOverride: mechanicPlan.systemPrompt }),
       sessionMemoryContext: contextStrategy.sessionMemoryContext,
       additionalInstructions: [
         ...contextStrategy.additionalInstructions,

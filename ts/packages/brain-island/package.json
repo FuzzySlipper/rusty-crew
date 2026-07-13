@@ -47,6 +47,8 @@
     "smoke:scene-state-tool": "tsx smokes/smoke-scene-state-tool.ts",
     "smoke:roleplay-narrator-brain": "tsx smokes/smoke-roleplay-narrator-brain.ts",
     "smoke:roleplay-narrator-fsm-bridge": "tsx smokes/smoke-roleplay-narrator-fsm-bridge.ts",
+    "smoke:roleplay-mechanic-profile": "tsx smokes/smoke-roleplay-mechanic-profile.ts",
+    "smoke:roleplay-mechanic-profile-live": "tsx smokes/smoke-roleplay-mechanic-profile-live.ts",
     "smoke:roleplay-browser-api": "tsx ../../smokes/brain-island/smoke-roleplay-browser-api.ts",
     "smoke:roleplay-st-import-service-api": "tsx ../../smokes/brain-island/smoke-roleplay-st-import-service-api.ts",
     "smoke:roleplay-behavior-eval": "tsx smokes/smoke-roleplay-behavior-eval.ts",

@@ -165,6 +165,7 @@ export declare class NativeBridgeBinding {
   mergeRoleplayPlayerPersonaJson(inputJson: string): string
   patchRoleplaySessionMetadataJson(inputJson: string): string
   normalizeRoleplayNarratorConfigJson(inputJson: string): string
+  planRoleplayMechanicProfileJson(inputJson: string): string
   startRoleplayNarratorTurnJson(inputJson: string): string
   advanceRoleplayNarratorTurnJson(inputJson: string): string
   putRoleplayCharacterJson(inputJson: string): string

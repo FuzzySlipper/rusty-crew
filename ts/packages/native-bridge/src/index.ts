@@ -827,6 +827,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     normalizeRoleplayNarratorConfig: unavailable(
       "normalize_roleplay_narrator_config",
     ),
+    planRoleplayMechanicProfile: unavailable("plan_roleplay_mechanic_profile"),
     startRoleplayNarratorTurn: unavailable("start_roleplay_narrator_turn"),
     advanceRoleplayNarratorTurn: unavailable("advance_roleplay_narrator_turn"),
     saveMessageSlot: unavailable("save_message_slot"),

@@ -475,6 +475,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "get_mechanic_capabilities",
+      "description": "Read the current mechanic profile identity, provider selection, proposal-only mutation policy, and auto-monitor availability.",
+      "category": "diagnostics",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["read_only"],
+      "output_shape": "roleplay.mechanic_capabilities.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "update_scene_state",
       "description": "Update lightweight roleplay scene state for the current session.",
       "category": "memory",
