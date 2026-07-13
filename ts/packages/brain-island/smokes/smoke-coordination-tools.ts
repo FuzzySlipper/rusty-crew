@@ -91,7 +91,10 @@ const runtime: CoordinationToolRuntime = {
 const directoryTool = listAgentsTool({ runtime });
 const directoryResult = await directoryTool.execute?.("directory-call", {});
 assert.equal(directoryResult?.details.ok, true);
-assert.equal(directoryResult?.details.agents?.[0]?.agentId, "coordination-target");
+assert.equal(
+  directoryResult?.details.agents?.[0]?.agentId,
+  "coordination-target",
+);
 
 const sendTool = sendAgentMessageTool({ runtime });
 const sendResult = await sendTool.executeWithContext?.(
@@ -109,19 +112,22 @@ const sendResult = await sendTool.executeWithContext?.(
   },
 );
 assert.equal(sendResult?.details.ok, true);
-assert.deepEqual(calls.find((call) => call.kind === "route"), {
-  kind: "route",
-  input: {
-    fromAgentId: "coordination-agent",
-    fromSessionId: "coordination-session",
-    wakeId: "coordination-wake",
-    toolCallId: "send-call",
-    toAgentId: "coordination-target",
-    body: "please wake",
-    correlationId: "coordination-proof",
-    requireWake: true,
+assert.deepEqual(
+  calls.find((call) => call.kind === "route"),
+  {
+    kind: "route",
+    input: {
+      fromAgentId: "coordination-agent",
+      fromSessionId: "coordination-session",
+      wakeId: "coordination-wake",
+      toolCallId: "send-call",
+      toAgentId: "coordination-target",
+      body: "please wake",
+      correlationId: "coordination-proof",
+      requireWake: true,
+    },
   },
-});
+);
 
 const roundTool = agentRoundTool({ runtime });
 const roundResult = await roundTool.executeWithContext?.(

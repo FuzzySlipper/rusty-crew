@@ -71,7 +71,10 @@ test("Codex coordination lists only the Rust-projected same-service directory", 
   assert.equal(result?.success, true);
   const content = result?.contentItems[0];
   assert.equal(content?.type, "inputText");
-  assert.match(content?.type === "inputText" ? content.text : "", /recipient=planner/);
+  assert.match(
+    content?.type === "inputText" ? content.text : "",
+    /recipient=planner/,
+  );
   assert.equal(port.directoryReads, 1);
 });
 
