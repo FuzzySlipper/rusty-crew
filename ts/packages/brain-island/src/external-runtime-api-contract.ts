@@ -4,7 +4,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.6.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.7.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -65,6 +65,8 @@ export interface ExternalThreadProjection {
   readonly preview: string;
   readonly ephemeral: boolean;
   readonly modelProvider: string;
+  /** Exact model Codex will use for the next turn, or null while unavailable. */
+  readonly effectiveModel: string | null;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly status: string;
@@ -1242,6 +1244,7 @@ function routeSchemas(): Record<string, JsonSchema> {
         "preview",
         "ephemeral",
         "modelProvider",
+        "effectiveModel",
         "createdAt",
         "updatedAt",
         "status",
@@ -1259,6 +1262,11 @@ function routeSchemas(): Record<string, JsonSchema> {
         preview: { type: "string" },
         ephemeral: { type: "boolean" },
         modelProvider: { type: "string" },
+        effectiveModel: {
+          type: ["string", "null"],
+          description:
+            "Exact model Codex will use for the next turn. Null means the thread is archived, unloaded, or its authoritative settings are unavailable; clients must not infer a model from modelProvider or other metadata.",
+        },
         createdAt: { type: "number" },
         updatedAt: { type: "number" },
         status: { type: "string" },

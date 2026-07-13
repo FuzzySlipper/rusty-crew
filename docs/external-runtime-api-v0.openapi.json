@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -4521,6 +4521,7 @@
           "preview",
           "ephemeral",
           "modelProvider",
+          "effectiveModel",
           "createdAt",
           "updatedAt",
           "status",
@@ -4538,6 +4539,10 @@
           "preview": { "type": "string" },
           "ephemeral": { "type": "boolean" },
           "modelProvider": { "type": "string" },
+          "effectiveModel": {
+            "type": ["string", "null"],
+            "description": "Exact model Codex will use for the next turn. Null means the thread is archived, unloaded, or its authoritative settings are unavailable; clients must not infer a model from modelProvider or other metadata."
+          },
           "createdAt": { "type": "number" },
           "updatedAt": { "type": "number" },
           "status": { "type": "string" },

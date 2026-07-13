@@ -82,6 +82,7 @@ interface ControlledRuntime {
   rawDetails: Map<string, ExternalRuntimeRawDetail>;
   threadSettings: Map<string, ControlledThreadSettings>;
   threadUsage: Map<string, ExternalThreadUsageProjection>;
+  archivedThreadIds: Set<string>;
 }
 
 type ControlledThreadSettings = CollaborationMode["settings"] & {
@@ -302,6 +303,7 @@ export class ServiceExternalRuntimeController {
       rawDetails: new Map(),
       threadSettings: new Map(),
       threadUsage: new Map(),
+      archivedThreadIds: new Set(),
     };
     const authority = this.#authority(controlled);
     controlled.driver = this.#driverFactory(registration, authority);
@@ -329,11 +331,25 @@ export class ServiceExternalRuntimeController {
     params: unknown,
   ): Promise<ExternalThreadPage> {
     const controlled = await this.#requireControlled(runtimeId);
-    const result = await controlled.driver.threadList(
-      params as Parameters<CodexAppServerDriver["threadList"]>[0],
-    );
+    const input = params as Parameters<CodexAppServerDriver["threadList"]>[0];
+    const result = await controlled.driver.threadList(input);
+    const items: ExternalThreadProjection[] = [];
+    for (const thread of result.data) {
+      if (input.archived === true) {
+        controlled.archivedThreadIds.add(thread.id);
+      } else {
+        controlled.archivedThreadIds.delete(thread.id);
+      }
+      items.push(
+        await this.#projectExternalThread(
+          controlled,
+          thread,
+          input.archived === true,
+        ),
+      );
+    }
     return {
-      items: result.data.map(projectExternalThread),
+      items,
       nextCursor: result.nextCursor,
       backwardsCursor: result.backwardsCursor,
     };
@@ -356,14 +372,9 @@ export class ServiceExternalRuntimeController {
         }
         throw error;
       });
-    const current = controlled.threadSettings.get(result.thread.id);
-    if (current !== undefined) {
-      controlled.threadSettings.set(result.thread.id, {
-        ...current,
-        modelProvider: result.thread.modelProvider,
-      });
-    }
-    return { thread: projectExternalThread(result.thread) };
+    return {
+      thread: await this.#projectExternalThread(controlled, result.thread),
+    };
   }
 
   async archiveThread(
@@ -390,6 +401,8 @@ export class ServiceExternalRuntimeController {
     const nativeArchiveApplied = state !== "archived";
     if (nativeArchiveApplied) {
       await controlled.driver.threadArchive({ threadId });
+      controlled.threadSettings.delete(threadId);
+      controlled.threadUsage.delete(threadId);
     }
     const saved: Array<{
       readonly before: ExternalAgentBinding;
@@ -436,6 +449,8 @@ export class ServiceExternalRuntimeController {
         `binding reconciliation failed after native archive: ${String(error)}; compensation failures: ${compensationFailures.length === 0 ? "none" : compensationFailures.join("; ")}`,
       );
     }
+
+    controlled.archivedThreadIds.add(threadId);
 
     return this.#threadLifecycleReceipt(
       runtimeId,
@@ -588,6 +603,7 @@ export class ServiceExternalRuntimeController {
       );
     }
     await controlled.driver.threadUnarchive({ threadId });
+    controlled.archivedThreadIds.delete(threadId);
     return this.#threadLifecycleReceipt(
       runtimeId,
       threadId,
@@ -606,7 +622,7 @@ export class ServiceExternalRuntimeController {
     const settings = await this.#effectiveThreadSettings(controlled, binding);
     const modelResult = await this.#tryModelCatalog(controlled);
     return {
-      contractVersion: "0.6.0",
+      contractVersion: "0.7.0",
       runtimeId: binding.runtimeId,
       bindingId: binding.bindingId,
       nativeThreadId: binding.nativeThreadId,
@@ -1113,7 +1129,7 @@ export class ServiceExternalRuntimeController {
     return {
       creation,
       runtime: controlled.registration,
-      thread: projectExternalThread(read.thread),
+      thread: await this.#projectExternalThread(controlled, read.thread),
     };
   }
 
@@ -1271,6 +1287,46 @@ export class ServiceExternalRuntimeController {
         true,
       );
     }
+  }
+
+  async #projectExternalThread(
+    controlled: ControlledRuntime,
+    value: unknown,
+    forceUnavailable = false,
+  ): Promise<ExternalThreadProjection> {
+    const thread = requireNativeRecord(value, "thread");
+    const threadId = requireNativeString(thread.id, "thread.id");
+    const status = projectNativeStatus(thread.status);
+    const loaded =
+      status === "idle" || status === "active" || status === "systemError";
+    if (
+      forceUnavailable ||
+      controlled.archivedThreadIds.has(threadId) ||
+      !loaded
+    ) {
+      return projectExternalThread(thread, null);
+    }
+
+    let settings = controlled.threadSettings.get(threadId);
+    if (settings === undefined) {
+      try {
+        const resumed = await controlled.driver.threadResume({
+          threadId,
+          excludeTurns: true,
+        });
+        settings = threadSettingsFromResume(resumed);
+      } catch {
+        return projectExternalThread(thread, null);
+      }
+    } else {
+      settings = {
+        ...settings,
+        modelProvider:
+          nativeString(thread.modelProvider) ?? settings.modelProvider,
+      };
+    }
+    controlled.threadSettings.set(threadId, settings);
+    return projectExternalThread(thread, settings.model);
   }
 
   async #applyThreadCommand(
@@ -1618,6 +1674,21 @@ export class ServiceExternalRuntimeController {
     controlled: ControlledRuntime,
     event: NeutralExternalRuntimeEvent,
   ): Promise<void> {
+    if (
+      event.threadId !== undefined &&
+      (event.method === "thread/closed" ||
+        event.method === "thread/archived" ||
+        event.method === "thread/deleted")
+    ) {
+      controlled.threadSettings.delete(event.threadId);
+      controlled.threadUsage.delete(event.threadId);
+    }
+    if (event.threadId !== undefined && event.method === "thread/archived") {
+      controlled.archivedThreadIds.add(event.threadId);
+    }
+    if (event.threadId !== undefined && event.method === "thread/unarchived") {
+      controlled.archivedThreadIds.delete(event.threadId);
+    }
     if (event.threadId !== undefined && event.payload.settings !== undefined) {
       controlled.threadSettings.set(event.threadId, {
         model: event.payload.settings.model,
@@ -2374,7 +2445,10 @@ function commandExecutionResult(
   };
 }
 
-function projectExternalThread(value: unknown): ExternalThreadProjection {
+function projectExternalThread(
+  value: unknown,
+  effectiveModel: string | null,
+): ExternalThreadProjection {
   const thread = requireNativeRecord(value, "thread");
   return {
     threadId: requireNativeString(thread.id, "thread.id"),
@@ -2383,6 +2457,7 @@ function projectExternalThread(value: unknown): ExternalThreadProjection {
     preview: nativeString(thread.preview) ?? "",
     ephemeral: thread.ephemeral === true,
     modelProvider: nativeString(thread.modelProvider) ?? "unknown",
+    effectiveModel,
     createdAt: nativeNumber(thread.createdAt) ?? 0,
     updatedAt: nativeNumber(thread.updatedAt) ?? 0,
     status: projectNativeStatus(thread.status),

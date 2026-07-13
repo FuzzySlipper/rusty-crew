@@ -551,6 +551,8 @@ test("controller atomically creates and idempotently reuses an external agent se
     const created = await fixture.controller.createAgentSession(request);
     assert.equal(created.creation.phase, "ready");
     assert.equal(created.thread.threadId, "created-thread-1");
+    assert.equal(created.thread.modelProvider, "openai");
+    assert.equal(created.thread.effectiveModel, "gpt-5.4");
     assert.equal(created.creation.session.profileId, fixture.profileId);
     assert.equal(created.creation.binding.nativeThreadId, "created-thread-1");
     assert.deepEqual(created.creation.request.taskRef, {
@@ -734,6 +736,115 @@ test("external commands use native catalogs and settings without creating turns"
     assert.equal(
       fixture.transport.sent.some((message) => message.method === "turn/start"),
       false,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("thread list and read project the authoritative next-effective model", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "effective-model-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const threadId = created.thread.threadId;
+
+    const initialList = await fixture.controller.listThreads(
+      fixture.runtimeId,
+      { limit: 50, archived: false },
+    );
+    assert.equal(initialList.items[0]?.modelProvider, "openai");
+    assert.equal(initialList.items[0]?.effectiveModel, "gpt-5.4");
+    assert.equal(
+      (
+        await fixture.controller.readThread(fixture.runtimeId, {
+          threadId,
+          includeTurns: false,
+        })
+      ).thread.effectiveModel,
+      "gpt-5.4",
+    );
+
+    fixture.transport.threadSettings.set(threadId, {
+      model: "gpt-5.4-mini",
+      modelProvider: "openai",
+      effort: "medium",
+    });
+    fixture.transport.emit({
+      method: "thread/settings/updated",
+      params: {
+        threadId,
+        threadSettings: fakeNativeThreadSettings({
+          model: "gpt-5.4-mini",
+          modelProvider: "openai",
+          effort: "medium",
+        }),
+      },
+    });
+    await waitUntil(
+      async () =>
+        (
+          await fixture.controller.readThread(fixture.runtimeId, {
+            threadId,
+            includeTurns: false,
+          })
+        ).thread.effectiveModel === "gpt-5.4-mini",
+      "sticky per-turn model settings projection",
+    );
+    assert.equal(
+      (
+        await fixture.controller.listThreads(fixture.runtimeId, {
+          limit: 50,
+          archived: false,
+        })
+      ).items[0]?.effectiveModel,
+      "gpt-5.4-mini",
+    );
+
+    const nativeThread = fixture.transport.threads.find(
+      (thread) => thread.id === threadId,
+    );
+    assert.ok(nativeThread);
+    nativeThread.status = { type: "notLoaded" };
+    assert.equal(
+      (
+        await fixture.controller.readThread(fixture.runtimeId, {
+          threadId,
+          includeTurns: false,
+        })
+      ).thread.effectiveModel,
+      null,
+    );
+    assert.equal(
+      (
+        await fixture.controller.listThreads(fixture.runtimeId, {
+          limit: 50,
+          archived: false,
+        })
+      ).items[0]?.effectiveModel,
+      null,
+    );
+
+    nativeThread.status = { type: "idle" };
+    await fixture.controller.archiveThread(fixture.runtimeId, threadId);
+    const archivedList = await fixture.controller.listThreads(
+      fixture.runtimeId,
+      { limit: 50, archived: true },
+    );
+    assert.equal(archivedList.items[0]?.effectiveModel, null);
+    assert.equal(
+      (
+        await fixture.controller.readThread(fixture.runtimeId, {
+          threadId,
+          includeTurns: false,
+        })
+      ).thread.effectiveModel,
+      null,
     );
   } finally {
     await fixture.cleanup();

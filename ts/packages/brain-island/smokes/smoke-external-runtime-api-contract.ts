@@ -18,7 +18,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.6.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.7.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -65,6 +65,13 @@ assert.deepEqual(schema("ExternalThreadPage").required, [
   "backwardsCursor",
 ]);
 assert.ok(schema("ExternalThreadProjection").properties?.turns);
+assert.ok(
+  schema("ExternalThreadProjection").required?.includes("effectiveModel"),
+);
+assert.deepEqual(
+  propertySchema("ExternalThreadProjection", "effectiveModel").type,
+  ["string", "null"],
+);
 assert.ok(schema("ExternalThreadTurnProjection").properties?.items);
 assert.ok(schema("ExternalThreadItemProjection").properties?.text);
 assert.deepEqual(
@@ -173,6 +180,7 @@ interface Operation {
 interface JsonSchema {
   const?: unknown;
   enum?: string[];
+  type?: string | string[];
   required?: string[];
   properties?: Record<string, unknown>;
 }

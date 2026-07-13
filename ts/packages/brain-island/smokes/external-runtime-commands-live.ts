@@ -51,6 +51,19 @@ assert.ok(
   "live model/list returned no models",
 );
 const before = await readThread(binding.runtimeId, binding.nativeThreadId);
+assert.equal(before.thread.modelProvider, "openai");
+assert.equal(before.thread.effectiveModel, initialCatalog.settings.model);
+assert.notEqual(
+  before.thread.effectiveModel,
+  before.thread.modelProvider,
+  "exact model projection collapsed to the generic provider id",
+);
+assert.equal(
+  (await listThreads(binding.runtimeId)).items.find(
+    (thread) => thread.threadId === binding.nativeThreadId,
+  )?.effectiveModel,
+  initialCatalog.settings.model,
+);
 const eventCursor = await latestEventCursor(binding.runtimeId);
 
 const status = await command(binding.bindingId, "/status", `${runId}:status`);
@@ -81,6 +94,17 @@ const modelResult = await command(
 );
 assert.equal(modelResult.status, "applied");
 assert.equal(modelResult.result.settings?.model, selectedModel.model);
+assert.equal(
+  (await readThread(binding.runtimeId, binding.nativeThreadId)).thread
+    .effectiveModel,
+  selectedModel.model,
+);
+assert.equal(
+  (await listThreads(binding.runtimeId)).items.find(
+    (thread) => thread.threadId === binding.nativeThreadId,
+  )?.effectiveModel,
+  selectedModel.model,
+);
 
 const effortResult = await command(
   binding.bindingId,
@@ -169,6 +193,7 @@ console.log(
     nativeThreadId: binding.nativeThreadId,
     modelCount: initialCatalog.models.length,
     selectedModel: selectedModel.model,
+    projectedInitialModel: before.thread.effectiveModel,
     selectedEffort: selectedEffort.value,
     selectedSettingsTurnId: liveTurn.nativeTurnId,
     statusCommandId: status.commandId,
@@ -261,11 +286,19 @@ async function readThread(
   runtimeId: string,
   threadId: string,
 ): Promise<{
-  thread: { turns: unknown[] };
+  thread: ExternalThread;
 }> {
   return apiPost(
     `/v1/external-runtimes/${encodeURIComponent(runtimeId)}/threads/read`,
     { threadId, includeTurns: true },
+  );
+}
+
+async function listThreads(
+  runtimeId: string,
+): Promise<{ items: ExternalThread[] }> {
+  return apiGet(
+    `/v1/external-runtimes/${encodeURIComponent(runtimeId)}/threads?limit=100&archived=false`,
   );
 }
 
@@ -380,4 +413,11 @@ interface ExternalTurn {
   phase: string;
   nativeTurnId?: string;
   nativeThreadId?: string;
+}
+
+interface ExternalThread {
+  threadId: string;
+  modelProvider: string;
+  effectiveModel: string | null;
+  turns: unknown[];
 }
