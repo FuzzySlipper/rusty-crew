@@ -11,6 +11,12 @@ The local machine has two first-class service roots. See
 - live agent service: `/home/system/rusty-crew`, port `9347`, PostgreSQL;
 - debug/test service: `/home/system/rusty-crew-debug`, port `9348`, SQLite.
 
+Set `RUSTY_CREW_DEPLOYMENT_ROLE=production` for the live service and
+`RUSTY_CREW_DEPLOYMENT_ROLE=debug` for the debug service. Operator messaging
+uses the separately named clients documented in
+`docs/agent-coordination-operator-clients.md`; there is no shared command with a
+service URL or debug selector.
+
 Use the debug service for smoke tests, Rusty View live certification, and
 disposable LLM-backed experiments.
 

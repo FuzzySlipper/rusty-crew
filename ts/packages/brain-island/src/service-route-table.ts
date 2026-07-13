@@ -2,6 +2,7 @@ import { isChatRoute } from "./service-chat-stream-routes.js";
 import { isProfileRegistryWriteRoute } from "./service-profile-registry-routes.js";
 import { isRoleplayBrowserRoute } from "./service-roleplay-routes.js";
 import { isExternalRuntimeRoute } from "./service-external-runtime-routes.js";
+import { isCoordinationOperatorRoute } from "./service-coordination-operator-routes.js";
 
 export type ServiceApiRouteId =
   | "admin.healthz"
@@ -9,6 +10,7 @@ export type ServiceApiRouteId =
   | "admin.control"
   | "chat"
   | "external_runtime"
+  | "coordination_operator"
   | "debug"
   | "admin.scheduler"
   | "admin.mcp.catalog"
@@ -60,6 +62,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     (path) => path.startsWith("/v1/admin/control/"),
   ),
   route("chat", 110, "after_auth", "Rusty View chat routes", isChatRoute),
+  route(
+    "coordination_operator",
+    112,
+    "after_auth",
+    "Deployment-bound operator agent coordination",
+    isCoordinationOperatorRoute,
+  ),
   route(
     "external_runtime",
     115,

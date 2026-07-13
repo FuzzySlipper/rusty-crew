@@ -369,6 +369,116 @@
         "public": true
       },
       {
+        "id": "coordination.production.agents.list",
+        "method": "GET",
+        "path_template": "/v1/coordination/agents",
+        "description": "List recipients on the production deployment.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.messages.create",
+        "method": "POST",
+        "path_template": "/v1/coordination/messages",
+        "description": "Send a TTL-bound operator message on the production deployment.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.rounds.create",
+        "method": "POST",
+        "path_template": "/v1/coordination/rounds",
+        "description": "Start a durable operator correlated round on the production deployment.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.rounds.read",
+        "method": "GET",
+        "path_template": "/v1/coordination/rounds/{round_id}",
+        "description": "Read a production operator correlated round.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.deliveries.read",
+        "method": "GET",
+        "path_template": "/v1/coordination/deliveries/{delivery_id}",
+        "description": "Read a production operator delivery receipt.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.agents.list",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/agents",
+        "description": "List recipients on the explicitly configured debug deployment.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.messages.create",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/messages",
+        "description": "Send a TTL-bound operator message on the explicitly configured debug deployment.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.rounds.create",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/rounds",
+        "description": "Start a durable operator correlated round on the explicitly configured debug deployment.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.rounds.read",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/rounds/{round_id}",
+        "description": "Read a debug operator correlated round.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.deliveries.read",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/deliveries/{delivery_id}",
+        "description": "Read a debug operator delivery receipt.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "admin.storage.schema",
         "method": "GET",
         "path_template": "/v1/admin/storage/schema",
@@ -2077,6 +2187,76 @@
         "method": "GET",
         "path_template": "/v1/agent-deliveries/{delivery_id}",
         "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.agents.list",
+        "method": "GET",
+        "path_template": "/v1/coordination/agents",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.messages.create",
+        "method": "POST",
+        "path_template": "/v1/coordination/messages",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.rounds.create",
+        "method": "POST",
+        "path_template": "/v1/coordination/rounds",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.rounds.read",
+        "method": "GET",
+        "path_template": "/v1/coordination/rounds/{round_id}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.deliveries.read",
+        "method": "GET",
+        "path_template": "/v1/coordination/deliveries/{delivery_id}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.agents.list",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/agents",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.messages.create",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/messages",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.rounds.create",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/rounds",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.rounds.read",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/rounds/{round_id}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.deliveries.read",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/deliveries/{delivery_id}",
+        "route_id": "coordination_operator",
         "auth_phase": "after_auth"
       },
       {

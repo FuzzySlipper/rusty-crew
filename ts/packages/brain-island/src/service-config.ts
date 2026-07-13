@@ -28,6 +28,7 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_BACKUP_DIR?: string;
   RUSTY_CREW_STATIC_DIR?: string;
   RUSTY_CREW_DEFAULT_WORKDIR?: string;
+  RUSTY_CREW_DEPLOYMENT_ROLE?: string;
   RUSTY_CREW_ADMIN_HOST?: string;
   RUSTY_CREW_ADMIN_PORT?: string;
   RUSTY_CREW_ADMIN_ALLOW_LAN?: string;
@@ -146,6 +147,7 @@ export interface RustyCrewTelegramConfig {
 }
 
 export type RustyCrewStorageBackend = "sqlite" | "postgres";
+export type RustyCrewDeploymentRole = "production" | "debug";
 
 export interface RustyCrewSqliteStorageConfig {
   path: string;
@@ -170,6 +172,7 @@ export interface RustyCrewStorageConfig {
 }
 
 export interface RustyCrewServiceConfig {
+  deploymentRole: RustyCrewDeploymentRole;
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
   openAiOauth: RustyCrewOpenAiOauthConfig;
@@ -233,6 +236,7 @@ export function loadRustyCrewServiceConfig(
   };
   paths.serviceConfigFile = join(paths.configDir, "service.json");
   paths.lockFile = join(paths.runDir, "service.lock");
+  const deploymentRole = parseDeploymentRole(env.RUSTY_CREW_DEPLOYMENT_ROLE);
 
   const admin: RustyCrewAdminConfig = {
     host: normalizeHost(
@@ -305,6 +309,7 @@ export function loadRustyCrewServiceConfig(
     normalizeOptional(env[name]) !== undefined;
 
   validateRustyCrewServiceConfig({
+    deploymentRole,
     paths,
     admin,
     openAiOauth,
@@ -318,6 +323,7 @@ export function loadRustyCrewServiceConfig(
     denSuccessorGateway,
   });
   return {
+    deploymentRole,
     paths,
     admin,
     openAiOauth,
@@ -330,6 +336,18 @@ export function loadRustyCrewServiceConfig(
     environmentVariablePresent,
     denSuccessorGateway,
   };
+}
+
+function parseDeploymentRole(
+  value: string | undefined,
+): RustyCrewDeploymentRole {
+  const normalized = normalizeOptional(value) ?? "production";
+  if (normalized === "production" || normalized === "debug") {
+    return normalized;
+  }
+  throw new Error(
+    "RUSTY_CREW_DEPLOYMENT_ROLE must be either production or debug",
+  );
 }
 
 export function loadDenSuccessorGatewayConfig(

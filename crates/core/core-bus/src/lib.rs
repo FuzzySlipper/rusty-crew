@@ -253,7 +253,8 @@ fn event_mentions_session(event: &CoreEvent, session_id: &SessionId) -> bool {
                 || &lifecycle.delegated_session_id == session_id
         }
         CoreEvent::AgentRoundObserved { round } => {
-            &round.sender_session_id == session_id || &round.recipient_session_id == session_id
+            round.sender_session_id.as_ref() == Some(session_id)
+                || &round.recipient_session_id == session_id
         }
         CoreEvent::AgentMessageRouted { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }

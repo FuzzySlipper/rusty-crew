@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 23;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 24;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -129,6 +129,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 23,
         description: "add idempotent external agent session creation records",
         apply: Some(apply_postgres_external_agent_session_creations),
+    },
+    PostgresSchemaMigration {
+        version: 24,
+        description: "allow system operator correlated rounds without fake sessions",
+        apply: Some(apply_postgres_operator_agent_rounds),
     },
 ];
 
@@ -1128,6 +1133,14 @@ fn apply_postgres_agent_coordination(tx: &mut Transaction<'_>, schema: &str) -> 
             ON {schema}.agent_correlated_rounds(status, expires_at, recipient_agent_id);"
     ))
     .map_err(|error| postgres_error("apply PostgreSQL agent coordination migration", error))
+}
+
+fn apply_postgres_operator_agent_rounds(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.agent_correlated_rounds
+            ALTER COLUMN sender_session_id DROP NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("apply PostgreSQL operator agent rounds migration", error))
 }
 
 fn apply_postgres_chat_event_log(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {

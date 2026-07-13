@@ -1101,7 +1101,7 @@ impl PostgresBackendStore {
                 &record.round_id.0,
                 &record.idempotency_key,
                 &record.sender_agent_id.0,
-                &record.sender_session_id.0,
+                &record.sender_session_id.as_ref().map(|id| id.0.as_str()),
                 &record.recipient_agent_id.0,
                 &record.recipient_session_id.0,
                 &record.correlation_id,

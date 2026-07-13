@@ -150,6 +150,8 @@
     "smoke:external-runtime-service-live": "tsx smokes/external-runtime-service-live.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
+    "agent:coordination": "tsx src/coordination-operator-production-cli.ts",
+    "agent:coordination:debug": "tsx src/coordination-operator-debug-cli.ts",
     "cron": "tsx src/cron-cli.ts",
     "generate:tool-registry-artifact": "tsx src/generate-tool-registry-artifact.ts"
   },

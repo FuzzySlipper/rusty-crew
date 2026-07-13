@@ -151,6 +151,8 @@
     "cron": "npm run cron -w @rusty-crew/brain-island --",
     "service:preflight": "npm run service:preflight -w @rusty-crew/service-host",
     "service:start": "npm run service:start -w @rusty-crew/service-host",
+    "agent:coordination": "npm run agent:coordination -w @rusty-crew/brain-island --",
+    "agent:coordination:debug": "npm run agent:coordination:debug -w @rusty-crew/brain-island --",
     "smoke:den": "npm run smoke -w @rusty-crew/adapter-den",
     "smoke:den-router-metadata": "npm run smoke:router-metadata -w @rusty-crew/adapter-den",
     "smoke:den-completion-evidence": "npm run smoke:completion-evidence -w @rusty-crew/adapter-den",

@@ -263,6 +263,7 @@ import {
 } from "./service-route-table.js";
 import { ServiceExternalRuntimeController } from "./service-external-runtime.js";
 import { handleExternalRuntimeRequest } from "./service-external-runtime-routes.js";
+import { handleCoordinationOperatorRequest } from "./service-coordination-operator-routes.js";
 import {
   controlUrlForSlashCommand,
   executeRustyViewChatCommand,
@@ -1319,6 +1320,16 @@ async function handleHttpRequest(
       }),
       request,
     );
+  }
+
+  if (route?.id === "coordination_operator") {
+    return handleCoordinationOperatorRequest(request, url, {
+      bridge: state.bridge,
+      deploymentRole: state.config.deploymentRole,
+      now: state.now,
+      requestId,
+      readJsonBody,
+    });
   }
 
   if (route?.id === "debug") {

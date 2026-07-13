@@ -173,6 +173,32 @@ impl CoreEngine {
                 Some("agent_message_expired".into()),
             );
         }
+        let message = AgentMessage {
+            from: sender_agent_id.clone(),
+            to: command.to_agent_id.clone(),
+            body: command.body.clone(),
+            correlation_id: command.correlation_id.clone(),
+            projection: None,
+        };
+        if let Some(round) = self.matching_agent_round(&message)? {
+            let sequence = self.bus.publish(CoreEvent::AgentMessageRouted {
+                message: message.clone(),
+            })?;
+            let round = self.resolve_agent_round_reply(
+                round,
+                &message,
+                &command.message_id,
+                &command.created_at,
+            )?;
+            return self.finish_agent_message_delivery(
+                pending,
+                AgentMessageDeliveryStatus::Accepted,
+                Some(sequence),
+                None,
+                Some(round.round_id),
+                None,
+            );
+        }
         let session = match self.sessions.get_session_by_agent(&command.to_agent_id) {
             Ok(session) if session.status != SessionStatus::Archived => session,
             Ok(_) => {
@@ -214,30 +240,10 @@ impl CoreEngine {
             );
         }
 
-        let message = AgentMessage {
-            from: sender_agent_id.clone(),
-            to: command.to_agent_id.clone(),
-            body: command.body.clone(),
-            correlation_id: command.correlation_id.clone(),
-            projection: None,
-        };
         let event = CoreEvent::AgentMessageRouted {
             message: message.clone(),
         };
         let sequence = self.bus.publish(event)?;
-
-        if let Some(round) =
-            self.resolve_matching_agent_round(&message, &command.message_id, &command.created_at)?
-        {
-            return self.finish_agent_message_delivery(
-                pending,
-                AgentMessageDeliveryStatus::Accepted,
-                Some(sequence),
-                None,
-                Some(round.round_id),
-                None,
-            );
-        }
 
         if !command.require_wake {
             return self.finish_agent_message_delivery(
@@ -311,12 +317,6 @@ impl CoreEngine {
     ) -> CoreResult<AgentRoundStartReceipt> {
         let (sender_agent_id, sender_session_id, sender_request_id) =
             self.resolve_coordination_caller(&command.caller)?;
-        let sender_session_id = sender_session_id.ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::ActionRejected,
-                "system callers cannot start correlated agent rounds",
-            )
-        })?;
         let recipient = self.sessions.get_session_by_agent(&command.to_agent_id)?;
         let round = AgentCorrelatedRound {
             round_id: command.round_id.clone(),
@@ -474,16 +474,14 @@ impl CoreEngine {
         }
     }
 
-    fn resolve_matching_agent_round(
+    fn matching_agent_round(
         &self,
         message: &AgentMessage,
-        reply_message_id: &str,
-        now: &IsoTimestamp,
     ) -> CoreResult<Option<AgentCorrelatedRound>> {
         let Some(correlation_id) = message.correlation_id.as_ref() else {
             return Ok(None);
         };
-        let Some(round) = self
+        Ok(self
             .store
             .list_pending_agent_rounds()?
             .into_iter()
@@ -491,10 +489,20 @@ impl CoreEngine {
                 round.sender_agent_id == message.to
                     && round.recipient_agent_id == message.from
                     && round.correlation_id == *correlation_id
-            })
-        else {
-            return Ok(None);
-        };
+            }))
+    }
+
+    fn resolve_agent_round_reply(
+        &self,
+        round: AgentCorrelatedRound,
+        message: &AgentMessage,
+        reply_message_id: &str,
+        now: &IsoTimestamp,
+    ) -> CoreResult<AgentCorrelatedRound> {
+        let correlation_id = message
+            .correlation_id
+            .as_ref()
+            .expect("matched round reply has a correlation id");
         if round.expires_at <= *now {
             let mut expired = round.clone();
             expired.status = AgentRoundStatus::Expired;
@@ -506,7 +514,7 @@ impl CoreEngine {
             self.bus.publish(CoreEvent::AgentRoundObserved {
                 round: expired.clone(),
             })?;
-            return Ok(Some(expired));
+            return Ok(expired);
         }
         let mut replied = round.clone();
         replied.reply_message_id = Some(reply_message_id.to_string());
@@ -524,7 +532,7 @@ impl CoreEngine {
         self.bus.publish(CoreEvent::AgentRoundObserved {
             round: replied.clone(),
         })?;
-        Ok(Some(replied))
+        Ok(replied)
     }
 
     fn finish_agent_message_delivery(

@@ -18,6 +18,11 @@ import {
   handleExternalRuntimeRequest,
   type ExternalRuntimeRouteContext,
 } from "../src/service-external-runtime-routes.js";
+import {
+  handleCoordinationOperatorRequest,
+  isCoordinationOperatorRoute,
+  type CoordinationOperatorRouteContext,
+} from "../src/service-coordination-operator-routes.js";
 import { ExternalThreadLifecycleError } from "../src/service-external-runtime.js";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
@@ -66,6 +71,89 @@ import type {
   LocalToolProfileStore,
   LocalToolProfileWrite,
 } from "../src/local-tool-profiles.js";
+
+test("coordination operator routes are deployment-bound and start system rounds", async () => {
+  let capturedRound: Record<string, unknown> | undefined;
+  const context = {
+    deploymentRole: "debug",
+    bridge: {
+      async listAgentDirectory() {
+        return [{ agentId: "agent-a", routable: true }];
+      },
+      async beginAgentRound(command: Record<string, unknown>) {
+        capturedRound = command;
+        return {
+          round: {
+            roundId: command.roundId,
+            recipientAgentId: command.toAgentId,
+            status: "pending",
+            terminalReasonCode: null,
+          },
+          delivery: {
+            request: { deliveryId: `round-delivery:${command.roundId}` },
+          },
+        };
+      },
+    },
+    now: () => "2026-07-12T00:00:00.000Z",
+    requestId: () => "req-coordination-operator",
+    readJsonBody: async () => ({
+      toAgentId: "agent-a",
+      body: "reply through the correlated round",
+      roundId: "round-a",
+      idempotencyKey: "round-key-a",
+      messageId: "message-a",
+      correlationId: "correlation-a",
+      ttlMs: 5_000,
+    }),
+  } as unknown as CoordinationOperatorRouteContext;
+
+  assert.equal(isCoordinationOperatorRoute("/v1/coordination/agents"), true);
+  assert.equal(
+    isCoordinationOperatorRoute("/v1/debug/coordination/agents"),
+    true,
+  );
+  const wrongRole = await handleCoordinationOperatorRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL("http://local/v1/coordination/agents"),
+    context,
+  );
+  assert.equal((wrongRole as AdminRouteResult).status, 409);
+  assert.equal(
+    errorReason(wrongRole as AdminRouteResult),
+    "coordination_deployment_role_mismatch",
+  );
+
+  const listed = await handleCoordinationOperatorRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/agents"),
+    context,
+  );
+  assert.equal(
+    okData<{ deploymentRole: string }>(listed as AdminRouteResult)
+      .deploymentRole,
+    "debug",
+  );
+
+  const started = await handleCoordinationOperatorRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/rounds"),
+    context,
+  );
+  assert.equal(
+    okData<{ roundId: string }>(started as AdminRouteResult).roundId,
+    "round-a",
+  );
+  assert.deepEqual(capturedRound?.caller, {
+    type: "system",
+    senderAgentId: "rusty-crew-debug-operator",
+  });
+  assert.match(
+    String(capturedRound?.body),
+    /recipient rusty-crew-debug-operator/,
+  );
+  assert.match(String(capturedRound?.body), /correlationId correlation-a/);
+});
 
 test("external session route translates generated Den task reference wire fields", async () => {
   let captured: ExternalAgentSessionCreationRequest | undefined;

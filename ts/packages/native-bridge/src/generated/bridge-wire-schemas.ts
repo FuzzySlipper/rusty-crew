@@ -4237,7 +4237,10 @@ export const bridgeWireSchemaArtifact = {
           ]
         },
         "senderSessionId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "enum": [
@@ -4266,7 +4269,6 @@ export const bridgeWireSchemaArtifact = {
         "roundId",
         "idempotencyKey",
         "senderAgentId",
-        "senderSessionId",
         "recipientAgentId",
         "recipientSessionId",
         "messageId",
@@ -15972,7 +15974,10 @@ export const bridgeWireSchemaArtifact = {
               ]
             },
             "senderSessionId": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "status": {
               "enum": [
@@ -16001,7 +16006,6 @@ export const bridgeWireSchemaArtifact = {
             "roundId",
             "idempotencyKey",
             "senderAgentId",
-            "senderSessionId",
             "recipientAgentId",
             "recipientSessionId",
             "messageId",

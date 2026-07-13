@@ -263,7 +263,10 @@
           ]
         },
         "senderSessionId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/$defs/AgentRoundStatus"
@@ -285,7 +288,6 @@
         "roundId",
         "idempotencyKey",
         "senderAgentId",
-        "senderSessionId",
         "recipientAgentId",
         "recipientSessionId",
         "messageId",

@@ -201,6 +201,38 @@ pub(crate) fn migrate_v38_add_external_agent_session_creations(
     .map_err(|error| persistence_error("apply schema migration 38", error))
 }
 
+pub(crate) fn migrate_v39_allow_operator_agent_rounds(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE agent_correlated_rounds_v39 (
+            round_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            sender_agent_id TEXT NOT NULL,
+            sender_session_id TEXT,
+            recipient_agent_id TEXT NOT NULL,
+            recipient_session_id TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            FOREIGN KEY(sender_session_id) REFERENCES sessions(session_id),
+            FOREIGN KEY(recipient_session_id) REFERENCES sessions(session_id)
+         );
+         INSERT INTO agent_correlated_rounds_v39
+            SELECT * FROM agent_correlated_rounds;
+         DROP TABLE agent_correlated_rounds;
+         ALTER TABLE agent_correlated_rounds_v39 RENAME TO agent_correlated_rounds;
+         CREATE UNIQUE INDEX agent_correlated_rounds_pending_correlation_idx
+            ON agent_correlated_rounds(sender_agent_id, recipient_agent_id, correlation_id)
+            WHERE status = 'pending';
+         CREATE INDEX agent_correlated_rounds_pending_idx
+            ON agent_correlated_rounds(status, expires_at, recipient_agent_id);",
+    )
+    .map_err(|error| persistence_error("apply schema migration 39", error))
+}
+
 impl CoordinationStore {
     pub fn put_external_runtime_registration(
         &self,
@@ -1147,7 +1179,7 @@ impl CoordinationStore {
                 record.round_id.0,
                 record.idempotency_key,
                 record.sender_agent_id.0,
-                record.sender_session_id.0,
+                record.sender_session_id.as_ref().map(|id| id.0.as_str()),
                 record.recipient_agent_id.0,
                 record.recipient_session_id.0,
                 record.correlation_id,
@@ -1617,7 +1649,7 @@ mod tests {
             round_id: AgentRoundId::new("round-a"),
             idempotency_key: "round-key-a".into(),
             sender_agent_id: AgentId::new("agent-a"),
-            sender_session_id: SessionId::new("session-a"),
+            sender_session_id: Some(SessionId::new("session-a")),
             recipient_agent_id: AgentId::new("agent-b"),
             recipient_session_id: SessionId::new("session-b"),
             sender_request_id: None,

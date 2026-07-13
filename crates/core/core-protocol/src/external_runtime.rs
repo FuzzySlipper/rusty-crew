@@ -693,7 +693,7 @@ pub struct AgentCorrelatedRound {
     pub round_id: AgentRoundId,
     pub idempotency_key: String,
     pub sender_agent_id: AgentId,
-    pub sender_session_id: SessionId,
+    pub sender_session_id: Option<SessionId>,
     pub recipient_agent_id: AgentId,
     pub recipient_session_id: SessionId,
     pub sender_request_id: Option<ExternalTurnRequestId>,

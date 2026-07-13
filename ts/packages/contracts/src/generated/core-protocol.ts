@@ -113,7 +113,7 @@ export type AgentCorrelatedRound = {
   roundId: string;
   senderAgentId: string;
   senderRequestId?: string | null;
-  senderSessionId: string;
+  senderSessionId?: string | null;
   status: AgentRoundStatus;
   terminalAt?: string | null;
   terminalReasonCode?: string | null;

@@ -2770,10 +2770,12 @@ fn postgres_event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
         | CoreEvent::BrainEventObserved { session_id, .. }
         | CoreEvent::BrainActionsAccepted { session_id, .. } => vec![session_id.clone()],
         CoreEvent::CompletionPacketDelivered { packet } => vec![packet.session_id.clone()],
-        CoreEvent::AgentRoundObserved { round } => vec![
-            round.sender_session_id.clone(),
-            round.recipient_session_id.clone(),
-        ],
+        CoreEvent::AgentRoundObserved { round } => round
+            .sender_session_id
+            .iter()
+            .cloned()
+            .chain(std::iter::once(round.recipient_session_id.clone()))
+            .collect(),
         CoreEvent::AgentMessageRouted { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
@@ -15183,7 +15185,7 @@ mod tests {
             round_id: rusty_crew_core_protocol::AgentRoundId::new("round-a"),
             idempotency_key: "round-key-a".into(),
             sender_agent_id: session.agent_id,
-            sender_session_id: session.session_id,
+            sender_session_id: Some(session.session_id),
             recipient_agent_id: recipient.agent_id,
             recipient_session_id: recipient.session_id,
             sender_request_id: Some(turn.request.request_id),

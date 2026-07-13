@@ -3384,6 +3384,218 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/coordination/agents": {
+      "get": {
+        "operationId": "coordinationProductionAgentsList",
+        "summary": "List recipients on the production deployment.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.agents.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "coordinationProductionDeliveriesRead",
+        "summary": "Read a production operator delivery receipt.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.deliveries.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/messages": {
+      "post": {
+        "operationId": "coordinationProductionMessagesCreate",
+        "summary": "Send a TTL-bound operator message on the production deployment.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.messages.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/rounds": {
+      "post": {
+        "operationId": "coordinationProductionRoundsCreate",
+        "summary": "Start a durable operator correlated round on the production deployment.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.rounds.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/rounds/{round_id}": {
+      "get": {
+        "operationId": "coordinationProductionRoundsRead",
+        "summary": "Read a production operator correlated round.",
+        "tags": ["session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.rounds.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/agents": {
+      "get": {
+        "operationId": "coordinationDebugAgentsList",
+        "summary": "List recipients on the explicitly configured debug deployment.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.agents.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "coordinationDebugDeliveriesRead",
+        "summary": "Read a debug operator delivery receipt.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.deliveries.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/messages": {
+      "post": {
+        "operationId": "coordinationDebugMessagesCreate",
+        "summary": "Send a TTL-bound operator message on the explicitly configured debug deployment.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.messages.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/rounds": {
+      "post": {
+        "operationId": "coordinationDebugRoundsCreate",
+        "summary": "Start a durable operator correlated round on the explicitly configured debug deployment.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.rounds.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/rounds/{round_id}": {
+      "get": {
+        "operationId": "coordinationDebugRoundsRead",
+        "summary": "Read a debug operator correlated round.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.rounds.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/external-agent-sessions": {
       "post": {
         "operationId": "externalAgentSessionsCreate",
@@ -4132,7 +4344,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 159,
+    "capability_count": 169,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

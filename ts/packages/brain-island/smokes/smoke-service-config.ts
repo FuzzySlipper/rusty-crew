@@ -25,11 +25,20 @@ import {
 import { loadRustyCrewRuntimeConfig } from "../src/service-runtime-config.js";
 
 assert.throws(() => loadRustyCrewServiceConfig({}), /RUSTY_CREW_ADMIN_TOKEN/);
+assert.throws(
+  () =>
+    loadRustyCrewServiceConfig({
+      RUSTY_CREW_ADMIN_TOKEN: "local-token",
+      RUSTY_CREW_DEPLOYMENT_ROLE: "staging",
+    }),
+  /RUSTY_CREW_DEPLOYMENT_ROLE/,
+);
 
 const defaultConfig = loadRustyCrewServiceConfig({
   RUSTY_CREW_ADMIN_TOKEN: "default-token",
 });
 assert.equal(defaultConfig.paths.dataDir, RUSTY_CREW_DEFAULT_DATA_DIR);
+assert.equal(defaultConfig.deploymentRole, "production");
 assert.equal(defaultConfig.paths.defaultWorkdir, RUSTY_CREW_DEFAULT_WORKDIR);
 assert.equal(
   defaultConfig.paths.staticDir,
@@ -91,6 +100,7 @@ const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
   const config = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_DEPLOYMENT_ROLE: "debug",
     RUSTY_CREW_DEFAULT_WORKDIR: join(root, "work"),
     RUSTY_CREW_ADMIN_PORT: "19447",
     RUSTY_CREW_ADMIN_TOKEN: "local-token",
@@ -126,6 +136,7 @@ try {
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
+  assert.equal(config.deploymentRole, "debug");
   assert.equal(
     config.paths.serviceConfigFile,
     join(root, "config", "service.json"),

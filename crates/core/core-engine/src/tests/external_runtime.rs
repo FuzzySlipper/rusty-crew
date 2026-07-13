@@ -661,6 +661,74 @@ fn durable_agent_round_resolves_reply_without_second_wake() {
 }
 
 #[test]
+fn system_operator_round_resolves_without_fake_sender_session() {
+    let data_dir = unique_data_dir("operator-round-reply");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let recipient = engine
+        .create_session(session_config(
+            "recipient-session",
+            "recipient-agent",
+            "recipient-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+
+    let started = engine
+        .begin_agent_round(AgentRoundCommand {
+            caller: AgentCoordinationCaller::System {
+                sender_agent_id: AgentId::new("rusty-crew-debug-operator"),
+            },
+            round_id: AgentRoundId::new("operator-round-1"),
+            idempotency_key: "operator-round-key-1".into(),
+            message_id: "operator-round-message-1".into(),
+            to_agent_id: recipient.agent_id.clone(),
+            body: "report back".into(),
+            correlation_id: "operator-correlation-1".into(),
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(started.round.sender_session_id, None);
+    assert_eq!(started.round.status, AgentRoundStatus::Pending);
+
+    let reply = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::DirectBrain {
+                session_id: recipient.session_id,
+                wake_id: "recipient-wake".into(),
+                tool_call_id: "reply-call".into(),
+            },
+            delivery_id: AgentMessageDeliveryId::new("operator-reply-delivery"),
+            idempotency_key: "operator-reply-key".into(),
+            message_id: "operator-reply-message".into(),
+            to_agent_id: AgentId::new("rusty-crew-debug-operator"),
+            body: "report complete".into(),
+            collaboration_mode: None,
+            correlation_id: Some("operator-correlation-1".into()),
+            require_wake: true,
+            created_at: "2026-06-19T00:00:01Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        reply.resolved_round_id,
+        Some(AgentRoundId::new("operator-round-1"))
+    );
+    assert!(reply.activation.is_none());
+
+    drop(engine);
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let round = restarted
+        .get_agent_round(&AgentRoundId::new("operator-round-1"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(round.status, AgentRoundStatus::Replied);
+    assert_eq!(round.sender_session_id, None);
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
 fn active_external_recipient_queues_without_brain_wake() {
     let engine = test_engine();
     let sender = engine

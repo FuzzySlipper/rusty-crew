@@ -1205,7 +1205,7 @@
           "roundId": { "type": "string" },
           "senderAgentId": { "type": "string" },
           "senderRequestId": { "type": ["string", "null"] },
-          "senderSessionId": { "type": "string" },
+          "senderSessionId": { "type": ["string", "null"] },
           "status": { "$ref": "#/components/schemas/AgentRoundStatus" },
           "terminalAt": { "type": ["string", "null"] },
           "terminalReasonCode": { "type": ["string", "null"] }
@@ -1214,7 +1214,6 @@
           "roundId",
           "idempotencyKey",
           "senderAgentId",
-          "senderSessionId",
           "recipientAgentId",
           "recipientSessionId",
           "messageId",
@@ -1225,6 +1224,51 @@
           "revision"
         ],
         "type": "object"
+      },
+      "AgentDirectoryEntry": {
+        "properties": {
+          "agentId": { "type": "string" },
+          "bindingId": { "type": ["string", "null"] },
+          "bindingStatus": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalBindingStatus" },
+              { "type": "null" }
+            ]
+          },
+          "displayLabel": { "type": "string" },
+          "profileId": { "type": "string" },
+          "routabilityReasonCode": { "type": ["string", "null"] },
+          "routable": { "type": "boolean" },
+          "runtimeId": { "type": ["string", "null"] },
+          "runtimeKind": {
+            "$ref": "#/components/schemas/AgentDirectoryRuntimeKind"
+          },
+          "sessionId": { "type": "string" },
+          "sessionKind": { "$ref": "#/components/schemas/SessionKind" },
+          "sessionStatus": { "$ref": "#/components/schemas/SessionStatus" },
+          "taskRef": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DenRuntimeReference" },
+              { "type": "null" }
+            ]
+          },
+          "workdir": { "type": ["string", "null"] }
+        },
+        "required": [
+          "agentId",
+          "sessionId",
+          "profileId",
+          "displayLabel",
+          "sessionKind",
+          "sessionStatus",
+          "runtimeKind",
+          "routable"
+        ],
+        "type": "object"
+      },
+      "AgentDirectoryRuntimeKind": {
+        "enum": ["direct_brain", "codex_app_server"],
+        "type": "string"
       },
       "AgentMessage": {
         "properties": {
