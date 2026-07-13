@@ -619,6 +619,7 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
 
     schema!("brain_catalog", brain_runtime::BrainCatalog);
     schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
+    schema!("list_agent_directory", Vec<protocol::AgentDirectoryEntry>);
     schema!(
         "deliver_agent_message",
         protocol::AgentMessageDeliveryReceipt

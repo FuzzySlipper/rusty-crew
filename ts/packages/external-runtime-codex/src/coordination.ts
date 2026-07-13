@@ -11,6 +11,17 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
     tools: [
       {
         type: "function",
+        name: "list_agents",
+        description:
+          "List agents addressable through this Rusty Crew service, including their stable recipient IDs.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+      {
+        type: "function",
         name: "send_agent_message",
         description: "Send a message to another Rusty Crew agent.",
         inputSchema: {

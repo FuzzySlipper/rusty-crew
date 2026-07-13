@@ -2624,6 +2624,119 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_SessionMemoryRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentDirectoryEntry>": {
+      "items": {
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "bindingId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bindingStatus": {
+            "enum": [
+              "active",
+              "paused",
+              "archived",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayLabel": {
+            "type": "string"
+          },
+          "profileId": {
+            "type": "string"
+          },
+          "routabilityReasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routable": {
+            "type": "boolean"
+          },
+          "runtimeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeKind": {
+            "enum": [
+              "direct_brain",
+              "codex_app_server"
+            ],
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "sessionKind": {
+            "enum": [
+              "full",
+              "worker",
+              "delegated"
+            ],
+            "type": "string"
+          },
+          "sessionStatus": {
+            "enum": [
+              "active",
+              "idle",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "taskRef": {
+            "properties": {
+              "project_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "task_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "workdir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "agentId",
+          "sessionId",
+          "profileId",
+          "displayLabel",
+          "sessionKind",
+          "sessionStatus",
+          "runtimeKind",
+          "routable"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_AgentDirectoryEntry",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>": {
       "items": {
         "properties": {
@@ -20011,6 +20124,7 @@ export const bridgeWireSchemaArtifact = {
     "get_roleplay_player_persona": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>",
     "get_roleplay_session_metadata": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
     "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
+    "list_agent_directory": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentDirectoryEntry>",
     "list_entries_by_layer": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin>",
     "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
     "list_external_runtimes": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",

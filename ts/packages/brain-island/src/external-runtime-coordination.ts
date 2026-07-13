@@ -1,5 +1,6 @@
 import type {
   AgentCorrelatedRound,
+  AgentDirectoryEntry,
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
   AgentRoundCommand,
@@ -23,6 +24,7 @@ export interface CodexCoordinationBinding {
 }
 
 export interface CodexCoordinationPort {
+  listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
   deliverAgentMessage(
     command: AgentMessageCommand,
   ): Promise<AgentMessageDeliveryReceipt>;
@@ -39,8 +41,24 @@ export async function resolveCodexCoordinationToolCall(input: {
 }): Promise<DynamicToolCallResponse | undefined> {
   const { params } = input;
   if (params.namespace !== COORDINATION_NAMESPACE) return undefined;
-  if (params.tool !== "send_agent_message" && params.tool !== "agent_round") {
+  if (
+    params.tool !== "list_agents" &&
+    params.tool !== "send_agent_message" &&
+    params.tool !== "agent_round"
+  ) {
     return failed(`unsupported Rusty Crew coordination tool ${params.tool}`);
+  }
+  if (params.tool === "list_agents") {
+    if (
+      params.arguments === null ||
+      typeof params.arguments !== "object" ||
+      Array.isArray(params.arguments) ||
+      Object.keys(params.arguments as Record<string, unknown>).length !== 0
+    ) {
+      return failed("list_agents does not accept arguments");
+    }
+    const agents = await input.port.listAgentDirectory();
+    return succeeded(formatAgentDirectory(agents));
   }
   const args = parseArguments(params.arguments);
   if (typeof args === "string") return failed(args);
@@ -165,4 +183,22 @@ function succeeded(text: string): DynamicToolCallResponse {
 
 function failed(text: string): DynamicToolCallResponse {
   return { success: false, contentItems: [{ type: "inputText", text }] };
+}
+
+function formatAgentDirectory(agents: readonly AgentDirectoryEntry[]): string {
+  if (agents.length === 0) {
+    return "No non-archived agents are registered on this Rusty Crew service.";
+  }
+  return [
+    "Agents on this Rusty Crew service:",
+    ...agents.map((agent) => {
+      const status = agent.routable
+        ? "routable"
+        : `unavailable (${agent.routabilityReasonCode ?? "unknown_reason"})`;
+      const task = agent.taskRef?.projectId
+        ? `; project=${agent.taskRef.projectId}`
+        : "";
+      return `- ${agent.displayLabel}: recipient=${agent.agentId}; profile=${agent.profileId}; runtime=${agent.runtimeKind}; status=${status}${task}`;
+    }),
+  ].join("\n");
 }

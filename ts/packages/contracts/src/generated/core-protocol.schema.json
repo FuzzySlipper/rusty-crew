@@ -297,6 +297,96 @@
       ],
       "type": "object"
     },
+    "AgentDirectoryEntry": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bindingStatus": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalBindingStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayLabel": {
+          "type": "string"
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "routabilityReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "routable": {
+          "type": "boolean"
+        },
+        "runtimeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeKind": {
+          "$ref": "#/$defs/AgentDirectoryRuntimeKind"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionKind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "sessionStatus": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "taskRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenRuntimeReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workdir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentId",
+        "sessionId",
+        "profileId",
+        "displayLabel",
+        "sessionKind",
+        "sessionStatus",
+        "runtimeKind",
+        "routable"
+      ],
+      "type": "object"
+    },
+    "AgentDirectoryRuntimeKind": {
+      "enum": [
+        "direct_brain",
+        "codex_app_server"
+      ],
+      "type": "string"
+    },
     "AgentMessage": {
       "properties": {
         "body": {
@@ -4791,6 +4881,9 @@
     "agent_correlated_round": {
       "$ref": "#/$defs/AgentCorrelatedRound"
     },
+    "agent_directory_entry": {
+      "$ref": "#/$defs/AgentDirectoryEntry"
+    },
     "agent_id": {
       "type": "string"
     },
@@ -5040,6 +5133,7 @@
     "context_compaction_artifact_query",
     "memory_governance_decision_input",
     "memory_governance_decision_record",
+    "agent_directory_entry",
     "agent_message_command",
     "agent_message_delivery_receipt",
     "agent_round_command",

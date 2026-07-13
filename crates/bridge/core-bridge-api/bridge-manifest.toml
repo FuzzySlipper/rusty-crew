@@ -361,6 +361,15 @@ errors = "core_protocol::CoreError"
 summary = "Queue a steer/follow-up message for the next Rust-owned wake with body-policy TTL and cap enforcement."
 
 [[operation]]
+name = "list_agent_directory"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::AgentDirectoryEntry>"
+errors = "core_protocol::CoreError"
+summary = "List same-service Crew agent recipients with Rust-owned runtime and routability projection."
+
+[[operation]]
 name = "deliver_agent_message"
 surface = "stable"
 direction = "ts_to_rust"

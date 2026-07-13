@@ -119,6 +119,25 @@ export type AgentCorrelatedRound = {
   terminalReasonCode?: string | null;
 };
 
+export type AgentDirectoryEntry = {
+  agentId: string;
+  bindingId?: string | null;
+  bindingStatus?: ExternalBindingStatus | null;
+  displayLabel: string;
+  profileId: string;
+  routabilityReasonCode?: string | null;
+  routable: boolean;
+  runtimeId?: string | null;
+  runtimeKind: AgentDirectoryRuntimeKind;
+  sessionId: string;
+  sessionKind: SessionKind;
+  sessionStatus: SessionStatus;
+  taskRef?: DenRuntimeReference | null;
+  workdir?: string | null;
+};
+
+export type AgentDirectoryRuntimeKind = "direct_brain" | "codex_app_server";
+
 export type AgentMessage = {
   body: string;
   correlationId?: string | null;

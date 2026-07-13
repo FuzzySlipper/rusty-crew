@@ -1,4 +1,4 @@
-import type { AgentId } from "@rusty-crew/contracts";
+import type { AgentDirectoryEntry, AgentId } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type {
@@ -19,6 +19,8 @@ const agentRoundParameters = Type.Object({
   correlationId: Type.Optional(Type.String({ minLength: 1 })),
   timeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
 });
+
+const listAgentsParameters = Type.Object({}, { additionalProperties: false });
 
 type SendAgentMessageParams = Static<typeof sendAgentMessageParameters>;
 type AgentRoundParams = Static<typeof agentRoundParameters>;
@@ -45,6 +47,7 @@ export interface AgentRoundResult extends AgentMessageRouteResult {
 }
 
 export interface CoordinationToolRuntime {
+  listAgents(): Promise<AgentDirectoryEntry[]>;
   routeMessage(input: {
     fromAgentId: string;
     fromSessionId: string;
@@ -74,8 +77,9 @@ export interface CoordinationToolContext {
 
 export interface CoordinationToolDetails {
   ok: boolean;
-  operation: "send_agent_message" | "agent_round";
+  operation: "list_agents" | "send_agent_message" | "agent_round";
   reasonCode?: string;
+  agents?: AgentDirectoryEntry[];
   routed?: AgentMessageRouteResult;
   round?: AgentRoundResult;
   queuedActions: number;
@@ -96,7 +100,44 @@ export function createCoordinationToolResolver(
 export function coordinationTools(
   context: CoordinationToolContext,
 ): BrainTool[] {
-  return [sendAgentMessageTool(context), agentRoundTool(context)];
+  return [
+    listAgentsTool(context),
+    sendAgentMessageTool(context),
+    agentRoundTool(context),
+  ];
+}
+
+export function listAgentsTool(
+  context: CoordinationToolContext,
+): BrainTool<typeof listAgentsParameters, CoordinationToolDetails> {
+  const execute = async () => {
+    if (context.runtime === undefined) {
+      return coordinationResult({
+        ok: false,
+        operation: "list_agents",
+        reasonCode: "coordination_runtime_unavailable",
+        queuedActions: 0,
+        text: "list_agents requires the Rusty Crew service coordination runtime.",
+      });
+    }
+    const agents = await context.runtime.listAgents();
+    return coordinationResult({
+      ok: true,
+      operation: "list_agents",
+      agents,
+      queuedActions: 0,
+      text: formatAgentDirectory(agents),
+    });
+  };
+  return {
+    name: "list_agents",
+    label: "List agents",
+    description:
+      "List agents addressable through this Rusty Crew service and their stable recipient IDs.",
+    parameters: listAgentsParameters,
+    executeWithContext: execute,
+    execute: execute,
+  };
 }
 
 export function sendAgentMessageTool(
@@ -268,6 +309,7 @@ function coordinationResult(input: {
   operation: CoordinationToolDetails["operation"];
   text: string;
   reasonCode?: string;
+  agents?: AgentDirectoryEntry[];
   routed?: AgentMessageRouteResult;
   round?: AgentRoundResult;
   queuedActions: number;
@@ -278,9 +320,28 @@ function coordinationResult(input: {
       ok: input.ok,
       operation: input.operation,
       reasonCode: input.reasonCode,
+      agents: input.agents,
       routed: input.routed,
       round: input.round,
       queuedActions: input.queuedActions,
     },
   };
+}
+
+function formatAgentDirectory(agents: readonly AgentDirectoryEntry[]): string {
+  if (agents.length === 0) {
+    return "No non-archived agents are registered on this Rusty Crew service.";
+  }
+  return [
+    "Agents on this Rusty Crew service:",
+    ...agents.map((agent) => {
+      const status = agent.routable
+        ? "routable"
+        : `unavailable (${agent.routabilityReasonCode ?? "unknown_reason"})`;
+      const task = agent.taskRef?.projectId
+        ? `; project=${agent.taskRef.projectId}`
+        : "";
+      return `- ${agent.displayLabel}: recipient=${agent.agentId}; profile=${agent.profileId}; runtime=${agent.runtimeKind}; status=${status}${task}`;
+    }),
+  ].join("\n");
 }

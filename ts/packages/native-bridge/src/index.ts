@@ -672,6 +672,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     drainSubscriptionEvents: unavailable("subscribe_events"),
     createSession: unavailable("initialize_engine"),
     routeAgentMessage: unavailable("inject_external_event"),
+    listAgentDirectory: unavailable("list_agent_directory"),
     deliverAgentMessage: unavailable("deliver_agent_message"),
     beginAgentRound: unavailable("begin_agent_round"),
     getAgentRound: unavailable("get_agent_round"),
@@ -1519,6 +1520,10 @@ function createNativeBridgeModule(
     archiveSession: async (sessionId) => binding.archiveSession(sessionId),
     routeAgentMessage: async (from, to, body, correlationId) =>
       binding.routeAgentMessage(from, to, body, correlationId),
+    listAgentDirectory: async () =>
+      JSON.parse(binding.listAgentDirectoryJson()) as Awaited<
+        ReturnType<NativeBridgeModule["listAgentDirectory"]>
+      >,
     deliverAgentMessage: async (command) =>
       JSON.parse(
         binding.deliverAgentMessageJson(JSON.stringify(command)),

@@ -175,6 +175,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "list_agents",
+      "description": "List same-service Rusty Crew agents and their stable recipient IDs.",
+      "category": "coordination",
+      "toolsets": ["agent_coordination", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "coordination.agent_directory.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "send_agent_message",
       "description": "Route a Rusty Crew internal message to another agent and request a wake.",
       "category": "coordination",

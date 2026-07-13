@@ -39,6 +39,7 @@ export const bridgeOperations = [
   {"name":"inject_external_event","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalEvent","output":"core_protocol::EventReceipt","errors":"core_protocol::CoreError","summary":"Inject an external adapter event into the internal Rust bus."},
   {"name":"inject_den_data_update","surface":"stable","direction":"ts_to_rust","input":"core_protocol::DenDataUpdate","output":"core_protocol::EventReceipt","errors":"core_protocol::CoreError","summary":"Inject Den product-data updates without making Den the coordination authority."},
   {"name":"enqueue_body_follow_up_message","surface":"stable","direction":"ts_to_rust","input":"session_id + core_protocol::AgentId + body + correlation_id","output":"queued_message_record","errors":"core_protocol::CoreError","summary":"Queue a steer/follow-up message for the next Rust-owned wake with body-policy TTL and cap enforcement."},
+  {"name":"list_agent_directory","surface":"stable","direction":"ts_to_rust","input":"unit","output":"vec<core_protocol::AgentDirectoryEntry>","errors":"core_protocol::CoreError","summary":"List same-service Crew agent recipients with Rust-owned runtime and routability projection."},
   {"name":"deliver_agent_message","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageCommand","output":"core_protocol::AgentMessageDeliveryReceipt","errors":"core_protocol::CoreError","summary":"Durably accept an identity-bound internal message and select direct wake, external turn, queue, round resolution, expiry, or rejection in Rust."},
   {"name":"begin_agent_round","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentRoundCommand","output":"core_protocol::AgentRoundStartReceipt","errors":"core_protocol::CoreError","summary":"Persist a correlated agent round before routing its message through the runtime-neutral delivery command."},
   {"name":"get_agent_round","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentRoundId","output":"option<core_protocol::AgentCorrelatedRound>","errors":"core_protocol::CoreError","summary":"Read durable correlated-round state without process-memory subscriptions or reply matching."},
@@ -248,4 +249,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "5dc092eedd4f92edb5ab591deb74a60fcc29262c463e238fc63fe3459cae9d94" as const;
+export const bridgeWireShapeFingerprint = "688993851c6b5af3e91de52640a87875501daa82a37e6571dee96a6d5076b51e" as const;

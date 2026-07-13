@@ -2,14 +2,134 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentActivation, AgentCoordinationCaller, AgentCorrelatedRound, AgentMessageCommand,
-    AgentMessageDeliveryReceipt, AgentMessageDeliveryRequest, AgentMessageDeliveryStatus,
-    AgentRoundCommand, AgentRoundStartReceipt, AgentRoundStatus, ExternalTurnInputPart,
-    ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
+    AgentActivation, AgentCoordinationCaller, AgentCorrelatedRound, AgentDirectoryEntry,
+    AgentDirectoryRuntimeKind, AgentMessageCommand, AgentMessageDeliveryReceipt,
+    AgentMessageDeliveryRequest, AgentMessageDeliveryStatus, AgentRoundCommand,
+    AgentRoundStartReceipt, AgentRoundStatus, ExternalBindingPurpose, ExternalBindingStatus,
+    ExternalRuntimeDesiredState, ExternalRuntimeKind, ExternalRuntimeObservedState,
+    ExternalTurnInputPart, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
 };
 use serde_json::json;
 
 impl CoreEngine {
+    pub fn list_agent_directory(&self) -> CoreResult<Vec<AgentDirectoryEntry>> {
+        let profiles = self
+            .list_profile_registry_records(&ProfileRegistryQuery::default())?
+            .into_iter()
+            .map(|profile| (profile.profile_id.clone(), profile))
+            .collect::<HashMap<_, _>>();
+        let bindings = self.store.list_external_agent_bindings()?;
+        let runtimes = self
+            .store
+            .list_external_runtime_registrations()?
+            .into_iter()
+            .map(|runtime| (runtime.runtime_id.clone(), runtime))
+            .collect::<HashMap<_, _>>();
+        let mut entries = Vec::new();
+
+        for session in self
+            .sessions
+            .all_sessions()?
+            .into_iter()
+            .filter(|session| session.status != SessionStatus::Archived)
+        {
+            let profile = profiles.get(&session.profile_id);
+            let binding = bindings
+                .iter()
+                .filter(|binding| {
+                    binding.purpose == ExternalBindingPurpose::CrewAgent
+                        && binding.agent_id.as_ref() == Some(&session.agent_id)
+                        && binding.session_id.as_ref() == Some(&session.session_id)
+                })
+                .max_by_key(|binding| match binding.status {
+                    ExternalBindingStatus::Active => 2,
+                    ExternalBindingStatus::Paused => 1,
+                    ExternalBindingStatus::Archived => 0,
+                });
+
+            let (
+                runtime_kind,
+                runtime_id,
+                binding_id,
+                binding_status,
+                task_ref,
+                workdir,
+                routable,
+                reason_code,
+            ) = if let Some(binding) = binding {
+                let runtime = runtimes.get(&binding.runtime_id).ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        format!(
+                            "external binding {} references missing runtime {}",
+                            binding.binding_id.0, binding.runtime_id.0
+                        ),
+                    )
+                })?;
+                let runtime_kind = match runtime.kind {
+                    ExternalRuntimeKind::CodexAppServer => {
+                        AgentDirectoryRuntimeKind::CodexAppServer
+                    }
+                };
+                let reason_code = if binding.status != ExternalBindingStatus::Active {
+                    Some("external_binding_not_active".to_string())
+                } else if runtime.desired_state != ExternalRuntimeDesiredState::Enabled {
+                    Some("external_runtime_disabled".to_string())
+                } else if runtime.observed_state != ExternalRuntimeObservedState::Ready {
+                    Some("external_runtime_not_ready".to_string())
+                } else {
+                    None
+                };
+                (
+                    runtime_kind,
+                    Some(binding.runtime_id.clone()),
+                    Some(binding.binding_id.clone()),
+                    Some(binding.status),
+                    binding.task_ref.clone(),
+                    binding.cwd.clone(),
+                    reason_code.is_none(),
+                    reason_code,
+                )
+            } else {
+                (
+                    AgentDirectoryRuntimeKind::DirectBrain,
+                    None,
+                    None,
+                    None,
+                    None,
+                    session.resource_limits.workdir.clone(),
+                    true,
+                    None,
+                )
+            };
+
+            entries.push(AgentDirectoryEntry {
+                agent_id: session.agent_id,
+                session_id: session.session_id,
+                profile_id: session.profile_id.clone(),
+                display_label: profile
+                    .and_then(|profile| profile.display_name.clone())
+                    .unwrap_or(session.profile_id.0),
+                session_kind: session.kind,
+                session_status: session.status,
+                runtime_kind,
+                runtime_id,
+                binding_id,
+                binding_status,
+                task_ref,
+                workdir,
+                routable,
+                routability_reason_code: reason_code,
+            });
+        }
+        entries.sort_by(|left, right| {
+            left.display_label
+                .cmp(&right.display_label)
+                .then_with(|| left.agent_id.0.cmp(&right.agent_id.0))
+        });
+        Ok(entries)
+    }
+
     pub fn deliver_agent_message(
         &self,
         command: AgentMessageCommand,

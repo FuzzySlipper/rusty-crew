@@ -314,6 +314,11 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:completion-tools",
   },
   {
+    name: "list_agents",
+    implementationModule: "./coordination-tools.js#listAgentsTool",
+    inventoryTest: "smoke:coordination-tools",
+  },
+  {
     name: "send_agent_message",
     implementationModule: "./coordination-tools.js#sendAgentMessageTool",
     inventoryTest: "smoke:coordination-tools",

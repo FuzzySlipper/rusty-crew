@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type {
   AgentCorrelatedRound,
+  AgentDirectoryEntry,
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
   AgentRoundCommand,
@@ -48,6 +49,32 @@ test("Codex coordination derives trusted identity outside model arguments", asyn
   });
 });
 
+test("Codex coordination lists only the Rust-projected same-service directory", async () => {
+  const port = new RecordingPort();
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-directory",
+      namespace: "rusty_crew",
+      tool: "list_agents",
+      arguments: {},
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-1",
+      controllerInstanceId: "controller-1",
+      controllerGeneration: 7,
+    },
+    port,
+  });
+  assert.equal(result?.success, true);
+  const content = result?.contentItems[0];
+  assert.equal(content?.type, "inputText");
+  assert.match(content?.type === "inputText" ? content.text : "", /recipient=planner/);
+  assert.equal(port.directoryReads, 1);
+});
+
 test("Codex coordination round returns the durable Rust reply", async () => {
   const port = new RecordingPort();
   const delivered: AgentMessageDeliveryReceipt[] = [];
@@ -80,9 +107,26 @@ test("Codex coordination round returns the durable Rust reply", async () => {
 });
 
 class RecordingPort implements CodexCoordinationPort {
+  directoryReads = 0;
   readonly deliveries: AgentMessageCommand[] = [];
   readonly rounds: AgentRoundCommand[] = [];
   #round?: AgentCorrelatedRound;
+
+  async listAgentDirectory(): Promise<AgentDirectoryEntry[]> {
+    this.directoryReads += 1;
+    return [
+      {
+        agentId: "planner",
+        sessionId: "planner-session" as SessionId,
+        profileId: "planner-profile",
+        displayLabel: "Planner",
+        sessionKind: "full",
+        sessionStatus: "idle",
+        runtimeKind: "direct_brain",
+        routable: true,
+      },
+    ];
+  }
 
   async deliverAgentMessage(
     command: AgentMessageCommand,

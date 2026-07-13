@@ -1,6 +1,10 @@
 use super::*;
 
 impl NativeBridge {
+    pub fn list_agent_directory(&self) -> CoreResult<Vec<AgentDirectoryEntry>> {
+        self.engine()?.list_agent_directory()
+    }
+
     pub fn deliver_agent_message(
         &self,
         command: AgentMessageCommand,
@@ -32,6 +36,16 @@ impl NativeBridge {
 
 #[napi_derive::napi]
 impl NativeBridgeBinding {
+    #[napi]
+    pub fn list_agent_directory_json(&self) -> napi::Result<String> {
+        let entries = self
+            .bridge()?
+            .list_agent_directory()
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&entries)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
     #[napi]
     pub fn deliver_agent_message_json(&self, command_json: String) -> napi::Result<String> {
         let command = serde_json::from_str::<AgentMessageCommand>(&command_json)

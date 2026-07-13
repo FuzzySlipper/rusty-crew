@@ -9,6 +9,7 @@ import type {
 import {
   agentRoundTool,
   createCoordinationToolResolver,
+  listAgentsTool,
   sendAgentMessageTool,
   type CoordinationToolRuntime,
 } from "../src/coordination-tools.js";
@@ -40,6 +41,21 @@ class MemoryActionCollector implements BrainActionCollector {
 const wake = fakeWake();
 const calls: Array<{ kind: string; input: unknown }> = [];
 const runtime: CoordinationToolRuntime = {
+  async listAgents() {
+    calls.push({ kind: "directory", input: {} });
+    return [
+      {
+        agentId: "coordination-target",
+        sessionId: "coordination-target-session" as SessionId,
+        profileId: "coordination-target-profile" as ProfileId,
+        displayLabel: "Coordination target",
+        sessionKind: "full",
+        sessionStatus: "idle",
+        runtimeKind: "direct_brain",
+        routable: true,
+      },
+    ];
+  },
   async routeMessage(input) {
     calls.push({ kind: "route", input });
     return {
@@ -72,6 +88,11 @@ const runtime: CoordinationToolRuntime = {
   },
 };
 
+const directoryTool = listAgentsTool({ runtime });
+const directoryResult = await directoryTool.execute?.("directory-call", {});
+assert.equal(directoryResult?.details.ok, true);
+assert.equal(directoryResult?.details.agents?.[0]?.agentId, "coordination-target");
+
 const sendTool = sendAgentMessageTool({ runtime });
 const sendResult = await sendTool.executeWithContext?.(
   {
@@ -88,7 +109,7 @@ const sendResult = await sendTool.executeWithContext?.(
   },
 );
 assert.equal(sendResult?.details.ok, true);
-assert.deepEqual(calls[0], {
+assert.deepEqual(calls.find((call) => call.kind === "route"), {
   kind: "route",
   input: {
     fromAgentId: "coordination-agent",
@@ -156,7 +177,7 @@ const selection = selectToolProfile({
 });
 assert.deepEqual(
   selection.toolProfile.tools.map((tool) => tool.name),
-  ["send_agent_message", "agent_round"],
+  ["list_agents", "send_agent_message", "agent_round"],
 );
 const resolved = resolveToolSession({
   wake,
@@ -165,10 +186,13 @@ const resolved = resolveToolSession({
 });
 assert.deepEqual(
   resolved.tools.map((tool) => tool.name),
-  ["send_agent_message", "agent_round"],
+  ["list_agents", "send_agent_message", "agent_round"],
 );
 
-const piSendTool = toPiAgentTool(resolved.tools[0]!, { wake });
+const piSendTool = toPiAgentTool(
+  resolved.tools.find((tool) => tool.name === "send_agent_message")!,
+  { wake },
+);
 const piSend = await piSendTool.execute("pi-send-call", {
   toAgentId: "pi-adapted-target",
   body: "adapter keeps context",

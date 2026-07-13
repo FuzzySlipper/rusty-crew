@@ -6,7 +6,7 @@
 
 use crate::{
     AgentId, CoreError, CoreErrorKind, CoreResult, DenRuntimeReference, IsoTimestamp, ProfileId,
-    RunId, SessionId, SessionStatus,
+    RunId, SessionId, SessionKind, SessionStatus,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -41,6 +41,32 @@ external_string_id!(ExternalAgentSessionCreationId);
 #[serde(rename_all = "snake_case")]
 pub enum ExternalRuntimeKind {
     CodexAppServer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentDirectoryRuntimeKind {
+    DirectBrain,
+    CodexAppServer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDirectoryEntry {
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    pub profile_id: ProfileId,
+    pub display_label: String,
+    pub session_kind: SessionKind,
+    pub session_status: SessionStatus,
+    pub runtime_kind: AgentDirectoryRuntimeKind,
+    pub runtime_id: Option<ExternalRuntimeId>,
+    pub binding_id: Option<ExternalBindingId>,
+    pub binding_status: Option<ExternalBindingStatus>,
+    pub task_ref: Option<DenRuntimeReference>,
+    pub workdir: Option<String>,
+    pub routable: bool,
+    pub routability_reason_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

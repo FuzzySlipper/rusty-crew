@@ -14,11 +14,11 @@ use rusty_crew_core_persistence::{
 };
 use rusty_crew_core_protocol::SessionHistoryWindow;
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentMessage, AttachmentLinkId, BrainAction, BrainEvent, CompletionPacket,
-    CompletionStatus, ConversationBranchId, ConversationSnapshotId, CoreErrorKind, CoreEventKind,
-    DelegatedRunStatus, DelegationLifecyclePhase, ExternalEventPayload, MessageId, ProfileId,
-    ProjectId, ResourceLimits, SessionKind, TaskId, ToolCallMetadata, ToolCallPolicyMetadata,
-    ToolCallSource, ToolDescriptor, ToolProfile,
+    AdapterId, AgentDirectoryRuntimeKind, AgentId, AgentMessage, AttachmentLinkId, BrainAction,
+    BrainEvent, CompletionPacket, CompletionStatus, ConversationBranchId, ConversationSnapshotId,
+    CoreErrorKind, CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase,
+    ExternalEventPayload, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind, TaskId,
+    ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

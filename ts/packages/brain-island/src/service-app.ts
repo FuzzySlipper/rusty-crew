@@ -4937,6 +4937,13 @@ function createServiceCoordinationRuntime(
   getState: () => ServiceState | undefined,
 ): CoordinationToolRuntime {
   const runtime: CoordinationToolRuntime = {
+    async listAgents() {
+      const state = getState();
+      if (state === undefined) {
+        throw new Error("service coordination runtime is not ready");
+      }
+      return state.bridge.listAgentDirectory();
+    },
     async routeMessage(input) {
       const state = getState();
       if (state === undefined) {

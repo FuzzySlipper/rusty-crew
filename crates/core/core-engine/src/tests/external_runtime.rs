@@ -428,6 +428,85 @@ fn shutdown_preserves_active_external_session_and_native_thread_binding() {
 }
 
 #[test]
+fn agent_directory_projects_same_service_direct_and_external_routability() {
+    let engine = test_engine();
+    let mut direct_profile =
+        profile_registry_write("direct-profile", "tester-chat", "direct-session");
+    direct_profile.display_name = Some("Direct planner".into());
+    engine
+        .create_profile_registry_record(&direct_profile)
+        .unwrap();
+    engine
+        .create_session(session_config(
+            "direct-session",
+            "direct-agent",
+            "direct-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+
+    let mut external_profile = profile_registry_write("codex-profile", "gpt", "codex-session");
+    external_profile.display_name = Some("Codex coder".into());
+    engine
+        .create_profile_registry_record(&external_profile)
+        .unwrap();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let saved_binding = engine.bind_external_agent(&binding(), None).unwrap();
+
+    let directory = engine.list_agent_directory().unwrap();
+    assert_eq!(directory.len(), 2);
+    let direct = directory
+        .iter()
+        .find(|entry| entry.agent_id == AgentId::new("direct-agent"))
+        .unwrap();
+    assert_eq!(direct.display_label, "Direct planner");
+    assert_eq!(direct.runtime_kind, AgentDirectoryRuntimeKind::DirectBrain);
+    assert!(direct.routable);
+    assert!(direct.binding_id.is_none());
+
+    let external = directory
+        .iter()
+        .find(|entry| entry.agent_id == AgentId::new("codex-agent"))
+        .unwrap();
+    assert_eq!(external.display_label, "Codex coder");
+    assert_eq!(
+        external.runtime_kind,
+        AgentDirectoryRuntimeKind::CodexAppServer
+    );
+    assert_eq!(
+        external.binding_id,
+        Some(ExternalBindingId::new("codex-binding"))
+    );
+    assert!(external.routable);
+
+    let mut paused = saved_binding.clone();
+    paused.status = ExternalBindingStatus::Paused;
+    paused.updated_at = "2026-06-19T00:00:01Z".into();
+    engine
+        .bind_external_agent(&paused, Some(saved_binding.revision))
+        .unwrap();
+    let paused = engine
+        .list_agent_directory()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.agent_id == AgentId::new("codex-agent"))
+        .unwrap();
+    assert!(!paused.routable);
+    assert_eq!(
+        paused.routability_reason_code.as_deref(),
+        Some("external_binding_not_active")
+    );
+}
+
+#[test]
 fn restart_repairs_legacy_active_binding_with_archived_session() {
     let data_dir = unique_data_dir("external-legacy-archive-repair");
     {

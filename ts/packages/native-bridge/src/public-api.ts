@@ -1,6 +1,7 @@
 import type {
   ActionBatchReceipt,
   AdapterId,
+  AgentDirectoryEntry,
   AgentId,
   AgentCorrelatedRound,
   AgentMessageCommand,
@@ -2110,6 +2111,7 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   deliverAgentMessage(
     command: AgentMessageCommand,
   ): Promise<AgentMessageDeliveryReceipt>;
+  listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
   beginAgentRound(command: AgentRoundCommand): Promise<AgentRoundStartReceipt>;
   getAgentRound(roundId: string): Promise<AgentCorrelatedRound | undefined>;
   getAgentMessageDelivery(

@@ -45,6 +45,7 @@ export {
   agentRoundTool,
   coordinationTools,
   createCoordinationToolResolver,
+  listAgentsTool,
   resolveCoordinationTools,
   sendAgentMessageTool,
 } from "../coordination-tools.js";
