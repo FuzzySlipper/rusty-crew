@@ -429,10 +429,22 @@ pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {
             "mechanic_proposals",
             "Reviewed roleplay mechanic change proposals",
         ),
+        (
+            "mechanic_sessions",
+            "Typed roleplay mechanic session associations",
+        ),
+        (
+            "mechanic_diagnostics",
+            "Persistent roleplay mechanic diagnostic outcomes",
+        ),
+        (
+            "mechanic_diagnostic_proposals",
+            "Normalized mechanic diagnostic proposal links",
+        ),
     ];
     ModuleSchemaBundle {
         module_id: ModuleId::new("roleplay").expect("valid roleplay module id"),
-        schema_version: 2,
+        schema_version: 3,
         owner: ModuleOwner {
             crate_name: "core_persistence".to_string(),
             rust_module: "roleplay_records".to_string(),
@@ -489,6 +501,36 @@ pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {
                 "profile_kind",
                 &["profile_id", "kind", "updated_at"],
             ),
+            roleplay_index(
+                "mechanic_sessions",
+                "profile",
+                &["mechanic_profile_id", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_sessions",
+                "roleplay",
+                &["roleplay_session_id", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_diagnostics",
+                "mechanic",
+                &["mechanic_session_id", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_diagnostics",
+                "roleplay_outcome",
+                &["roleplay_session_id", "outcome", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_diagnostics",
+                "profile",
+                &["roleplay_profile_id", "updated_at"],
+            ),
+            roleplay_index(
+                "mechanic_diagnostic_proposals",
+                "proposal",
+                &["proposal_id", "diagnostic_id"],
+            ),
         ],
         retention: Vec::new(),
         capability_requirements: vec![
@@ -501,6 +543,8 @@ pub fn roleplay_schema_bundle() -> ModuleSchemaBundle {
             "session_metadata",
             "import",
             "mechanic_proposal",
+            "mechanic_session",
+            "mechanic_diagnostic",
         ]
         .into_iter()
         .flat_map(|name| {

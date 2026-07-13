@@ -897,6 +897,116 @@
         "public": true
       },
       {
+        "id": "admin.roleplay.mechanic_sessions.list",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions",
+        "description": "List typed roleplay mechanic conversation associations and runtime state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_sessions.create",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions",
+        "description": "Create an independent mechanic conversation with an optional roleplay session attachment.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_sessions.read",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}",
+        "description": "Read one mechanic conversation association and runtime state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_sessions.attach",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/attach",
+        "description": "attach a typed roleplay mechanic conversation.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_sessions.archive",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/archive",
+        "description": "archive a typed roleplay mechanic conversation.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_sessions.restore",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/restore",
+        "description": "restore a typed roleplay mechanic conversation.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_diagnostics.list",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics",
+        "description": "List durable roleplay mechanic diagnostic records and outcomes.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_diagnostics.create",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics",
+        "description": "Record a pending diagnostic from an attached mechanic conversation.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_diagnostics.read",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics/{diagnostic_id}",
+        "description": "Read one durable roleplay mechanic diagnostic.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.roleplay.mechanic_diagnostics.outcome",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics/{diagnostic_id}/outcome",
+        "description": "Record an evaluated diagnostic outcome with optimistic revision protection.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["profile", "storage", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "admin.roleplay.mechanic_proposals.list",
         "method": "GET",
         "path_template": "/v1/admin/roleplay/mechanic-proposals",
@@ -2622,6 +2732,76 @@
         "method": "GET",
         "path_template": "/v1/admin/mcp/servers",
         "route_id": "admin.mcp.servers",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_sessions.list",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_sessions.create",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_sessions.read",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_sessions.attach",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/attach",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_sessions.archive",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/archive",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_sessions.restore",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/restore",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_diagnostics.list",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_diagnostics.create",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_diagnostics.read",
+        "method": "GET",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics/{diagnostic_id}",
+        "route_id": "roleplay",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.roleplay.mechanic_diagnostics.outcome",
+        "method": "POST",
+        "path_template": "/v1/admin/roleplay/mechanic-diagnostics/{diagnostic_id}/outcome",
+        "route_id": "roleplay",
         "auth_phase": "after_auth"
       },
       {

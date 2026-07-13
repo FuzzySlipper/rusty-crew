@@ -1,8 +1,11 @@
 use super::*;
 use rusty_crew_core_persistence::{
+    RoleplayMechanicDiagnosticCreate, RoleplayMechanicDiagnosticOutcome,
+    RoleplayMechanicDiagnosticOutcomeUpdate, RoleplayMechanicDiagnosticQuery,
     RoleplayMechanicProposalApply, RoleplayMechanicProposalCreate,
     RoleplayMechanicProposalDecision, RoleplayMechanicProposalDecisionKind,
     RoleplayMechanicProposalKind, RoleplayMechanicProposalQuery, RoleplayMechanicProposalStatus,
+    RoleplayMechanicSessionAssociationCreate, RoleplayMechanicSessionAttachmentUpdate,
     RoleplaySessionMetadataRecord, RoleplaySessionMetadataWrite,
 };
 use rusty_crew_core_protocol::ProfileRegistryUpdate;
@@ -175,6 +178,139 @@ fn mechanic_proposal_history_survives_restart() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].proposal_id, "proposal-restart");
     assert_eq!(records[0].history.len(), 1);
+}
+
+#[test]
+fn mechanic_association_survives_restart_and_rejects_mismatched_roleplay_profiles() {
+    let data_dir = unique_data_dir("roleplay-mechanic-associations");
+    {
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        seed_roleplay_proposal_engine(&engine);
+        let association = engine
+            .get_roleplay_mechanic_session_association(&SessionId::new("mechanic-session"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            association.roleplay_session_id.as_deref(),
+            Some("roleplay-session")
+        );
+
+        engine
+            .create_session(session_config(
+                "mismatched-roleplay-session",
+                "narrator-agent",
+                "narrator-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .put_roleplay_session_metadata(&RoleplaySessionMetadataWrite {
+                record: RoleplaySessionMetadataRecord {
+                    session_id: "mismatched-roleplay-session".to_string(),
+                    profile_id: "different-profile".to_string(),
+                    display_name: None,
+                    player_persona_id: None,
+                    character_id: None,
+                    active_layer_ids: vec![],
+                    archived: false,
+                    narrator_diagnostic: None,
+                    revision: 0,
+                    created_at: "2026-07-13T04:00:00Z".to_string(),
+                    updated_at: "2026-07-13T04:00:00Z".to_string(),
+                },
+                expected_revision: None,
+            })
+            .unwrap();
+        let error = engine
+            .update_roleplay_mechanic_session_attachment(&RoleplayMechanicSessionAttachmentUpdate {
+                mechanic_session_id: SessionId::new("mechanic-session"),
+                roleplay_session_id: Some("mismatched-roleplay-session".to_string()),
+                expected_revision: association.revision,
+                now: "2026-07-13T04:00:01Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::ActionRejected);
+
+        engine
+            .archive_session(&SessionId::new("mechanic-session"))
+            .unwrap();
+        assert_eq!(
+            engine
+                .get_session(&SessionId::new("roleplay-session"))
+                .unwrap()
+                .status,
+            SessionStatus::Idle
+        );
+    }
+    let reopened = test_engine_with_data_dir(data_dir);
+    let association = reopened
+        .get_roleplay_mechanic_session_association(&SessionId::new("mechanic-session"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(association.mechanic_profile_id.0, "mechanic-profile");
+    assert_eq!(
+        reopened
+            .get_session(&SessionId::new("mechanic-session"))
+            .unwrap()
+            .status,
+        SessionStatus::Archived
+    );
+}
+
+#[test]
+fn mechanic_diagnostics_link_applied_proposals_and_protect_outcome_revisions() {
+    let data_dir = unique_data_dir("roleplay-mechanic-diagnostics");
+    {
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        seed_roleplay_proposal_engine(&engine);
+        let applied = approve_and_apply(&engine, narrator_config_proposal("proposal-diagnostic"));
+        let diagnostic = engine
+            .create_roleplay_mechanic_diagnostic(&RoleplayMechanicDiagnosticCreate {
+                diagnostic_id: "diagnostic-one".to_string(),
+                mechanic_session_id: SessionId::new("mechanic-session"),
+                roleplay_session_id: "roleplay-session".to_string(),
+                symptom: "Scene transitions rush established beats.".to_string(),
+                hypothesis: "Narrator pacing is too fast.".to_string(),
+                proposal_ids: vec![applied.proposal_id.clone()],
+                applied_proposal_ids: vec![applied.proposal_id],
+                notes: Some("Observe the next three turns.".to_string()),
+                now: "2026-07-13T05:00:00Z".to_string(),
+            })
+            .unwrap();
+        let updated = engine
+            .update_roleplay_mechanic_diagnostic_outcome(&RoleplayMechanicDiagnosticOutcomeUpdate {
+                diagnostic_id: diagnostic.diagnostic_id.clone(),
+                outcome: RoleplayMechanicDiagnosticOutcome::Improved,
+                notes: Some("Transitions now preserve scene beats.".to_string()),
+                expected_revision: diagnostic.revision,
+                now: "2026-07-13T05:01:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(updated.outcome, RoleplayMechanicDiagnosticOutcome::Improved);
+        let conflict = engine
+            .update_roleplay_mechanic_diagnostic_outcome(&RoleplayMechanicDiagnosticOutcomeUpdate {
+                diagnostic_id: diagnostic.diagnostic_id,
+                outcome: RoleplayMechanicDiagnosticOutcome::Worse,
+                notes: None,
+                expected_revision: 1,
+                now: "2026-07-13T05:02:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(conflict.kind, CoreErrorKind::ActionRejected);
+    }
+    let reopened = test_engine_with_data_dir(data_dir);
+    let records = reopened
+        .list_roleplay_mechanic_diagnostics(&RoleplayMechanicDiagnosticQuery {
+            roleplay_session_id: Some("roleplay-session".to_string()),
+            ..RoleplayMechanicDiagnosticQuery::default()
+        })
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].outcome,
+        RoleplayMechanicDiagnosticOutcome::Improved
+    );
+    assert_eq!(records[0].revision, 2);
 }
 
 #[test]
@@ -395,6 +531,13 @@ fn seed_roleplay_proposal_engine(engine: &CoreEngine) {
                 updated_at: "2026-07-13T00:00:00Z".to_string(),
             },
             expected_revision: None,
+        })
+        .unwrap();
+    engine
+        .create_roleplay_mechanic_session_association(&RoleplayMechanicSessionAssociationCreate {
+            mechanic_session_id: SessionId::new("mechanic-session"),
+            roleplay_session_id: Some("roleplay-session".to_string()),
+            now: "2026-07-13T00:00:01Z".to_string(),
         })
         .unwrap();
 }

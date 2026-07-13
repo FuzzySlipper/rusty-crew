@@ -415,6 +415,142 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_roleplay_mechanic_session_association_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let create = parse_json::<RoleplayMechanicSessionAssociationCreate>(
+            &input_json,
+            "roleplay mechanic session association create",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .create_roleplay_mechanic_session_association(&create)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic session association",
+        )
+    }
+
+    #[napi]
+    pub fn get_roleplay_mechanic_session_association_json(
+        &self,
+        mechanic_session_id: String,
+    ) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_mechanic_session_association(&SessionId(mechanic_session_id))
+                .map_err(to_napi_error)?,
+            "roleplay mechanic session association",
+        )
+    }
+
+    #[napi]
+    pub fn list_roleplay_mechanic_session_associations_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let query = parse_json::<RoleplayMechanicSessionAssociationQuery>(
+            &input_json,
+            "roleplay mechanic session association query",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_mechanic_session_associations(&query)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic session associations",
+        )
+    }
+
+    #[napi]
+    pub fn update_roleplay_mechanic_session_attachment_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let update = parse_json::<RoleplayMechanicSessionAttachmentUpdate>(
+            &input_json,
+            "roleplay mechanic session attachment update",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .update_roleplay_mechanic_session_attachment(&update)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic session association",
+        )
+    }
+
+    #[napi]
+    pub fn create_roleplay_mechanic_diagnostic_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let create = parse_json::<RoleplayMechanicDiagnosticCreate>(
+            &input_json,
+            "roleplay mechanic diagnostic create",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .create_roleplay_mechanic_diagnostic(&create)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic diagnostic",
+        )
+    }
+
+    #[napi]
+    pub fn get_roleplay_mechanic_diagnostic_json(
+        &self,
+        diagnostic_id: String,
+    ) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_roleplay_mechanic_diagnostic(&diagnostic_id)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic diagnostic",
+        )
+    }
+
+    #[napi]
+    pub fn list_roleplay_mechanic_diagnostics_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let query = parse_json::<RoleplayMechanicDiagnosticQuery>(
+            &input_json,
+            "roleplay mechanic diagnostic query",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_roleplay_mechanic_diagnostics(&query)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic diagnostics",
+        )
+    }
+
+    #[napi]
+    pub fn update_roleplay_mechanic_diagnostic_outcome_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let update = parse_json::<RoleplayMechanicDiagnosticOutcomeUpdate>(
+            &input_json,
+            "roleplay mechanic diagnostic outcome update",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .update_roleplay_mechanic_diagnostic_outcome(&update)
+                .map_err(to_napi_error)?,
+            "roleplay mechanic diagnostic",
+        )
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;

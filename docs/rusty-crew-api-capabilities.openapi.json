@@ -2247,6 +2247,92 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/roleplay/mechanic-diagnostics": {
+      "get": {
+        "operationId": "adminRoleplayMechanicDiagnosticsList",
+        "summary": "List durable roleplay mechanic diagnostic records and outcomes.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_diagnostics.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "adminRoleplayMechanicDiagnosticsCreate",
+        "summary": "Record a pending diagnostic from an attached mechanic conversation.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_diagnostics.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-diagnostics/{diagnostic_id}": {
+      "get": {
+        "operationId": "adminRoleplayMechanicDiagnosticsRead",
+        "summary": "Read one durable roleplay mechanic diagnostic.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "diagnostic_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_diagnostics.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-diagnostics/{diagnostic_id}/outcome": {
+      "post": {
+        "operationId": "adminRoleplayMechanicDiagnosticsOutcome",
+        "summary": "Record an evaluated diagnostic outcome with optimistic revision protection.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "diagnostic_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_diagnostics.outcome",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/roleplay/mechanic-proposals": {
       "get": {
         "operationId": "adminRoleplayMechanicProposalsList",
@@ -2405,6 +2491,144 @@
           }
         },
         "x-rusty-crew-capability-id": "admin.roleplay.mechanic_proposals.reject",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-sessions": {
+      "get": {
+        "operationId": "adminRoleplayMechanicSessionsList",
+        "summary": "List typed roleplay mechanic conversation associations and runtime state.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_sessions.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "adminRoleplayMechanicSessionsCreate",
+        "summary": "Create an independent mechanic conversation with an optional roleplay session attachment.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_sessions.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}": {
+      "get": {
+        "operationId": "adminRoleplayMechanicSessionsRead",
+        "summary": "Read one mechanic conversation association and runtime state.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "mechanic_session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_sessions.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/archive": {
+      "post": {
+        "operationId": "adminRoleplayMechanicSessionsArchive",
+        "summary": "archive a typed roleplay mechanic conversation.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "mechanic_session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_sessions.archive",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/attach": {
+      "post": {
+        "operationId": "adminRoleplayMechanicSessionsAttach",
+        "summary": "attach a typed roleplay mechanic conversation.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "mechanic_session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_sessions.attach",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/roleplay/mechanic-sessions/{mechanic_session_id}/restore": {
+      "post": {
+        "operationId": "adminRoleplayMechanicSessionsRestore",
+        "summary": "restore a typed roleplay mechanic conversation.",
+        "tags": ["profile", "storage", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "mechanic_session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.roleplay.mechanic_sessions.restore",
         "x-rusty-crew-auth": "admin",
         "x-rusty-crew-mutation": "control",
         "x-rusty-crew-stability": "experimental",
@@ -4558,7 +4782,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 178,
+    "capability_count": 188,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

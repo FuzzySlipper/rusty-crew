@@ -14,8 +14,9 @@ export interface RoleplayMechanicToolDetails {
     | "inspect_roleplay_scene"
     | "inspect_lore_retrieval"
     | "inspect_roleplay_proposals"
-    | "propose_roleplay_change";
-  action: "read" | "proposed" | "denied" | "failed";
+    | "propose_roleplay_change"
+    | "record_roleplay_diagnostic";
+  action: "read" | "proposed" | "recorded" | "denied" | "failed";
   reasonCode?: string;
   result?: unknown;
 }
@@ -48,6 +49,12 @@ const proposalMarkdownParameters = Type.Object(
   },
   { additionalProperties: false },
 );
+const diagnosticMarkdownParameters = Type.Object(
+  {
+    report: Type.String({ minLength: 1, maxLength: 200_000 }),
+  },
+  { additionalProperties: false },
+);
 
 type MechanicBridge = Pick<
   NativeBridgeModule,
@@ -61,6 +68,8 @@ type MechanicBridge = Pick<
   | "listRecallTraces"
   | "createRoleplayMechanicProposal"
   | "listRoleplayMechanicProposals"
+  | "getRoleplayMechanicSessionAssociation"
+  | "createRoleplayMechanicDiagnostic"
 >;
 
 export function createRoleplayMechanicToolResolver(input: {
@@ -76,7 +85,73 @@ export function createRoleplayMechanicToolResolver(input: {
       inspectLoreRetrievalTool(input),
       inspectRoleplayProposalsTool(input),
       proposeRoleplayChangeTool({ ...input, mechanicSessionId }),
+      recordRoleplayDiagnosticTool({ ...input, mechanicSessionId }),
     ];
+  };
+}
+
+export function recordRoleplayDiagnosticTool(input: {
+  bridge?: MechanicBridge;
+  profile: ProfileConfig;
+  mechanicSessionId: string;
+}): BrainTool<
+  typeof diagnosticMarkdownParameters,
+  RoleplayMechanicToolDetails
+> {
+  return {
+    name: "record_roleplay_diagnostic",
+    label: "Record roleplay diagnostic",
+    description:
+      "Record a pending diagnostic for this mechanic conversation from one Markdown document. Use YAML front matter with symptom, hypothesis, and optional proposal_ids and applied_proposal_ids; put supporting notes in the body.",
+    parameters: diagnosticMarkdownParameters,
+    executionMode: "sequential",
+    execute: async (_callId, params) => {
+      if (input.profile.roleplayMechanic === undefined) {
+        return mechanicResultFor("record_roleplay_diagnostic", "denied", {
+          ok: false,
+          reasonCode: "roleplay_mechanic_profile_required",
+        });
+      }
+      if (!input.bridge) {
+        return mechanicResultFor("record_roleplay_diagnostic", "failed", {
+          ok: false,
+          reasonCode: "roleplay_mechanic_bridge_unavailable",
+        });
+      }
+      try {
+        const association =
+          (await input.bridge.getRoleplayMechanicSessionAssociation(
+            input.mechanicSessionId,
+          )) as { roleplaySessionId?: string } | undefined;
+        if (association?.roleplaySessionId === undefined) {
+          throw new Error(
+            "roleplay_mechanic_session_not_attached: attach the mechanic session before recording diagnostics",
+          );
+        }
+        const report = parseRoleplayDiagnosticMarkdown(params.report);
+        const diagnostic = await input.bridge.createRoleplayMechanicDiagnostic({
+          diagnosticId: `mechanic-diagnostic:${randomUUID()}`,
+          mechanicSessionId: input.mechanicSessionId,
+          roleplaySessionId: association.roleplaySessionId,
+          symptom: report.symptom,
+          hypothesis: report.hypothesis,
+          proposalIds: report.proposalIds,
+          appliedProposalIds: report.appliedProposalIds,
+          notes: report.notes,
+          now: new Date().toISOString(),
+        });
+        return mechanicResultFor("record_roleplay_diagnostic", "recorded", {
+          ok: true,
+          result: diagnostic,
+        });
+      } catch (error) {
+        return mechanicResultFor("record_roleplay_diagnostic", "failed", {
+          ok: false,
+          reasonCode: errorReasonCode(error),
+          result: { message: errorMessage(error) },
+        });
+      }
+    },
   };
 }
 
@@ -411,6 +486,43 @@ const roleplayProposalKinds = new Set<ParsedRoleplayProposalDraft["kind"]>([
   "provider_failure_pattern",
 ]);
 
+interface ParsedRoleplayDiagnosticDraft {
+  symptom: string;
+  hypothesis: string;
+  proposalIds: string[];
+  appliedProposalIds: string[];
+  notes?: string;
+}
+
+function parseRoleplayDiagnosticMarkdown(
+  markdown: string,
+): ParsedRoleplayDiagnosticDraft {
+  const match = markdown.match(
+    /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s*\r?\n([\s\S]*))?$/,
+  );
+  if (!match) {
+    throw new Error(
+      "roleplay_mechanic_diagnostic_front_matter_required: report must begin with YAML front matter",
+    );
+  }
+  const header = parseYaml(match[1] ?? "");
+  if (!isRecord(header)) {
+    throw new Error(
+      "roleplay_mechanic_diagnostic_front_matter_invalid: front matter must be a YAML mapping",
+    );
+  }
+  return {
+    symptom: requiredHeaderString(header, "symptom"),
+    hypothesis: requiredHeaderString(header, "hypothesis"),
+    proposalIds: optionalHeaderStringArray(header, "proposal_ids"),
+    appliedProposalIds: optionalHeaderStringArray(
+      header,
+      "applied_proposal_ids",
+    ),
+    notes: optionalBody(match[2]),
+  };
+}
+
 function parseRoleplayProposalMarkdown(
   markdown: string,
 ): ParsedRoleplayProposalDraft {
@@ -495,6 +607,28 @@ function optionalHeaderString(
     );
   }
   return value.trim();
+}
+
+function optionalHeaderStringArray(
+  header: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = header[key];
+  if (value === undefined || value === null) return [];
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== "string" || item.trim() === "")
+  ) {
+    throw new Error(
+      `roleplay_mechanic_diagnostic_${key}_invalid: ${key} must be a list of non-empty strings`,
+    );
+  }
+  return value.map((item) => (item as string).trim());
+}
+
+function optionalBody(value: string | undefined): string | undefined {
+  const body = value?.trim();
+  return body ? body : undefined;
 }
 
 async function requireRoleplaySession(

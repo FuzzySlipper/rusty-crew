@@ -2261,6 +2261,18 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   listRoleplayMechanicProposals(query: unknown): Promise<unknown[]>;
   decideRoleplayMechanicProposal(decision: unknown): Promise<unknown>;
   applyRoleplayMechanicProposal(apply: unknown): Promise<unknown>;
+  createRoleplayMechanicSessionAssociation(create: unknown): Promise<unknown>;
+  getRoleplayMechanicSessionAssociation(
+    sessionId: string,
+  ): Promise<unknown | undefined>;
+  listRoleplayMechanicSessionAssociations(query: unknown): Promise<unknown[]>;
+  updateRoleplayMechanicSessionAttachment(update: unknown): Promise<unknown>;
+  createRoleplayMechanicDiagnostic(create: unknown): Promise<unknown>;
+  getRoleplayMechanicDiagnostic(
+    diagnosticId: string,
+  ): Promise<unknown | undefined>;
+  listRoleplayMechanicDiagnostics(query: unknown): Promise<unknown[]>;
+  updateRoleplayMechanicDiagnosticOutcome(update: unknown): Promise<unknown>;
   addLoreEntry(
     write: NativeRoleplayLoreWrite,
   ): Promise<NativeRoleplayLoreRecord>;

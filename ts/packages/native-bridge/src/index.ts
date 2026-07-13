@@ -55,6 +55,7 @@ import { createNativeBridgeCuratorMethods } from "./curator-wrappers.js";
 import { createNativeBridgeSchedulerMethods } from "./scheduler-wrappers.js";
 import { createNativeBridgeRoleplayMethods } from "./roleplay-wrappers.js";
 import { createNativeBridgeRoleplayProposalMethods } from "./roleplay-proposal-wrappers.js";
+import { createNativeBridgeRoleplayMechanicMethods } from "./roleplay-mechanic-wrappers.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
 import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
@@ -757,6 +758,14 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listRoleplayMechanicProposals: unavailable("initialize_engine"),
     decideRoleplayMechanicProposal: unavailable("initialize_engine"),
     applyRoleplayMechanicProposal: unavailable("initialize_engine"),
+    createRoleplayMechanicSessionAssociation: unavailable("initialize_engine"),
+    getRoleplayMechanicSessionAssociation: unavailable("initialize_engine"),
+    listRoleplayMechanicSessionAssociations: unavailable("initialize_engine"),
+    updateRoleplayMechanicSessionAttachment: unavailable("initialize_engine"),
+    createRoleplayMechanicDiagnostic: unavailable("initialize_engine"),
+    getRoleplayMechanicDiagnostic: unavailable("initialize_engine"),
+    listRoleplayMechanicDiagnostics: unavailable("initialize_engine"),
+    updateRoleplayMechanicDiagnosticOutcome: unavailable("initialize_engine"),
     createLoreLayer: unavailable("initialize_engine"),
     getLoreLayer: unavailable("initialize_engine"),
     listLoreLayers: unavailable("initialize_engine"),
@@ -1696,6 +1705,7 @@ function createNativeBridgeModule(
     ...createNativeBridgeProfileProviderMethods(binding),
     ...createNativeBridgeRoleplayMethods(binding),
     ...createNativeBridgeRoleplayProposalMethods(binding),
+    ...createNativeBridgeRoleplayMechanicMethods(binding),
     ...createNativeBridgeMemoryMethods(binding),
     ...createNativeBridgeCuratorMethods(binding),
     ...createNativeBridgeChatMethods(binding),

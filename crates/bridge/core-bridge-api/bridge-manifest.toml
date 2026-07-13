@@ -1449,6 +1449,78 @@ output = "core_persistence::RoleplayMechanicProposalRecord"
 errors = "core_protocol::CoreError"
 summary = "Apply an approved roleplay mechanic proposal through Rust-owned target write authorities."
 
+[[operation]]
+name = "create_roleplay_mechanic_session_association"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicSessionAssociationCreate"
+output = "core_persistence::RoleplayMechanicSessionAssociationRecord"
+errors = "core_protocol::CoreError"
+summary = "Register a full session as a roleplay mechanic conversation with an optional roleplay attachment."
+
+[[operation]]
+name = "get_roleplay_mechanic_session_association"
+surface = "stable"
+direction = "ts_to_rust"
+input = "mechanic_session_id"
+output = "Option<core_persistence::RoleplayMechanicSessionAssociationRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read the typed roleplay mechanic association for a session."
+
+[[operation]]
+name = "list_roleplay_mechanic_session_associations"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicSessionAssociationQuery"
+output = "Vec<core_persistence::RoleplayMechanicSessionAssociationRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query typed roleplay mechanic session associations."
+
+[[operation]]
+name = "update_roleplay_mechanic_session_attachment"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicSessionAttachmentUpdate"
+output = "core_persistence::RoleplayMechanicSessionAssociationRecord"
+errors = "core_protocol::CoreError"
+summary = "Attach or detach a mechanic conversation using an optimistic revision check."
+
+[[operation]]
+name = "create_roleplay_mechanic_diagnostic"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicDiagnosticCreate"
+output = "core_persistence::RoleplayMechanicDiagnosticRecord"
+errors = "core_protocol::CoreError"
+summary = "Record a durable pending diagnostic from an attached roleplay mechanic session."
+
+[[operation]]
+name = "get_roleplay_mechanic_diagnostic"
+surface = "stable"
+direction = "ts_to_rust"
+input = "diagnostic_id"
+output = "Option<core_persistence::RoleplayMechanicDiagnosticRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one durable roleplay mechanic diagnostic."
+
+[[operation]]
+name = "list_roleplay_mechanic_diagnostics"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicDiagnosticQuery"
+output = "Vec<core_persistence::RoleplayMechanicDiagnosticRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query durable roleplay mechanic diagnostics and outcomes."
+
+[[operation]]
+name = "update_roleplay_mechanic_diagnostic_outcome"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayMechanicDiagnosticOutcomeUpdate"
+output = "core_persistence::RoleplayMechanicDiagnosticRecord"
+errors = "core_protocol::CoreError"
+summary = "Record an evaluated mechanic diagnostic outcome with optimistic revision checks."
+
 # Roleplay lore: persistence and recall surfaces for frontend/adaptor modules.
 
 [[operation]]

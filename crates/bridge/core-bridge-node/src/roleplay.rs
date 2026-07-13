@@ -109,6 +109,68 @@ impl NativeBridge {
         self.engine()?.apply_roleplay_mechanic_proposal(apply)
     }
 
+    pub fn create_roleplay_mechanic_session_association(
+        &self,
+        create: &RoleplayMechanicSessionAssociationCreate,
+    ) -> CoreResult<RoleplayMechanicSessionAssociationRecord> {
+        self.engine()?
+            .create_roleplay_mechanic_session_association(create)
+    }
+
+    pub fn get_roleplay_mechanic_session_association(
+        &self,
+        mechanic_session_id: &SessionId,
+    ) -> CoreResult<Option<RoleplayMechanicSessionAssociationRecord>> {
+        self.engine()?
+            .get_roleplay_mechanic_session_association(mechanic_session_id)
+    }
+
+    pub fn list_roleplay_mechanic_session_associations(
+        &self,
+        query: &RoleplayMechanicSessionAssociationQuery,
+    ) -> CoreResult<Vec<RoleplayMechanicSessionAssociationRecord>> {
+        self.engine()?
+            .list_roleplay_mechanic_session_associations(query)
+    }
+
+    pub fn update_roleplay_mechanic_session_attachment(
+        &self,
+        update: &RoleplayMechanicSessionAttachmentUpdate,
+    ) -> CoreResult<RoleplayMechanicSessionAssociationRecord> {
+        self.engine()?
+            .update_roleplay_mechanic_session_attachment(update)
+    }
+
+    pub fn create_roleplay_mechanic_diagnostic(
+        &self,
+        create: &RoleplayMechanicDiagnosticCreate,
+    ) -> CoreResult<RoleplayMechanicDiagnosticRecord> {
+        self.engine()?.create_roleplay_mechanic_diagnostic(create)
+    }
+
+    pub fn get_roleplay_mechanic_diagnostic(
+        &self,
+        diagnostic_id: &str,
+    ) -> CoreResult<Option<RoleplayMechanicDiagnosticRecord>> {
+        self.engine()?
+            .get_roleplay_mechanic_diagnostic(diagnostic_id)
+    }
+
+    pub fn list_roleplay_mechanic_diagnostics(
+        &self,
+        query: &RoleplayMechanicDiagnosticQuery,
+    ) -> CoreResult<Vec<RoleplayMechanicDiagnosticRecord>> {
+        self.engine()?.list_roleplay_mechanic_diagnostics(query)
+    }
+
+    pub fn update_roleplay_mechanic_diagnostic_outcome(
+        &self,
+        update: &RoleplayMechanicDiagnosticOutcomeUpdate,
+    ) -> CoreResult<RoleplayMechanicDiagnosticRecord> {
+        self.engine()?
+            .update_roleplay_mechanic_diagnostic_outcome(update)
+    }
+
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,

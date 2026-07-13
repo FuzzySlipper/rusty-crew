@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 41;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 42;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -224,7 +224,69 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add durable roleplay mechanic proposals",
         apply: migrate_v41_add_roleplay_mechanic_proposals,
     },
+    SchemaMigration {
+        version: 42,
+        description: "add roleplay mechanic session associations and diagnostics",
+        apply: migrate_v42_add_roleplay_mechanic_sessions_and_diagnostics,
+    },
 ];
+
+fn migrate_v42_add_roleplay_mechanic_sessions_and_diagnostics(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS module_roleplay_mechanic_sessions (
+            mechanic_session_id TEXT PRIMARY KEY,
+            mechanic_profile_id TEXT NOT NULL,
+            roleplay_session_id TEXT,
+            roleplay_profile_id TEXT,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_sessions_profile
+            ON module_roleplay_mechanic_sessions(mechanic_profile_id, updated_at DESC, mechanic_session_id);
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_sessions_roleplay
+            ON module_roleplay_mechanic_sessions(roleplay_session_id, updated_at DESC, mechanic_session_id);
+
+         CREATE TABLE IF NOT EXISTS module_roleplay_mechanic_diagnostics (
+            diagnostic_id TEXT PRIMARY KEY,
+            mechanic_session_id TEXT NOT NULL,
+            mechanic_profile_id TEXT NOT NULL,
+            roleplay_session_id TEXT NOT NULL,
+            roleplay_profile_id TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_diagnostics_mechanic
+            ON module_roleplay_mechanic_diagnostics(mechanic_session_id, updated_at DESC, diagnostic_id);
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_diagnostics_roleplay_outcome
+            ON module_roleplay_mechanic_diagnostics(roleplay_session_id, outcome, updated_at DESC, diagnostic_id);
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_diagnostics_profile
+            ON module_roleplay_mechanic_diagnostics(roleplay_profile_id, updated_at DESC, diagnostic_id);
+
+         CREATE TABLE IF NOT EXISTS module_roleplay_mechanic_diagnostic_proposals (
+            diagnostic_id TEXT NOT NULL,
+            proposal_id TEXT NOT NULL,
+            applied INTEGER NOT NULL,
+            PRIMARY KEY(diagnostic_id, proposal_id),
+            FOREIGN KEY(diagnostic_id) REFERENCES module_roleplay_mechanic_diagnostics(diagnostic_id) ON DELETE CASCADE,
+            FOREIGN KEY(proposal_id) REFERENCES module_roleplay_mechanic_proposals(proposal_id) ON DELETE RESTRICT
+         );
+         CREATE INDEX IF NOT EXISTS idx_roleplay_mechanic_diagnostic_proposals_proposal
+            ON module_roleplay_mechanic_diagnostic_proposals(proposal_id, diagnostic_id);",
+    )
+    .map_err(|error| {
+        persistence_error(
+            "add roleplay mechanic session association and diagnostic persistence",
+            error,
+        )
+    })
+}
 
 fn migrate_v41_add_roleplay_mechanic_proposals(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(
@@ -1984,6 +2046,11 @@ fn apply_module_schema_migration_in_tx(
             2 => {
                 repos::roleplay_records::migrate_v33_add_roleplay_records(tx)?;
                 migrate_v41_add_roleplay_mechanic_proposals(tx)
+            }
+            3 => {
+                repos::roleplay_records::migrate_v33_add_roleplay_records(tx)?;
+                migrate_v41_add_roleplay_mechanic_proposals(tx)?;
+                migrate_v42_add_roleplay_mechanic_sessions_and_diagnostics(tx)
             }
             version => Err(CoreError::new(
                 CoreErrorKind::PersistenceFailure,

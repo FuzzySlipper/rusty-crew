@@ -535,6 +535,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "record_roleplay_diagnostic",
+      "description": "Record a durable pending diagnostic for the roleplay session attached to the current mechanic conversation.",
+      "category": "diagnostics",
+      "toolsets": ["roleplay_mechanic"],
+      "surfaces": ["brain", "diagnostic"],
+      "safety": ["coordination_action"],
+      "output_shape": "roleplay.mechanic_diagnostic.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "update_scene_state",
       "description": "Update lightweight roleplay scene state for the current session.",
       "category": "memory",

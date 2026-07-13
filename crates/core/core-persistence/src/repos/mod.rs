@@ -7,6 +7,7 @@ pub(crate) mod external_runtime;
 pub(crate) mod memory;
 pub(crate) mod queued_messages;
 pub(crate) mod roleplay_lore;
+pub(crate) mod roleplay_mechanic;
 pub(crate) mod roleplay_proposals;
 pub(crate) mod roleplay_records;
 pub(crate) mod runtime_counters;

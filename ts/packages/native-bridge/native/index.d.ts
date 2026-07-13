@@ -186,6 +186,14 @@ export declare class NativeBridgeBinding {
   listRoleplayMechanicProposalsJson(inputJson: string): string
   decideRoleplayMechanicProposalJson(inputJson: string): string
   applyRoleplayMechanicProposalJson(inputJson: string): string
+  createRoleplayMechanicSessionAssociationJson(inputJson: string): string
+  getRoleplayMechanicSessionAssociationJson(mechanicSessionId: string): string
+  listRoleplayMechanicSessionAssociationsJson(inputJson: string): string
+  updateRoleplayMechanicSessionAttachmentJson(inputJson: string): string
+  createRoleplayMechanicDiagnosticJson(inputJson: string): string
+  getRoleplayMechanicDiagnosticJson(diagnosticId: string): string
+  listRoleplayMechanicDiagnosticsJson(inputJson: string): string
+  updateRoleplayMechanicDiagnosticOutcomeJson(inputJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string

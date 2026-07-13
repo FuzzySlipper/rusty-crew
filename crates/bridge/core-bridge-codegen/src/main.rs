@@ -1058,6 +1058,38 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "apply_roleplay_mechanic_proposal",
         persistence::RoleplayMechanicProposalRecord
     );
+    schema!(
+        "create_roleplay_mechanic_session_association",
+        persistence::RoleplayMechanicSessionAssociationRecord
+    );
+    schema!(
+        "get_roleplay_mechanic_session_association",
+        Option<persistence::RoleplayMechanicSessionAssociationRecord>
+    );
+    schema!(
+        "list_roleplay_mechanic_session_associations",
+        Vec<persistence::RoleplayMechanicSessionAssociationRecord>
+    );
+    schema!(
+        "update_roleplay_mechanic_session_attachment",
+        persistence::RoleplayMechanicSessionAssociationRecord
+    );
+    schema!(
+        "create_roleplay_mechanic_diagnostic",
+        persistence::RoleplayMechanicDiagnosticRecord
+    );
+    schema!(
+        "get_roleplay_mechanic_diagnostic",
+        Option<persistence::RoleplayMechanicDiagnosticRecord>
+    );
+    schema!(
+        "list_roleplay_mechanic_diagnostics",
+        Vec<persistence::RoleplayMechanicDiagnosticRecord>
+    );
+    schema!(
+        "update_roleplay_mechanic_diagnostic_outcome",
+        persistence::RoleplayMechanicDiagnosticRecord
+    );
 
     schema!(
         "plan_roleplay_assistant_alternative",

@@ -12,7 +12,7 @@ const suffix = Date.now().toString(36);
 const narratorProfileId = `mechanic-proposal-narrator-${suffix}`;
 const roleplaySessionId = `mechanic-proposal-rp-${suffix}`;
 const mechanicProfileId = `mechanic-proposal-agent-${suffix}`;
-const mechanicSessionId = `${mechanicProfileId}-session`;
+let mechanicSessionId = `${mechanicProfileId}-session`;
 const marker = `MECHANIC_PROPOSAL_${suffix.toUpperCase()}`;
 const acceptedExemplar = `Rain counted a patient rhythm against the observatory glass. ${marker}`;
 const rejectedExemplar = `This rejected exemplar must never become active. ${marker}`;
@@ -36,7 +36,6 @@ try {
   });
   await createProfile({
     profileId: mechanicProfileId,
-    sessionId: mechanicSessionId,
     displayName: "Mechanic proposal live agent",
     providerAlias,
     localToolProfileId: "basic_chat",
@@ -46,6 +45,13 @@ try {
     `/v1/admin/roleplay/profiles/${mechanicProfileId}/mechanic-config`,
     { name: "Maren", providerAlias, autoMonitor: false },
   );
+  const mechanicCreated = await apiData<{
+    association: { mechanicSessionId: string };
+  }>("POST", "/v1/admin/roleplay/mechanic-sessions", {
+    profileId: mechanicProfileId,
+    roleplaySessionId,
+  });
+  mechanicSessionId = mechanicCreated.association.mechanicSessionId;
 
   const before = await narratorConfig();
   assert.notEqual(before.exemplar, acceptedExemplar);

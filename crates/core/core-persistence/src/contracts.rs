@@ -66,7 +66,7 @@ pub struct PersistedEvent {
     pub event: CoreEvent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryPage {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -2283,6 +2283,138 @@ pub struct RoleplayMechanicProposalApplyOutcome {
     pub target_revision: Option<u64>,
     pub outcome: JsonValue,
     pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicSessionAssociationRecord {
+    pub mechanic_session_id: SessionId,
+    pub mechanic_profile_id: ProfileId,
+    #[serde(default)]
+    pub roleplay_session_id: Option<String>,
+    #[serde(default)]
+    pub roleplay_profile_id: Option<ProfileId>,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicSessionAssociationCreate {
+    pub mechanic_session_id: SessionId,
+    #[serde(default)]
+    pub roleplay_session_id: Option<String>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicSessionAssociationWrite {
+    pub record: RoleplayMechanicSessionAssociationRecord,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicSessionAttachmentUpdate {
+    pub mechanic_session_id: SessionId,
+    #[serde(default)]
+    pub roleplay_session_id: Option<String>,
+    pub expected_revision: u64,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicSessionAssociationQuery {
+    #[serde(default)]
+    pub mechanic_profile_id: Option<ProfileId>,
+    #[serde(default)]
+    pub roleplay_session_id: Option<String>,
+    #[serde(default)]
+    pub roleplay_profile_id: Option<ProfileId>,
+    #[serde(default)]
+    pub attached: Option<bool>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayMechanicDiagnosticOutcome {
+    Pending,
+    Improved,
+    NoChange,
+    Worse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicDiagnosticRecord {
+    pub diagnostic_id: String,
+    pub mechanic_session_id: SessionId,
+    pub mechanic_profile_id: ProfileId,
+    pub roleplay_session_id: String,
+    pub roleplay_profile_id: ProfileId,
+    pub symptom: String,
+    pub hypothesis: String,
+    #[serde(default)]
+    pub proposal_ids: Vec<String>,
+    #[serde(default)]
+    pub applied_proposal_ids: Vec<String>,
+    pub outcome: RoleplayMechanicDiagnosticOutcome,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicDiagnosticCreate {
+    pub diagnostic_id: String,
+    pub mechanic_session_id: SessionId,
+    pub roleplay_session_id: String,
+    pub symptom: String,
+    pub hypothesis: String,
+    #[serde(default)]
+    pub proposal_ids: Vec<String>,
+    #[serde(default)]
+    pub applied_proposal_ids: Vec<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicDiagnosticOutcomeUpdate {
+    pub diagnostic_id: String,
+    pub outcome: RoleplayMechanicDiagnosticOutcome,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub expected_revision: u64,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayMechanicDiagnosticQuery {
+    #[serde(default)]
+    pub mechanic_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub roleplay_session_id: Option<String>,
+    #[serde(default)]
+    pub roleplay_profile_id: Option<ProfileId>,
+    #[serde(default)]
+    pub outcome: Option<RoleplayMechanicDiagnosticOutcome>,
+    #[serde(default)]
+    pub proposal_id: Option<String>,
+    #[serde(default)]
+    pub page: Option<QueryPage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

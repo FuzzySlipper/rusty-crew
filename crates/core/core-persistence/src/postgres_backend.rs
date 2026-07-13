@@ -12,6 +12,7 @@ mod external_runtime;
 mod memory_lore;
 mod pool;
 mod profile_config;
+mod roleplay_mechanic;
 mod roleplay_proposals;
 mod roleplay_records;
 mod runtime_counters;
@@ -15310,6 +15311,108 @@ mod tests {
                 .get_roleplay_mechanic_proposal("proposal-pg")
                 .unwrap(),
             Some(applied)
+        );
+        reopened.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_roleplay_mechanic_associations_and_diagnostics_round_trip() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_roleplay_mechanic_diagnostics");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let association = crate::RoleplayMechanicSessionAssociationRecord {
+            mechanic_session_id: SessionId::new("mechanic-pg"),
+            mechanic_profile_id: ProfileId::new("mechanic-profile-pg"),
+            roleplay_session_id: Some("roleplay-pg".into()),
+            roleplay_profile_id: Some(ProfileId::new("roleplay-profile-pg")),
+            revision: 1,
+            created_at: "2026-07-13T00:00:00Z".into(),
+            updated_at: "2026-07-13T00:00:00Z".into(),
+        };
+        assert_eq!(
+            store
+                .put_roleplay_mechanic_session_association(
+                    &crate::RoleplayMechanicSessionAssociationWrite {
+                        record: association.clone(),
+                        expected_revision: None,
+                    },
+                )
+                .unwrap(),
+            association
+        );
+        store
+            .create_roleplay_mechanic_proposal(&crate::RoleplayMechanicProposalPersist {
+                create: crate::RoleplayMechanicProposalCreate {
+                    proposal_id: "proposal-pg".into(),
+                    mechanic_session_id: association.mechanic_session_id.clone(),
+                    roleplay_session_id: "roleplay-pg".into(),
+                    kind: crate::RoleplayMechanicProposalKind::Exemplar,
+                    target_id: None,
+                    proposed_value: serde_json::json!("PostgreSQL diagnostic exemplar"),
+                    rationale: "Prove typed diagnostic links.".into(),
+                    diagnostic_context: serde_json::json!({}),
+                    now: "2026-07-13T00:00:00Z".into(),
+                },
+                captured: crate::RoleplayMechanicProposalCapturedTarget {
+                    profile_id: ProfileId::new("roleplay-profile-pg"),
+                    target_revision: Some(1),
+                    before_value: serde_json::Value::Null,
+                },
+            })
+            .unwrap();
+        let diagnostic = crate::RoleplayMechanicDiagnosticRecord {
+            diagnostic_id: "diagnostic-pg".into(),
+            mechanic_session_id: association.mechanic_session_id.clone(),
+            mechanic_profile_id: association.mechanic_profile_id.clone(),
+            roleplay_session_id: "roleplay-pg".into(),
+            roleplay_profile_id: ProfileId::new("roleplay-profile-pg"),
+            symptom: "Abrupt pacing".into(),
+            hypothesis: "Exemplar pressure".into(),
+            proposal_ids: vec!["proposal-pg".into()],
+            applied_proposal_ids: vec![],
+            outcome: crate::RoleplayMechanicDiagnosticOutcome::Pending,
+            notes: Some("Observe three turns".into()),
+            revision: 1,
+            created_at: "2026-07-13T00:00:01Z".into(),
+            updated_at: "2026-07-13T00:00:01Z".into(),
+        };
+        assert_eq!(
+            store
+                .create_roleplay_mechanic_diagnostic(&diagnostic)
+                .unwrap(),
+            diagnostic
+        );
+        let updated = store
+            .update_roleplay_mechanic_diagnostic_outcome(
+                &crate::RoleplayMechanicDiagnosticOutcomeUpdate {
+                    diagnostic_id: diagnostic.diagnostic_id.clone(),
+                    outcome: crate::RoleplayMechanicDiagnosticOutcome::NoChange,
+                    notes: Some("No measurable change".into()),
+                    expected_revision: 1,
+                    now: "2026-07-13T00:00:02Z".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.revision, 2);
+        drop(store);
+        let reopened = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        assert_eq!(
+            reopened
+                .get_roleplay_mechanic_session_association(&SessionId::new("mechanic-pg"))
+                .unwrap(),
+            Some(association)
+        );
+        assert_eq!(
+            reopened
+                .list_roleplay_mechanic_diagnostics(&crate::RoleplayMechanicDiagnosticQuery {
+                    proposal_id: Some("proposal-pg".into()),
+                    ..crate::RoleplayMechanicDiagnosticQuery::default()
+                },)
+                .unwrap(),
+            vec![updated]
         );
         reopened.drop_schema_for_test().unwrap();
     }

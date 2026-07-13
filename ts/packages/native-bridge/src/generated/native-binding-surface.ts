@@ -186,6 +186,14 @@ export interface NativeBridgeBinding {
   listRoleplayMechanicProposalsJson(inputJson: string): string
   decideRoleplayMechanicProposalJson(inputJson: string): string
   applyRoleplayMechanicProposalJson(inputJson: string): string
+  createRoleplayMechanicSessionAssociationJson(inputJson: string): string
+  getRoleplayMechanicSessionAssociationJson(mechanicSessionId: string): string
+  listRoleplayMechanicSessionAssociationsJson(inputJson: string): string
+  updateRoleplayMechanicSessionAttachmentJson(inputJson: string): string
+  createRoleplayMechanicDiagnosticJson(inputJson: string): string
+  getRoleplayMechanicDiagnosticJson(diagnosticId: string): string
+  listRoleplayMechanicDiagnosticsJson(inputJson: string): string
+  updateRoleplayMechanicDiagnosticOutcomeJson(inputJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string
@@ -787,7 +795,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 243,
+  "manifestOperationCount": 251,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2244,6 +2252,70 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "apply_roleplay_mechanic_proposal"
+    },
+    {
+      "name": "createRoleplayMechanicSessionAssociationJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "create_roleplay_mechanic_session_association"
+    },
+    {
+      "name": "getRoleplayMechanicSessionAssociationJson",
+      "parameterSource": "mechanicSessionId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_roleplay_mechanic_session_association"
+    },
+    {
+      "name": "listRoleplayMechanicSessionAssociationsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_roleplay_mechanic_session_associations"
+    },
+    {
+      "name": "updateRoleplayMechanicSessionAttachmentJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "update_roleplay_mechanic_session_attachment"
+    },
+    {
+      "name": "createRoleplayMechanicDiagnosticJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "create_roleplay_mechanic_diagnostic"
+    },
+    {
+      "name": "getRoleplayMechanicDiagnosticJson",
+      "parameterSource": "diagnosticId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_roleplay_mechanic_diagnostic"
+    },
+    {
+      "name": "listRoleplayMechanicDiagnosticsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_roleplay_mechanic_diagnostics"
+    },
+    {
+      "name": "updateRoleplayMechanicDiagnosticOutcomeJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "update_roleplay_mechanic_diagnostic_outcome"
     },
     {
       "name": "addLoreEntryJson",

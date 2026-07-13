@@ -1122,6 +1122,87 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn put_roleplay_mechanic_session_association(
+        &self,
+        write: &RoleplayMechanicSessionAssociationWrite,
+    ) -> CoreResult<RoleplayMechanicSessionAssociationRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_roleplay_mechanic_session_association(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_roleplay_mechanic_session_association(write),
+        }
+    }
+
+    pub fn get_roleplay_mechanic_session_association(
+        &self,
+        mechanic_session_id: &SessionId,
+    ) -> CoreResult<Option<RoleplayMechanicSessionAssociationRecord>> {
+        match self {
+            Self::Sqlite(store) => {
+                store.get_roleplay_mechanic_session_association(mechanic_session_id)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.get_roleplay_mechanic_session_association(mechanic_session_id)
+            }
+        }
+    }
+
+    pub fn list_roleplay_mechanic_session_associations(
+        &self,
+        query: &RoleplayMechanicSessionAssociationQuery,
+    ) -> CoreResult<Vec<RoleplayMechanicSessionAssociationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_mechanic_session_associations(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_mechanic_session_associations(query),
+        }
+    }
+
+    pub fn create_roleplay_mechanic_diagnostic(
+        &self,
+        record: &RoleplayMechanicDiagnosticRecord,
+    ) -> CoreResult<RoleplayMechanicDiagnosticRecord> {
+        match self {
+            Self::Sqlite(store) => store.create_roleplay_mechanic_diagnostic(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.create_roleplay_mechanic_diagnostic(record),
+        }
+    }
+
+    pub fn get_roleplay_mechanic_diagnostic(
+        &self,
+        diagnostic_id: &str,
+    ) -> CoreResult<Option<RoleplayMechanicDiagnosticRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_roleplay_mechanic_diagnostic(diagnostic_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_roleplay_mechanic_diagnostic(diagnostic_id),
+        }
+    }
+
+    pub fn list_roleplay_mechanic_diagnostics(
+        &self,
+        query: &RoleplayMechanicDiagnosticQuery,
+    ) -> CoreResult<Vec<RoleplayMechanicDiagnosticRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_roleplay_mechanic_diagnostics(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_roleplay_mechanic_diagnostics(query),
+        }
+    }
+
+    pub fn update_roleplay_mechanic_diagnostic_outcome(
+        &self,
+        update: &RoleplayMechanicDiagnosticOutcomeUpdate,
+    ) -> CoreResult<RoleplayMechanicDiagnosticRecord> {
+        match self {
+            Self::Sqlite(store) => store.update_roleplay_mechanic_diagnostic_outcome(update),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.update_roleplay_mechanic_diagnostic_outcome(update),
+        }
+    }
+
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,

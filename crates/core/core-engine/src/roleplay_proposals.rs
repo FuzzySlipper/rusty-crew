@@ -17,6 +17,26 @@ impl CoreEngine {
         create: &RoleplayMechanicProposalCreate,
     ) -> CoreResult<RoleplayMechanicProposalRecord> {
         self.require_mechanic_session(&create.mechanic_session_id)?;
+        let association = self
+            .get_roleplay_mechanic_session_association(&create.mechanic_session_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    format!(
+                        "mechanic session {} has no roleplay association",
+                        create.mechanic_session_id
+                    ),
+                )
+            })?;
+        if association.roleplay_session_id.as_deref() != Some(create.roleplay_session_id.as_str()) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "mechanic session {} is not attached to roleplay session {}",
+                    create.mechanic_session_id, create.roleplay_session_id
+                ),
+            ));
+        }
         let metadata = self
             .get_roleplay_session_metadata(&create.roleplay_session_id)?
             .ok_or_else(|| {
@@ -121,7 +141,10 @@ impl CoreEngine {
         }
     }
 
-    fn require_mechanic_session(&self, session_id: &SessionId) -> CoreResult<()> {
+    pub(crate) fn require_mechanic_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<SessionState> {
         let session = self.get_session(session_id)?;
         let profile = self
             .get_profile_registry_record(&session.profile_id)?
@@ -141,7 +164,7 @@ impl CoreEngine {
             })
             .is_some();
         if configured {
-            Ok(())
+            Ok(session)
         } else {
             Err(CoreError::new(
                 CoreErrorKind::ActionRejected,

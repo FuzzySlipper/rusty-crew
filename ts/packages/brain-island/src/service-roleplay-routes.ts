@@ -12,6 +12,7 @@ import {
   handleAdminRoleplayLoreRequest,
   handleBrowserProfileLoreLayersRequest,
 } from "./roleplay/lore-routes.js";
+import { handleRoleplayMechanicSessionRequest } from "./roleplay/mechanic-session-routes.js";
 import type {
   ChatActor,
   ChatEvent,
@@ -336,6 +337,12 @@ export async function handleAdminRoleplayRequest(
   }
   if (url.pathname.startsWith("/v1/admin/roleplay/sessions")) {
     return handleRoleplaySessionRequest(request, state, url);
+  }
+  if (
+    url.pathname.startsWith("/v1/admin/roleplay/mechanic-sessions") ||
+    url.pathname.startsWith("/v1/admin/roleplay/mechanic-diagnostics")
+  ) {
+    return handleRoleplayMechanicSessionRequest(request, state, url);
   }
   if (url.pathname.startsWith("/v1/admin/roleplay/mechanic-proposals")) {
     return handleRoleplayMechanicProposalRequest(request, state, url);

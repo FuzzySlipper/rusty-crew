@@ -344,11 +344,11 @@ pub(crate) fn roleplay_proposal_status_as_str(
     }
 }
 
-fn validate_proposal_id(value: &str) -> CoreResult<()> {
+pub(crate) fn validate_proposal_id(value: &str) -> CoreResult<()> {
     validate_actor_id("proposal_id", value)
 }
 
-fn validate_actor_id(field: &str, value: &str) -> CoreResult<()> {
+pub(crate) fn validate_actor_id(field: &str, value: &str) -> CoreResult<()> {
     let valid = !value.is_empty()
         && value.len() <= 200
         && value

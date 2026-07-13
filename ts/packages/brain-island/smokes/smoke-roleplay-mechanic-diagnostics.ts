@@ -6,6 +6,7 @@ import {
   inspectRoleplaySceneTool,
   inspectRoleplayTranscriptTool,
   proposeRoleplayChangeTool,
+  recordRoleplayDiagnosticTool,
 } from "../src/roleplay-mechanic-tools.js";
 
 const profile = {
@@ -131,6 +132,15 @@ const bridge = {
       history: [{ kind: "proposed", actorId: "mechanic" }],
     };
   },
+  async getRoleplayMechanicSessionAssociation() {
+    return {
+      mechanicSessionId: "mechanic-session",
+      roleplaySessionId: "rp-session",
+    };
+  },
+  async createRoleplayMechanicDiagnostic(input: Record<string, unknown>) {
+    return { ...input, outcome: "pending", revision: 1 };
+  },
 } as never;
 
 const transcript = await inspectRoleplayTranscriptTool({
@@ -206,6 +216,27 @@ assert.equal(
   "Rain tapped a patient rhythm against the observatory glass.",
 );
 
+const diagnostic = await recordRoleplayDiagnosticTool({
+  bridge,
+  profile,
+  mechanicSessionId: "mechanic-session",
+}).execute("diagnostic", {
+  report: `---
+symptom: Scene transitions skip established beats.
+hypothesis: The active exemplar rewards abrupt pacing.
+proposal_ids:
+  - proposal-previous
+---
+Compare the next three assistant turns before recording an outcome.`,
+});
+assert.equal(diagnostic.details.ok, true);
+assert.equal(diagnostic.details.action, "recorded");
+assert.equal(
+  (diagnostic.details.result as { roleplaySessionId: string })
+    .roleplaySessionId,
+  "rp-session",
+);
+
 const malformed = await proposeRoleplayChangeTool({
   bridge,
   profile,
@@ -232,6 +263,7 @@ console.log(
     traceDecisions: 2,
     proposalHistoryAvailable: true,
     markdownProposalCreated: true,
+    markdownDiagnosticRecorded: true,
     missingSessionReason: missing.details.reasonCode,
   }),
 );

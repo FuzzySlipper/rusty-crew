@@ -2358,6 +2358,90 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_RoleplayLoreRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord>": {
+      "items": {
+        "properties": {
+          "appliedProposalIds": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "diagnosticId": {
+            "type": "string"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "mechanicProfileId": {
+            "type": "string"
+          },
+          "mechanicSessionId": {
+            "type": "string"
+          },
+          "notes": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "improved",
+              "no_change",
+              "worse"
+            ],
+            "type": "string"
+          },
+          "proposalIds": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "roleplayProfileId": {
+            "type": "string"
+          },
+          "roleplaySessionId": {
+            "type": "string"
+          },
+          "symptom": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "diagnosticId",
+          "mechanicSessionId",
+          "mechanicProfileId",
+          "roleplaySessionId",
+          "roleplayProfileId",
+          "symptom",
+          "hypothesis",
+          "outcome",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_RoleplayMechanicDiagnosticRecord",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord>": {
       "items": {
         "properties": {
@@ -2531,6 +2615,53 @@ export const bridgeWireSchemaArtifact = {
         "type": "object"
       },
       "title": "Array_of_RoleplayMechanicProposalRecord",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord>": {
+      "items": {
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "mechanicProfileId": {
+            "type": "string"
+          },
+          "mechanicSessionId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "roleplayProfileId": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "roleplaySessionId": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mechanicSessionId",
+          "mechanicProfileId",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_RoleplayMechanicSessionAssociationRecord",
       "type": "array"
     },
     "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>": {
@@ -4362,6 +4493,90 @@ export const bridgeWireSchemaArtifact = {
         "null"
       ]
     },
+    "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord>": {
+      "properties": {
+        "appliedProposalIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "diagnosticId": {
+          "type": "string"
+        },
+        "hypothesis": {
+          "type": "string"
+        },
+        "mechanicProfileId": {
+          "type": "string"
+        },
+        "mechanicSessionId": {
+          "type": "string"
+        },
+        "notes": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "pending",
+            "improved",
+            "no_change",
+            "worse"
+          ],
+          "type": "string"
+        },
+        "proposalIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roleplayProfileId": {
+          "type": "string"
+        },
+        "roleplaySessionId": {
+          "type": "string"
+        },
+        "symptom": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "diagnosticId",
+        "mechanicSessionId",
+        "mechanicProfileId",
+        "roleplaySessionId",
+        "roleplayProfileId",
+        "symptom",
+        "hypothesis",
+        "outcome",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Nullable_RoleplayMechanicDiagnosticRecord",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord>": {
       "properties": {
         "appliedAt": {
@@ -4532,6 +4747,53 @@ export const bridgeWireSchemaArtifact = {
         "updatedAt"
       ],
       "title": "Nullable_RoleplayMechanicProposalRecord",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord>": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "mechanicProfileId": {
+          "type": "string"
+        },
+        "mechanicSessionId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roleplayProfileId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roleplaySessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mechanicSessionId",
+        "mechanicProfileId",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Nullable_RoleplayMechanicSessionAssociationRecord",
       "type": [
         "object",
         "null"
@@ -14612,6 +14874,87 @@ export const bridgeWireSchemaArtifact = {
       "title": "RoleplayLoreRecord",
       "type": "object"
     },
+    "rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord": {
+      "properties": {
+        "appliedProposalIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "diagnosticId": {
+          "type": "string"
+        },
+        "hypothesis": {
+          "type": "string"
+        },
+        "mechanicProfileId": {
+          "type": "string"
+        },
+        "mechanicSessionId": {
+          "type": "string"
+        },
+        "notes": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "pending",
+            "improved",
+            "no_change",
+            "worse"
+          ],
+          "type": "string"
+        },
+        "proposalIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roleplayProfileId": {
+          "type": "string"
+        },
+        "roleplaySessionId": {
+          "type": "string"
+        },
+        "symptom": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "diagnosticId",
+        "mechanicSessionId",
+        "mechanicProfileId",
+        "roleplaySessionId",
+        "roleplayProfileId",
+        "symptom",
+        "hypothesis",
+        "outcome",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "RoleplayMechanicDiagnosticRecord",
+      "type": "object"
+    },
     "rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord": {
       "properties": {
         "appliedAt": {
@@ -14782,6 +15125,50 @@ export const bridgeWireSchemaArtifact = {
         "updatedAt"
       ],
       "title": "RoleplayMechanicProposalRecord",
+      "type": "object"
+    },
+    "rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "mechanicProfileId": {
+          "type": "string"
+        },
+        "mechanicSessionId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roleplayProfileId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roleplaySessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mechanicSessionId",
+        "mechanicProfileId",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "RoleplayMechanicSessionAssociationRecord",
       "type": "object"
     },
     "rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord": {
@@ -21010,7 +21397,9 @@ export const bridgeWireSchemaArtifact = {
     "create_chat_message_slot": "rusty_crew_core_persistence::contracts::CreateChatMessageSlotResult",
     "create_chat_message_variant": "rusty_crew_core_persistence::contracts::CreateChatMessageVariantResult",
     "create_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
+    "create_roleplay_mechanic_diagnostic": "rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord",
     "create_roleplay_mechanic_proposal": "rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord",
+    "create_roleplay_mechanic_session_association": "rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord",
     "decide_roleplay_mechanic_proposal": "rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord",
     "delete_chat_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
     "delete_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
@@ -21030,7 +21419,9 @@ export const bridgeWireSchemaArtifact = {
     "get_recall_trace": "core::option::Option<rusty_crew_core_persistence::contracts::LoreRecallTraceRecord>",
     "get_roleplay_character": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayCharacterRecord>",
     "get_roleplay_import": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayImportRecord>",
+    "get_roleplay_mechanic_diagnostic": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord>",
     "get_roleplay_mechanic_proposal": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord>",
+    "get_roleplay_mechanic_session_association": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord>",
     "get_roleplay_player_persona": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>",
     "get_roleplay_session_metadata": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
     "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
@@ -21043,7 +21434,9 @@ export const bridgeWireSchemaArtifact = {
     "list_recall_traces": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::LoreRecallTraceRecord>",
     "list_roleplay_characters": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayCharacterRecord>",
     "list_roleplay_imports": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayImportRecord>",
+    "list_roleplay_mechanic_diagnostics": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord>",
     "list_roleplay_mechanic_proposals": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord>",
+    "list_roleplay_mechanic_session_associations": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord>",
     "list_roleplay_player_personas": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>",
     "list_roleplay_session_metadata": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
     "list_scheduled_jobs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput>",
@@ -21140,6 +21533,8 @@ export const bridgeWireSchemaArtifact = {
     "transition_external_turn": "rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation",
     "update_conversation_branch_head": "rusty_crew_core_persistence::contracts::UpdateBranchHeadResult",
     "update_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
+    "update_roleplay_mechanic_diagnostic_outcome": "rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord",
+    "update_roleplay_mechanic_session_attachment": "rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord",
     "validate_runtime_config_draft": "rusty_crew_core_config::RuntimeConfigValidationResult",
     "write_roleplay_character": "rusty_crew_roleplay_core::RoleplayCharacter",
     "write_roleplay_player_persona": "rusty_crew_roleplay_core::RoleplayPlayerPersona"

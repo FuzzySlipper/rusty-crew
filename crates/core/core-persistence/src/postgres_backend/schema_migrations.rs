@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 26;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 27;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -145,7 +145,68 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add durable roleplay mechanic proposals",
         apply: Some(apply_postgres_roleplay_mechanic_proposals),
     },
+    PostgresSchemaMigration {
+        version: 27,
+        description: "add roleplay mechanic session associations and diagnostics",
+        apply: Some(apply_postgres_roleplay_mechanic_sessions_and_diagnostics),
+    },
 ];
+
+fn apply_postgres_roleplay_mechanic_sessions_and_diagnostics(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_mechanic_sessions (
+            mechanic_session_id TEXT PRIMARY KEY,
+            mechanic_profile_id TEXT NOT NULL,
+            roleplay_session_id TEXT,
+            roleplay_profile_id TEXT,
+            revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_sessions_profile_idx
+            ON {schema}.module_roleplay_mechanic_sessions(mechanic_profile_id, updated_at DESC, mechanic_session_id);
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_sessions_roleplay_idx
+            ON {schema}.module_roleplay_mechanic_sessions(roleplay_session_id, updated_at DESC, mechanic_session_id);
+
+         CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_mechanic_diagnostics (
+            diagnostic_id TEXT PRIMARY KEY,
+            mechanic_session_id TEXT NOT NULL,
+            mechanic_profile_id TEXT NOT NULL,
+            roleplay_session_id TEXT NOT NULL,
+            roleplay_profile_id TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            revision BIGINT NOT NULL,
+            record_json JSONB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_diagnostics_mechanic_idx
+            ON {schema}.module_roleplay_mechanic_diagnostics(mechanic_session_id, updated_at DESC, diagnostic_id);
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_diagnostics_roleplay_outcome_idx
+            ON {schema}.module_roleplay_mechanic_diagnostics(roleplay_session_id, outcome, updated_at DESC, diagnostic_id);
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_diagnostics_profile_idx
+            ON {schema}.module_roleplay_mechanic_diagnostics(roleplay_profile_id, updated_at DESC, diagnostic_id);
+
+         CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_mechanic_diagnostic_proposals (
+            diagnostic_id TEXT NOT NULL REFERENCES {schema}.module_roleplay_mechanic_diagnostics(diagnostic_id) ON DELETE CASCADE,
+            proposal_id TEXT NOT NULL REFERENCES {schema}.module_roleplay_mechanic_proposals(proposal_id) ON DELETE RESTRICT,
+            applied BOOLEAN NOT NULL,
+            PRIMARY KEY(diagnostic_id, proposal_id)
+         );
+         CREATE INDEX IF NOT EXISTS roleplay_mechanic_diagnostic_proposals_proposal_idx
+            ON {schema}.module_roleplay_mechanic_diagnostic_proposals(proposal_id, diagnostic_id);"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL roleplay mechanic session associations and diagnostics",
+            error,
+        )
+    })
+}
 
 fn apply_postgres_roleplay_mechanic_proposals(
     tx: &mut Transaction<'_>,
