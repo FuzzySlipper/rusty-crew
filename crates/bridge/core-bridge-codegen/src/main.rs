@@ -2438,7 +2438,7 @@ fn sample_create_profile_plan_input() -> CreateProfilePlanInput {
                 max_output_tokens: Some(1024),
             }),
             brain: Some(ProfileBrainMetadata {
-                module: Some("pi-agent".to_owned()),
+                module: Some("chat-completions".to_owned()),
                 strategy: Some("default".to_owned()),
             }),
             mcp_bindings: vec![CreateProfileMcpBindingRequest {
@@ -2610,7 +2610,7 @@ fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
     ProfileRuntimeMetadata {
         profile_id: ProfileId::new("field-sample-profile"),
         brain: Some(ProfileBrainMetadata {
-            module: Some("pi-agent".to_owned()),
+            module: Some("chat-completions".to_owned()),
             strategy: Some("default".to_owned()),
         }),
         runtime: Some(ProfileRuntimeOptions {

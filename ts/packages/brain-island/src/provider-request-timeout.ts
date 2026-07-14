@@ -1,7 +1,9 @@
-export type ProviderRequestTimeoutModuleId = "pi-agent" | "openai-responses";
+export type ProviderRequestTimeoutModuleId =
+  | "chat-completions"
+  | "openai-responses";
 
 const ENV_BY_MODULE: Record<ProviderRequestTimeoutModuleId, string> = {
-  "pi-agent": "RUSTY_CREW_PI_AGENT_PROVIDER_REQUEST_TIMEOUT_MS",
+  "chat-completions": "RUSTY_CREW_CHAT_COMPLETIONS_PROVIDER_REQUEST_TIMEOUT_MS",
   "openai-responses": "RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS",
 };
 
@@ -33,7 +35,7 @@ export function providerRequestTimeoutDiagnostics(moduleId: string): {
   providerRequestTimeoutMode?: "disabled" | "configured";
   providerRequestTimeoutMs?: number;
 } {
-  if (moduleId !== "pi-agent" && moduleId !== "openai-responses") {
+  if (moduleId !== "chat-completions" && moduleId !== "openai-responses") {
     return {};
   }
   const timeoutMs = providerRequestTimeoutMs(moduleId);

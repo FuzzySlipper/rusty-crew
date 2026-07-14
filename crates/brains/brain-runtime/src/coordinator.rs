@@ -990,7 +990,7 @@ mod tests {
 
     fn coordinator() -> BufferedBrainTurnCoordinator {
         BufferedBrainTurnCoordinator::new_at(
-            "pi-agent",
+            "chat-completions",
             "wake-1",
             session_id("session-1"),
             Some(1_000),
@@ -1356,7 +1356,7 @@ mod tests {
         assert_eq!(turn.phase(), BufferedBrainTurnPhase::TimedOut);
 
         let mut unbounded = BufferedBrainTurnCoordinator::new_at(
-            "pi-agent",
+            "chat-completions",
             "wake-2",
             session_id("session-1"),
             None,
@@ -1379,7 +1379,7 @@ mod tests {
             max_tool_output_bytes: 3,
         };
         let mut stream_turn = BufferedBrainTurnCoordinator::new(
-            "pi-agent",
+            "chat-completions",
             "wake-1",
             session_id("session-1"),
             None,
@@ -1400,7 +1400,7 @@ mod tests {
         assert_eq!(stream_turn.phase(), BufferedBrainTurnPhase::Failed);
 
         let mut tool_turn = BufferedBrainTurnCoordinator::new(
-            "pi-agent",
+            "chat-completions",
             "wake-1",
             session_id("session-1"),
             None,
@@ -1420,7 +1420,7 @@ mod tests {
         ));
 
         let mut output_turn = BufferedBrainTurnCoordinator::new(
-            "pi-agent",
+            "chat-completions",
             "wake-1",
             session_id("session-1"),
             None,
@@ -1478,7 +1478,7 @@ mod tests {
     #[test]
     fn zero_limits_are_rejected() {
         let error = BufferedBrainTurnCoordinator::new(
-            "pi-agent",
+            "chat-completions",
             "wake-1",
             session_id("session-1"),
             None,
@@ -1498,7 +1498,7 @@ mod tests {
 
     #[test]
     fn typed_registry_rejects_duplicates_and_cleans_active_runs() {
-        let registry = BufferedBrainTurnRegistry::new("pi-agent");
+        let registry = BufferedBrainTurnRegistry::new("chat-completions");
         let mut first = coordinator();
         first.start().expect("start");
         registry

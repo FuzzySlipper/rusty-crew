@@ -99,7 +99,7 @@ const validBinding = withDirectBridgeOutputValidation(
     bufferedBrainRunDiagnosticsJson: () =>
       JSON.stringify({
         active_run_count: 0,
-        modules: [{ module_label: "pi-agent", active_run_count: 0 }],
+        modules: [{ module_label: "chat-completions", active_run_count: 0 }],
         runs: [],
       }),
     cleanupBufferedBrainRunsJson: () =>
@@ -110,7 +110,7 @@ const validBinding = withDirectBridgeOutputValidation(
         removed_runs: 0,
         modules: [
           {
-            module_label: "pi-agent",
+            module_label: "chat-completions",
             active_runs: 0,
             terminal_runs: 0,
             cancelled_nonterminal_runs: 0,

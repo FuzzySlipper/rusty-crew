@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 30;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 31;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -165,7 +165,53 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add typed external runtime compatibility certifications",
         apply: Some(apply_postgres_external_runtime_certifications),
     },
+    PostgresSchemaMigration {
+        version: 31,
+        description: "rename chat completions brain identity",
+        apply: Some(apply_postgres_rename_chat_completions_brain),
+    },
 ];
+
+fn apply_postgres_rename_chat_completions_brain(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.profile_registry
+            SET record_json = (
+                CASE
+                    WHEN record_json::jsonb #>> '{{active_runtime_settings_json,brain,module}}' = 'pi-agent'
+                    THEN jsonb_set(
+                        record_json::jsonb,
+                        '{{active_runtime_settings_json,brain,module}}',
+                        '\"chat-completions\"'::jsonb,
+                        false
+                    )
+                    ELSE record_json::jsonb
+                END
+            )::text
+          WHERE record_json::jsonb #>> '{{active_runtime_settings_json,brain,module}}' = 'pi-agent';
+
+         UPDATE {schema}.profile_registry
+            SET record_json = (
+                CASE
+                    WHEN record_json::jsonb #>> '{{active_runtime_settings_json,profile,brain,module}}' = 'pi-agent'
+                    THEN jsonb_set(
+                        record_json::jsonb,
+                        '{{active_runtime_settings_json,profile,brain,module}}',
+                        '\"chat-completions\"'::jsonb,
+                        false
+                    )
+                    ELSE record_json::jsonb
+                END
+            )::text
+          WHERE record_json::jsonb #>> '{{active_runtime_settings_json,profile,brain,module}}' = 'pi-agent';
+
+         DELETE FROM {schema}.provider_wire_states WHERE module_id = 'pi-agent';"
+    ))
+    .map_err(|error| postgres_error("rename PostgreSQL chat completions brain identity", error))?;
+    Ok(())
+}
 
 fn apply_postgres_external_runtime_certifications(
     tx: &mut Transaction<'_>,
@@ -1731,5 +1777,96 @@ mod tests {
         let error = validate_postgres_migration_catalog(&migrations).unwrap_err();
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
         assert!(error.message.contains("expected version 2"));
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_chat_completions_brain_identity_migration_is_complete_and_idempotent() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_chat_brain_migration_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let quoted_schema = store.quoted_schema();
+        let old_record = serde_json::json!({
+            "profile_id": "legacy-chat-profile",
+            "lifecycle_status": "active",
+            "active_runtime_settings_json": {
+                "brain": {"module": "pi-agent", "strategy": "default"},
+                "profile": {
+                    "brain": {"module": "pi-agent", "strategy": "default"}
+                }
+            }
+        })
+        .to_string();
+        let mut client = store.client().unwrap();
+        client
+            .execute(
+                &format!(
+                    "INSERT INTO {quoted_schema}.profile_registry
+                        (profile_id, lifecycle_status, record_json, created_at, updated_at)
+                     VALUES ($1, 'active', $2, $3, $3)"
+                ),
+                &[&"legacy-chat-profile", &old_record, &"2026-07-14T00:00:00Z"],
+            )
+            .unwrap();
+        client
+            .execute(
+                &format!(
+                    "INSERT INTO {quoted_schema}.provider_wire_states (
+                        session_id, module_id, strategy_id, profile_fingerprint,
+                        provider_fingerprint, payload_version, payload_json,
+                        created_at, updated_at
+                     ) VALUES ($1, 'pi-agent', 'default', 'profile', 'provider', 'v1', '{{}}', $2, $2)"
+                ),
+                &[&"legacy-chat-session", &"2026-07-14T00:00:00Z"],
+            )
+            .unwrap();
+
+        for _ in 0..2 {
+            let mut tx = client.transaction().unwrap();
+            apply_postgres_rename_chat_completions_brain(&mut tx, &quoted_schema).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let row = client
+            .query_one(
+                &format!(
+                    "SELECT record_json FROM {quoted_schema}.profile_registry WHERE profile_id = $1"
+                ),
+                &[&"legacy-chat-profile"],
+            )
+            .unwrap();
+        let raw: String = row.get(0);
+        let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            settings["active_runtime_settings_json"]["brain"]["module"],
+            "chat-completions"
+        );
+        assert_eq!(
+            settings["active_runtime_settings_json"]["profile"]["brain"]["module"],
+            "chat-completions"
+        );
+        let old_state_count: i64 = client
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*) FROM {quoted_schema}.provider_wire_states WHERE module_id = 'pi-agent'"
+                ),
+                &[],
+            )
+            .unwrap()
+            .get(0);
+        assert_eq!(old_state_count, 0);
+
+        drop(client);
+        store.drop_schema_for_test().unwrap();
     }
 }

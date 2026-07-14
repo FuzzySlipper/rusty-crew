@@ -1,4 +1,4 @@
-//! Rust provider-wire foundation for the pi-agent brain.
+//! Rust provider-wire foundation for the chat-completions brain.
 //!
 //! This crate intentionally stops below the full agent loop. It owns
 //! OpenAI-compatible chat-completions request construction, live SSE transport,
@@ -23,7 +23,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
-pub const MODULE_ID: &str = "pi-agent-rust";
+pub const MODULE_ID: &str = "chat-completions";
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
 pub const DEFAULT_DEN_ROUTER_MODEL_CANDIDATES: [&str; 4] =
     ["deepseek-flash", "grok", "glm", "local-coder"];
@@ -290,14 +290,14 @@ fn den_router_routes_from_value(value: Value) -> Result<DenRouterRoutes, DenRout
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PiAgentChatConfig {
+pub struct ChatCompletionsChatConfig {
     pub model: String,
     pub temperature_milli: Option<u32>,
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
 }
 
-impl PiAgentChatConfig {
+impl ChatCompletionsChatConfig {
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             model: model.into(),
@@ -477,14 +477,14 @@ pub struct ChatCompletionsStreamOptions {
 }
 
 pub struct ChatCompletionsRequestBuilder {
-    config: PiAgentChatConfig,
+    config: ChatCompletionsChatConfig,
     tools: Vec<NeutralBrainTool>,
     tool_choice: ChatToolChoice,
     include_usage: bool,
 }
 
 impl ChatCompletionsRequestBuilder {
-    pub fn new(config: PiAgentChatConfig) -> Self {
+    pub fn new(config: ChatCompletionsChatConfig) -> Self {
         Self {
             config,
             tools: Vec::new(),
@@ -577,14 +577,14 @@ pub enum ChatCompletionsEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PiAgentToolOutput {
+pub struct ChatCompletionsToolOutput {
     pub output: String,
     pub is_error: bool,
     pub cancelled: bool,
     pub timed_out: bool,
 }
 
-impl PiAgentToolOutput {
+impl ChatCompletionsToolOutput {
     pub fn ok(output: impl Into<String>) -> Self {
         Self {
             output: output.into(),
@@ -622,17 +622,17 @@ impl PiAgentToolOutput {
     }
 }
 
-pub trait PiAgentNeutralToolExecutor {
-    fn execute(&self, call: &PendingChatFunctionCall) -> PiAgentToolOutput;
+pub trait ChatCompletionsNeutralToolExecutor {
+    fn execute(&self, call: &PendingChatFunctionCall) -> ChatCompletionsToolOutput;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PiAgentBrainLoopConfig {
+pub struct ChatCompletionsBrainLoopConfig {
     pub max_tool_rounds: usize,
     pub repeated_tool_call_limit: usize,
 }
 
-impl Default for PiAgentBrainLoopConfig {
+impl Default for ChatCompletionsBrainLoopConfig {
     fn default() -> Self {
         Self {
             max_tool_rounds: 8,
@@ -642,47 +642,47 @@ impl Default for PiAgentBrainLoopConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PiAgentBrainLoopInput {
+pub struct ChatCompletionsBrainLoopInput {
     pub context: BrainEventContext,
     pub messages: Vec<ChatCompletionMessage>,
-    pub final_message_fallback: Option<PiAgentFinalMessage>,
+    pub final_message_fallback: Option<ChatCompletionsFinalMessage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PiAgentBrainLoopOutput {
+pub struct ChatCompletionsBrainLoopOutput {
     pub stream: Vec<BrainWakeStreamItem>,
     pub completed: bool,
     pub provider_request_count: usize,
     pub tool_round_count: usize,
 }
 
-pub struct PiAgentBrainLoop<C, T> {
+pub struct ChatCompletionsBrainLoop<C, T> {
     client: C,
     tools: T,
     request_builder: ChatCompletionsRequestBuilder,
-    config: PiAgentBrainLoopConfig,
+    config: ChatCompletionsBrainLoopConfig,
 }
 
-impl<C, T> PiAgentBrainLoop<C, T>
+impl<C, T> ChatCompletionsBrainLoop<C, T>
 where
     C: ChatCompletionsClient,
-    T: PiAgentNeutralToolExecutor,
+    T: ChatCompletionsNeutralToolExecutor,
 {
     pub fn new(
         client: C,
         tools: T,
-        chat_config: PiAgentChatConfig,
+        chat_config: ChatCompletionsChatConfig,
         descriptors: Vec<NeutralBrainTool>,
     ) -> Self {
         Self {
             client,
             tools,
             request_builder: ChatCompletionsRequestBuilder::new(chat_config).tools(descriptors),
-            config: PiAgentBrainLoopConfig::default(),
+            config: ChatCompletionsBrainLoopConfig::default(),
         }
     }
 
-    pub fn with_loop_config(mut self, config: PiAgentBrainLoopConfig) -> Self {
+    pub fn with_loop_config(mut self, config: ChatCompletionsBrainLoopConfig) -> Self {
         self.config = config;
         self
     }
@@ -691,16 +691,16 @@ where
         &mut self,
         context: BrainEventContext,
         messages: Vec<ChatCompletionMessage>,
-    ) -> PiAgentBrainLoopOutput {
-        self.wake(PiAgentBrainLoopInput {
+    ) -> ChatCompletionsBrainLoopOutput {
+        self.wake(ChatCompletionsBrainLoopInput {
             context,
             messages,
             final_message_fallback: None,
         })
     }
 
-    pub fn wake(&mut self, input: PiAgentBrainLoopInput) -> PiAgentBrainLoopOutput {
-        let mut mapper = PiAgentEventMapper::new();
+    pub fn wake(&mut self, input: ChatCompletionsBrainLoopInput) -> ChatCompletionsBrainLoopOutput {
+        let mut mapper = ChatCompletionsEventMapper::new();
         let mut stream = mapper.map_started(&input.context);
         let mut messages = input.messages;
         let mut repeated_calls: HashMap<(String, String), usize> = HashMap::new();
@@ -734,9 +734,9 @@ where
                 stream.push(wake_failed_item(
                     &input.context,
                     CoreErrorKind::BrainUnavailable,
-                    format!("pi-agent provider stream failed: {error}"),
+                    format!("chat-completions provider stream failed: {error}"),
                 ));
-                return PiAgentBrainLoopOutput {
+                return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
                     provider_request_count,
@@ -751,7 +751,7 @@ where
                     }
                 }
                 stream.push(success_actions_item(&input.context));
-                return PiAgentBrainLoopOutput {
+                return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: true,
                     provider_request_count,
@@ -764,11 +764,11 @@ where
                     &input.context,
                     CoreErrorKind::BrainUnavailable,
                     format!(
-                        "pi-agent exceeded {} tool continuation rounds",
+                        "chat-completions exceeded {} tool continuation rounds",
                         self.config.max_tool_rounds
                     ),
                 ));
-                return PiAgentBrainLoopOutput {
+                return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
                     provider_request_count,
@@ -787,11 +787,11 @@ where
                         &input.context,
                         CoreErrorKind::BrainUnavailable,
                         format!(
-                            "pi-agent repeated tool call {} with unchanged arguments more than {} times",
+                            "chat-completions repeated tool call {} with unchanged arguments more than {} times",
                             call.name, self.config.repeated_tool_call_limit
                         ),
                     ));
-                    return PiAgentBrainLoopOutput {
+                    return ChatCompletionsBrainLoopOutput {
                         stream,
                         completed: false,
                         provider_request_count,
@@ -822,7 +822,7 @@ where
                         CoreErrorKind::BrainUnavailable
                     };
                     stream.push(wake_failed_item(&input.context, kind, output.output));
-                    return PiAgentBrainLoopOutput {
+                    return ChatCompletionsBrainLoopOutput {
                         stream,
                         completed: false,
                         provider_request_count,
@@ -891,7 +891,7 @@ impl BrainEventContext {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PiAgentFinalMessage {
+pub struct ChatCompletionsFinalMessage {
     pub text: Option<String>,
     pub thinking: Option<String>,
     pub stop_reason: Option<String>,
@@ -899,12 +899,12 @@ pub struct PiAgentFinalMessage {
 }
 
 #[derive(Debug, Default)]
-pub struct PiAgentEventMapper {
+pub struct ChatCompletionsEventMapper {
     saw_text_delta: bool,
     think_scanner: LiteralThinkScanner,
 }
 
-impl PiAgentEventMapper {
+impl ChatCompletionsEventMapper {
     pub fn new() -> Self {
         Self::default()
     }
@@ -962,7 +962,7 @@ impl PiAgentEventMapper {
     pub fn map_final_message(
         &mut self,
         context: &BrainEventContext,
-        message: PiAgentFinalMessage,
+        message: ChatCompletionsFinalMessage,
     ) -> Vec<BrainWakeStreamItem> {
         if self.saw_text_delta {
             return Vec::new();
@@ -974,7 +974,7 @@ impl PiAgentEventMapper {
                 context,
                 BrainEvent::ReasoningDelta {
                     text: thinking,
-                    format: Some("pi-thinking".to_string()),
+                    format: Some("chat-completions-thinking".to_string()),
                 },
             ));
         }
@@ -1768,7 +1768,7 @@ mod tests {
     }
 
     fn live_chat_request() -> ChatCompletionsRequest {
-        ChatCompletionsRequestBuilder::new(PiAgentChatConfig::new("test-model"))
+        ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig::new("test-model"))
             .build(vec![ChatCompletionMessage::user("hello")])
     }
 
@@ -1830,7 +1830,7 @@ mod tests {
 
     #[test]
     fn builds_chat_completions_request_from_provider_config() {
-        let request = ChatCompletionsRequestBuilder::new(PiAgentChatConfig {
+        let request = ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig {
             model: "deepseek-flash".to_string(),
             temperature_milli: Some(500),
             max_output_tokens: Some(256),
@@ -2227,35 +2227,35 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct ScriptedToolExecutor {
-        outputs: std::sync::Mutex<VecDeque<PiAgentToolOutput>>,
+        outputs: std::sync::Mutex<VecDeque<ChatCompletionsToolOutput>>,
     }
 
     impl ScriptedToolExecutor {
-        fn new(outputs: impl IntoIterator<Item = PiAgentToolOutput>) -> Self {
+        fn new(outputs: impl IntoIterator<Item = ChatCompletionsToolOutput>) -> Self {
             Self {
                 outputs: std::sync::Mutex::new(outputs.into_iter().collect()),
             }
         }
     }
 
-    impl PiAgentNeutralToolExecutor for ScriptedToolExecutor {
-        fn execute(&self, _call: &PendingChatFunctionCall) -> PiAgentToolOutput {
+    impl ChatCompletionsNeutralToolExecutor for ScriptedToolExecutor {
+        fn execute(&self, _call: &PendingChatFunctionCall) -> ChatCompletionsToolOutput {
             self.outputs
                 .lock()
                 .expect("tool script mutex")
                 .pop_front()
-                .unwrap_or_else(|| PiAgentToolOutput::ok("default tool output"))
+                .unwrap_or_else(|| ChatCompletionsToolOutput::ok("default tool output"))
         }
     }
 
     fn loop_with(
         scripts: Vec<Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError>>,
-        outputs: Vec<PiAgentToolOutput>,
-    ) -> PiAgentBrainLoop<FakeChatCompletionsClient, ScriptedToolExecutor> {
-        PiAgentBrainLoop::new(
+        outputs: Vec<ChatCompletionsToolOutput>,
+    ) -> ChatCompletionsBrainLoop<FakeChatCompletionsClient, ScriptedToolExecutor> {
+        ChatCompletionsBrainLoop::new(
             FakeChatCompletionsClient::new(scripts),
             ScriptedToolExecutor::new(outputs),
-            PiAgentChatConfig::new("deepseek-flash"),
+            ChatCompletionsChatConfig::new("deepseek-flash"),
             vec![NeutralBrainTool {
                 name: "lookup".to_string(),
                 description: "Look up".to_string(),
@@ -2306,7 +2306,7 @@ mod tests {
                     },
                 ]),
             ],
-            vec![PiAgentToolOutput::ok("tool says yes")],
+            vec![ChatCompletionsToolOutput::ok("tool says yes")],
         );
 
         let output =
@@ -2348,7 +2348,7 @@ mod tests {
                     },
                 ]),
             ],
-            vec![PiAgentToolOutput::error("not available")],
+            vec![ChatCompletionsToolOutput::error("not available")],
         );
 
         let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("go")]);
@@ -2385,10 +2385,10 @@ mod tests {
                 repeated,
             ],
             vec![
-                PiAgentToolOutput::ok("one"),
-                PiAgentToolOutput::ok("two"),
-                PiAgentToolOutput::ok("three"),
-                PiAgentToolOutput::ok("four"),
+                ChatCompletionsToolOutput::ok("one"),
+                ChatCompletionsToolOutput::ok("two"),
+                ChatCompletionsToolOutput::ok("three"),
+                ChatCompletionsToolOutput::ok("four"),
             ],
         );
 
@@ -2406,8 +2406,8 @@ mod tests {
     #[test]
     fn minimal_loop_fails_visibly_on_tool_cancellation_or_timeout() {
         for tool_output in [
-            PiAgentToolOutput::cancelled("cancelled by operator"),
-            PiAgentToolOutput::timed_out("tool timed out"),
+            ChatCompletionsToolOutput::cancelled("cancelled by operator"),
+            ChatCompletionsToolOutput::timed_out("tool timed out"),
         ] {
             let context = context();
             let mut brain = loop_with(
@@ -2462,12 +2462,12 @@ mod tests {
             Vec::new(),
         );
 
-        let output = brain.wake(PiAgentBrainLoopInput {
+        let output = brain.wake(ChatCompletionsBrainLoopInput {
             context,
             messages: vec![ChatCompletionMessage::user("hi")],
-            final_message_fallback: Some(PiAgentFinalMessage {
+            final_message_fallback: Some(ChatCompletionsFinalMessage {
                 text: Some("final-only".to_string()),
-                ..PiAgentFinalMessage::default()
+                ..ChatCompletionsFinalMessage::default()
             }),
         });
 
@@ -2481,7 +2481,7 @@ mod tests {
     #[test]
     fn mapper_splits_literal_think_tags_across_provider_chunks() {
         let context = context();
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
 
         let mut items = Vec::new();
         items.extend(mapper.map_provider_event(
@@ -2524,7 +2524,7 @@ mod tests {
     #[test]
     fn mapper_keeps_unterminated_think_content_as_reasoning_at_finish() {
         let context = context();
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
 
         let mut items = mapper.map_provider_event(
             &context,
@@ -2555,7 +2555,7 @@ mod tests {
     #[test]
     fn mapper_treats_nested_think_like_content_as_reasoning_until_first_close() {
         let context = context();
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
 
         let mut items = mapper.map_provider_event(
             &context,
@@ -2589,7 +2589,7 @@ mod tests {
     #[test]
     fn mapper_suppresses_final_message_when_streamed_text_was_seen() {
         let context = context();
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
 
         let streamed = mapper.map_provider_event(
             &context,
@@ -2597,9 +2597,9 @@ mod tests {
         );
         let fallback = mapper.map_final_message(
             &context,
-            PiAgentFinalMessage {
+            ChatCompletionsFinalMessage {
                 text: Some("final duplicate".to_string()),
-                ..PiAgentFinalMessage::default()
+                ..ChatCompletionsFinalMessage::default()
             },
         );
 
@@ -2615,14 +2615,14 @@ mod tests {
     #[test]
     fn mapper_uses_final_message_text_thinking_and_error_fallbacks() {
         let context = context();
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
 
         let items = mapper.map_final_message(
             &context,
-            PiAgentFinalMessage {
+            ChatCompletionsFinalMessage {
                 text: Some("answer <think>trace</think>".to_string()),
                 thinking: Some("native thought".to_string()),
-                ..PiAgentFinalMessage::default()
+                ..ChatCompletionsFinalMessage::default()
             },
         );
 
@@ -2631,7 +2631,7 @@ mod tests {
             vec![
                 BrainEvent::ReasoningDelta {
                     text: "native thought".to_string(),
-                    format: Some("pi-thinking".to_string()),
+                    format: Some("chat-completions-thinking".to_string()),
                 },
                 BrainEvent::TextDelta {
                     text: "answer ".to_string()
@@ -2643,13 +2643,13 @@ mod tests {
             ]
         );
 
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
         let items = mapper.map_final_message(
             &context,
-            PiAgentFinalMessage {
+            ChatCompletionsFinalMessage {
                 stop_reason: Some("error".to_string()),
                 error_message: Some(" provider timed out ".to_string()),
-                ..PiAgentFinalMessage::default()
+                ..ChatCompletionsFinalMessage::default()
             },
         );
         assert_eq!(
@@ -2663,7 +2663,7 @@ mod tests {
     #[test]
     fn mapper_projects_provider_reasoning_error_and_finish_reason() {
         let context = context();
-        let mut mapper = PiAgentEventMapper::new();
+        let mut mapper = ChatCompletionsEventMapper::new();
 
         let mut items = mapper.map_provider_event(
             &context,

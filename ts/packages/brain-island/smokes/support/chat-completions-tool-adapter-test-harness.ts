@@ -1,8 +1,8 @@
 import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult as PiAgentToolResult,
-  AgentToolUpdateCallback as PiAgentToolUpdateCallback,
-} from "./legacy-pi-agent-test-harness.js";
+  AgentTool as ChatCompletionsTool,
+  AgentToolResult as ChatCompletionsToolResult,
+  AgentToolUpdateCallback as ChatCompletionsToolUpdateCallback,
+} from "./chat-completions-test-harness.js";
 import type { Static, TSchema } from "typebox";
 import type { BrainTool, BrainToolResult } from "../../src/brain-tool.js";
 import type { BrainWakeInput } from "../../src/index.js";
@@ -11,15 +11,18 @@ import {
   type ToolCallDebugStore,
 } from "../../src/tool-call-debug-store.js";
 
-export interface PiToolAdapterContext {
+export interface ChatCompletionsToolAdapterContext {
   wake: BrainWakeInput;
   toolCallDebugStore?: ToolCallDebugStore;
 }
 
-export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
+export function toChatCompletionsTool<
+  TParameters extends TSchema,
+  TDetails = unknown,
+>(
   tool: BrainTool<TParameters, TDetails>,
-  context: PiToolAdapterContext,
-): PiAgentTool<TParameters, TDetails> {
+  context: ChatCompletionsToolAdapterContext,
+): ChatCompletionsTool<TParameters, TDetails> {
   return {
     name: tool.name,
     description: tool.description,
@@ -57,7 +60,8 @@ export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
               callId: toolCallId,
               signal: signal ?? new AbortController().signal,
               onUpdate: onUpdate
-                ? (partial) => onUpdate(toPiToolResult(recordUpdate(partial)))
+                ? (partial) =>
+                    onUpdate(toChatCompletionsToolResult(recordUpdate(partial)))
                 : undefined,
             },
           );
@@ -67,7 +71,7 @@ export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
               finalResult: result,
             });
           }
-          return toPiToolResult(result);
+          return toChatCompletionsToolResult(result);
         } catch (error) {
           if (debugRecord) {
             context.toolCallDebugStore?.fail({
@@ -84,7 +88,8 @@ export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
           params as Static<TParameters>,
           signal,
           onUpdate
-            ? (partial) => onUpdate(toPiToolResult(recordUpdate(partial)))
+            ? (partial) =>
+                onUpdate(toChatCompletionsToolResult(recordUpdate(partial)))
             : undefined,
         );
         if (debugRecord) {
@@ -93,7 +98,7 @@ export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
             finalResult: result,
           });
         }
-        return toPiToolResult(result);
+        return toChatCompletionsToolResult(result);
       } catch (error) {
         if (debugRecord) {
           context.toolCallDebugStore?.fail({
@@ -108,17 +113,19 @@ export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
   };
 }
 
-export function toPiAgentTools(
+export function toChatCompletionsTools(
   tools: readonly BrainTool[],
-  context: PiToolAdapterContext,
-): PiAgentTool[] {
-  return tools.map((tool) => toPiAgentTool(tool, context));
+  context: ChatCompletionsToolAdapterContext,
+): ChatCompletionsTool[] {
+  return tools.map((tool) => toChatCompletionsTool(tool, context));
 }
 
-export function fromPiAgentTool<
+export function fromChatCompletionsTool<
   TParameters extends TSchema,
   TDetails = unknown,
->(tool: PiAgentTool<TParameters, TDetails>): BrainTool<TParameters, TDetails> {
+>(
+  tool: ChatCompletionsTool<TParameters, TDetails>,
+): BrainTool<TParameters, TDetails> {
   return {
     name: tool.name,
     description: tool.description,
@@ -126,13 +133,13 @@ export function fromPiAgentTool<
     parameters: tool.parameters,
     prepareArguments: tool.prepareArguments,
     execute: async (toolCallId, params, signal, onUpdate) =>
-      fromPiToolResult(
+      fromChatCompletionsToolResult(
         await tool.execute(
           toolCallId,
           params,
           signal,
           onUpdate
-            ? (partial) => onUpdate(fromPiToolResult(partial))
+            ? (partial) => onUpdate(fromChatCompletionsToolResult(partial))
             : undefined,
         ),
       ),
@@ -140,14 +147,16 @@ export function fromPiAgentTool<
   };
 }
 
-export function fromPiAgentTools(tools: readonly PiAgentTool[]): BrainTool[] {
-  return tools.map((tool) => fromPiAgentTool(tool));
+export function fromChatCompletionsTools(
+  tools: readonly ChatCompletionsTool[],
+): BrainTool[] {
+  return tools.map((tool) => fromChatCompletionsTool(tool));
 }
 
-function toPiToolResult<TDetails>(
+function toChatCompletionsToolResult<TDetails>(
   result: BrainToolResult<TDetails>,
-): PiAgentToolResult<TDetails> {
-  const mapped: PiAgentToolResult<TDetails> = {
+): ChatCompletionsToolResult<TDetails> {
+  const mapped: ChatCompletionsToolResult<TDetails> = {
     content: result.content.map((item) =>
       item.type === "text"
         ? item
@@ -159,8 +168,8 @@ function toPiToolResult<TDetails>(
   return mapped;
 }
 
-function fromPiToolResult<TDetails>(
-  result: PiAgentToolResult<TDetails>,
+function fromChatCompletionsToolResult<TDetails>(
+  result: ChatCompletionsToolResult<TDetails>,
 ): BrainToolResult<TDetails> {
   const mapped: BrainToolResult<TDetails> = {
     content: result.content.map((item) =>
@@ -178,7 +187,7 @@ function fromPiToolResult<TDetails>(
   return mapped;
 }
 
-export type LegacyPiAgentToolResolver = (input: {
+export type LegacyChatCompletionsToolResolver = (input: {
   wake: BrainWakeInput;
   tools: Parameters<
     import("../../src/tool-session-selection.js").BrainToolResolver
@@ -186,16 +195,18 @@ export type LegacyPiAgentToolResolver = (input: {
   actions?: Parameters<
     import("../../src/tool-session-selection.js").BrainToolResolver
   >[0]["actions"];
-}) => PiAgentTool[];
+}) => ChatCompletionsTool[];
 
-export function adaptLegacyPiAgentToolResolver(
-  resolver: LegacyPiAgentToolResolver,
+export function adaptLegacyChatCompletionsToolResolver(
+  resolver: LegacyChatCompletionsToolResolver,
 ): import("../../src/tool-session-selection.js").BrainToolResolver {
-  return (input) => fromPiAgentTools(resolver(input));
+  return (input) => fromChatCompletionsTools(resolver(input));
 }
 
-export function adaptLegacyPiAgentToolResolvers(
-  ...resolvers: readonly LegacyPiAgentToolResolver[]
+export function adaptLegacyChatCompletionsToolResolvers(
+  ...resolvers: readonly LegacyChatCompletionsToolResolver[]
 ): import("../../src/tool-session-selection.js").BrainToolResolver[] {
-  return resolvers.map((resolver) => adaptLegacyPiAgentToolResolver(resolver));
+  return resolvers.map((resolver) =>
+    adaptLegacyChatCompletionsToolResolver(resolver),
+  );
 }

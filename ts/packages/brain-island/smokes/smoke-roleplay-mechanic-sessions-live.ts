@@ -184,7 +184,7 @@ async function createNarrator(profileId: string, sessionId: string) {
     displayName: `Narrator ${profileId}`,
     providerAlias,
     localToolProfileId: "roleplay_lore",
-    brain: { module: "pi-agent", strategy: "roleplay_narrator" },
+    brain: { module: "chat-completions", strategy: "roleplay_narrator" },
   });
   await apiData("POST", "/v1/admin/roleplay/sessions", {
     sessionId,

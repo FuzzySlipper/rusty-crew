@@ -22,7 +22,7 @@ import {
   chatReadModelPageSchema,
   eventReceiptSchema,
   openAiResponsesBrainRunInputSchema,
-  piAgentBrainRunInputSchema,
+  chatCompletionsBrainRunInputSchema,
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
   rawBufferedBrainRunDrainSchema,
@@ -35,7 +35,7 @@ import {
   rawModelProviderRecordArraySchema,
   rawModelProviderRecordSchema,
   rawOpenAiResponsesBrainRunResultSchema,
-  rawPiAgentBufferedDrainResultSchema,
+  rawChatCompletionsBufferedDrainResultSchema,
   rawProfilePurgeReportSchema,
   rawProfileRegistryRecordArraySchema,
   rawProfileRegistryRecordSchema,
@@ -64,10 +64,10 @@ import { createNativeBridgeExternalRuntimeMethods } from "./external-runtime-wra
 import { createNativeBridgeExternalRuntimeCertificationMethods } from "./external-runtime-certification-wrappers.js";
 import {
   assertCanonicalBrainRunModule,
-  piAgentTransportMetricsFromRaw,
+  chatCompletionsTransportMetricsFromRaw,
   toNativeBrainAction,
   toNativeOpenAiResponsesBrainRunInput,
-  toNativePiAgentBrainRunInput,
+  toNativeChatCompletionsBrainRunInput,
   toNativeProviderStateInput,
   toBrainWakeStreamItem,
   toOpenAiResponsesBrainRunResult,
@@ -83,9 +83,9 @@ import {
   type RawOpenAiOauthCredentialSummary,
   type RawOpenAiOauthCodeExchangeResult,
   type RawOpenAiResponsesBufferedStartResult,
-  type RawPiAgentBufferedStartResult,
+  type RawChatCompletionsBufferedStartResult,
   type RawOpenAiResponsesBufferedDrainResult,
-  type RawPiAgentBufferedDrainResult,
+  type RawChatCompletionsBufferedDrainResult,
   type RawBufferedBrainRunDrainResult,
   type RawOpenAiResponsesBufferedCancellation,
   type RawOpenAiResponsesBufferedCancelResult,
@@ -248,10 +248,10 @@ import type {
   NativeOpenAiOauthCodeExchangeResult,
   OpenAiResponsesBrainRunInput,
   OpenAiResponsesToolRequest,
-  PiAgentChatCompletionMessage,
-  PiAgentBrainRunInput,
-  PiAgentToolRequest,
-  PiAgentTransportMetrics,
+  ChatCompletionsChatCompletionMessage,
+  ChatCompletionsBrainRunInput,
+  ChatCompletionsToolRequest,
+  ChatCompletionsTransportMetrics,
   OpenAiResponsesBufferedCancellation,
   NativeBrainWakeProviderStateInput,
   BrainWakeExecutor,
@@ -1778,12 +1778,12 @@ function createNativeBridgeModule(
     },
     startBrainRun: async (input) => {
       const providerInput =
-        input.moduleId === "pi-agent"
-          ? toNativePiAgentBrainRunInput(
-              validateBridgeValue<PiAgentBrainRunInput>({
+        input.moduleId === "chat-completions"
+          ? toNativeChatCompletionsBrainRunInput(
+              validateBridgeValue<ChatCompletionsBrainRunInput>({
                 operation: "start_brain_run",
                 direction: "ts_to_rust",
-                schema: piAgentBrainRunInputSchema,
+                schema: chatCompletionsBrainRunInputSchema,
                 value: input.providerInput,
               }),
             )

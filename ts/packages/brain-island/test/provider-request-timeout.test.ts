@@ -5,10 +5,10 @@ import { providerRequestTimeoutMs } from "../src/provider-request-timeout.js";
 
 const parsers = [
   {
-    name: "pi-agent",
-    variable: "RUSTY_CREW_PI_AGENT_PROVIDER_REQUEST_TIMEOUT_MS",
+    name: "chat-completions",
+    variable: "RUSTY_CREW_CHAT_COMPLETIONS_PROVIDER_REQUEST_TIMEOUT_MS",
     parse: (env: Partial<NodeJS.ProcessEnv>) =>
-      providerRequestTimeoutMs("pi-agent", env),
+      providerRequestTimeoutMs("chat-completions", env),
   },
   {
     name: "openai-responses",

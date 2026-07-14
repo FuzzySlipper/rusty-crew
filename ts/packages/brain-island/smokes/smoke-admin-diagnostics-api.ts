@@ -171,13 +171,13 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
     active_run_count: 1,
     modules: [
       {
-        module_label: "pi-agent",
+        module_label: "chat-completions",
         active_run_count: 1,
       },
     ],
     runs: [
       {
-        module_label: "pi-agent",
+        module_label: "chat-completions",
         wake_id: "wake-active",
         queued_stream_item_count: 2,
         pending_tool_request_count: 1,

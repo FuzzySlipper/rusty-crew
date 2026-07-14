@@ -1109,7 +1109,7 @@ const chatCompletionMessageSchema = Type.Object(
   { additionalProperties: true },
 );
 
-const piAgentClientSchema = Type.Union([
+const chatCompletionsClientSchema = Type.Union([
   Type.Object(
     {
       mode: Type.Literal("fake"),
@@ -1126,7 +1126,7 @@ const piAgentClientSchema = Type.Union([
   ),
 ]);
 
-export const piAgentBrainRunInputSchema = Type.Object(
+export const chatCompletionsBrainRunInputSchema = Type.Object(
   {
     wakeId: Type.String(),
     sessionId: Type.String(),
@@ -1156,7 +1156,7 @@ export const piAgentBrainRunInputSchema = Type.Object(
       },
       { additionalProperties: true },
     ),
-    client: Type.Optional(piAgentClientSchema),
+    client: Type.Optional(chatCompletionsClientSchema),
   },
   { additionalProperties: true },
 );
@@ -1370,7 +1370,7 @@ export const rawOpenAiResponsesBrainRunResultSchema = Type.Object(
   { additionalProperties: true },
 );
 
-const piAgentTransportMetricsSchema = Type.Object(
+const chatCompletionsTransportMetricsSchema = Type.Object(
   {
     provider_request_count: Type.Number(),
     tool_round_count: Type.Number(),
@@ -1378,7 +1378,7 @@ const piAgentTransportMetricsSchema = Type.Object(
   { additionalProperties: true },
 );
 
-export const rawPiAgentBufferedDrainResultSchema = Type.Object(
+export const rawChatCompletionsBufferedDrainResultSchema = Type.Object(
   {
     wake_id: Type.String(),
     items: Type.Array(rawBrainWakeStreamItemSchema),
@@ -1399,7 +1399,7 @@ export const rawPiAgentBufferedDrainResultSchema = Type.Object(
     ),
     terminal: Type.Boolean(),
     transport_metrics: Type.Optional(
-      Type.Union([Type.Null(), piAgentTransportMetricsSchema]),
+      Type.Union([Type.Null(), chatCompletionsTransportMetricsSchema]),
     ),
     error: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     cancellation: Type.Optional(
@@ -1422,7 +1422,7 @@ export const rawPiAgentBufferedDrainResultSchema = Type.Object(
 export const rawBufferedBrainRunDrainSchema = Type.Object(
   {
     module_id: Type.Union([
-      Type.Literal("pi-agent"),
+      Type.Literal("chat-completions"),
       Type.Literal("openai-responses"),
     ]),
     wake_id: Type.String(),
@@ -1448,7 +1448,7 @@ export const rawBufferedBrainRunDrainSchema = Type.Object(
     transport_metrics: Type.Optional(
       Type.Union([
         openAiResponsesTransportMetricsSchema,
-        piAgentTransportMetricsSchema,
+        chatCompletionsTransportMetricsSchema,
         Type.Null(),
       ]),
     ),

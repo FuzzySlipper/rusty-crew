@@ -67,7 +67,7 @@
     {
       "profileId": "parity-runner",
       "brain": {
-        "module": "pi-agent",
+        "module": "chat-completions",
         "strategy": "default"
       },
       "runtime": {

@@ -4,8 +4,8 @@ import type {
   ToolProfile,
 } from "@rusty-crew/contracts";
 import type {
-  PiAgentBrainRunInput,
-  PiAgentTransportMetrics,
+  ChatCompletionsBrainRunInput,
+  ChatCompletionsTransportMetrics,
 } from "@rusty-crew/native-bridge";
 import type {
   BrainActionPlanner,
@@ -26,9 +26,11 @@ import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
 
-export function createPiAgentBrainHost(
+export function createChatCompletionsBrainHost(
   context: BrainHostContext,
-  client: RustPiAgentClientConfig = rustPiAgentClientConfig(context),
+  client: RustChatCompletionsClientConfig = rustChatCompletionsClientConfig(
+    context,
+  ),
 ): BrainHostExecutor {
   if (
     context.profile.profile.brain?.strategy === "roleplay_narrator" ||
@@ -40,8 +42,8 @@ export function createPiAgentBrainHost(
     return createRoleplayNarratorBrain({
       narratorFsm: createRoleplayNarratorFsmBridge(context.bridge),
       createPhaseBrain: (phase: RoleplayNarratorPhaseBrainOptions) =>
-        createRustPiAgentBrainHostExecutor(context, {
-          moduleLabel: "pi-agent",
+        createRustChatCompletionsBrainHostExecutor(context, {
+          moduleLabel: "chat-completions",
           client,
           toolResolver: phase.resolveTools,
           toolProfile: phase.toolProfile,
@@ -95,23 +97,25 @@ export function createPiAgentBrainHost(
       },
     });
   }
-  return createRustPiAgentBrainHostExecutor(context, {
-    moduleLabel: "pi-agent",
+  return createRustChatCompletionsBrainHostExecutor(context, {
+    moduleLabel: "chat-completions",
     client,
     planActions: context.planActions,
   });
 }
 
-export type RustPiAgentClientConfig = NonNullable<
-  PiAgentBrainRunInput["client"]
+export type RustChatCompletionsClientConfig = NonNullable<
+  ChatCompletionsBrainRunInput["client"]
 >;
 
-function rustPiAgentClientConfig(
+function rustChatCompletionsClientConfig(
   context: BrainHostContext,
-): RustPiAgentClientConfig {
+): RustChatCompletionsClientConfig {
   const baseUrl = context.profile.profile.modelConfig.baseUrl;
   if (!baseUrl) {
-    throw new Error("rust-pi-agent live client requires modelConfig.baseUrl");
+    throw new Error(
+      "rust-chat-completions live client requires modelConfig.baseUrl",
+    );
   }
   const keyEnv = context.profile.profile.modelConfig.apiKeyEnv;
   const apiKey = keyEnv ? process.env[keyEnv] : undefined;
@@ -122,9 +126,9 @@ function rustPiAgentClientConfig(
   };
 }
 
-interface RustPiAgentBrainImplementationOptions {
+interface RustChatCompletionsBrainImplementationOptions {
   moduleLabel: string;
-  client: RustPiAgentClientConfig;
+  client: RustChatCompletionsClientConfig;
   toolResolver?: BrainToolResolver;
   toolProfile?: ToolProfile;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
@@ -132,9 +136,9 @@ interface RustPiAgentBrainImplementationOptions {
   planActions?: BrainActionPlanner;
 }
 
-function createRustPiAgentBrainHostExecutor(
+function createRustChatCompletionsBrainHostExecutor(
   context: BrainHostContext,
-  implementation: RustPiAgentBrainImplementationOptions,
+  implementation: RustChatCompletionsBrainImplementationOptions,
 ): BrainHostExecutor {
   const client = implementation.client;
   return {
@@ -145,7 +149,7 @@ function createRustPiAgentBrainHostExecutor(
           `${implementation.moduleLabel} brain requires native bridge`,
         );
       }
-      const requestTimeoutMs = providerRequestTimeoutMs("pi-agent");
+      const requestTimeoutMs = providerRequestTimeoutMs("chat-completions");
       const submitEvent =
         implementation.liveEvents === false
           ? undefined
@@ -153,10 +157,10 @@ function createRustPiAgentBrainHostExecutor(
             (async (event: BrainEventEnvelope) => {
               await bridge.submitBrainEvent(event);
             }));
-      const input: PiAgentBrainRunInput = {
+      const input: ChatCompletionsBrainRunInput = {
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
-        messages: rustPiAgentMessages(wake),
+        messages: rustChatCompletionsMessages(wake),
         config: {
           model: context.profile.profile.modelConfig.modelName,
           ...(requestTimeoutMs === undefined
@@ -180,7 +184,7 @@ function createRustPiAgentBrainHostExecutor(
         protocol: "chat_completions",
         providerKind: context.profile.profile.modelConfig.provider,
         request: {
-          boundary: "ts_to_native_rust_pi_agent",
+          boundary: "ts_to_native_rust_chat_completions",
           wakeId: input.wakeId,
           sessionId: input.sessionId,
           messages: input.messages,
@@ -197,7 +201,7 @@ function createRustPiAgentBrainHostExecutor(
           events.push(event);
         }
       }
-      return runRustPiAgentBrainWithIncrementalDrain(
+      return runRustChatCompletionsBrainWithIncrementalDrain(
         context,
         wake,
         input,
@@ -215,9 +219,9 @@ function createRustPiAgentBrainHostExecutor(
   };
 }
 
-function rustPiAgentMessages(
+function rustChatCompletionsMessages(
   wake: BrainWakeInput,
-): PiAgentBrainRunInput["messages"] {
+): ChatCompletionsBrainRunInput["messages"] {
   const system = [wake.systemPrompt, wake.roleAssembly.instructions]
     .filter(Boolean)
     .join("\n\n");
@@ -234,10 +238,10 @@ function rustPiAgentMessages(
   ];
 }
 
-async function runRustPiAgentBrainWithIncrementalDrain(
+async function runRustChatCompletionsBrainWithIncrementalDrain(
   context: BrainHostContext,
   wake: BrainWakeInput,
-  input: PiAgentBrainRunInput,
+  input: ChatCompletionsBrainRunInput,
   options?: BrainWakeOptions,
   runOptions: {
     moduleLabel: string;
@@ -247,23 +251,23 @@ async function runRustPiAgentBrainWithIncrementalDrain(
     toolProfile?: ToolProfile;
     planActions?: BrainActionPlanner;
   } = {
-    moduleLabel: "pi-agent",
+    moduleLabel: "chat-completions",
     events: [],
   },
 ): Promise<{
   events: BrainEventEnvelope[];
   actions: BrainAction[];
-  transportMetrics?: PiAgentTransportMetrics;
+  transportMetrics?: ChatCompletionsTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;
 }> {
   const bridge = context.bridge;
   if (bridge === undefined) {
-    throw new Error("pi-agent host requires native bridge");
+    throw new Error("chat-completions host requires native bridge");
   }
   const result = await runBufferedBrainHost({
     bridge,
-    run: { moduleId: "pi-agent", providerInput: input },
+    run: { moduleId: "chat-completions", providerInput: input },
     moduleLabel: runOptions.moduleLabel,
     wake,
     wakeOptions: options,
@@ -278,7 +282,7 @@ async function runRustPiAgentBrainWithIncrementalDrain(
   return {
     ...result,
     transportMetrics: result.transportMetrics as
-      | PiAgentTransportMetrics
+      | ChatCompletionsTransportMetrics
       | undefined,
   };
 }

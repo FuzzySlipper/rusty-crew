@@ -18,14 +18,14 @@ const address = server.address();
 assert(address !== null && typeof address !== "string");
 
 const bridge = await loadNativeBridge();
-const wakeId = `pi-agent-silent-upstream-${Date.now()}`;
+const wakeId = `chat-completions-silent-upstream-${Date.now()}`;
 const startedAt = Date.now();
 try {
   await bridge.startBrainRun({
-    moduleId: "pi-agent",
+    moduleId: "chat-completions",
     providerInput: {
       wakeId,
-      sessionId: "pi-agent-silent-upstream-session" as SessionId,
+      sessionId: "chat-completions-silent-upstream-session" as SessionId,
       messages: [{ role: "user", content: "Produce one response." }],
       config: {
         model: "silent-upstream",
@@ -43,7 +43,7 @@ try {
   let terminal: Awaited<ReturnType<typeof bridge.drainBrainRun>> | undefined;
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const drained = await bridge.drainBrainRun({
-      moduleId: "pi-agent",
+      moduleId: "chat-completions",
       wakeId,
       maxItems: 64,
     });

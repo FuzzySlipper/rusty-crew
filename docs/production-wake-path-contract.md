@@ -147,5 +147,5 @@ internal trigger event
 ```
 
 This proof may use a deterministic TS brain if needed, but it must exercise the
-same registered-brain and `wake_brain` path that pi-agent-backed brains will
+same registered-brain and `wake_brain` path that production brains will
 use.

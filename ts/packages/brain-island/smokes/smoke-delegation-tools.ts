@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
+} from "./support/chat-completions-test-harness.js";
 import type {
   AgentId,
   BrainAction,
@@ -16,7 +16,7 @@ import {
   resolveDelegationTools,
   selectToolProfile,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const sessionId = "delegation-tools-session" as SessionId;
 const agentId = "delegation-tools-agent" as AgentId;
@@ -42,16 +42,16 @@ assert.deepEqual(
 );
 
 class DelegationToolFakeAgent {
-  constructor(private readonly options: PiAgentOptions) {}
+  constructor(private readonly options: ChatCompletionsOptions) {}
 
   subscribe(
-    _listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    _listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     return () => {};
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     await this.callTool("spawn_subagent", {
       profileId: "coder-profile",
@@ -169,7 +169,7 @@ Review the markdown delegation tool.`,
 }
 
 let plannerSawToolActions: readonly BrainAction[] = [];
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   createAgent: (options) => new DelegationToolFakeAgent(options),
   resolveTools: resolveDelegationTools,
   toolProfile: selection.toolProfile,

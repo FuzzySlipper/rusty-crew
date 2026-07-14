@@ -7,25 +7,25 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentTool as PiAgentTool,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentTool as ChatCompletionsTool,
+} from "./support/chat-completions-test-harness.js";
 import {
   BodyControlledDeltaQueue,
   defaultBodyDeltaPolicy,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 class FakeAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
-  private readonly promptedMessages: PiAgentMessage[] = [];
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
+  private readonly promptedMessages: ChatCompletionsMessage[] = [];
   clearAllQueuesCalls = 0;
 
   constructor(private readonly onPrompt: () => Promise<void>) {}
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -34,7 +34,7 @@ class FakeAgent {
   }
 
   async prompt(
-    input: PiAgentMessage | PiAgentMessage[] | string,
+    input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const messages = Array.isArray(input)
       ? input
@@ -44,11 +44,11 @@ class FakeAgent {
               role: "user",
               content: [{ type: "text", text: input }],
               timestamp: Date.now(),
-            } as PiAgentMessage,
+            } as ChatCompletionsMessage,
           ]
         : [input];
     this.promptedMessages.push(...messages);
-    await this.emit({ type: "agent_start" } as PiAgentEvent);
+    await this.emit({ type: "agent_start" } as ChatCompletionsEvent);
     await this.emit({
       type: "message_update",
       assistantMessageEvent: {
@@ -66,9 +66,12 @@ class FakeAgent {
         content: [{ type: "text", text: "working" }],
         timestamp: Date.now(),
       },
-    } as PiAgentEvent);
+    } as ChatCompletionsEvent);
     await this.onPrompt();
-    await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
+    await this.emit({
+      type: "agent_end",
+      messages: [],
+    } as ChatCompletionsEvent);
   }
 
   async waitForIdle(): Promise<void> {}
@@ -89,7 +92,7 @@ class FakeAgent {
       .join("\n");
   }
 
-  private async emit(event: PiAgentEvent): Promise<void> {
+  private async emit(event: ChatCompletionsEvent): Promise<void> {
     this.listener?.(event, new AbortController().signal);
   }
 }
@@ -107,10 +110,10 @@ function isTextContent(
   );
 }
 class CumulativeFakeAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -119,11 +122,14 @@ class CumulativeFakeAgent {
   }
 
   async prompt(): Promise<void> {
-    await this.emit({ type: "agent_start" } as PiAgentEvent);
+    await this.emit({ type: "agent_start" } as ChatCompletionsEvent);
     await this.emitUpdate("Hel", "Hel");
     await this.emitUpdate("lo", "Hello");
     await this.emitUpdate(".", "Hello.");
-    await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
+    await this.emit({
+      type: "agent_end",
+      messages: [],
+    } as ChatCompletionsEvent);
   }
 
   async waitForIdle(): Promise<void> {}
@@ -148,10 +154,10 @@ class CumulativeFakeAgent {
         content: [{ type: "text", text }],
         timestamp: Date.now(),
       },
-    } as PiAgentEvent);
+    } as ChatCompletionsEvent);
   }
 
-  private async emit(event: PiAgentEvent): Promise<void> {
+  private async emit(event: ChatCompletionsEvent): Promise<void> {
     this.listener?.(event, new AbortController().signal);
   }
 }
@@ -177,7 +183,7 @@ const fakeAgent = new FakeAgent(async () => {
   });
 });
 
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   createAgent: () => fakeAgent,
 });
 
@@ -223,7 +229,7 @@ assert.equal(fakeAgent.promptedText(), "frozen snapshot message");
 assert.equal(queue.size(), 1);
 
 let capturedToolNames: string[] = [];
-const toolFilteredBrain = createPiAgentBrain({
+const toolFilteredBrain = createChatCompletionsBrain({
   createAgent: (options) => {
     capturedToolNames = (options.initialState?.tools ?? []).map(
       (tool) => tool.name,
@@ -270,7 +276,7 @@ await toolFilteredBrain.wake({
 assert.deepEqual(capturedToolNames, ["read_file"]);
 
 const cumulativeAgent = new CumulativeFakeAgent();
-const cumulativeBrain = createPiAgentBrain({
+const cumulativeBrain = createChatCompletionsBrain({
   createAgent: () => cumulativeAgent,
 });
 const cumulativeResult = await cumulativeBrain.wake({
@@ -344,12 +350,12 @@ console.log(
   ),
 );
 
-function fakeTool(name: string): PiAgentTool {
+function fakeTool(name: string): ChatCompletionsTool {
   return {
     name,
     description: `${name} description`,
     label: name,
-    parameters: {} as PiAgentTool["parameters"],
+    parameters: {} as ChatCompletionsTool["parameters"],
     execute: async () => ({
       content: [{ type: "text", text: `${name} result` }],
       details: {},

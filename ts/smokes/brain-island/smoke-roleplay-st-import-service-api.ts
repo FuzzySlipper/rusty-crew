@@ -220,7 +220,7 @@ function writeRuntimeConfig(dataDir: string): void {
           modelName: "deepseek-flash",
           baseUrl: "http://127.0.0.1:18082/v1",
         },
-        brain: { module: "pi-agent" },
+        brain: { module: "chat-completions" },
         toolPolicy: { requestedTools: [] },
       },
       null,

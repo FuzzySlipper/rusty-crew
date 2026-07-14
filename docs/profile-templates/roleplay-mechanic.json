@@ -3,7 +3,7 @@
   "displayName": "Mechanic",
   "providerAlias": "replace-with-provider-alias",
   "brain": {
-    "module": "pi-agent",
+    "module": "chat-completions",
     "strategy": "default"
   },
   "localToolProfileId": "roleplay_mechanic",

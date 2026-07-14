@@ -52,4 +52,4 @@ guidance for `session_search` and `counter_reset`.
 ## Verification
 
 `npm run smoke:profile-role-assembly` covers the ordering and proves the
-assembled prompt reaches the pi-agent brain wrapper.
+assembled prompt reaches the selected production brain host.

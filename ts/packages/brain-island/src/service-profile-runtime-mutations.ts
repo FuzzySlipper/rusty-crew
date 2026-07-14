@@ -757,7 +757,7 @@ function defaultProfileBrainForModelProvider(
   if (provider.protocol === "responses") {
     return { module: "openai-responses" };
   }
-  return { module: "pi-agent" };
+  return { module: "chat-completions" };
 }
 
 function profileBrainFromBody(

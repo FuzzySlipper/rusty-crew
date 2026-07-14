@@ -167,7 +167,7 @@ Use Codex for bounded coding delegation when context isolation helps.
   assert.equal(
     (await resolveBrainCatalogSelection(native, context.profile)).selection
       .moduleId,
-    "pi-agent",
+    "chat-completions",
   );
   assert.equal(
     context.profile.runtime?.defaultResourceLimits?.maxDelegationDepth,
@@ -262,7 +262,7 @@ modelConfig:
   temperature: 0.2
   maxTokens: 4096
 brain:
-  module: pi-agent-core
+  module: chat-completions-core
   strategy: default
 mcpConfig:
   toolProfile: runner
@@ -307,7 +307,7 @@ backgroundReview:
   assert.equal(runner.profile.modelConfig.baseUrl, "http://127.0.0.1:18082/v1");
   assert.equal(runner.profile.modelConfig.apiKeyEnv, "DEN_ROUTER_API_KEY");
   assert.equal(runner.profile.modelConfig.api, "openai-completions");
-  assert.equal(runner.profile.brain?.module, "pi-agent");
+  assert.equal(runner.profile.brain?.module, "chat-completions");
   assert.equal(runner.profile.brain?.strategy, "default");
   assert.equal(runner.profile.modelConfig.temperatureMilli, 200);
   assert.equal(runner.profile.modelConfig.maxOutputTokens, 4096);
@@ -360,7 +360,7 @@ backgroundReview:
         profileId: "roleplay-narrator",
         providerAlias: "deepseek_flash",
         brain: {
-          module: "pi-agent",
+          module: "chat-completions",
           strategy: "roleplay_narrator",
         },
         toolPolicy: {

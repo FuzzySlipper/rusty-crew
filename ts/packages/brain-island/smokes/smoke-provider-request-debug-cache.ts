@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentOptions as PiAgentOptions,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentOptions as ChatCompletionsOptions,
+} from "./support/chat-completions-test-harness.js";
 import type { AgentId, BodyState, SessionId } from "@rusty-crew/contracts";
 import { Type } from "typebox";
 import type { BrainTool } from "../src/brain-tool.js";
 import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
 import { MemoryProviderRequestDebugStore } from "../src/provider-request-debug-store.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
   maxJsonChars: 20_000,
@@ -16,11 +16,11 @@ const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
   maxRecords: 10,
 });
 
-let capturedOptions: PiAgentOptions | undefined;
+let capturedOptions: ChatCompletionsOptions | undefined;
 let eventSink:
-  | ((event: PiAgentEvent, signal: AbortSignal) => Promise<void> | void)
+  | ((event: ChatCompletionsEvent, signal: AbortSignal) => Promise<void> | void)
   | undefined;
-const emit = (event: PiAgentEvent): void => {
+const emit = (event: ChatCompletionsEvent): void => {
   void eventSink?.(event, new AbortController().signal);
 };
 
@@ -40,9 +40,9 @@ const debugTool: BrainTool<
   }),
 };
 
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   providerRequestDebugStore,
-  createAgent: (options: PiAgentOptions) => {
+  createAgent: (options: ChatCompletionsOptions) => {
     capturedOptions = options;
     return {
       subscribe: (sink) => {
@@ -59,7 +59,7 @@ const brain = createPiAgentBrain({
             type: "text_delta",
             delta: "provider debug response",
           },
-        } as PiAgentEvent);
+        } as ChatCompletionsEvent);
         emit({ type: "agent_end", messages: [] });
       },
       waitForIdle: async () => undefined,
@@ -121,7 +121,7 @@ const result = await brain.wake({
   } as unknown as BodyState,
 });
 
-assert.ok(capturedOptions, "Pi agent options should be built");
+assert.ok(capturedOptions, "Chat Completions options should be built");
 const providerStatus = result.events.find(
   (event) => event.event.type === "provider_status",
 );
@@ -141,7 +141,7 @@ const detail = providerRequestDebugStore.get({
   debugDetailId: metadata.provider_request_debug_detail_id ?? "",
 });
 assert.ok(detail);
-assert.equal(detail.provider.brain_module, "pi-agent");
+assert.equal(detail.provider.brain_module, "chat-completions");
 assert.equal(detail.provider.model, "debug-model");
 assert.equal(detail.request.redacted, false);
 const request = detail.request.value as {

@@ -1,7 +1,7 @@
 import type { BrainHostExecutor } from "../../src/index.js";
 import type { BrainHostContext } from "../../src/brain-host-context.js";
 import { createOpenAiResponsesBrainHost } from "../../src/openai-responses-host.js";
-import { createPiAgentBrainHost } from "../../src/pi-agent-host.js";
+import { createChatCompletionsBrainHost } from "../../src/chat-completions-host.js";
 
 export const fakeOpenAiResponsesBrainHost = {
   createBrain(context: BrainHostContext): Promise<BrainHostExecutor> {
@@ -9,8 +9,8 @@ export const fakeOpenAiResponsesBrainHost = {
   },
 };
 
-export const fakePiAgentBrainHost = {
+export const fakeChatCompletionsBrainHost = {
   async createBrain(context: BrainHostContext): Promise<BrainHostExecutor> {
-    return createPiAgentBrainHost(context, { mode: "fake" });
+    return createChatCompletionsBrainHost(context, { mode: "fake" });
   },
 };

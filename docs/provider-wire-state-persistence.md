@@ -84,7 +84,7 @@ text. If a future module needs encrypted binary payloads, add a new
 `sessionId` is the Rust session receiving wakes.
 
 `moduleId` is the selected `BrainModule.moduleId`, for example
-`pi-agent-core`, `openai-responses`, or `local`.
+`chat-completions` or `openai-responses`.
 
 `strategyId` is the module's internal state strategy, for example `replay` or
 `previous-response-chain`. A module with no cross-wake state should omit state

@@ -33,7 +33,7 @@ const profile: ProfileConfig = {
     modelName: "local-deterministic",
   },
   brain: {
-    module: "pi-agent",
+    module: "chat-completions",
     strategy: "default",
   },
   runtime: {

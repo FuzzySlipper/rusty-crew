@@ -38,7 +38,7 @@ modelConfig:
   temperature: 0.2
   maxTokens: 4096
 brain:
-  module: pi-agent-core
+  module: chat-completions-core
   strategy: default
 mcpConfig:
   bindingId: runner-mcp

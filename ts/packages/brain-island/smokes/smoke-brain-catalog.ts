@@ -36,7 +36,16 @@ try {
     const catalog = await native.brainCatalog();
     assert.deepEqual(
       catalog.modules.map((module) => module.module_id),
-      ["pi-agent", "openai-responses"],
+      ["chat-completions", "openai-responses"],
+    );
+    await assert.rejects(
+      () =>
+        native.planBrainSelection({
+          configuredModuleId: "pi-agent",
+          providerProtocol: "chat_completions",
+          providerKind: "test",
+        }),
+      /unknown production brain module pi-agent/,
     );
     await assert.rejects(
       () =>
@@ -69,7 +78,7 @@ try {
       (catalogRoute.body as { data: typeof catalog }).data.modules.map(
         (module) => module.module_id,
       ),
-      ["pi-agent", "openai-responses"],
+      ["chat-completions", "openai-responses"],
     );
     const applyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig,
@@ -78,8 +87,8 @@ try {
     });
 
     assert.equal(
-      applyResult.brainModulesByProfileId["pi-profile"]?.moduleId,
-      "pi-agent",
+      applyResult.brainModulesByProfileId["chat-profile"]?.moduleId,
+      "chat-completions",
     );
     assert.equal(
       applyResult.brainModulesByProfileId["responses-profile"]?.moduleId,
@@ -87,22 +96,24 @@ try {
     );
     assert.equal(
       applyResult.brainModulesByProfileId["narrator-profile"]?.moduleId,
-      "pi-agent",
+      "chat-completions",
     );
     assert.equal(
       applyResult.brainModulesByProfileId["narrator-profile"]?.strategy,
       "roleplay_narrator",
     );
     assert.equal(
-      applyResult.brainDiagnosticsByProfileId["pi-profile"]?.toolAdapterStatus,
+      applyResult.brainDiagnosticsByProfileId["chat-profile"]
+        ?.toolAdapterStatus,
       "native_neutral_tools",
     );
     assert.equal(
-      applyResult.brainDiagnosticsByProfileId["pi-profile"]?.selectedToolSource,
+      applyResult.brainDiagnosticsByProfileId["chat-profile"]
+        ?.selectedToolSource,
       "default-local-tools",
     );
     assert.ok(
-      (applyResult.brainDiagnosticsByProfileId["pi-profile"]
+      (applyResult.brainDiagnosticsByProfileId["chat-profile"]
         ?.selectedToolCount ?? 0) > 0,
       "pi module diagnostics should report selected tools",
     );
@@ -148,21 +159,33 @@ try {
       brainModules: brainModuleDiagnostics(runtimeConfig, applyResult),
     });
     assert.deepEqual(
-      diagnostics.runtime.brainModules.map((module) => [
-        module.profileId,
-        module.implementationId,
-        module.moduleId,
-        module.strategy,
-        module.effectiveStrategy,
-        module.providerStateMode,
-        module.selectedToolSource,
-        module.toolAdapterStatus,
-      ]),
+      diagnostics.runtime.brainModules
+        .map((module) => [
+          module.profileId,
+          module.implementationId,
+          module.moduleId,
+          module.strategy,
+          module.effectiveStrategy,
+          module.providerStateMode,
+          module.selectedToolSource,
+          module.toolAdapterStatus,
+        ])
+        .toSorted(([left], [right]) => left.localeCompare(right)),
       [
         [
-          "pi-profile",
-          "pi-brain",
-          "pi-agent",
+          "narrator-profile",
+          "narrator-brain",
+          "chat-completions",
+          "roleplay_narrator",
+          "roleplay_narrator",
+          "unused",
+          "default-local-tools",
+          "native_neutral_tools",
+        ],
+        [
+          "chat-profile",
+          "chat-brain",
+          "chat-completions",
           "default",
           "default",
           "unused",
@@ -189,17 +212,7 @@ try {
           "default-local-tools",
           "native_neutral_tools",
         ],
-        [
-          "narrator-profile",
-          "narrator-brain",
-          "pi-agent",
-          "roleplay_narrator",
-          "roleplay_narrator",
-          "unused",
-          "default-local-tools",
-          "native_neutral_tools",
-        ],
-      ],
+      ].toSorted(([left], [right]) => left.localeCompare(right)),
     );
     assert.equal(
       diagnostics.runtime.brainModules.find(
@@ -273,7 +286,11 @@ function writeRuntimeConfig(dataDir: string): void {
       {
         profilesDir,
         brains: [
-          { profileId: "pi-profile", implementationId: "pi-brain" },
+          {
+            profileId: "narrator-profile",
+            implementationId: "narrator-brain",
+          },
+          { profileId: "chat-profile", implementationId: "chat-brain" },
           {
             profileId: "responses-profile",
             implementationId: "responses-brain",
@@ -282,16 +299,18 @@ function writeRuntimeConfig(dataDir: string): void {
             profileId: "responses-chain-profile",
             implementationId: "responses-chain-brain",
           },
-          {
-            profileId: "narrator-profile",
-            implementationId: "narrator-brain",
-          },
         ],
         sessions: [
           {
-            sessionId: "pi-session",
-            agentId: "pi-agent",
-            profileId: "pi-profile",
+            sessionId: "narrator-session",
+            agentId: "narrator-agent",
+            profileId: "narrator-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "chat-session",
+            agentId: "chat-completions",
+            profileId: "chat-profile",
             kind: "full",
           },
           {
@@ -306,12 +325,6 @@ function writeRuntimeConfig(dataDir: string): void {
             profileId: "responses-chain-profile",
             kind: "full",
           },
-          {
-            sessionId: "narrator-session",
-            agentId: "narrator-agent",
-            profileId: "narrator-profile",
-            kind: "full",
-          },
         ],
       },
       null,
@@ -319,10 +332,10 @@ function writeRuntimeConfig(dataDir: string): void {
     ),
   );
   writeFileSync(
-    join(profilesDir, "pi-profile.json"),
+    join(profilesDir, "chat-profile.json"),
     JSON.stringify(
       {
-        profileId: "pi-profile",
+        profileId: "chat-profile",
         modelConfig: {
           provider: "den-router",
           modelName: "fake-model",
@@ -330,7 +343,7 @@ function writeRuntimeConfig(dataDir: string): void {
           maxOutputTokens: 256,
         },
         brain: {
-          module: "pi-agent",
+          module: "chat-completions",
           strategy: "default",
         },
         toolPolicy: {
@@ -395,7 +408,7 @@ function writeRuntimeConfig(dataDir: string): void {
           maxOutputTokens: 256,
         },
         brain: {
-          module: "pi-agent",
+          module: "chat-completions",
           strategy: "roleplay_narrator",
         },
         toolPolicy: {

@@ -32,7 +32,7 @@ not the current planning queue.
 - Rust is authoritative for coordination: internal bus routing, sessions,
   body-state projection, wake thresholds, brain action validation, delegated
   worker lifecycle, completion packet persistence, and restart hydration.
-- Rust owns the current pi-agent brain loop and OpenAI Responses brain loop
+- Rust owns the current chat-completions brain loop and OpenAI Responses brain loop
   behind the neutral wake/stream/action/provider-state contract.
 - TypeScript owns many model-callable tool implementations, neutral tool
   execution, role/profile composition, MCP clients, roleplay narrator
@@ -81,7 +81,7 @@ not the current planning queue.
     /packages
       /contracts          # TypeScript contracts until codegen owns this
       /native-bridge      # native addon loader and TS bridge facade
-      /brain-island       # pi Agent brain boundary and tool/profile assembly
+      /brain-island       # LLM host boundary and tool/profile assembly
       /service-host       # service process composition root
       /adapter-den        # Den data + observability adapter
       /adapter-*          # remaining adapter boundaries

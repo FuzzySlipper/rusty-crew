@@ -55,7 +55,7 @@ not the current planning queue.
   body-state projection, wake thresholds, brain action validation, delegated
   worker lifecycle, completion packet persistence, and restart hydration.
 - Rust owns production brain loops behind the neutral wake contract, including
-  the pi-agent and OpenAI Responses brains.
+  the chat-completions and OpenAI Responses brains.
 - TypeScript owns the brain island service composition, neutral tool
   execution, role/profile composition, roleplay narrator sequencing during the
   transition, MCP clients, and platform adapters.
@@ -94,7 +94,7 @@ not the current planning queue.
       /contracts          # TypeScript contracts until codegen owns this
       /core-bridge        # TS bridge facade
       /native-bridge      # native addon loader
-      /brain-island       # pi Agent/LLM boundary
+      /brain-island       # LLM host, tool, profile, and adapter boundary
       /adapter-den        # Den data + observability adapter
       /adapter-*          # remaining adapter boundaries
 ```

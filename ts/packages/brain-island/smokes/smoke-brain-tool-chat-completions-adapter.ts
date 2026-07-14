@@ -8,7 +8,7 @@ import type {
 import { Type } from "typebox";
 import type { BrainTool, BrainWakeInput } from "../src/index.js";
 import { defaultBodyDeltaPolicy } from "../src/mid-turn-delta.js";
-import { toPiAgentTool } from "./support/legacy-pi-tool-adapter-test-harness.js";
+import { toChatCompletionsTool } from "./support/chat-completions-tool-adapter-test-harness.js";
 
 const parameters = Type.Object({
   subject: Type.String(),
@@ -29,7 +29,9 @@ const tool: BrainTool<typeof parameters, { subject: string; via: string }> = {
   description: "Echo through the neutral BrainTool contract.",
   parameters,
   execute: async () => {
-    throw new Error("expected pi adapter to prefer executeWithContext");
+    throw new Error(
+      "expected chat completions adapter to prefer executeWithContext",
+    );
   },
   async executeWithContext(params, context) {
     seen.wakeId = context.wakeId;
@@ -47,8 +49,8 @@ const tool: BrainTool<typeof parameters, { subject: string; via: string }> = {
   },
 };
 
-const piTool = toPiAgentTool(tool, { wake });
-const result = await piTool.execute(
+const chatCompletionsTool = toChatCompletionsTool(tool, { wake });
+const result = await chatCompletionsTool.execute(
   "neutral-call-1",
   { subject: "rusty" },
   new AbortController().signal,
@@ -61,7 +63,7 @@ const result = await piTool.execute(
   },
 );
 
-assert.equal(piTool.name, "neutral_echo");
+assert.equal(chatCompletionsTool.name, "neutral_echo");
 assert.equal(seen.wakeId, wake.wakeId);
 assert.equal(seen.sessionId, wake.sessionId);
 assert.equal(seen.callId, "neutral-call-1");
@@ -75,7 +77,7 @@ assert.deepEqual(result, {
 console.log(
   JSON.stringify(
     {
-      toolName: piTool.name,
+      toolName: chatCompletionsTool.name,
       partials,
       result,
       context: seen,
@@ -86,9 +88,9 @@ console.log(
 );
 
 function fakeWake(): BrainWakeInput {
-  const sessionId = "brain-tool-pi-adapter-session" as SessionId;
+  const sessionId = "brain-tool-chat-adapter-session" as SessionId;
   return {
-    wakeId: "brain-tool-pi-adapter-wake",
+    wakeId: "brain-tool-chat-adapter-wake",
     sessionId,
     systemPrompt: "system",
     roleAssembly: { instructions: "test neutral tools" },

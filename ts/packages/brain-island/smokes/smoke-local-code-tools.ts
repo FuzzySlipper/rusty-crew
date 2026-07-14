@@ -16,18 +16,18 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
   AgentToolResult,
-} from "./support/legacy-pi-agent-test-harness.js";
+} from "./support/chat-completions-test-harness.js";
 import {
   createLocalCodeToolResolver,
   defaultBodyDeltaPolicy,
   defaultLocalCodeResourcePolicy,
   selectToolProfile,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const workdir = mkdtempSync(join(tmpdir(), "rusty-crew-local-tools-"));
 const outsideDir = mkdtempSync(
@@ -66,18 +66,18 @@ const searchSelection = selectToolProfile({
 
 class ToolCallingFakeAgent {
   constructor(
-    private readonly options: PiAgentOptions,
+    private readonly options: ChatCompletionsOptions,
     private readonly results: Record<string, AgentToolResult<unknown>>,
   ) {}
 
   subscribe(
-    _listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    _listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     return () => {};
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const tools = this.options.initialState?.tools ?? [];
     const readFile = tools.find((tool) => tool.name === "read_file");
@@ -153,7 +153,7 @@ const policyBackedResolver = createLocalCodeToolResolver({
     maxCommandOutputBytes: 64,
   },
 });
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   createAgent: (options) => new ToolCallingFakeAgent(options, toolResults),
   resolveTools: policyBackedResolver,
 });

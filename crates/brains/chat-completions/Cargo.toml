@@ -1,5 +1,5 @@
 [package]
-name = "rusty-crew-pi-agent-brain"
+name = "rusty-crew-chat-completions-brain"
 edition.workspace = true
 license.workspace = true
 version.workspace = true

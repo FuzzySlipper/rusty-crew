@@ -154,8 +154,8 @@ const model = buildReadOnlySlashCommandResponse("model", {
       revision: 3,
     },
     brain: {
-      module: "pi-agent",
-      backend: "pi-agent",
+      module: "chat-completions",
+      backend: "chat-completions",
     },
     context_strategy: {
       strategy_id: "recent_window",

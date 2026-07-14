@@ -5,25 +5,28 @@ import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 const native = await loadNativeBridge();
 const started = await native.startBrainRun({
-  moduleId: "pi-agent",
-  providerInput: piAgentWakeInput("pi-agent-rust-bridge-wake", "primary"),
+  moduleId: "chat-completions",
+  providerInput: chatCompletionsWakeInput(
+    "chat-completions-rust-bridge-wake",
+    "primary",
+  ),
 });
 
 const firstDrain = await waitForToolRequest(native, started.wakeId);
 assert.equal(firstDrain.toolRequests.length, 1);
 assert.equal(firstDrain.toolRequests[0]?.name, "echo_tool");
-assert.equal(firstDrain.toolRequests[0]?.callId, "fake-pi-call");
+assert.equal(firstDrain.toolRequests[0]?.callId, "fake-chat-call");
 const activeDiagnostics = await native.bufferedBrainRunDiagnostics();
 assert.equal(activeDiagnostics.active_run_count, 1);
-assert.equal(activeDiagnostics.runs[0]?.module_label, "pi-agent");
+assert.equal(activeDiagnostics.runs[0]?.module_label, "chat-completions");
 assert.equal(activeDiagnostics.runs[0]?.wake_id, started.wakeId);
 assertNoBufferedPayloads(activeDiagnostics);
 
 await native.submitBrainHostResult({
-  moduleId: "pi-agent",
+  moduleId: "chat-completions",
   wakeId: started.wakeId,
   callId: firstDrain.toolRequests[0]!.callId,
-  output: "SENTINEL_PI_AGENT_TOOL_OUTPUT from TS bridge smoke",
+  output: "SENTINEL_CHAT_COMPLETIONS_TOOL_OUTPUT from TS bridge smoke",
   status: "succeeded",
   retryable: false,
 });
@@ -51,14 +54,14 @@ assert.ok(
   events.some(
     (event) =>
       event.type === "text_delta" &&
-      event.text.includes("pi-agent Rust bridge wake completed"),
+      event.text.includes("chat-completions Rust bridge wake completed"),
   ),
 );
 assert.ok(
   events.some(
     (event) =>
       event.type === "reasoning_delta" &&
-      event.text.includes("pi-agent Rust reasoning"),
+      event.text.includes("chat-completions Rust reasoning"),
   ),
 );
 assert.ok(events.some((event) => event.type === "finished"));
@@ -86,14 +89,15 @@ console.log(
   ),
 );
 
-function piAgentWakeInput(
+function chatCompletionsWakeInput(
   wakeId: string,
   sessionLabel: string,
   toolName = "echo_tool",
 ) {
   return {
     wakeId,
-    sessionId: `pi-agent-rust-bridge-${sessionLabel}-session` as SessionId,
+    sessionId:
+      `chat-completions-rust-bridge-${sessionLabel}-session` as SessionId,
     messages: [
       {
         role: "system" as const,
@@ -125,14 +129,18 @@ async function runSingleDeniedContinuationScenario(): Promise<{
   toolResultWasError: boolean;
 }> {
   const host = await loadNativeBridge();
-  const wakeId = "pi-agent-single-denied-wake";
+  const wakeId = "chat-completions-single-denied-wake";
   await host.startBrainRun({
-    moduleId: "pi-agent",
-    providerInput: piAgentWakeInput(wakeId, "single-denied", "denied_tool"),
+    moduleId: "chat-completions",
+    providerInput: chatCompletionsWakeInput(
+      wakeId,
+      "single-denied",
+      "denied_tool",
+    ),
   });
   const pending = await waitForToolRequest(host, wakeId);
   await host.submitBrainHostResult({
-    moduleId: "pi-agent",
+    moduleId: "chat-completions",
     wakeId,
     callId: pending.toolRequests[0]!.callId,
     output: "manual review required",
@@ -153,7 +161,7 @@ async function runSingleDeniedContinuationScenario(): Promise<{
     events.some(
       (event) =>
         event.type === "text_delta" &&
-        event.text.includes("pi-agent Rust bridge wake completed"),
+        event.text.includes("chat-completions Rust bridge wake completed"),
     );
   assert.equal(toolResultWasError, true);
   assert.equal(providerContinued, true);
@@ -166,10 +174,10 @@ async function runRepeatedFailureStopScenario(): Promise<{
   completionSuppressed: boolean;
 }> {
   const host = await loadNativeBridge();
-  const wakeId = "pi-agent-repeated-failure-wake";
+  const wakeId = "chat-completions-repeated-failure-wake";
   await host.startBrainRun({
-    moduleId: "pi-agent",
-    providerInput: piAgentWakeInput(
+    moduleId: "chat-completions",
+    providerInput: chatCompletionsWakeInput(
       wakeId,
       "repeated-failure",
       "repeat_failure_tool",
@@ -178,7 +186,7 @@ async function runRepeatedFailureStopScenario(): Promise<{
   for (let index = 1; index <= 2; index += 1) {
     const pending = await waitForToolRequest(host, wakeId);
     await host.submitBrainHostResult({
-      moduleId: "pi-agent",
+      moduleId: "chat-completions",
       wakeId,
       callId: pending.toolRequests[0]!.callId,
       output: "memory client unavailable",
@@ -214,26 +222,26 @@ async function runSameWakeHostIsolationScenario(): Promise<{
 }> {
   const firstHost = await loadNativeBridge();
   const secondHost = await loadNativeBridge();
-  const sharedWakeId = "pi-agent-shared-host-wake";
+  const sharedWakeId = "chat-completions-shared-host-wake";
 
   const firstStarted = await firstHost.startBrainRun({
-    moduleId: "pi-agent",
-    providerInput: piAgentWakeInput(sharedWakeId, "host-one"),
+    moduleId: "chat-completions",
+    providerInput: chatCompletionsWakeInput(sharedWakeId, "host-one"),
   });
   const secondStarted = await secondHost.startBrainRun({
-    moduleId: "pi-agent",
-    providerInput: piAgentWakeInput(sharedWakeId, "host-two"),
+    moduleId: "chat-completions",
+    providerInput: chatCompletionsWakeInput(sharedWakeId, "host-two"),
   });
   assert.equal(firstStarted.wakeId, sharedWakeId);
   assert.equal(secondStarted.wakeId, sharedWakeId);
 
   const firstDrain = await waitForToolRequest(firstHost, sharedWakeId);
   const secondDrain = await waitForToolRequest(secondHost, sharedWakeId);
-  assert.equal(firstDrain.toolRequests[0]?.callId, "fake-pi-call");
-  assert.equal(secondDrain.toolRequests[0]?.callId, "fake-pi-call");
+  assert.equal(firstDrain.toolRequests[0]?.callId, "fake-chat-call");
+  assert.equal(secondDrain.toolRequests[0]?.callId, "fake-chat-call");
 
   await firstHost.submitBrainHostResult({
-    moduleId: "pi-agent",
+    moduleId: "chat-completions",
     wakeId: sharedWakeId,
     callId: firstDrain.toolRequests[0]!.callId,
     output: "FIRST_HOST_OUTPUT_ONLY",
@@ -243,7 +251,7 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   const firstStream = await drainUntilTerminal(firstHost, sharedWakeId);
 
   const secondAfterFirstOutput = await secondHost.drainBrainRun({
-    moduleId: "pi-agent",
+    moduleId: "chat-completions",
     wakeId: sharedWakeId,
     maxItems: 32,
   });
@@ -252,7 +260,7 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   assert.equal(secondAfterFirstOutput.toolRequests.length, 0);
 
   const cancellation = await secondHost.cancelBrainRun({
-    moduleId: "pi-agent",
+    moduleId: "chat-completions",
     wakeId: sharedWakeId,
     reasonCode: "host_isolation_smoke",
     summary: "second host cleanup after same-wake isolation smoke",
@@ -269,13 +277,19 @@ async function runSameWakeHostIsolationScenario(): Promise<{
 
   await assert.rejects(
     () =>
-      firstHost.drainBrainRun({ moduleId: "pi-agent", wakeId: sharedWakeId }),
-    /pi-agent buffered wake pi-agent-shared-host-wake was not found/,
+      firstHost.drainBrainRun({
+        moduleId: "chat-completions",
+        wakeId: sharedWakeId,
+      }),
+    /chat-completions buffered wake chat-completions-shared-host-wake was not found/,
   );
   await assert.rejects(
     () =>
-      secondHost.drainBrainRun({ moduleId: "pi-agent", wakeId: sharedWakeId }),
-    /pi-agent buffered wake pi-agent-shared-host-wake was not found/,
+      secondHost.drainBrainRun({
+        moduleId: "chat-completions",
+        wakeId: sharedWakeId,
+      }),
+    /chat-completions buffered wake chat-completions-shared-host-wake was not found/,
   );
 
   return {
@@ -298,10 +312,10 @@ async function runExplicitCleanupScenario(): Promise<{
   activeAfterCleanup: number;
 }> {
   const cleanupHost = await loadNativeBridge();
-  const cleanupWakeId = "pi-agent-cleanup-host-wake";
+  const cleanupWakeId = "chat-completions-cleanup-host-wake";
   await cleanupHost.startBrainRun({
-    moduleId: "pi-agent",
-    providerInput: piAgentWakeInput(cleanupWakeId, "cleanup-host"),
+    moduleId: "chat-completions",
+    providerInput: chatCompletionsWakeInput(cleanupWakeId, "cleanup-host"),
   });
   await waitForToolRequest(cleanupHost, cleanupWakeId);
   const beforeCleanup = await cleanupHost.bufferedBrainRunDiagnostics();
@@ -311,7 +325,7 @@ async function runExplicitCleanupScenario(): Promise<{
 
   const cleanup = await cleanupHost.cleanupBufferedBrainRuns({
     reasonCode: "smoke_cleanup",
-    summary: "pi-agent bridge smoke cleanup",
+    summary: "chat-completions bridge smoke cleanup",
   });
   assert.equal(cleanup.active_runs, 1);
   assert.equal(cleanup.cancelled_nonterminal_runs, 1);
@@ -322,10 +336,10 @@ async function runExplicitCleanupScenario(): Promise<{
   await assert.rejects(
     () =>
       cleanupHost.drainBrainRun({
-        moduleId: "pi-agent",
+        moduleId: "chat-completions",
         wakeId: cleanupWakeId,
       }),
-    /pi-agent buffered wake pi-agent-cleanup-host-wake was not found/,
+    /chat-completions buffered wake chat-completions-cleanup-host-wake was not found/,
   );
 
   return {
@@ -350,7 +364,7 @@ function assertNoBufferedPayloads(value: unknown): void {
   const serialized = JSON.stringify(value);
   assert.ok(!serialized.includes("argumentsJson"));
   assert.ok(!serialized.includes("arguments_json"));
-  assert.ok(!serialized.includes("SENTINEL_PI_AGENT_TOOL_OUTPUT"));
+  assert.ok(!serialized.includes("SENTINEL_CHAT_COMPLETIONS_TOOL_OUTPUT"));
   assert.ok(!serialized.includes("FIRST_HOST_OUTPUT_ONLY"));
 }
 
@@ -364,7 +378,7 @@ async function waitForToolRequest(
 }> {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const drained = await nativeBridge.drainBrainRun({
-      moduleId: "pi-agent",
+      moduleId: "chat-completions",
       wakeId,
       maxItems: 32,
     });
@@ -373,7 +387,7 @@ async function waitForToolRequest(
     }
     await delay(25);
   }
-  throw new Error("timed out waiting for pi-agent tool request");
+  throw new Error("timed out waiting for chat-completions tool request");
 }
 
 async function drainUntilTerminal(
@@ -392,7 +406,7 @@ async function drainTerminalReceipt(
   const stream: BrainWakeStreamItem[] = [];
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const drained = await nativeBridge.drainBrainRun({
-      moduleId: "pi-agent",
+      moduleId: "chat-completions",
       wakeId,
       maxItems: 32,
     });
@@ -408,7 +422,7 @@ async function drainTerminalReceipt(
     }
     await delay(25);
   }
-  throw new Error("timed out waiting for pi-agent terminal stream");
+  throw new Error("timed out waiting for chat-completions terminal stream");
 }
 
 async function delay(delayMs: number): Promise<void> {

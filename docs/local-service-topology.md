@@ -55,13 +55,13 @@ modelId: deepseek-flash
 baseUrl: http://127.0.0.1:18082/v1
 ```
 
-Production pi-agent hosts always use the live Rust provider path. A silent
-provider request fails visibly after 30 seconds by default; this is an HTTP
-stream-idle ceiling, not a whole-turn or tool-loop ceiling:
+Production Chat Completions hosts always use the live Rust provider path.
+Provider requests have no automatic deadline by default; user cancellation owns
+turn lifetime. An operator may configure an emergency request ceiling:
 
 ```text
 # Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
-# RUSTY_CREW_PI_AGENT_PROVIDER_REQUEST_TIMEOUT_MS=30000
+# RUSTY_CREW_CHAT_COMPLETIONS_PROVIDER_REQUEST_TIMEOUT_MS=30000
 ```
 
 Deterministic provider clients are available only through explicit smoke/test

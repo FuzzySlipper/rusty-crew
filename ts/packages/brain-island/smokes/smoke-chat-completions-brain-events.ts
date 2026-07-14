@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
+} from "./support/chat-completions-test-harness.js";
 import type {
   AgentId,
   BrainEventEnvelope,
@@ -11,11 +11,11 @@ import type {
   SessionHandle,
   SessionId,
 } from "@rusty-crew/contracts";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
-const sessionId = "pi-agent-brain-events-session" as SessionId;
+const sessionId = "chat-completions-brain-events-session" as SessionId;
 
-function assistantMessage(content: unknown): PiAgentMessage {
+function assistantMessage(content: unknown): ChatCompletionsMessage {
   return {
     role: "assistant",
     content,
@@ -38,11 +38,11 @@ function assistantMessage(content: unknown): PiAgentMessage {
     },
     stopReason: "stop",
     timestamp: Date.now(),
-  } as PiAgentMessage;
+  } as ChatCompletionsMessage;
 }
 
 class FinalMessageOnlyAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   constructor(
     private readonly finalMessage:
@@ -51,7 +51,7 @@ class FinalMessageOnlyAgent {
   ) {}
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -60,24 +60,24 @@ class FinalMessageOnlyAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.({ type: "agent_start" } as ChatCompletionsEvent, signal);
     this.listener?.(
       {
         type: "message_end",
         message: this.assistantMessage(),
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
+      { type: "agent_end", messages: [] } as ChatCompletionsEvent,
       signal,
     );
   }
 
-  private assistantMessage(): PiAgentMessage {
+  private assistantMessage(): ChatCompletionsMessage {
     return {
       role: "assistant",
       content:
@@ -107,7 +107,7 @@ class FinalMessageOnlyAgent {
           ? this.finalMessage.errorMessage
           : undefined,
       timestamp: Date.now(),
-    } as PiAgentMessage;
+    } as ChatCompletionsMessage;
   }
 
   async waitForIdle(): Promise<void> {}
@@ -116,10 +116,10 @@ class FinalMessageOnlyAgent {
 }
 
 class StreamingThenFinalMessageAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -128,22 +128,22 @@ class StreamingThenFinalMessageAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.({ type: "agent_start" } as ChatCompletionsEvent, signal);
     this.listener?.(
       {
         type: "message_update",
         assistantMessageEvent: { type: "text_delta", delta: "streamed " },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
       {
         type: "message_update",
         assistantMessageEvent: { type: "text_delta", delta: "answer" },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
@@ -153,11 +153,11 @@ class StreamingThenFinalMessageAgent {
           role: "assistant",
           content: [{ type: "text", text: "streamed answer" }],
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
+      { type: "agent_end", messages: [] } as ChatCompletionsEvent,
       signal,
     );
   }
@@ -168,11 +168,11 @@ class StreamingThenFinalMessageAgent {
 }
 
 class ControlledLiveSubmitAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
   private readonly idle = deferred<void>();
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -181,15 +181,15 @@ class ControlledLiveSubmitAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.({ type: "agent_start" } as ChatCompletionsEvent, signal);
     this.listener?.(
       {
         type: "message_update",
         assistantMessageEvent: { type: "text_delta", delta: "early" },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
   }
@@ -204,11 +204,11 @@ class ControlledLiveSubmitAgent {
           role: "assistant",
           content: [{ type: "text", text: "early" }],
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
+      { type: "agent_end", messages: [] } as ChatCompletionsEvent,
       signal,
     );
   }
@@ -220,15 +220,15 @@ class ControlledLiveSubmitAgent {
   clearAllQueues(): void {}
 }
 
-const textBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) =>
+const textBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
     new FinalMessageOnlyAgent({
       kind: "text",
       text: "final message text without streaming deltas",
     }),
 });
 
-const textResult = await wake(textBrain, "pi-agent-brain-events-wake");
+const textResult = await wake(textBrain, "chat-completions-brain-events-wake");
 
 assert.deepEqual(
   textResult.events.map((event) => event.event.type),
@@ -237,14 +237,14 @@ assert.deepEqual(
 const textDelta = textDeltaText(textResult);
 assert.equal(textDelta, "final message text without streaming deltas");
 
-const streamedBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) =>
+const streamedBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
     new StreamingThenFinalMessageAgent(),
 });
 
 const streamedResult = await wake(
   streamedBrain,
-  "pi-agent-brain-streamed-events-wake",
+  "chat-completions-brain-streamed-events-wake",
 );
 
 assert.deepEqual(
@@ -255,8 +255,8 @@ assert.deepEqual(textDeltaTexts(streamedResult), ["streamed ", "answer"]);
 
 const liveSubmitAgent = new ControlledLiveSubmitAgent();
 const liveSubmittedEvents: BrainEventEnvelope[] = [];
-const liveSubmitBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) => liveSubmitAgent,
+const liveSubmitBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) => liveSubmitAgent,
   submitEvent: async (event) => {
     liveSubmittedEvents.push(event);
   },
@@ -264,7 +264,7 @@ const liveSubmitBrain = createPiAgentBrain({
 let liveSubmitWakeSettled = false;
 const liveSubmitWake = wake(
   liveSubmitBrain,
-  "pi-agent-brain-live-submit-events-wake",
+  "chat-completions-brain-live-submit-events-wake",
 ).finally(() => {
   liveSubmitWakeSettled = true;
 });
@@ -289,8 +289,8 @@ assert.deepEqual(
   ["started", "text_delta", "finished"],
 );
 
-const reasoningFinalBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) =>
+const reasoningFinalBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
     new FinalMessageOnlyAgent({
       kind: "text",
       text: "<think>private chain</think>visible answer",
@@ -299,7 +299,7 @@ const reasoningFinalBrain = createPiAgentBrain({
 
 const reasoningFinalResult = await wake(
   reasoningFinalBrain,
-  "pi-agent-brain-reasoning-final-events-wake",
+  "chat-completions-brain-reasoning-final-events-wake",
 );
 
 assert.deepEqual(
@@ -310,10 +310,10 @@ assert.deepEqual(reasoningDeltaTexts(reasoningFinalResult), ["private chain"]);
 assert.deepEqual(textDeltaTexts(reasoningFinalResult), ["visible answer"]);
 
 class StreamingThinkMessageAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -322,10 +322,10 @@ class StreamingThinkMessageAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.({ type: "agent_start" } as ChatCompletionsEvent, signal);
     this.listener?.(
       {
         type: "message_update",
@@ -333,7 +333,7 @@ class StreamingThinkMessageAgent {
           type: "text_delta",
           delta: "before <think>stream thought</think> after",
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
@@ -343,11 +343,11 @@ class StreamingThinkMessageAgent {
           role: "assistant",
           content: [{ type: "text", text: "before  after" }],
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
+      { type: "agent_end", messages: [] } as ChatCompletionsEvent,
       signal,
     );
   }
@@ -357,13 +357,14 @@ class StreamingThinkMessageAgent {
   clearAllQueues(): void {}
 }
 
-const reasoningStreamedBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) => new StreamingThinkMessageAgent(),
+const reasoningStreamedBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
+    new StreamingThinkMessageAgent(),
 });
 
 const reasoningStreamedResult = await wake(
   reasoningStreamedBrain,
-  "pi-agent-brain-reasoning-streamed-events-wake",
+  "chat-completions-brain-reasoning-streamed-events-wake",
 );
 
 assert.deepEqual(
@@ -379,10 +380,10 @@ assert.deepEqual(textDeltaTexts(reasoningStreamedResult), [
 ]);
 
 class StreamingPiThinkingMessageAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -391,49 +392,58 @@ class StreamingPiThinkingMessageAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.({ type: "agent_start" } as ChatCompletionsEvent, signal);
     this.listener?.(
       {
         type: "message_update",
         message: assistantMessage([
-          { type: "thinking", thinking: "native pi thinking " },
+          { type: "thinking", thinking: "native chat completions thinking " },
         ]),
         assistantMessageEvent: {
           type: "thinking_delta",
           contentIndex: 0,
-          delta: "native pi thinking ",
+          delta: "native chat completions thinking ",
           partial: assistantMessage([
-            { type: "thinking", thinking: "native pi thinking " },
+            { type: "thinking", thinking: "native chat completions thinking " },
           ]),
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
       {
         type: "message_update",
         message: assistantMessage([
-          { type: "thinking", thinking: "native pi thinking continued" },
+          {
+            type: "thinking",
+            thinking: "native chat completions thinking continued",
+          },
         ]),
         assistantMessageEvent: {
           type: "thinking_delta",
           contentIndex: 0,
           delta: "continued",
           partial: assistantMessage([
-            { type: "thinking", thinking: "native pi thinking continued" },
+            {
+              type: "thinking",
+              thinking: "native chat completions thinking continued",
+            },
           ]),
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
       {
         type: "message_update",
         message: assistantMessage([
-          { type: "thinking", thinking: "native pi thinking continued" },
+          {
+            type: "thinking",
+            thinking: "native chat completions thinking continued",
+          },
           { type: "text", text: "visible native answer" },
         ]),
         assistantMessageEvent: {
@@ -441,25 +451,31 @@ class StreamingPiThinkingMessageAgent {
           contentIndex: 1,
           delta: "visible native answer",
           partial: assistantMessage([
-            { type: "thinking", thinking: "native pi thinking continued" },
+            {
+              type: "thinking",
+              thinking: "native chat completions thinking continued",
+            },
             { type: "text", text: "visible native answer" },
           ]),
         },
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
       {
         type: "message_end",
         message: assistantMessage([
-          { type: "thinking", thinking: "native pi thinking continued" },
+          {
+            type: "thinking",
+            thinking: "native chat completions thinking continued",
+          },
           { type: "text", text: "visible native answer" },
         ]),
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
+      { type: "agent_end", messages: [] } as ChatCompletionsEvent,
       signal,
     );
   }
@@ -469,14 +485,14 @@ class StreamingPiThinkingMessageAgent {
   clearAllQueues(): void {}
 }
 
-const nativeThinkingStreamedBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) =>
+const nativeThinkingStreamedBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
     new StreamingPiThinkingMessageAgent(),
 });
 
 const nativeThinkingStreamedResult = await wake(
   nativeThinkingStreamedBrain,
-  "pi-agent-brain-native-thinking-streamed-events-wake",
+  "chat-completions-brain-native-thinking-streamed-events-wake",
 );
 
 assert.deepEqual(
@@ -484,23 +500,23 @@ assert.deepEqual(
   ["started", "reasoning_delta", "reasoning_delta", "text_delta", "finished"],
 );
 assert.deepEqual(reasoningDeltaTexts(nativeThinkingStreamedResult), [
-  "native pi thinking ",
+  "native chat completions thinking ",
   "continued",
 ]);
 assert.deepEqual(textDeltaTexts(nativeThinkingStreamedResult), [
   "visible native answer",
 ]);
 
-const nativeThinkingFinalBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) =>
+const nativeThinkingFinalBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
     new FinalNativeThinkingMessageAgent(),
 });
 
 class FinalNativeThinkingMessageAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -509,10 +525,10 @@ class FinalNativeThinkingMessageAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.({ type: "agent_start" } as ChatCompletionsEvent, signal);
     this.listener?.(
       {
         type: "message_end",
@@ -520,11 +536,11 @@ class FinalNativeThinkingMessageAgent {
           { type: "thinking", thinking: "final native thinking" },
           { type: "text", text: "final visible answer" },
         ]),
-      } as PiAgentEvent,
+      } as ChatCompletionsEvent,
       signal,
     );
     this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
+      { type: "agent_end", messages: [] } as ChatCompletionsEvent,
       signal,
     );
   }
@@ -536,7 +552,7 @@ class FinalNativeThinkingMessageAgent {
 
 const nativeThinkingFinalResult = await wake(
   nativeThinkingFinalBrain,
-  "pi-agent-brain-native-thinking-final-events-wake",
+  "chat-completions-brain-native-thinking-final-events-wake",
 );
 
 assert.deepEqual(
@@ -550,15 +566,18 @@ assert.deepEqual(textDeltaTexts(nativeThinkingFinalResult), [
   "final visible answer",
 ]);
 
-const errorBrain = createPiAgentBrain({
-  createAgent: (_options: PiAgentOptions) =>
+const errorBrain = createChatCompletionsBrain({
+  createAgent: (_options: ChatCompletionsOptions) =>
     new FinalMessageOnlyAgent({
       kind: "error",
       errorMessage: "OpenAI API error (404): 404 status code (no body)",
     }),
 });
 
-const errorResult = await wake(errorBrain, "pi-agent-brain-error-events-wake");
+const errorResult = await wake(
+  errorBrain,
+  "chat-completions-brain-error-events-wake",
+);
 assert.equal(
   textDeltaText(errorResult),
   "LLM error: OpenAI API error (404): 404 status code (no body)",
@@ -582,13 +601,13 @@ console.log(
 );
 
 async function wake(
-  brain: ReturnType<typeof createPiAgentBrain>,
+  brain: ReturnType<typeof createChatCompletionsBrain>,
   wakeId: string,
 ) {
   return brain.wake({
     wakeId,
     sessionId,
-    systemPrompt: "Map pi-agent events.",
+    systemPrompt: "Map chat-completions events.",
     roleAssembly: {
       instructions: "Return final text.",
       initialMessages: [],
@@ -628,13 +647,17 @@ async function wake(
 }
 
 function textDeltaText(
-  result: Awaited<ReturnType<ReturnType<typeof createPiAgentBrain>["wake"]>>,
+  result: Awaited<
+    ReturnType<ReturnType<typeof createChatCompletionsBrain>["wake"]>
+  >,
 ): string | undefined {
   return textDeltaTexts(result)[0];
 }
 
 function textDeltaTexts(
-  result: Awaited<ReturnType<ReturnType<typeof createPiAgentBrain>["wake"]>>,
+  result: Awaited<
+    ReturnType<ReturnType<typeof createChatCompletionsBrain>["wake"]>
+  >,
 ): string[] {
   return result.events
     .map((event) => event.event)
@@ -642,7 +665,9 @@ function textDeltaTexts(
 }
 
 function reasoningDeltaTexts(
-  result: Awaited<ReturnType<ReturnType<typeof createPiAgentBrain>["wake"]>>,
+  result: Awaited<
+    ReturnType<ReturnType<typeof createChatCompletionsBrain>["wake"]>
+  >,
 ): string[] {
   return result.events
     .map((event) => event.event)

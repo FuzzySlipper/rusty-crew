@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
+} from "./support/chat-completions-test-harness.js";
 import type {
   AgentId,
   BrainAction,
@@ -16,7 +16,7 @@ import {
   resolveCompletionTools,
   selectToolProfile,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const sessionId = "completion-tools-session" as SessionId;
 const agentId = "completion-tools-agent" as AgentId;
@@ -33,16 +33,16 @@ assert.deepEqual(
 );
 
 class CompletionToolFakeAgent {
-  constructor(private readonly options: PiAgentOptions) {}
+  constructor(private readonly options: ChatCompletionsOptions) {}
 
   subscribe(
-    _listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    _listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     return () => {};
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     await this.callTool("deliver_completion_md", {
       markdown: `---
@@ -102,7 +102,7 @@ status: blocked
 }
 
 let plannerSawToolActions: readonly BrainAction[] = [];
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   createAgent: (options) => new CompletionToolFakeAgent(options),
   resolveTools: resolveCompletionTools,
   toolProfile: selection.toolProfile,

@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+} from "./support/chat-completions-test-harness.js";
 import type {
   AdapterId,
   AgentId,
@@ -18,11 +18,11 @@ import type {
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { registerBrainHostRuntime } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 import type {
-  PiAgentFactory,
-  PiAgentLike,
-} from "./support/legacy-pi-agent-test-harness.js";
+  ChatCompletionsFactory,
+  ChatCompletionsLike,
+} from "./support/chat-completions-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;
@@ -105,15 +105,15 @@ try {
         modelName: "deterministic",
       },
     },
-    createPiAgentBrain({
-      createAgent: createStubPiAgentFactory,
+    createChatCompletionsBrain({
+      createAgent: createStubChatCompletionsFactory,
       planActions: ({ wake }): BrainAction[] => [
         {
           type: "deliver_completion",
           packet: {
             sessionId: wake.sessionId,
             status: "completed",
-            summary: "registered pi-agent bridge wake completed",
+            summary: "registered chat-completions bridge wake completed",
           } satisfies CompletionPacket,
         },
       ],
@@ -158,8 +158,8 @@ try {
   rmSync(engineDataDir, { force: true, recursive: true });
 }
 
-function createStubPiAgent(): PiAgentLike {
-  let listener: Parameters<PiAgentLike["subscribe"]>[0] | undefined;
+function createStubChatCompletions(): ChatCompletionsLike {
+  let listener: Parameters<ChatCompletionsLike["subscribe"]>[0] | undefined;
 
   return {
     subscribe(callback) {
@@ -168,36 +168,44 @@ function createStubPiAgent(): PiAgentLike {
         listener = undefined;
       };
     },
-    async prompt(input: PiAgentMessage | PiAgentMessage[] | string) {
+    async prompt(
+      input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
+    ) {
       const messages = Array.isArray(input) ? input : [input];
-      await listener?.({ type: "agent_start" } as PiAgentEvent, abortSignal);
+      await listener?.(
+        { type: "agent_start" } as ChatCompletionsEvent,
+        abortSignal,
+      );
       listener?.(
         {
           type: "message_update",
           assistantMessageEvent: {
             type: "text_delta",
-            delta: `stub pi-agent saw ${messages.length} message(s)`,
+            delta: `stub chat-completions saw ${messages.length} message(s)`,
           },
           message: {
             role: "assistant",
             content: [
               {
                 type: "text",
-                text: `stub pi-agent saw ${messages.length} message(s)`,
+                text: `stub chat-completions saw ${messages.length} message(s)`,
               },
             ],
             timestamp: Date.now(),
           },
-        } as PiAgentEvent,
+        } as ChatCompletionsEvent,
         abortSignal,
       );
-      await listener?.({ type: "agent_end" } as PiAgentEvent, abortSignal);
+      await listener?.(
+        { type: "agent_end" } as ChatCompletionsEvent,
+        abortSignal,
+      );
     },
     async waitForIdle() {},
     clearAllQueues() {},
   };
 }
 
-function createStubPiAgentFactory(): PiAgentLike {
-  return createStubPiAgent();
+function createStubChatCompletionsFactory(): ChatCompletionsLike {
+  return createStubChatCompletions();
 }

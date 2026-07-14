@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import type {
-  AgentOptions as PiAgentOptions,
-  AgentEvent as PiAgentEvent,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentOptions as ChatCompletionsOptions,
+  AgentEvent as ChatCompletionsEvent,
+} from "./support/chat-completions-test-harness.js";
 import type { BodyState, SessionId } from "@rusty-crew/contracts";
 import { Type } from "typebox";
 import type { BrainTool } from "../src/brain-tool.js";
 import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
 import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const toolCallDebugStore = new MemoryToolCallDebugStore({
   maxJsonChars: 256,
@@ -39,15 +39,15 @@ const debugTool: BrainTool<typeof parameters, { count: number }> = {
 };
 
 let eventSink:
-  | ((event: PiAgentEvent, signal: AbortSignal) => Promise<void> | void)
+  | ((event: ChatCompletionsEvent, signal: AbortSignal) => Promise<void> | void)
   | undefined;
-const emit = (event: PiAgentEvent): void => {
+const emit = (event: ChatCompletionsEvent): void => {
   void eventSink?.(event, new AbortController().signal);
 };
 
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   toolCallDebugStore,
-  createAgent: (options: PiAgentOptions) => ({
+  createAgent: (options: ChatCompletionsOptions) => ({
     subscribe: (sink) => {
       eventSink = sink;
       return () => {

@@ -1,6 +1,6 @@
 use super::*;
 
-const PI_AGENT_MODULE_ID: &str = "pi-agent";
+const CHAT_COMPLETIONS_MODULE_ID: &str = "chat-completions";
 const OPENAI_RESPONSES_MODULE_ID: &str = "openai-responses";
 
 fn unsupported_brain_module(module_id: &str) -> napi::Error {
@@ -45,9 +45,10 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let result = match module_id.as_str() {
-            PI_AGENT_MODULE_ID => {
-                start_pi_agent_brain_json(bridge.pi_agent_buffered_runs(), input_json)
-            }
+            CHAT_COMPLETIONS_MODULE_ID => start_chat_completions_brain_json(
+                bridge.chat_completions_buffered_runs(),
+                input_json,
+            ),
             OPENAI_RESPONSES_MODULE_ID => start_openai_responses_brain_json(
                 bridge.openai_responses_buffered_runs(),
                 input_json,
@@ -66,8 +67,8 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let result = match module_id.as_str() {
-            PI_AGENT_MODULE_ID => drain_pi_agent_brain_stream_json(
-                &bridge.pi_agent_buffered_runs(),
+            CHAT_COMPLETIONS_MODULE_ID => drain_chat_completions_brain_stream_json(
+                &bridge.chat_completions_buffered_runs(),
                 wake_id,
                 max_items,
             ),
@@ -89,9 +90,10 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let result = match module_id.as_str() {
-            PI_AGENT_MODULE_ID => {
-                submit_pi_agent_tool_output_json(&bridge.pi_agent_buffered_runs(), input_json)
-            }
+            CHAT_COMPLETIONS_MODULE_ID => submit_chat_completions_tool_output_json(
+                &bridge.chat_completions_buffered_runs(),
+                input_json,
+            ),
             OPENAI_RESPONSES_MODULE_ID => submit_openai_responses_tool_output_json(
                 &bridge.openai_responses_buffered_runs(),
                 input_json,
@@ -109,9 +111,10 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let result = match module_id.as_str() {
-            PI_AGENT_MODULE_ID => {
-                cancel_pi_agent_brain_json(&bridge.pi_agent_buffered_runs(), input_json)
-            }
+            CHAT_COMPLETIONS_MODULE_ID => cancel_chat_completions_brain_json(
+                &bridge.chat_completions_buffered_runs(),
+                input_json,
+            ),
             OPENAI_RESPONSES_MODULE_ID => cancel_openai_responses_brain_json(
                 &bridge.openai_responses_buffered_runs(),
                 input_json,
@@ -138,12 +141,12 @@ mod tests {
     #[test]
     fn generic_results_carry_the_rust_selected_module_id() {
         let attached = attach_brain_module_id(
-            PI_AGENT_MODULE_ID,
+            CHAT_COMPLETIONS_MODULE_ID,
             serde_json::json!({"wake_id": "wake-1"}).to_string(),
         )
         .expect("attach module id");
         let value: serde_json::Value = serde_json::from_str(&attached).expect("valid JSON");
-        assert_eq!(value["module_id"], PI_AGENT_MODULE_ID);
+        assert_eq!(value["module_id"], CHAT_COMPLETIONS_MODULE_ID);
         assert_eq!(value["wake_id"], "wake-1");
     }
 }

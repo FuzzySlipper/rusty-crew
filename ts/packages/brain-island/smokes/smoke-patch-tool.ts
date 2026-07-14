@@ -3,11 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
   AgentToolResult,
-} from "./support/legacy-pi-agent-test-harness.js";
+} from "./support/chat-completions-test-harness.js";
 import type {
   AgentId,
   ProfileId,
@@ -21,7 +21,7 @@ import {
   resolveLocalCodeTools,
   selectToolProfile,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const workdir = mkdtempSync(join(tmpdir(), "rusty-crew-patch-tool-"));
 const outsideDir = mkdtempSync(
@@ -43,18 +43,18 @@ const selection = selectToolProfile({
 
 class PatchCallingFakeAgent {
   constructor(
-    private readonly options: PiAgentOptions,
+    private readonly options: ChatCompletionsOptions,
     private readonly results: Record<string, AgentToolResult<unknown>>,
   ) {}
 
   subscribe(
-    _listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    _listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     return () => {};
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const patch = this.options.initialState?.tools?.find(
       (tool) => tool.name === "patch",
@@ -73,7 +73,7 @@ class PatchCallingFakeAgent {
 }
 
 const results: Record<string, AgentToolResult<unknown>> = {};
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   createAgent: (options) => new PatchCallingFakeAgent(options, results),
   resolveTools: resolveLocalCodeTools,
 });

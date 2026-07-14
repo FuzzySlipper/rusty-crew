@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 45;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 46;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -244,7 +244,40 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add typed external runtime compatibility certifications",
         apply: repos::external_runtime::migrate_v45_external_runtime_certifications,
     },
+    SchemaMigration {
+        version: 46,
+        description: "rename chat completions brain identity",
+        apply: migrate_v46_rename_chat_completions_brain,
+    },
 ];
+
+fn migrate_v46_rename_chat_completions_brain(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE profile_registry
+            SET active_runtime_settings_json =
+                CASE
+                    WHEN json_extract(active_runtime_settings_json, '$.brain.module') = 'pi-agent'
+                    THEN json_set(active_runtime_settings_json, '$.brain.module', 'chat-completions')
+                    ELSE active_runtime_settings_json
+                END
+          WHERE json_valid(active_runtime_settings_json)
+            AND json_extract(active_runtime_settings_json, '$.brain.module') = 'pi-agent';
+
+         UPDATE profile_registry
+            SET active_runtime_settings_json =
+                CASE
+                    WHEN json_extract(active_runtime_settings_json, '$.profile.brain.module') = 'pi-agent'
+                    THEN json_set(active_runtime_settings_json, '$.profile.brain.module', 'chat-completions')
+                    ELSE active_runtime_settings_json
+                END
+          WHERE json_valid(active_runtime_settings_json)
+            AND json_extract(active_runtime_settings_json, '$.profile.brain.module') = 'pi-agent';
+
+         DELETE FROM provider_wire_states WHERE module_id = 'pi-agent';",
+    )
+    .map_err(|error| persistence_error("rename SQLite chat completions brain identity", error))?;
+    Ok(())
+}
 
 fn migrate_v42_add_roleplay_mechanic_sessions_and_diagnostics(
     tx: &rusqlite::Transaction<'_>,
@@ -2623,6 +2656,86 @@ mod tests {
 
         drop(conn);
         drop(store);
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn chat_completions_brain_identity_migration_is_complete_and_idempotent() {
+        let db_path = temp_db_path("chat-completions-brain-identity-migration");
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            prepare_migration_metadata(&conn).unwrap();
+            apply_schema_migrations(&mut conn, &SCHEMA_MIGRATIONS[..45]).unwrap();
+            conn.execute(
+                "INSERT INTO profile_registry (
+                    profile_id, lifecycle_status, active_runtime_settings_json,
+                    source_asset_refs_json, derived_runtime_refs_json, import_export_json,
+                    revision, created_at, updated_at
+                 ) VALUES (?1, 'active', ?2, '[]', '[]', '{}', 7, ?3, ?3)",
+                params![
+                    "legacy-chat-profile",
+                    serde_json::json!({
+                        "brain": {"module": "pi-agent", "strategy": "default"},
+                        "profile": {
+                            "brain": {"module": "pi-agent", "strategy": "default"}
+                        },
+                        "provider_alias": "test-chat"
+                    })
+                    .to_string(),
+                    "2026-07-14T00:00:00Z",
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO provider_wire_states (
+                    session_id, module_id, strategy_id, profile_fingerprint,
+                    provider_fingerprint, payload_version, payload_json,
+                    created_at, updated_at
+                 ) VALUES (?1, 'pi-agent', 'default', 'profile', 'provider', 'v1', '{}', ?2, ?2)",
+                params!["legacy-chat-session", "2026-07-14T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT active_runtime_settings_json FROM profile_registry WHERE profile_id = ?1",
+                params!["legacy-chat-profile"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(settings["brain"]["module"], "chat-completions");
+        assert_eq!(settings["profile"]["brain"]["module"], "chat-completions");
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM provider_wire_states WHERE module_id = 'pi-agent'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+
+        drop(conn);
+        drop(store);
+        let mut conn = Connection::open(&db_path).unwrap();
+        let tx = conn.transaction().unwrap();
+        migrate_v46_rename_chat_completions_brain(&tx).unwrap();
+        tx.commit().unwrap();
+        let raw_after_second_run: String = conn
+            .query_row(
+                "SELECT active_runtime_settings_json FROM profile_registry WHERE profile_id = ?1",
+                params!["legacy-chat-profile"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw_after_second_run, raw);
+
+        drop(conn);
         remove_temp_db(&db_path);
     }
 

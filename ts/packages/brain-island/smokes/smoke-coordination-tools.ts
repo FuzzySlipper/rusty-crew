@@ -14,7 +14,7 @@ import {
   type CoordinationToolRuntime,
 } from "../src/coordination-tools.js";
 import { defaultBodyDeltaPolicy } from "../src/mid-turn-delta.js";
-import { toPiAgentTool } from "./support/legacy-pi-tool-adapter-test-harness.js";
+import { toChatCompletionsTool } from "./support/chat-completions-tool-adapter-test-harness.js";
 import {
   buildBuiltInToolCatalog,
   defaultToolRegistry,
@@ -195,14 +195,14 @@ assert.deepEqual(
   ["list_agents", "send_agent_message", "agent_round"],
 );
 
-const piSendTool = toPiAgentTool(
+const piSendTool = toChatCompletionsTool(
   resolved.tools.find((tool) => tool.name === "send_agent_message")!,
   { wake },
 );
-const piSend = await piSendTool.execute("pi-send-call", {
-  toAgentId: "pi-adapted-target",
+const piSend = await piSendTool.execute("chat-send-call", {
+  toAgentId: "chat-adapted-target",
   body: "adapter keeps context",
-  correlationId: "pi-adapter-proof",
+  correlationId: "chat-adapter-proof",
 });
 assert.equal((piSend.details as { ok?: boolean }).ok, true);
 assert.equal(

@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
+} from "./support/chat-completions-test-harness.js";
 import type {
   AgentId,
   ProfileId,
@@ -22,9 +22,9 @@ import {
   renderSessionTodoContext,
 } from "../src/index.js";
 import {
-  createPiAgentBrain,
-  type PiAgentLike,
-} from "./support/legacy-pi-agent-test-harness.js";
+  createChatCompletionsBrain,
+  type ChatCompletionsLike,
+} from "./support/chat-completions-test-harness.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-profile-role-assembly-"));
 const profilesDir = join(root, "profiles");
@@ -162,10 +162,10 @@ Look for concrete regressions and cite evidence.
   );
 
   let capturedSystemPrompt = "";
-  const brain = createPiAgentBrain({
-    createAgent(options: PiAgentOptions): PiAgentLike {
+  const brain = createChatCompletionsBrain({
+    createAgent(options: ChatCompletionsOptions): ChatCompletionsLike {
       capturedSystemPrompt = options.initialState?.systemPrompt ?? "";
-      return createStubPiAgent();
+      return createStubChatCompletions();
     },
   });
   await brain.wake({
@@ -237,8 +237,8 @@ function assertOrder(text: string, markers: readonly string[]): void {
   }
 }
 
-function createStubPiAgent(): PiAgentLike {
-  let listener: Parameters<PiAgentLike["subscribe"]>[0] | undefined;
+function createStubChatCompletions(): ChatCompletionsLike {
+  let listener: Parameters<ChatCompletionsLike["subscribe"]>[0] | undefined;
 
   return {
     subscribe(callback) {
@@ -247,13 +247,15 @@ function createStubPiAgent(): PiAgentLike {
         listener = undefined;
       };
     },
-    async prompt(_input: PiAgentMessage | PiAgentMessage[] | string) {
+    async prompt(
+      _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
+    ) {
       await listener?.(
-        { type: "agent_start" } as PiAgentEvent,
+        { type: "agent_start" } as ChatCompletionsEvent,
         new AbortController().signal,
       );
       await listener?.(
-        { type: "agent_end" } as PiAgentEvent,
+        { type: "agent_end" } as ChatCompletionsEvent,
         new AbortController().signal,
       );
     },

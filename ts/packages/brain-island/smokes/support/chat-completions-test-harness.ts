@@ -21,7 +21,7 @@ import {
   resolveToolSession,
   type BrainToolResolver,
 } from "../../src/tool-session-selection.js";
-import { toPiAgentTools } from "./legacy-pi-tool-adapter-test-harness.js";
+import { toChatCompletionsTools } from "./chat-completions-tool-adapter-test-harness.js";
 import {
   localToolCallMetadata,
   type ToolCallDebugStore,
@@ -29,8 +29,8 @@ import {
 } from "../../src/tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "../../src/provider-request-debug-store.js";
 
-// Legacy TS pi-agent test harness only. Production pi-agent module wiring now
-// uses the Rust pi-agent brain through the native bridge.
+// Legacy TS chat-completions test harness only. Production chat-completions module wiring now
+// uses the Rust chat-completions brain through the native bridge.
 export interface AgentToolResult<TDetails = unknown> {
   content: Array<
     | { type: "text"; text: string }
@@ -131,22 +131,24 @@ export interface Agent {
   clearAllQueues?(): void;
 }
 
-type PiAgent = Agent;
-type PiAgentEvent = AgentEvent;
-type PiAgentMessage = AgentMessage;
-type PiAgentOptions = AgentOptions;
-type PiAgentTool = AgentTool;
+type ChatCompletions = Agent;
+type ChatCompletionsEvent = AgentEvent;
+type ChatCompletionsMessage = AgentMessage;
+type ChatCompletionsOptions = AgentOptions;
+type ChatCompletionsTool = AgentTool;
 
-export type PiAgentLike = Pick<
-  PiAgent,
+export type ChatCompletionsLike = Pick<
+  ChatCompletions,
   "prompt" | "subscribe" | "waitForIdle"
 > &
-  Partial<Pick<PiAgent, "clearAllQueues">>;
+  Partial<Pick<ChatCompletions, "clearAllQueues">>;
 
-export type PiAgentFactory = (options: PiAgentOptions) => PiAgentLike;
+export type ChatCompletionsFactory = (
+  options: ChatCompletionsOptions,
+) => ChatCompletionsLike;
 
-export interface PiAgentBrainOptions {
-  createAgent: PiAgentFactory;
+export interface ChatCompletionsBrainOptions {
+  createAgent: ChatCompletionsFactory;
   planActions?: BrainActionPlanner;
   resolveTools?: BrainToolResolver;
   toolProfile?: ToolProfile;
@@ -155,8 +157,8 @@ export interface PiAgentBrainOptions {
   providerRequestDebugStore?: ProviderRequestDebugStore;
 }
 
-export function createPiAgentBrain(
-  options: PiAgentBrainOptions,
+export function createChatCompletionsBrain(
+  options: ChatCompletionsBrainOptions,
 ): BrainHostExecutor {
   return {
     async wake(input: BrainWakeInput): Promise<BrainWakeResult> {
@@ -182,12 +184,12 @@ export function createPiAgentBrain(
       const providerDebug = options.providerRequestDebugStore?.record({
         sessionId: input.sessionId,
         wakeId: input.wakeId,
-        brainModule: "pi-agent",
+        brainModule: "chat-completions",
         model: modelConfig?.modelName,
         protocol: modelConfig?.api,
         providerKind: modelConfig?.provider,
         request: {
-          boundary: "pi_agent_options",
+          boundary: "chat_completions_options",
           sessionId: input.sessionId,
           wakeId: input.wakeId,
           initialState: agentOptions.initialState,
@@ -203,7 +205,7 @@ export function createPiAgentBrain(
       const agent = options.createAgent(agentOptions);
       let sawTextDelta = false;
       const unsubscribe = agent.subscribe((event) => {
-        const mappedEvents = mapPiAgentEvent(event, {
+        const mappedEvents = mapChatCompletionsEvent(event, {
           sawTextDelta,
           wake: input,
           toolCallDebugStore: options.toolCallDebugStore,
@@ -220,7 +222,10 @@ export function createPiAgentBrain(
 
       try {
         await agent.prompt(
-          toPiMessages(input.roleAssembly, input.state.pendingMessages),
+          toChatCompletionsMessages(
+            input.roleAssembly,
+            input.state.pendingMessages,
+          ),
         );
         await agent.waitForIdle();
       } finally {
@@ -306,15 +311,15 @@ function envelope(
 
 function buildAgentOptions(
   input: BrainWakeInput,
-  options: PiAgentBrainOptions,
+  options: ChatCompletionsBrainOptions,
   actions: BrainActionCollector,
-): PiAgentOptions {
+): ChatCompletionsOptions {
   return {
     initialState: {
       systemPrompt: [input.systemPrompt, input.roleAssembly.instructions]
         .filter(Boolean)
         .join("\n\n"),
-      messages: toPiMessages(input.roleAssembly, []),
+      messages: toChatCompletionsMessages(input.roleAssembly, []),
       tools: resolveAllowedTools(
         input,
         options.resolveTools,
@@ -335,18 +340,18 @@ function resolveAllowedTools(
   toolProfile: ToolProfile | undefined,
   actions: BrainActionCollector,
   toolCallDebugStore: ToolCallDebugStore | undefined,
-): PiAgentTool[] {
-  return toPiAgentTools(
+): ChatCompletionsTool[] {
+  return toChatCompletionsTools(
     resolveToolSession({ wake: input, resolveTools, toolProfile, actions })
       .tools,
     { wake: input, toolCallDebugStore },
   );
 }
 
-function toPiMessages(
+function toChatCompletionsMessages(
   roleAssembly: BrainRoleAssembly,
   pendingMessages: RustyAgentMessage[],
-): PiAgentMessage[] {
+): ChatCompletionsMessage[] {
   const initial = roleAssembly.initialMessages ?? [];
   return [...initial, ...pendingMessages].map((message) => ({
     role: "user",
@@ -355,8 +360,8 @@ function toPiMessages(
   }));
 }
 
-function mapPiAgentEvent(
-  event: PiAgentEvent,
+function mapChatCompletionsEvent(
+  event: ChatCompletionsEvent,
   state: {
     sawTextDelta: boolean;
     wake: BrainWakeInput;
@@ -378,7 +383,7 @@ function mapPiAgentEvent(
               {
                 type: "reasoning_delta",
                 text: event.assistantMessageEvent.delta,
-                format: "pi-thinking",
+                format: "chat-completions-thinking",
               },
             ]
           : [];
@@ -395,7 +400,7 @@ function mapPiAgentEvent(
         events.push({
           type: "reasoning_delta",
           text: thinking,
-          format: "pi-thinking",
+          format: "chat-completions-thinking",
         });
       }
       const text = assistantMessageText(event.message);
@@ -492,7 +497,9 @@ function pushReasoningDelta(events: BrainEvent[], text: string): void {
   }
 }
 
-function assistantMessageText(message: PiAgentMessage): string | undefined {
+function assistantMessageText(
+  message: ChatCompletionsMessage,
+): string | undefined {
   if (message.role !== "assistant") return undefined;
   const content = Array.isArray(message.content) ? message.content : [];
   const text = content
@@ -503,7 +510,9 @@ function assistantMessageText(message: PiAgentMessage): string | undefined {
   return text.trim() ? text : undefined;
 }
 
-function assistantMessageThinking(message: PiAgentMessage): string | undefined {
+function assistantMessageThinking(
+  message: ChatCompletionsMessage,
+): string | undefined {
   if (message.role !== "assistant") return undefined;
   const content = Array.isArray(message.content) ? message.content : [];
   const text = content
@@ -517,7 +526,7 @@ function assistantMessageThinking(message: PiAgentMessage): string | undefined {
 }
 
 function assistantMessageErrorText(
-  message: PiAgentMessage,
+  message: ChatCompletionsMessage,
 ): string | undefined {
   if (message.role !== "assistant") return undefined;
   const maybeError = message as {

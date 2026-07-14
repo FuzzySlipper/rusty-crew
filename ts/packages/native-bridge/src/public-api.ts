@@ -106,11 +106,13 @@ export interface BrainWakeExecutionResult {
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
-  transportMetrics?: OpenAiResponsesTransportMetrics | PiAgentTransportMetrics;
+  transportMetrics?:
+    | OpenAiResponsesTransportMetrics
+    | ChatCompletionsTransportMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
 }
 
-export type NativeBrainRunModuleId = "pi-agent" | "openai-responses";
+export type NativeBrainRunModuleId = "chat-completions" | "openai-responses";
 
 export interface NativeBufferedBrainRunDrain {
   moduleId: NativeBrainRunModuleId;
@@ -125,7 +127,9 @@ export interface NativeBufferedBrainRunDrain {
   }>;
   terminal: boolean;
   providerState?: BrainWakeProviderStateOutput;
-  transportMetrics?: OpenAiResponsesTransportMetrics | PiAgentTransportMetrics;
+  transportMetrics?:
+    | OpenAiResponsesTransportMetrics
+    | ChatCompletionsTransportMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
   cancellation?: OpenAiResponsesBufferedCancellation;
   error?: string;
@@ -239,7 +243,7 @@ export interface OpenAiResponsesToolRequest {
   argumentsJson: string;
 }
 
-export interface PiAgentChatCompletionMessage {
+export interface ChatCompletionsChatCompletionMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string;
   name?: string;
@@ -247,10 +251,10 @@ export interface PiAgentChatCompletionMessage {
   toolCalls?: unknown[];
 }
 
-export interface PiAgentBrainRunInput {
+export interface ChatCompletionsBrainRunInput {
   wakeId: string;
   sessionId: SessionId;
-  messages: PiAgentChatCompletionMessage[];
+  messages: ChatCompletionsChatCompletionMessage[];
   tools?: Array<{
     name: string;
     description: string;
@@ -275,7 +279,7 @@ export interface PiAgentBrainRunInput {
       };
 }
 
-export interface PiAgentToolRequest {
+export interface ChatCompletionsToolRequest {
   wakeId: string;
   callId: string;
   providerItemId?: string;
@@ -283,7 +287,7 @@ export interface PiAgentToolRequest {
   argumentsJson: string;
 }
 
-export interface PiAgentTransportMetrics extends OpenAiResponsesTransportMetrics {
+export interface ChatCompletionsTransportMetrics extends OpenAiResponsesTransportMetrics {
   toolRoundCount: number;
 }
 
@@ -2437,19 +2441,22 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   ): Promise<NativeOpenAiOauthCodeExchangeResult>;
   startBrainRun(
     input:
-      | { moduleId: "pi-agent"; providerInput: PiAgentBrainRunInput }
+      | {
+          moduleId: "chat-completions";
+          providerInput: ChatCompletionsBrainRunInput;
+        }
       | {
           moduleId: "openai-responses";
           providerInput: OpenAiResponsesBrainRunInput;
         },
   ): Promise<{ moduleId: NativeBrainRunModuleId; wakeId: string }>;
   drainBrainRun(input: {
-    moduleId: "pi-agent" | "openai-responses";
+    moduleId: "chat-completions" | "openai-responses";
     wakeId: string;
     maxItems?: number;
   }): Promise<NativeBufferedBrainRunDrain>;
   submitBrainHostResult(input: {
-    moduleId: "pi-agent" | "openai-responses";
+    moduleId: "chat-completions" | "openai-responses";
     wakeId: string;
     callId: string;
     output: string;
@@ -2460,17 +2467,17 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
     summary?: string;
     debugDetailId?: string;
   }): Promise<{
-    moduleId: "pi-agent" | "openai-responses";
+    moduleId: "chat-completions" | "openai-responses";
     wakeId: string;
     callId: string;
   }>;
   cancelBrainRun(input: {
-    moduleId: "pi-agent" | "openai-responses";
+    moduleId: "chat-completions" | "openai-responses";
     wakeId: string;
     reasonCode: string;
     summary: string;
   }): Promise<{
-    moduleId: "pi-agent" | "openai-responses";
+    moduleId: "chat-completions" | "openai-responses";
     wakeId: string;
     cancelled: boolean;
     terminal: boolean;

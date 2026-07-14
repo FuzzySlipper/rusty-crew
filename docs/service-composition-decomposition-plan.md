@@ -7,7 +7,7 @@ Rusty Crew's intended TypeScript boundary is:
 - `service-host` owns process composition: concrete adapter injection, HTTP
   listener startup, route table composition, runtime config assembly, and
   lifecycle/drain-loop ownership.
-- `brain-island` owns brain capability: pi-agent integration, brain modules,
+- `brain-island` owns brain host capability, tool execution, profile assembly,
   model-callable tools, profile/role assembly, and framework-neutral route or
   control handlers that are close to those capabilities.
 

@@ -754,7 +754,9 @@ function providerBrainBackend(
   provider: NativeModelProviderRecord | undefined,
 ): string {
   if (provider === undefined) return "unknown";
-  return provider.protocol === "responses" ? "openai-responses" : "pi-agent";
+  return provider.protocol === "responses"
+    ? "openai-responses"
+    : "chat-completions";
 }
 
 function redactedProviderUrl(baseUrl: string | undefined): {

@@ -319,7 +319,8 @@ function expectBrainIslandCompositionRatchets() {
       description: "a TypeScript built-in brain registry",
     },
     {
-      pattern: /RUSTY_CREW_OPENAI_RESPONSES_LIVE|RUSTY_CREW_PI_AGENT_LIVE/,
+      pattern:
+        /RUSTY_CREW_OPENAI_RESPONSES_LIVE|RUSTY_CREW_CHAT_COMPLETIONS_LIVE/,
       description: "a production fake/live brain switch",
     },
     {
@@ -328,7 +329,7 @@ function expectBrainIslandCompositionRatchets() {
     },
     {
       pattern:
-        /\b(?:runOpenAiResponsesBrain|startOpenAiResponsesBrain|drainOpenAiResponsesBrainStream|submitOpenAiResponsesToolOutput|cancelOpenAiResponsesBrain|startPiAgentBrain|drainPiAgentBrainStream|submitPiAgentToolOutput|cancelPiAgentBrain)\b/,
+        /\b(?:runOpenAiResponsesBrain|startOpenAiResponsesBrain|drainOpenAiResponsesBrainStream|submitOpenAiResponsesToolOutput|cancelOpenAiResponsesBrain|startChatCompletionsBrain|drainChatCompletionsBrainStream|submitChatCompletionsToolOutput|cancelChatCompletionsBrain)\b/,
       description: "a provider-specific public brain bridge operation",
     },
   ];

@@ -6,16 +6,16 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentTool as PiAgentTool,
-} from "./support/legacy-pi-agent-test-harness.js";
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentTool as ChatCompletionsTool,
+} from "./support/chat-completions-test-harness.js";
 import {
   combineResolvers,
   defaultBodyDeltaPolicy,
   resolveToolSession,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const sessionId = "tool-session" as SessionId;
 const agentId = "tool-agent" as AgentId;
@@ -96,13 +96,13 @@ assert.deepEqual(
 
 class FakeAgent {
   subscribe(
-    _listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    _listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     return () => {};
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {}
 
   async waitForIdle(): Promise<void> {}
@@ -111,7 +111,7 @@ class FakeAgent {
 }
 
 let capturedToolNames: string[] = [];
-const brain = createPiAgentBrain({
+const brain = createChatCompletionsBrain({
   createAgent: (options) => {
     capturedToolNames = (options.initialState?.tools ?? []).map(
       (tool) => tool.name,
@@ -144,12 +144,12 @@ console.log(
   ),
 );
 
-function fakeTool(name: string): PiAgentTool {
+function fakeTool(name: string): ChatCompletionsTool {
   return {
     name,
     description: `${name} description`,
     label: name,
-    parameters: {} as PiAgentTool["parameters"],
+    parameters: {} as ChatCompletionsTool["parameters"],
     execute: async () => ({
       content: [{ type: "text", text: `${name} result` }],
       details: {},

@@ -3,11 +3,11 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
   AgentTool,
-} from "../../packages/brain-island/smokes/support/legacy-pi-agent-test-harness.js";
+} from "../../packages/brain-island/smokes/support/legacy-chat-completions-test-harness.js";
 import type {
   DenMemoryClient,
   DenMemoryRecallRequest,
@@ -36,7 +36,7 @@ import {
   resolveDenMemoryTools,
   resolveSkillsTools,
 } from "../../packages/brain-island/src/index.js";
-import { createPiAgentBrain } from "../../packages/brain-island/smokes/support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "../../packages/brain-island/smokes/support/legacy-chat-completions-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;
@@ -60,15 +60,15 @@ const engine = await native.initializeEngine({
 });
 
 class MemorySkillsFakeAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   constructor(
-    private readonly options: PiAgentOptions,
+    private readonly options: ChatCompletionsOptions,
     private readonly outputs: Record<string, string>,
   ) {}
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -77,9 +77,9 @@ class MemorySkillsFakeAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
-    await this.emit({ type: "agent_start" } as PiAgentEvent);
+    await this.emit({ type: "agent_start" } as ChatCompletionsEvent);
     assert.match(
       this.options.initialState?.systemPrompt ?? "",
       /Dense Profile Memory/,
@@ -98,7 +98,10 @@ class MemorySkillsFakeAgent {
       slug: "memory-skill",
       includeBody: false,
     });
-    await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
+    await this.emit({
+      type: "agent_end",
+      messages: [],
+    } as ChatCompletionsEvent);
   }
 
   async waitForIdle(): Promise<void> {}
@@ -113,7 +116,7 @@ class MemorySkillsFakeAgent {
     await this.emit({
       type: "tool_execution_start",
       toolName: name,
-    } as PiAgentEvent);
+    } as ChatCompletionsEvent);
     try {
       const result = await (tool as AgentTool).execute(`${name}-call`, params);
       this.outputs[name] = result.content
@@ -127,18 +130,18 @@ class MemorySkillsFakeAgent {
         type: "tool_execution_end",
         toolName: name,
         isError: false,
-      } as PiAgentEvent);
+      } as ChatCompletionsEvent);
     } catch (error) {
       await this.emit({
         type: "tool_execution_end",
         toolName: name,
         isError: true,
-      } as PiAgentEvent);
+      } as ChatCompletionsEvent);
       throw error;
     }
   }
 
-  private async emit(event: PiAgentEvent): Promise<void> {
+  private async emit(event: ChatCompletionsEvent): Promise<void> {
     this.listener?.(event, abortSignal);
   }
 }
@@ -257,7 +260,7 @@ Use Den memory for product/project facts and dense profile memory for stable pro
       toolProfile: profileContext.toolSelection.toolProfile,
       modelConfig: { provider: "local", modelName: "deterministic" },
     },
-    createPiAgentBrain({
+    createChatCompletionsBrain({
       createAgent: (options) => new MemorySkillsFakeAgent(options, toolOutputs),
       resolveTools: ({ wake }) => [
         ...resolveDenMemoryTools({

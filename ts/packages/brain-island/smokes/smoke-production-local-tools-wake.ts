@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
+  AgentEvent as ChatCompletionsEvent,
+  AgentMessage as ChatCompletionsMessage,
+  AgentOptions as ChatCompletionsOptions,
   AgentTool,
-} from "./support/legacy-pi-agent-test-harness.js";
+} from "./support/chat-completions-test-harness.js";
 import type {
   AgentId,
   BodyState,
@@ -25,7 +25,7 @@ import {
   resolveLocalCodeTools,
   selectToolProfile,
 } from "../src/index.js";
-import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
+import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;
@@ -50,15 +50,15 @@ const engine = await native.initializeEngine({
 });
 
 class ToolCallingFakeAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private listener?: (event: ChatCompletionsEvent, signal: AbortSignal) => void;
 
   constructor(
-    private readonly options: PiAgentOptions,
+    private readonly options: ChatCompletionsOptions,
     private readonly outputs: Record<string, string>,
   ) {}
 
   subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+    listener: (event: ChatCompletionsEvent, signal: AbortSignal) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -67,15 +67,18 @@ class ToolCallingFakeAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
-    await this.emit({ type: "agent_start" } as PiAgentEvent);
+    await this.emit({ type: "agent_start" } as ChatCompletionsEvent);
     await this.callTool("read_file", { path: "note.txt" });
     await this.callTool("terminal", {
       command: "printf production-terminal-ok",
       timeoutMs: 5_000,
     });
-    await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
+    await this.emit({
+      type: "agent_end",
+      messages: [],
+    } as ChatCompletionsEvent);
   }
 
   async waitForIdle(): Promise<void> {}
@@ -90,7 +93,7 @@ class ToolCallingFakeAgent {
     await this.emit({
       type: "tool_execution_start",
       toolName: name,
-    } as PiAgentEvent);
+    } as ChatCompletionsEvent);
     try {
       const result = await (tool as AgentTool).execute(`${name}-call`, params);
       this.outputs[name] = result.content
@@ -104,18 +107,18 @@ class ToolCallingFakeAgent {
         type: "tool_execution_end",
         toolName: name,
         isError: false,
-      } as PiAgentEvent);
+      } as ChatCompletionsEvent);
     } catch (error) {
       await this.emit({
         type: "tool_execution_end",
         toolName: name,
         isError: true,
-      } as PiAgentEvent);
+      } as ChatCompletionsEvent);
       throw error;
     }
   }
 
-  private async emit(event: PiAgentEvent): Promise<void> {
+  private async emit(event: ChatCompletionsEvent): Promise<void> {
     this.listener?.(event, abortSignal);
   }
 }
@@ -152,7 +155,7 @@ try {
       toolProfile: selection.toolProfile,
       modelConfig: { provider: "local", modelName: "deterministic" },
     },
-    createPiAgentBrain({
+    createChatCompletionsBrain({
       createAgent: (options) => new ToolCallingFakeAgent(options, toolOutputs),
       resolveTools: resolveLocalCodeTools,
       planActions: ({ wake }): BrainAction[] => [

@@ -238,7 +238,7 @@ export async function runCoordinationLiveCertification(
     };
 
     const directRuntime = runtimeEvidence({
-      runtimeId: "direct-pi-agent",
+      runtimeId: "direct-chat-completions",
       runtimeKind: "direct_brain",
       backend: serviceBaseUrl,
       startedAt: directToCodex.startedAt,

@@ -44,7 +44,7 @@ idle timeout explicit in live certification environments:
 
 ```bash
 # Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
-# RUSTY_CREW_PI_AGENT_PROVIDER_REQUEST_TIMEOUT_MS=30000
+# RUSTY_CREW_CHAT_COMPLETIONS_PROVIDER_REQUEST_TIMEOUT_MS=30000
 ```
 
 This value belongs in the local debug service environment file, normally
@@ -123,7 +123,7 @@ Expected result:
 
 - profile id: `tester`;
 - session id: normally derived by the backend, such as `tester-session`;
-- brain module: `pi-agent` because `tester-chat` uses
+- brain module: `chat-completions` because `tester-chat` uses
   `chat_completions`;
 - local tool profile: `full_agent`.
 

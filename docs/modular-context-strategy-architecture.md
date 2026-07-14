@@ -45,7 +45,7 @@ compaction approach through service-host, brain modules, and Rust persistence.
 - Do not make Den, channels, or Rusty View own context policy.
 - Do not require a real tokenizer before strategy boundaries exist.
 - Do not make UI/debug events implicitly model-facing.
-- Do not bake roleplay lore, Den memory, or pi-agent behavior into the generic
+- Do not bake roleplay lore, Den memory, or provider-loop behavior into the generic
   strategy contract.
 
 ## Ownership Boundary

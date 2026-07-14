@@ -420,9 +420,9 @@
               "revision": 1
             },
             "brain": {
-              "module": "pi-agent",
+              "module": "chat-completions",
               "strategy": "roleplay_narrator",
-              "backend": "pi-agent"
+              "backend": "chat-completions"
             },
             "context_strategy": {
               "strategy_id": "recent_window",

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt;
 
-pub const BRAIN_CATALOG_REVISION: u32 = 1;
-pub const PI_AGENT_BRAIN_ID: &str = "pi-agent";
+pub const BRAIN_CATALOG_REVISION: u32 = 2;
+pub const CHAT_COMPLETIONS_BRAIN_ID: &str = "chat-completions";
 pub const OPENAI_RESPONSES_BRAIN_ID: &str = "openai-responses";
 
 const PREVIOUS_RESPONSE_FALLBACK_REASONS: &[&str] = &[
@@ -142,7 +142,7 @@ pub enum BrainCatalogError {
         module_id: String,
         strategy_id: String,
     },
-    NarratorRequiresPiAgent,
+    NarratorRequiresChatCompletions,
     NarratorStrategyConflict {
         strategy_id: String,
     },
@@ -168,8 +168,11 @@ impl fmt::Display for BrainCatalogError {
                 formatter,
                 "unknown strategy {strategy_id} for brain module {module_id}"
             ),
-            Self::NarratorRequiresPiAgent => {
-                write!(formatter, "roleplay narrator requires the pi-agent brain")
+            Self::NarratorRequiresChatCompletions => {
+                write!(
+                    formatter,
+                    "roleplay narrator requires the chat-completions brain"
+                )
             }
             Self::NarratorStrategyConflict { strategy_id } => write!(
                 formatter,
@@ -184,7 +187,7 @@ impl std::error::Error for BrainCatalogError {}
 pub fn brain_catalog() -> BrainCatalog {
     BrainCatalog {
         revision: BRAIN_CATALOG_REVISION,
-        modules: vec![pi_agent_module(), openai_responses_module()],
+        modules: vec![chat_completions_module(), openai_responses_module()],
     }
 }
 
@@ -210,8 +213,8 @@ pub fn plan_brain_selection(
             protocol: request.provider_protocol,
         });
     }
-    if request.roleplay_narrator_enabled && module.module_id != PI_AGENT_BRAIN_ID {
-        return Err(BrainCatalogError::NarratorRequiresPiAgent);
+    if request.roleplay_narrator_enabled && module.module_id != CHAT_COMPLETIONS_BRAIN_ID {
+        return Err(BrainCatalogError::NarratorRequiresChatCompletions);
     }
     if request.roleplay_narrator_enabled {
         if let Some(strategy_id) = request.configured_strategy_id.as_deref() {
@@ -256,14 +259,14 @@ fn canonical_module_id(
     protocol: BrainProviderProtocol,
 ) -> Result<String, BrainCatalogError> {
     let default = match protocol {
-        BrainProviderProtocol::ChatCompletions => PI_AGENT_BRAIN_ID,
+        BrainProviderProtocol::ChatCompletions => CHAT_COMPLETIONS_BRAIN_ID,
         BrainProviderProtocol::Responses => OPENAI_RESPONSES_BRAIN_ID,
     };
     let Some(configured) = configured else {
         return Ok(default.to_string());
     };
     match configured {
-        PI_AGENT_BRAIN_ID | OPENAI_RESPONSES_BRAIN_ID => Ok(configured.to_string()),
+        CHAT_COMPLETIONS_BRAIN_ID | OPENAI_RESPONSES_BRAIN_ID => Ok(configured.to_string()),
         other => Err(BrainCatalogError::UnsupportedModule {
             module_id: other.to_string(),
         }),
@@ -278,17 +281,17 @@ fn host_capabilities() -> Vec<BrainHostCapability> {
     ]
 }
 
-fn pi_agent_module() -> BrainCatalogModule {
+fn chat_completions_module() -> BrainCatalogModule {
     BrainCatalogModule {
-        module_id: PI_AGENT_BRAIN_ID.to_string(),
-        display_name: "Rust pi-agent".to_string(),
+        module_id: CHAT_COMPLETIONS_BRAIN_ID.to_string(),
+        display_name: "Chat Completions".to_string(),
         provider_protocols: vec![BrainProviderProtocol::ChatCompletions],
         default_strategy_id: "default".to_string(),
         strategies: vec![
             strategy(
                 "default",
                 BrainProviderStateMode::Unused,
-                "pi-agent chat completions does not persist provider wire state",
+                "chat completions does not persist provider wire state",
                 None,
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "default".to_string(),
@@ -404,7 +407,7 @@ mod tests {
                 .iter()
                 .map(|module| module.module_id.as_str())
                 .collect::<Vec<_>>(),
-            vec![PI_AGENT_BRAIN_ID, OPENAI_RESPONSES_BRAIN_ID]
+            vec![CHAT_COMPLETIONS_BRAIN_ID, OPENAI_RESPONSES_BRAIN_ID]
         );
         assert!(!catalog
             .modules
@@ -418,7 +421,7 @@ mod tests {
             plan_brain_selection(&request(BrainProviderProtocol::ChatCompletions))
                 .expect("chat plan")
                 .module_id,
-            PI_AGENT_BRAIN_ID
+            CHAT_COMPLETIONS_BRAIN_ID
         );
         assert_eq!(
             plan_brain_selection(&request(BrainProviderProtocol::Responses))
@@ -429,8 +432,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_pi_aliases_and_local_are_rejected() {
-        for rejected in ["pi-agent-core", "rust-pi-agent", "local"] {
+    fn retired_and_noncanonical_module_ids_are_rejected() {
+        for rejected in [
+            "pi-agent",
+            "pi-agent-core",
+            "rust-pi-agent",
+            "chat-completions-core",
+            "rust-chat-completions",
+            "local",
+        ] {
             let mut input = request(BrainProviderProtocol::ChatCompletions);
             input.configured_module_id = Some(rejected.to_string());
             assert!(matches!(
@@ -443,7 +453,7 @@ mod tests {
     #[test]
     fn module_protocol_mismatches_fail_closed() {
         let mut input = request(BrainProviderProtocol::Responses);
-        input.configured_module_id = Some(PI_AGENT_BRAIN_ID.to_string());
+        input.configured_module_id = Some(CHAT_COMPLETIONS_BRAIN_ID.to_string());
         assert!(matches!(
             plan_brain_selection(&input),
             Err(BrainCatalogError::ProtocolMismatch { .. })
@@ -466,7 +476,7 @@ mod tests {
         let mut narrator = request(BrainProviderProtocol::ChatCompletions);
         narrator.roleplay_narrator_enabled = true;
         let narrator = plan_brain_selection(&narrator).expect("narrator plan");
-        assert_eq!(narrator.module_id, PI_AGENT_BRAIN_ID);
+        assert_eq!(narrator.module_id, CHAT_COMPLETIONS_BRAIN_ID);
         assert_eq!(narrator.selected_strategy_id, "roleplay_narrator");
     }
 

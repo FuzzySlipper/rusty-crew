@@ -78,7 +78,7 @@ async function prepare(): Promise<void> {
     displayName: `Roleplay live certification (${backend})`,
     providerAlias: PROVIDER_ALIAS,
     kind: "full",
-    brain: { module: "pi-agent", strategy: "roleplay_narrator" },
+    brain: { module: "chat-completions", strategy: "roleplay_narrator" },
     localToolProfileId: "roleplay_lore",
     sessionId: state.runtimeSessionId,
     agentId: `${prefix}-agent`,

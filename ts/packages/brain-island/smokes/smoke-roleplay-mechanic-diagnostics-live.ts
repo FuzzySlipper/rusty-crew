@@ -27,7 +27,7 @@ try {
     displayName: "Mechanic read target narrator",
     providerAlias,
     localToolProfileId: "roleplay_lore",
-    brain: { module: "pi-agent", strategy: "roleplay_narrator" },
+    brain: { module: "chat-completions", strategy: "roleplay_narrator" },
   });
   const metadata = await api("POST", "/v1/admin/roleplay/sessions", {
     sessionId: narratorSessionId,

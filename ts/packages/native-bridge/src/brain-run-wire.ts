@@ -16,8 +16,8 @@ import type {
   OpenAiResponsesTransportMetrics,
   NativeOpenAiOauthExchangeError,
   OpenAiResponsesBrainRunInput,
-  PiAgentBrainRunInput,
-  PiAgentTransportMetrics,
+  ChatCompletionsBrainRunInput,
+  ChatCompletionsTransportMetrics,
   NativeBrainWakeProviderStateInput,
   NativeModelProviderCredentialKind,
 } from "./public-api.js";
@@ -34,21 +34,21 @@ import type { RawResourceLimits } from "./runtime-config-wire.js";
 
 export function assertCanonicalBrainRunModule(
   moduleId: string,
-): "pi-agent" | "openai-responses" {
-  if (moduleId === "pi-agent" || moduleId === "openai-responses") {
+): "chat-completions" | "openai-responses" {
+  if (moduleId === "chat-completions" || moduleId === "openai-responses") {
     return moduleId;
   }
   throw new Error(`native bridge returned unknown brain module ${moduleId}`);
 }
 
-export function piAgentTransportMetricsFromRaw(
+export function chatCompletionsTransportMetricsFromRaw(
   raw:
-    | NonNullable<RawPiAgentBufferedDrainResult["transport_metrics"]>
+    | NonNullable<RawChatCompletionsBufferedDrainResult["transport_metrics"]>
     | undefined,
-): PiAgentTransportMetrics | undefined {
+): ChatCompletionsTransportMetrics | undefined {
   if (!raw) return undefined;
   return {
-    effectiveTransport: "rust-pi-agent",
+    effectiveTransport: "rust-chat-completions",
     selectedStrategyId: "default",
     effectiveStrategyId: "default",
     fallbackReason: null,
@@ -146,8 +146,8 @@ export function toNativeOpenAiResponsesBrainRunInput(
   };
 }
 
-export function toNativePiAgentBrainRunInput(
-  input: PiAgentBrainRunInput,
+export function toNativeChatCompletionsBrainRunInput(
+  input: ChatCompletionsBrainRunInput,
 ): unknown {
   return {
     wakeId: input.wakeId,
@@ -426,10 +426,10 @@ export function toBufferedBrainRunDrainResult(
   const transportMetrics =
     raw.transport_metrics == null
       ? undefined
-      : moduleId === "pi-agent"
-        ? piAgentTransportMetricsFromRaw(
+      : moduleId === "chat-completions"
+        ? chatCompletionsTransportMetricsFromRaw(
             raw.transport_metrics as NonNullable<
-              RawPiAgentBufferedDrainResult["transport_metrics"]
+              RawChatCompletionsBufferedDrainResult["transport_metrics"]
             >,
           )
         : (raw.transport_metrics as OpenAiResponsesTransportMetrics);
@@ -478,13 +478,13 @@ export function toRawBufferedBrainRunDrainResult(
   const transportMetrics =
     result.transportMetrics === undefined
       ? undefined
-      : result.moduleId === "pi-agent"
+      : result.moduleId === "chat-completions"
         ? {
             provider_request_count: (
-              result.transportMetrics as PiAgentTransportMetrics
+              result.transportMetrics as ChatCompletionsTransportMetrics
             ).providerRequestCount,
             tool_round_count: (
-              result.transportMetrics as PiAgentTransportMetrics
+              result.transportMetrics as ChatCompletionsTransportMetrics
             ).toolRoundCount,
           }
         : (result.transportMetrics as OpenAiResponsesTransportMetrics);
@@ -571,7 +571,7 @@ export interface RawOpenAiResponsesBufferedStartResult {
   wake_id: string;
 }
 
-export interface RawPiAgentBufferedStartResult {
+export interface RawChatCompletionsBufferedStartResult {
   wake_id: string;
 }
 
@@ -592,7 +592,7 @@ export interface RawOpenAiResponsesBufferedDrainResult {
   cancellation?: RawOpenAiResponsesBufferedCancellation | null;
 }
 
-export interface RawPiAgentBufferedDrainResult {
+export interface RawChatCompletionsBufferedDrainResult {
   wake_id: string;
   items: RawBrainWakeStreamItem[];
   tool_requests?: Array<{
@@ -625,7 +625,7 @@ export interface RawBufferedBrainRunDrainResult {
   provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?:
     | OpenAiResponsesTransportMetrics
-    | NonNullable<RawPiAgentBufferedDrainResult["transport_metrics"]>
+    | NonNullable<RawChatCompletionsBufferedDrainResult["transport_metrics"]>
     | null;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate | null;
   error?: string | null;

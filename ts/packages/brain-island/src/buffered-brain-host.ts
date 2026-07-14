@@ -10,8 +10,8 @@ import type {
   OpenAiResponsesBrainRunInput,
   OpenAiResponsesCredentialSecretUpdate,
   OpenAiResponsesTransportMetrics,
-  PiAgentBrainRunInput,
-  PiAgentTransportMetrics,
+  ChatCompletionsBrainRunInput,
+  ChatCompletionsTransportMetrics,
 } from "@rusty-crew/native-bridge";
 import type {
   BrainActionPlanner,
@@ -33,7 +33,10 @@ import {
 } from "./tool-execution-host.js";
 
 export type BufferedBrainProviderRun =
-  | { moduleId: "pi-agent"; providerInput: PiAgentBrainRunInput }
+  | {
+      moduleId: "chat-completions";
+      providerInput: ChatCompletionsBrainRunInput;
+    }
   | {
       moduleId: "openai-responses";
       providerInput: OpenAiResponsesBrainRunInput;
@@ -43,7 +46,9 @@ export interface BufferedBrainHostRunResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
-  transportMetrics?: OpenAiResponsesTransportMetrics | PiAgentTransportMetrics;
+  transportMetrics?:
+    | OpenAiResponsesTransportMetrics
+    | ChatCompletionsTransportMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
   brainEventCounts: Record<string, number>;
   brainStreamItemCounts: Record<string, number>;
@@ -78,9 +83,9 @@ export async function runBufferedBrainHost(options: {
     inputSchema: tool.parameters,
   }));
   const started = await options.bridge.startBrainRun(
-    options.run.moduleId === "pi-agent"
+    options.run.moduleId === "chat-completions"
       ? {
-          moduleId: "pi-agent",
+          moduleId: "chat-completions",
           providerInput: { ...options.run.providerInput, tools },
         }
       : {

@@ -23,11 +23,11 @@ import { createMemoryDenProjectionSink } from "@rusty-crew/adapter-den/test-supp
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { defaultBodyDeltaPolicy } from "../../packages/brain-island/src/index.js";
 import {
-  createPiAgentBrain,
+  createChatCompletionsBrain,
   type AgentEvent,
-  type AgentMessage as PiAgentMessage,
-  type PiAgentFactory,
-} from "../../packages/brain-island/smokes/support/legacy-pi-agent-test-harness.js";
+  type AgentMessage as ChatCompletionsMessage,
+  type ChatCompletionsFactory,
+} from "../../packages/brain-island/smokes/support/legacy-chat-completions-test-harness.js";
 
 const decoder = new TextDecoder();
 const engineDataDir = mkdtempSync(
@@ -54,7 +54,7 @@ class SilentFakeAgent {
   }
 
   async prompt(
-    _input: PiAgentMessage | PiAgentMessage[] | string,
+    _input: ChatCompletionsMessage | ChatCompletionsMessage[] | string,
   ): Promise<void> {
     const signal = new AbortController().signal;
     this.listener?.({ type: "agent_start" }, signal);
@@ -67,7 +67,7 @@ class SilentFakeAgent {
 }
 
 try {
-  const createAgent: PiAgentFactory = () => new SilentFakeAgent();
+  const createAgent: ChatCompletionsFactory = () => new SilentFakeAgent();
   const plannerSessionId = "planner-session" as SessionId;
   const plannerAgentId = "planner" as AgentId;
   const plannerWakeId = "planner-wake-1";
@@ -88,7 +88,7 @@ try {
     "Delegate one tiny worker slice and ask the worker to report completion.",
   );
 
-  const plannerBrain = createPiAgentBrain({
+  const plannerBrain = createChatCompletionsBrain({
     createAgent,
     planActions: (): BrainAction[] => [
       {
@@ -134,7 +134,7 @@ try {
     ),
   );
 
-  const workerBrain = createPiAgentBrain({
+  const workerBrain = createChatCompletionsBrain({
     createAgent,
     planActions: ({ wake }): BrainAction[] => [
       {

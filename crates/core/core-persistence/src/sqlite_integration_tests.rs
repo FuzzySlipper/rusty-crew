@@ -6970,7 +6970,7 @@ fn profile_registry_write(profile_id: &str) -> ProfileRegistryWrite {
         prompt_soul_markdown: Some("You are a registry-backed runner.".to_string()),
         prompt_memory_markdown: Some("Static deployment-safe memory.".to_string()),
         active_runtime_settings_json: json!({
-            "brainModule": "pi_agent_core",
+            "brainModule": "chat_completions_core",
             "model": "gpt"
         }),
         source_asset_refs: vec![

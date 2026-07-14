@@ -688,7 +688,7 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
         .unwrap();
 
     let mut coordinator = rusty_crew_brain_runtime::BufferedBrainTurnCoordinator::new(
-        "pi-agent",
+        "chat-completions",
         "shutdown-buffered-wake",
         SessionId::new("shutdown-buffered-session"),
         Some(10_000),
@@ -697,15 +697,15 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
     .unwrap();
     coordinator.start().unwrap();
     bridge
-        .pi_agent_buffered_runs()
+        .chat_completions_buffered_runs()
         .insert(rusty_crew_brain_runtime::BufferedBrainTurnRun::new(
             coordinator,
-            crate::pi_agent::PiAgentBufferedRunPayload::default(),
+            crate::chat_completions::ChatCompletionsBufferedRunPayload::default(),
         ))
         .unwrap();
     let active = bridge.buffered_brain_run_diagnostics().unwrap();
     assert_eq!(active.active_run_count, 1);
-    assert_eq!(active.runs[0].module_label, "pi-agent");
+    assert_eq!(active.runs[0].module_label, "chat-completions");
     assert_eq!(active.runs[0].wake_id, "shutdown-buffered-wake");
 
     bridge

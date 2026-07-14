@@ -10,7 +10,8 @@ Rusty Crew now has two Rust brain modules that stream through native bridge
 buffered runs:
 
 - OpenAI Responses in `crates/bridge/core-bridge-node/src/responses.rs`;
-- Rust pi-agent in `crates/bridge/core-bridge-node/src/pi_agent.rs`.
+- Rust Chat Completions in
+  `crates/bridge/core-bridge-node/src/chat_completions.rs`.
 
 Both paths currently store active wake state in process-global `OnceLock`
 registries inside the native bridge crate. The shared state shape lives in
@@ -82,14 +83,14 @@ TypeScript owns during this transition:
 4. Add diagnostics and shutdown cleanup for active buffered runs so a stopped
    service cannot leave invisible in-flight state behind.
 5. Delete the bridge-global registries once the handle-scoped path covers both
-   OpenAI Responses and Rust pi-agent smokes.
+   OpenAI Responses and Rust Chat Completions smokes.
 
 ## Guardrails
 
 - Do not make Rust brain crates depend on `core-engine`, `core-session`,
   `core-bus`, `core-body`, `core-persistence`, service-host, or TypeScript
   packages.
-- Do not reintroduce separate responses-specific and pi-agent-specific run
+- Do not reintroduce separate Responses-specific and Chat-Completions-specific run
   state machines. Module-specific output fields are okay; lifecycle semantics
   should stay shared.
 - Do not preserve a hidden bridge-global fallback after the explicit host path
@@ -106,7 +107,7 @@ Keep these gates green during each slice:
 cargo test --workspace
 npm run smoke:rust-crate-boundaries
 npm run smoke:openai-responses-tool-bridge -w @rusty-crew/brain-island
-npm run smoke:pi-agent-rust-bridge -w @rusty-crew/brain-island
+npm run smoke:chat-completions-rust-bridge -w @rusty-crew/brain-island
 npm run smoke:bridge-validation
 npm run smoke:bridge-native-surface
 npm run smoke:bridge-fingerprint-drift

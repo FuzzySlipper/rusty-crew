@@ -12,7 +12,7 @@ first-class production path.
 Rusty Crew now has two production provider loops in Rust:
 
 - `crates/brains/openai-responses`;
-- `crates/brains/pi-agent`.
+- `crates/brains/chat-completions`.
 
 Both use the neutral wake, stream, action, provider-state, and tool-call
 contracts. `crates/brains/brain-runtime` already owns the shared buffered-run
@@ -75,7 +75,7 @@ The landed TypeScript host boundary is deliberately split by responsibility:
 - `buffered-brain-host.ts`: generic drain/submit loop over Rust directives;
 - `tool-execution-host.ts`: concrete tool lookup and execution only;
 - `provider-debug-projection.ts`: bounded non-authoritative debug projection;
-- `pi-agent-host.ts` and `openai-responses-host.ts`: provider input and client
+- `chat-completions-host.ts` and `openai-responses-host.ts`: provider input and client
   adaptation without provider-loop lifecycle policy;
 - `built-in-brain-host.ts`: exhaustive dispatch of Rust-selected canonical ids
   to those host adapters.
@@ -96,7 +96,7 @@ dispatches those calls to the canonical provider implementation.
 - pending tool request identity and submitted-result correlation;
 - tool failure counters, stop decisions, and output bounds;
 - cancellation, timeout, bounded buffering, and cleanup;
-- OpenAI Responses and pi-agent provider loops;
+- OpenAI Responses and Chat Completions provider loops;
 - roleplay narrator phase/FSM hosting;
 - provider-state and transport result assembly;
 - stable reason codes exposed to diagnostics and APIs.
@@ -124,12 +124,12 @@ The catalog lives in a focused Rust brain/runtime or config crate, not in
 
 | Canonical id | Provider protocol | Strategies | Execution |
 | --- | --- | --- | --- |
-| `pi-agent` | chat completions | `default`, `roleplay_narrator` | Rust |
+| `chat-completions` | chat completions | `default`, `roleplay_narrator` | Rust |
 | `openai-responses` | Responses | `replay`, `previous-response-chain` | Rust |
 
-`pi-agent-core`, `rust-pi-agent`, and `local` are rejected module ids. Profile
-and test fixtures use canonical `pi-agent`; no input canonicalization or alias
-fallback remains.
+`pi-agent`, `pi-agent-core`, `rust-pi-agent`, and `local` are rejected module
+ids. Profile and test fixtures use canonical `chat-completions`; no input
+canonicalization or alias fallback remains.
 
 The deterministic `local` brain is not a production catalog entry. Fake
 provider clients and deterministic brains belong in Rust unit tests, package
@@ -275,7 +275,7 @@ The end-state native surface is provider-neutral:
 - `cleanup_buffered_brain_runs`.
 
 Provider-specific start/drain/submit/cancel methods were deleted when OpenAI
-Responses and pi-agent moved to the generic operations. They are not retained
+Responses and Chat Completions moved to the generic operations. They are not retained
 as fallbacks.
 
 The start request contains the selected catalog module/strategy, frozen wake
@@ -292,11 +292,11 @@ does not define brain identity, catalog entries, strategies, or lifecycle.
 | `BrainModule`, `BrainModuleRegistry`, `createBrainModuleRegistry`, `defaultBrainModules` | runtime config and package surface | Deleted. Rust catalog is canonical. |
 | `resolveBrainModuleSelection`, `resolveBrainModuleStrategy` | runtime registration/rebuild | Deleted; `plan_brain_selection` is authoritative. |
 | strategy/provider-state metadata helpers | runtime diagnostics, rebuild, fingerprints | Rust selection plans return the metadata and own fingerprint policy. |
-| `piAgentCoreBrainModule`, `rustPiAgentBrainModule` | runtime registration and smokes | Deleted; canonical `pi-agent` is required. |
+| `piAgentCoreBrainModule`, `rustPiAgentBrainModule` | runtime registration and smokes | Deleted; canonical `chat-completions` is required. |
 | `openAiResponsesBrainModule` | runtime registration and smokes | Deleted; generic Rust catalog dispatch selects `openai-responses`. |
 | `localBrainModule` | registry smoke/dev behavior | Deleted from production; deterministic executors exist only in smoke support. |
 | provider client mode/config helpers | brain module and smokes | Production host adapters always request live clients; explicit fake clients are smoke support only. |
-| Responses/pi-agent incremental drain loops | brain module | One generic host loop drains Rust coordinator directives. |
+| Responses/Chat Completions incremental drain loops | brain module | One generic host loop drains Rust coordinator directives. |
 | tool request preparation/execution | brain module | Mechanics live in `tool-execution-host.ts`; policy lives in Rust. |
 | debug-reference correlation | brain module | Debug projection is isolated and cannot affect coordinator policy. |
 | roleplay narrator `createPhaseBrain` composition | brain module/narrator executor | Rust narrator receipts host phase sequencing; TS executes requested provider/tool work. |
@@ -319,7 +319,7 @@ contract or explicit smoke support.
 1. Task 5374 implemented the coordinator transitions in Rust without changing
    provider behavior.
 2. Task 5378 moved failure counters, stop policy, and output bounds to Rust.
-3. Tasks 5382 and 5386 adapted Responses and pi-agent to generic coordinator
+3. Tasks 5382 and 5386 adapted Responses and Chat Completions to generic coordinator
    operations and delete their old TypeScript drain policy.
 4. Task 5414 moved catalog, selection, diagnostics, and provider-state
    fingerprint policy to Rust.
@@ -374,7 +374,7 @@ This is an extension seam, not a legacy TS path.
 Use the SQLite debug service and Rusty View:
 
 - OpenAI Responses text, reasoning, provider state, and a mid-turn tool;
-- pi-agent chat-completions text, reasoning when supplied, and a mid-turn tool;
+- Chat Completions text, reasoning when supplied, and a mid-turn tool;
 - one recoverable denied/unsuccessful tool result that the model can report;
 - cancellation and idle-timeout behavior;
 - roleplay narrator phase/tool/text/reasoning/final narrative flow;

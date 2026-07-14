@@ -151,13 +151,13 @@ mod binding_roleplay;
 mod binding_scheduler;
 mod binding_sessions;
 mod binding_storage;
+mod chat_completions;
 mod config_profiles;
 mod conversation;
 mod delegation;
 mod engine;
 mod events;
 mod memory;
-mod pi_agent;
 mod registries;
 mod responses;
 mod roleplay;
@@ -167,14 +167,15 @@ mod storage_admin;
 mod wire_helpers;
 mod wire_types;
 
+use chat_completions::{
+    cancel_chat_completions_brain_json, drain_chat_completions_brain_stream_json,
+    start_chat_completions_brain_json, submit_chat_completions_tool_output_json,
+    ChatCompletionsBufferedRunRegistry,
+};
 pub(crate) use config_profiles::*;
 pub(crate) use engine::*;
 pub(crate) use events::*;
 pub(crate) use memory::*;
-use pi_agent::{
-    cancel_pi_agent_brain_json, drain_pi_agent_brain_stream_json, start_pi_agent_brain_json,
-    submit_pi_agent_tool_output_json, PiAgentBufferedRunRegistry,
-};
 use registries::{BrainImplementationRegistry, PlatformAdapterRegistry, SubscriptionRegistry};
 use responses::{
     cancel_openai_responses_brain_json, drain_openai_responses_brain_stream_json,
@@ -201,7 +202,7 @@ pub struct NativeBridge {
     adapter_registrations: PlatformAdapterRegistry,
     subscriptions: SubscriptionRegistry,
     openai_responses_buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
-    pi_agent_buffered_runs: Arc<PiAgentBufferedRunRegistry>,
+    chat_completions_buffered_runs: Arc<ChatCompletionsBufferedRunRegistry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -237,7 +238,9 @@ impl NativeBridge {
             openai_responses_buffered_runs: Arc::new(OpenAiResponsesBufferedRunRegistry::new(
                 "OpenAI Responses",
             )),
-            pi_agent_buffered_runs: Arc::new(PiAgentBufferedRunRegistry::new("pi-agent")),
+            chat_completions_buffered_runs: Arc::new(ChatCompletionsBufferedRunRegistry::new(
+                "chat-completions",
+            )),
         }
     }
 
@@ -245,8 +248,8 @@ impl NativeBridge {
         Arc::clone(&self.openai_responses_buffered_runs)
     }
 
-    pub(crate) fn pi_agent_buffered_runs(&self) -> Arc<PiAgentBufferedRunRegistry> {
-        Arc::clone(&self.pi_agent_buffered_runs)
+    pub(crate) fn chat_completions_buffered_runs(&self) -> Arc<ChatCompletionsBufferedRunRegistry> {
+        Arc::clone(&self.chat_completions_buffered_runs)
     }
 
     fn buffered_brain_run_diagnostics(
@@ -261,12 +264,12 @@ impl NativeBridge {
         });
         runs.extend(responses);
 
-        let pi_agent = self.pi_agent_buffered_runs.diagnostics()?;
+        let chat_completions = self.chat_completions_buffered_runs.diagnostics()?;
         modules.push(BufferedBrainRunModuleDiagnostics {
-            module_label: "pi-agent".to_string(),
-            active_run_count: pi_agent.len(),
+            module_label: "chat-completions".to_string(),
+            active_run_count: chat_completions.len(),
         });
-        runs.extend(pi_agent);
+        runs.extend(chat_completions);
         runs.sort_by(|left, right| {
             left.module_label
                 .cmp(&right.module_label)
@@ -288,7 +291,8 @@ impl NativeBridge {
         let modules = vec![
             self.openai_responses_buffered_runs
                 .cleanup(reason_code, summary)?,
-            self.pi_agent_buffered_runs.cleanup(reason_code, summary)?,
+            self.chat_completions_buffered_runs
+                .cleanup(reason_code, summary)?,
         ];
         Ok(BufferedBrainRunCleanupSummary {
             active_runs: modules.iter().map(|module| module.active_runs).sum(),
