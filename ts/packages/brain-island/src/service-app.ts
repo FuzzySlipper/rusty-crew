@@ -1524,6 +1524,12 @@ async function handleHttpRequest(
           withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
             applyProfileRegistryLifecycleEffects(state, record),
           ),
+        applyPromptEffects: (record) =>
+          withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+            state.externalRuntimeController.refreshProfileInstructions(
+              record.profileId,
+            ),
+          ),
         applyRuntimeConfigEffects: (record, plan) =>
           withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
             applyProfileRegistryRuntimeConfigEffectsFromModule(

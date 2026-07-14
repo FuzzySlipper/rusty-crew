@@ -3156,6 +3156,29 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "profileId": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profilePromptHash": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profileRevision": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "purpose": {
             "enum": [
               "crew_agent",
@@ -5458,6 +5481,29 @@ export const bridgeWireSchemaArtifact = {
         "nativeThreadId": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "profileId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profilePromptHash": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         },
@@ -17574,6 +17620,29 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "profileId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profilePromptHash": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "purpose": {
           "enum": [
             "crew_agent",
@@ -17674,6 +17743,29 @@ export const bridgeWireSchemaArtifact = {
             "nativeThreadId": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "profileId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profilePromptHash": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profileRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
                 "null"
               ]
             },

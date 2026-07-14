@@ -1435,6 +1435,10 @@ function profileRegistryRouteContext() {
       calls.push(`lifecycle:${record.profileId}`);
       return { lifecycleEffects: true };
     },
+    async applyPromptEffects(record) {
+      calls.push(`prompt:${record.profileId}`);
+      return { promptEffects: true };
+    },
     async applyRuntimeConfigEffects(record) {
       calls.push(`runtime:${record.profileId}`);
       return runtimeEffects;

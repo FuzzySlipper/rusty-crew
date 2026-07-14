@@ -23,6 +23,18 @@ const engine = await bridge.initializeEngine({
 });
 
 try {
+  await bridge.createProfileRegistryRecord({
+    profileId: "nullability-profile",
+    lifecycleStatus: "active",
+    displayName: "Nullability profile",
+    defaultSessionKind: "full",
+    agentId,
+    activeRuntimeSettingsJson: {},
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [],
+    importExport: { metadataJson: {} },
+    now,
+  });
   await bridge.registerExternalRuntime({
     registration: {
       runtimeId,
@@ -69,6 +81,10 @@ try {
       runtimeId,
       sessionId,
       agentId,
+      profileId: "nullability-profile",
+      profileRevision: 1,
+      profilePromptHash:
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       purpose: "crew_agent",
       effectiveConfigFingerprint: "nullability-v1",
       status: "active",

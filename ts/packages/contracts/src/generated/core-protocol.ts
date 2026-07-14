@@ -562,6 +562,9 @@ export type ExternalAgentBinding = {
   effectiveConfigFingerprint: string;
   label?: string | null;
   nativeThreadId?: string | null;
+  profileId?: string | null;
+  profilePromptHash?: string | null;
+  profileRevision?: number | null;
   purpose: ExternalBindingPurpose;
   revision: number;
   runtimeId: string;

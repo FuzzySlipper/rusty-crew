@@ -305,6 +305,9 @@ impl CoreEngine {
             runtime_id: runtime.runtime_id.clone(),
             session_id: Some(session.session_id.clone()),
             agent_id: Some(session.agent_id.clone()),
+            profile_id: Some(profile.profile_id.clone()),
+            profile_revision: Some(profile.revision),
+            profile_prompt_hash: Some(external_profile_prompt_hash(&profile)),
             purpose: ExternalBindingPurpose::CrewAgent,
             native_thread_id: None,
             cwd: Some(cwd),
@@ -957,6 +960,30 @@ impl CoreEngine {
                     "external binding agent_id does not match the bound Crew session",
                 ));
             }
+            if binding.profile_id.as_ref() != Some(&session.profile_id) {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "external binding profile_id does not match the bound Crew session",
+                ));
+            }
+            let profile = self
+                .get_profile_registry_record(&session.profile_id)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::NotFound,
+                        "external binding profile was not found",
+                    )
+                })?;
+            if profile.lifecycle_status != ProfileRegistryLifecycleStatus::Active
+                || binding.profile_revision != Some(profile.revision)
+                || binding.profile_prompt_hash.as_deref()
+                    != Some(external_profile_prompt_hash(&profile).as_str())
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "external binding profile prompt provenance is stale",
+                ));
+            }
             if session.status == SessionStatus::Archived
                 && binding.status != ExternalBindingStatus::Archived
             {
@@ -1380,6 +1407,15 @@ fn external_agent_effective_config_fingerprint(
         &canonical,
         "fingerprint external agent effective configuration",
     )
+}
+
+fn external_profile_prompt_hash(profile: &ProfileRegistryRecord) -> String {
+    let soul = profile
+        .prompt_soul_markdown
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    hex_sha256(soul.as_bytes())
 }
 
 fn hash_json(value: &serde_json::Value, action: &str) -> CoreResult<String> {

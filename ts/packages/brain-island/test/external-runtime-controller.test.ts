@@ -352,6 +352,40 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       });
       return;
     }
+    if (parsed.method === "thread/fork") {
+      const source = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      if (source === undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: "thread not found" },
+        });
+        return;
+      }
+      const thread = {
+        ...source,
+        id: `forked-thread-${this.threads.length + 1}`,
+        sessionId: `native-session-fork-${this.threads.length + 1}`,
+        forkedFromId: params.threadId,
+        parentThreadId: params.threadId,
+        cwd: params.cwd ?? source.cwd,
+      };
+      this.threads.push(thread);
+      this.threadSettings.set(String(thread.id), {
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        effort: null,
+      });
+      this.emit({
+        id: parsed.id,
+        result: fakeThreadStartResponse(
+          thread,
+          this.threadSettings.get(String(thread.id)),
+        ),
+      });
+      return;
+    }
     if (parsed.method === "thread/read") {
       if (
         params.includeTurns !== false &&
@@ -606,6 +640,23 @@ test("controller atomically creates and idempotently reuses an external agent se
     assert.equal(created.creation.binding.nativeThreadId, "created-thread-1");
     assert.equal(created.creation.binding.label, "Browser Codex agent");
     assert.equal(created.thread.name, "Browser Codex agent");
+    const startRequest = fixture.transport.sent.find(
+      (message) => message.method === "thread/start",
+    );
+    assert.equal(
+      (startRequest?.params as Record<string, unknown>).developerInstructions,
+      "CREATION_PROFILE_SOUL_MARKER",
+    );
+    assert.equal(
+      Object.hasOwn(
+        startRequest?.params as Record<string, unknown>,
+        "baseInstructions",
+      ),
+      false,
+    );
+    assert.equal(created.creation.binding.profileId, fixture.profileId);
+    assert.equal(created.creation.binding.profileRevision, 1);
+    assert.equal(typeof created.creation.binding.profilePromptHash, "string");
     assert.deepEqual(created.creation.request.taskRef, {
       project_id: "rusty-crew",
       task_id: "5678",
@@ -701,6 +752,70 @@ test("controller atomically creates and idempotently reuses an external agent se
         label: "Changed intent",
       }),
       /external_agent_creation_idempotency_conflict/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("profile prompt refresh forks history and preserves Crew identity", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "profile-refresh-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const before = created.creation.binding;
+    const current = await fixture.bridge.getProfileRegistryRecord(
+      fixture.profileId,
+    );
+    assert.ok(current);
+    await fixture.bridge.updateProfileRegistryRecord({
+      write: {
+        profileId: current.profileId,
+        lifecycleStatus: current.lifecycleStatus,
+        displayName: current.displayName,
+        summary: current.summary,
+        defaultSessionKind: current.defaultSessionKind,
+        agentId: current.agentId,
+        ownerId: current.ownerId,
+        promptSoulMarkdown: "REFRESHED_PROFILE_SOUL_MARKER",
+        promptMemoryMarkdown: current.promptMemoryMarkdown,
+        activeRuntimeSettingsJson: current.activeRuntimeSettingsJson,
+        sourceAssetRefs: current.sourceAssetRefs,
+        derivedRuntimeRefs: current.derivedRuntimeRefs,
+        importExport: current.importExport,
+        now: new Date().toISOString(),
+      },
+      expectedRevision: current.revision,
+    });
+
+    const receipt = await fixture.controller.refreshProfileInstructions(
+      fixture.profileId,
+    );
+    assert.deepEqual(receipt.refreshedBindings, [before.bindingId]);
+    const after = await fixture.bridge.getExternalBinding(before.bindingId);
+    assert.ok(after);
+    assert.equal(after.sessionId, before.sessionId);
+    assert.equal(after.agentId, before.agentId);
+    assert.notEqual(after.nativeThreadId, before.nativeThreadId);
+    assert.equal(after.profileRevision, current.revision + 1);
+    const forkRequest = fixture.transport.sent.find(
+      (message) => message.method === "thread/fork",
+    );
+    assert.equal(
+      (forkRequest?.params as Record<string, unknown>).developerInstructions,
+      "REFRESHED_PROFILE_SOUL_MARKER",
+    );
+    assert.equal(
+      Object.hasOwn(
+        forkRequest?.params as Record<string, unknown>,
+        "baseInstructions",
+      ),
+      false,
     );
   } finally {
     await fixture.cleanup();
@@ -1568,6 +1683,18 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
   const now = (): string => new Date().toISOString();
 
   try {
+    await bridge.createProfileRegistryRecord({
+      profileId: "interaction-profile",
+      lifecycleStatus: "active",
+      displayName: "Interaction profile",
+      defaultSessionKind: "full",
+      agentId: "interaction-agent",
+      activeRuntimeSettingsJson: {},
+      sourceAssetRefs: [],
+      derivedRuntimeRefs: [],
+      importExport: { metadataJson: {} },
+      now: now(),
+    });
     await bridge.registerExternalRuntime({
       registration: {
         runtimeId: "interaction-runtime",
@@ -1597,6 +1724,10 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
         runtimeId: "interaction-runtime",
         sessionId: "interaction-session",
         agentId: "interaction-agent",
+        profileId: "interaction-profile",
+        profileRevision: 1,
+        profilePromptHash:
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         purpose: "crew_agent",
         nativeThreadId: "native-thread-1",
         effectiveConfigFingerprint: "interaction-test",
@@ -1813,6 +1944,18 @@ test("controller expires undispatched turns and reports ambiguous native starts 
   const now = (): string => new Date().toISOString();
 
   try {
+    await bridge.createProfileRegistryRecord({
+      profileId: "dispatch-profile",
+      lifecycleStatus: "active",
+      displayName: "Dispatch profile",
+      defaultSessionKind: "full",
+      agentId,
+      activeRuntimeSettingsJson: {},
+      sourceAssetRefs: [],
+      derivedRuntimeRefs: [],
+      importExport: { metadataJson: {} },
+      now: now(),
+    });
     await bridge.registerExternalRuntime({
       registration: {
         runtimeId,
@@ -1842,6 +1985,10 @@ test("controller expires undispatched turns and reports ambiguous native starts 
         runtimeId,
         sessionId,
         agentId,
+        profileId: "dispatch-profile",
+        profileRevision: 1,
+        profilePromptHash:
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         purpose: "crew_agent",
         nativeThreadId: "dispatch-thread",
         effectiveConfigFingerprint: "dispatch-test",
@@ -1988,6 +2135,7 @@ async function externalCreationFixture(
     displayName: "Creation profile",
     defaultSessionKind: "full",
     agentId: profileId,
+    promptSoulMarkdown: "CREATION_PROFILE_SOUL_MARKER",
     activeRuntimeSettingsJson: {},
     sourceAssetRefs: [],
     derivedRuntimeRefs: [],

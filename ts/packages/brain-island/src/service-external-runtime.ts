@@ -66,6 +66,7 @@ export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
   "external_agent_creation_idempotency_conflict",
   "external_agent_creation_runtime_unavailable",
   "external_agent_creation_profile_invalid",
+  "external_agent_creation_profile_revision_conflict",
   "external_agent_creation_cwd_invalid",
   "external_agent_creation_revision_conflict",
   "external_agent_creation_binding_conflict",
@@ -862,6 +863,9 @@ export class ServiceExternalRuntimeController {
         expectedRevision: creation.revision,
         now: this.#now().toISOString(),
       });
+      const developerInstructions = await this.#developerInstructionsForBinding(
+        creation.binding,
+      );
       const recovered = await this.#findThreadBySource(
         controlled,
         creation.nativeThreadSource,
@@ -874,12 +878,13 @@ export class ServiceExternalRuntimeController {
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           excludeTurns: true,
+          developerInstructions,
         });
         controlled.threadSettings.set(recovered.id, {
           model: resumed.model,
           modelProvider: resumed.modelProvider,
           reasoning_effort: resumed.reasoningEffort,
-          developer_instructions: null,
+          developer_instructions: developerInstructions,
         });
       } else {
         const cwd = creation.request.cwd;
@@ -891,13 +896,14 @@ export class ServiceExternalRuntimeController {
           environments: [{ environmentId: "local", cwd }],
           dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
           threadSource: creation.nativeThreadSource,
+          developerInstructions,
         });
         nativeThreadId = started.thread.id;
         controlled.threadSettings.set(nativeThreadId, {
           model: started.model,
           modelProvider: started.modelProvider,
           reasoning_effort: started.reasoningEffort,
-          developer_instructions: null,
+          developer_instructions: developerInstructions,
         });
       }
       creation = await this.#bridge.completeExternalAgentSessionCreation({
@@ -937,6 +943,97 @@ export class ServiceExternalRuntimeController {
         true,
       );
     }
+  }
+
+  async refreshProfileInstructions(profileId: string): Promise<{
+    profileId: string;
+    profileRevision: number;
+    refreshedBindings: string[];
+    unchangedBindings: string[];
+  }> {
+    const profile = await this.#profileDeveloperInstructions(profileId);
+    const bindings = (await this.#bridge.listExternalBindings()).filter(
+      (binding) =>
+        binding.purpose === "crew_agent" &&
+        binding.status === "active" &&
+        binding.profileId === profileId,
+    );
+    const refreshedBindings: string[] = [];
+    const unchangedBindings: string[] = [];
+    for (const binding of bindings) {
+      if (
+        binding.profileRevision === profile.revision &&
+        binding.profilePromptHash === profile.promptHash
+      ) {
+        unchangedBindings.push(binding.bindingId);
+        continue;
+      }
+      if (typeof binding.nativeThreadId !== "string") {
+        throw new ExternalAgentSessionCreationError(
+          "external_agent_creation_recovery_required",
+          `external binding ${binding.bindingId} has no native thread to refresh`,
+          true,
+        );
+      }
+      const controlled = await this.#requireControlled(binding.runtimeId);
+      await this.#assertThreadHasNoCrewWork(
+        binding.runtimeId,
+        binding.nativeThreadId,
+        [binding],
+      );
+      const previousThreadId = binding.nativeThreadId;
+      const forked = await controlled.driver.threadFork({
+        threadId: previousThreadId,
+        ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        developerInstructions: profile.developerInstructions,
+        excludeTurns: true,
+      });
+      const nextThreadId = forked.thread.id;
+      try {
+        await this.#bridge.bindExternalAgent({
+          binding: {
+            ...binding,
+            nativeThreadId: nextThreadId,
+            profileRevision: profile.revision,
+            profilePromptHash: profile.promptHash,
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: binding.revision,
+        });
+      } catch (error) {
+        await controlled.driver
+          .threadDelete({ threadId: nextThreadId })
+          .catch(() => undefined);
+        throw error;
+      }
+      controlled.threadSettings.delete(previousThreadId);
+      controlled.threadUsage.delete(previousThreadId);
+      controlled.threadSettings.set(nextThreadId, {
+        model: forked.model,
+        modelProvider: forked.modelProvider,
+        reasoning_effort: forked.reasoningEffort,
+        developer_instructions: profile.developerInstructions,
+      });
+      if (typeof binding.label === "string") {
+        await controlled.driver.threadSetName({
+          threadId: nextThreadId,
+          name: binding.label,
+        });
+      }
+      await controlled.driver
+        .threadArchive({ threadId: previousThreadId })
+        .then(() => controlled.archivedThreadIds.add(previousThreadId))
+        .catch(() => undefined);
+      refreshedBindings.push(binding.bindingId);
+    }
+    return {
+      profileId,
+      profileRevision: profile.revision,
+      refreshedBindings,
+      unchangedBindings,
+    };
   }
 
   async executeControl(
@@ -1145,18 +1242,21 @@ export class ServiceExternalRuntimeController {
         continue;
       }
       try {
+        const developerInstructions =
+          await this.#developerInstructionsForBinding(binding);
         const resumed = await controlled.driver.threadResume({
           threadId: binding.nativeThreadId,
           ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           excludeTurns: true,
+          developerInstructions,
         });
         controlled.threadSettings.set(binding.nativeThreadId, {
           model: resumed.model,
           modelProvider: resumed.modelProvider,
           reasoning_effort: resumed.reasoningEffort,
-          developer_instructions: null,
+          developer_instructions: developerInstructions,
         });
         if (typeof binding.label === "string") {
           await controlled.driver.threadSetName({
@@ -1173,6 +1273,55 @@ export class ServiceExternalRuntimeController {
         });
       }
     }
+  }
+
+  async #developerInstructionsForBinding(
+    binding: ExternalAgentBinding,
+  ): Promise<string | null> {
+    if (
+      typeof binding.profileId !== "string" ||
+      typeof binding.profileRevision !== "number" ||
+      typeof binding.profilePromptHash !== "string"
+    ) {
+      throw new ExternalAgentSessionCreationError(
+        "external_agent_creation_profile_invalid",
+        `external binding ${binding.bindingId} has no profile prompt provenance`,
+        false,
+      );
+    }
+    const profile = await this.#profileDeveloperInstructions(binding.profileId);
+    if (
+      profile.revision !== binding.profileRevision ||
+      profile.promptHash !== binding.profilePromptHash
+    ) {
+      throw new ExternalAgentSessionCreationError(
+        "external_agent_creation_profile_revision_conflict",
+        `profile ${binding.profileId} revision or prompt hash changed; refresh the bound Codex thread`,
+        false,
+      );
+    }
+    return profile.developerInstructions;
+  }
+
+  async #profileDeveloperInstructions(profileId: string): Promise<{
+    revision: number;
+    promptHash: string;
+    developerInstructions: string | null;
+  }> {
+    const profile = await this.#bridge.getProfileRegistryRecord(profileId);
+    if (profile === undefined || profile.lifecycleStatus !== "active") {
+      throw new ExternalAgentSessionCreationError(
+        "external_agent_creation_profile_invalid",
+        `profile ${profileId} is missing or inactive`,
+        false,
+      );
+    }
+    const soul = profile.promptSoulMarkdown?.trim() ?? "";
+    return {
+      revision: profile.revision,
+      promptHash: createHash("sha256").update(soul).digest("hex"),
+      developerInstructions: soul === "" ? null : soul,
+    };
   }
 
   async #restoreReadyRegistration(
@@ -1311,6 +1460,7 @@ export class ServiceExternalRuntimeController {
   ): Promise<void> {
     let collaborationMode: CollaborationMode;
     try {
+      await this.#developerInstructionsForBinding(binding);
       collaborationMode = await this.#resolveCollaborationMode(
         controlled,
         binding,
@@ -1389,7 +1539,7 @@ export class ServiceExternalRuntimeController {
         model,
         reasoning_effort:
           preset.reasoning_effort ?? current?.reasoning_effort ?? null,
-        developer_instructions: null,
+        developer_instructions: current?.developer_instructions ?? null,
       },
     };
   }
@@ -1742,16 +1892,20 @@ export class ServiceExternalRuntimeController {
   ): Promise<unknown> {
     switch (request.kind) {
       case "start_or_resume_thread": {
+        const developerInstructions =
+          await this.#developerInstructionsForBinding(binding);
         if (typeof binding.nativeThreadId === "string") {
           const resumed = await controlled.driver.threadResume({
             threadId: binding.nativeThreadId,
             ...(isRecord(request.payload) ? request.payload : {}),
+            baseInstructions: undefined,
+            developerInstructions,
           });
           controlled.threadSettings.set(binding.nativeThreadId, {
             model: resumed.model,
             modelProvider: resumed.modelProvider,
             reasoning_effort: resumed.reasoningEffort,
-            developer_instructions: null,
+            developer_instructions: developerInstructions,
           });
           return resumed;
         }
@@ -1764,12 +1918,14 @@ export class ServiceExternalRuntimeController {
           environments: [{ environmentId: "local", cwd }],
           dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
           ...(isRecord(request.payload) ? request.payload : {}),
+          baseInstructions: undefined,
+          developerInstructions,
         });
         controlled.threadSettings.set(started.thread.id, {
           model: started.model,
           modelProvider: started.modelProvider,
           reasoning_effort: started.reasoningEffort,
-          developer_instructions: null,
+          developer_instructions: developerInstructions,
         });
         await this.#bridge.bindExternalAgent({
           binding: {
@@ -1910,11 +2066,12 @@ export class ServiceExternalRuntimeController {
       controlled.archivedThreadIds.delete(event.threadId);
     }
     if (event.threadId !== undefined && event.payload.settings !== undefined) {
+      const current = controlled.threadSettings.get(event.threadId);
       controlled.threadSettings.set(event.threadId, {
         model: event.payload.settings.model,
         modelProvider: event.payload.settings.modelProvider,
         reasoning_effort: event.payload.settings.effort,
-        developer_instructions: null,
+        developer_instructions: current?.developer_instructions ?? null,
       });
     }
     if (event.threadId !== undefined && event.payload.usage !== undefined) {

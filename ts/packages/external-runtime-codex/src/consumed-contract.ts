@@ -6,6 +6,7 @@ export const CODEX_CONSUMED_RESPONSE_SCHEMAS: Readonly<Record<string, string>> =
     "thread/list": "v2/ThreadListResponse.json",
     "thread/read": "v2/ThreadReadResponse.json",
     "thread/archive": "v2/ThreadArchiveResponse.json",
+    "thread/fork": "v2/ThreadForkResponse.json",
     "thread/delete": "v2/ThreadDeleteResponse.json",
     "thread/unarchive": "v2/ThreadUnarchiveResponse.json",
     "thread/loaded/list": "v2/ThreadLoadedListResponse.json",

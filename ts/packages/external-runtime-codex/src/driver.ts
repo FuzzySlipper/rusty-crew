@@ -22,6 +22,8 @@ import type { ThreadUnarchiveParams } from "../protocol/0.144.1/ts/v2/ThreadUnar
 import type { ThreadUnarchiveResponse } from "../protocol/0.144.1/ts/v2/ThreadUnarchiveResponse.js";
 import type { ThreadResumeParams } from "../protocol/0.144.1/ts/v2/ThreadResumeParams.js";
 import type { ThreadResumeResponse } from "../protocol/0.144.1/ts/v2/ThreadResumeResponse.js";
+import type { ThreadForkParams } from "../protocol/0.144.1/ts/v2/ThreadForkParams.js";
+import type { ThreadForkResponse } from "../protocol/0.144.1/ts/v2/ThreadForkResponse.js";
 import type { ThreadStartParams } from "../protocol/0.144.1/ts/v2/ThreadStartParams.js";
 import type { ThreadStartResponse } from "../protocol/0.144.1/ts/v2/ThreadStartResponse.js";
 import type { ThreadSettingsUpdateParams } from "../protocol/0.144.1/ts/v2/ThreadSettingsUpdateParams.js";
@@ -417,6 +419,13 @@ export class CodexAppServerDriver {
     signal?: AbortSignal,
   ): Promise<ThreadResumeResponse> {
     return this.#request("thread/resume", params, signal);
+  }
+
+  threadFork(
+    params: ThreadForkParams,
+    signal?: AbortSignal,
+  ): Promise<ThreadForkResponse> {
+    return this.#request("thread/fork", params, signal);
   }
 
   threadSetName(

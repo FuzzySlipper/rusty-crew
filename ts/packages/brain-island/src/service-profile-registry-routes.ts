@@ -38,6 +38,7 @@ export interface ProfileRegistryWriteRouteContext {
     expectedRevision: number;
   }): Promise<NativeProfileRegistryRecord>;
   applyLifecycleEffects(record: NativeProfileRegistryRecord): Promise<unknown>;
+  applyPromptEffects(record: NativeProfileRegistryRecord): Promise<unknown>;
   applyRuntimeConfigEffects(
     record: NativeProfileRegistryRecord,
     plan: ProfileRegistryRoutePlan,
@@ -92,9 +93,11 @@ export async function handleProfileRegistryWriteRequest(
   const effects =
     route.kind === "lifecycle"
       ? await context.applyLifecycleEffects(updated)
-      : route.kind === "runtime-config"
-        ? await context.applyRuntimeConfigEffects(updated, plan)
-        : undefined;
+      : route.kind === "prompt"
+        ? await context.applyPromptEffects(updated)
+        : route.kind === "runtime-config"
+          ? await context.applyRuntimeConfigEffects(updated, plan)
+          : undefined;
   return successRoute(request.requestId, {
     ...plan,
     applied: true,

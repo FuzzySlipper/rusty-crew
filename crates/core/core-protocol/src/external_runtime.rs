@@ -300,6 +300,12 @@ pub struct ExternalAgentBinding {
     pub runtime_id: ExternalRuntimeId,
     pub session_id: Option<SessionId>,
     pub agent_id: Option<AgentId>,
+    #[serde(default)]
+    pub profile_id: Option<ProfileId>,
+    #[serde(default)]
+    pub profile_revision: Option<u64>,
+    #[serde(default)]
+    pub profile_prompt_hash: Option<String>,
     pub purpose: ExternalBindingPurpose,
     pub native_thread_id: Option<String>,
     pub cwd: Option<String>,
@@ -356,11 +362,15 @@ impl ExternalAgentBinding {
             &self.effective_config_fingerprint,
         )?;
         if self.purpose == ExternalBindingPurpose::CrewAgent
-            && (self.session_id.is_none() || self.agent_id.is_none())
+            && (self.session_id.is_none()
+                || self.agent_id.is_none()
+                || self.profile_id.is_none()
+                || self.profile_revision.is_none()
+                || self.profile_prompt_hash.is_none())
         {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
-                "crew_agent external binding requires session_id and agent_id",
+                "crew_agent external binding requires session, agent, and profile prompt provenance",
             ));
         }
         if self.purpose == ExternalBindingPurpose::ImportedObserver
@@ -1251,6 +1261,9 @@ mod tests {
             runtime_id: ExternalRuntimeId::new("codex-local"),
             session_id: Some(SessionId::new("session")),
             agent_id: None,
+            profile_id: None,
+            profile_revision: None,
+            profile_prompt_hash: None,
             purpose: ExternalBindingPurpose::ImportedObserver,
             native_thread_id: Some("thread".into()),
             cwd: None,
