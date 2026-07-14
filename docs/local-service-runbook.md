@@ -47,6 +47,10 @@ socket, and do not give the debug process the live `/home/agent/.codex` home.
 | live and normal CLI history | `codex-app-server-live.service` | `/home/agent/.codex` | `/run/user/1001/codex-app-server-live/app-server.sock` |
 | debug and certification history | `codex-app-server.service` | `/home/system/rusty-crew-debug/codex-home` | `/run/user/1001/codex-app-server/app-server.sock` |
 
+Frequent Codex CLI updates must be staged and certified through the debug-only
+operator workflow before live promotion. See
+[Codex debug update and certification](codex-debug-update-certification.md).
+
 Bootstrap the private debug home without copying live sessions, history, or
 state databases:
 

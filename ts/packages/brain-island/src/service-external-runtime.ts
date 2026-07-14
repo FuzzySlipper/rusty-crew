@@ -882,11 +882,13 @@ export class ServiceExternalRuntimeController {
           developer_instructions: null,
         });
       } else {
+        const cwd = creation.request.cwd;
         const started = await controlled.driver.threadStart({
-          cwd: creation.request.cwd,
+          cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           ephemeral: false,
+          environments: [{ environmentId: "local", cwd }],
           dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
           threadSource: creation.nativeThreadSource,
         });
@@ -1329,6 +1331,7 @@ export class ServiceExternalRuntimeController {
       now: this.#now().toISOString(),
     });
     try {
+      const cwd = binding.cwd ?? "/home";
       const started = await controlled.driver.turnStart({
         threadId: turn.nativeThreadId,
         input: turn.request.input.map((part) =>
@@ -1340,7 +1343,8 @@ export class ServiceExternalRuntimeController {
                 text_elements: [],
               },
         ),
-        ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
+        cwd,
+        environments: [{ environmentId: "local", cwd }],
         approvalPolicy: "never",
         sandboxPolicy: { type: "dangerFullAccess" },
         collaborationMode,
@@ -1751,11 +1755,13 @@ export class ServiceExternalRuntimeController {
           });
           return resumed;
         }
+        const cwd = binding.cwd ?? "/home";
         const started = await controlled.driver.threadStart({
-          cwd: binding.cwd ?? "/home",
+          cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           ephemeral: false,
+          environments: [{ environmentId: "local", cwd }],
           dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
           ...(isRecord(request.payload) ? request.payload : {}),
         });

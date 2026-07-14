@@ -182,6 +182,7 @@
     "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/external-runtime-codex && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui && tsc --noEmit -p ts/packages/service-host && tsc --noEmit -p ts/packages/capability-harness",
     "codegen:codex-app-server": "node tools/generate-codex-app-server-protocol.mjs",
     "check:codex-app-server-protocol": "node tools/generate-codex-app-server-protocol.mjs --check",
+    "codex:debug:update-certify": "node tools/codex-debug-update-certify.mjs",
     "generate:tool-registry-artifact": "npm run generate:tool-registry-artifact -w @rusty-crew/brain-island",
     "format": "prettier --check .",
     "format:fix": "prettier --write ."

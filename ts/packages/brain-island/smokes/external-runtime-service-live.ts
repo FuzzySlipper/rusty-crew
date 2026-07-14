@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -20,10 +27,17 @@ import {
 const socketPath =
   process.env.CODEX_APP_SERVER_SOCKET ??
   "/run/user/1001/codex-app-server/app-server.sock";
+const codexHomeRef =
+  process.env.CODEX_APP_SERVER_HOME_REF ?? "/home/agent/.codex";
 const timeoutMs = Number(
   process.env.CODEX_APP_SERVER_SERVICE_LIVE_TIMEOUT_MS ?? 300_000,
 );
-const dataDir = mkdtempSync(join(tmpdir(), "rusty-crew-external-service-"));
+const scratchParent =
+  process.env.CODEX_APP_SERVER_SERVICE_LIVE_ROOT ?? tmpdir();
+mkdirSync(scratchParent, { recursive: true });
+const dataDir = mkdtempSync(
+  join(scratchParent, "rusty-crew-external-service-"),
+);
 const runtimeId = "codex-service-live";
 const sessionId = "codex-service-live-session";
 const agentId = "codex-service-live-agent";
@@ -58,7 +72,7 @@ try {
       kind: "codex_app_server",
       endpoint: { transport: "unix_web_socket", address: socketPath },
       processOwnership: "attached",
-      codexHomeRef: "/home/agent/.codex",
+      codexHomeRef,
       observedCliVersion: null,
       consumedContractRevision: null,
       compatibilityState: "unassessed",
@@ -200,6 +214,23 @@ try {
   const address = server.address();
   assert(address !== null && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const localToolToken = `LOCAL_TOOL_${randomUUID()}`;
+  const localToolPath = join(dataDir, "local-tool-proof.txt");
+  writeFileSync(localToolPath, "BEFORE_TOOL_EXECUTION\n");
+  const localToolDelivery = await deliverLiveMessage(
+    baseUrl,
+    "external-service-live-local-tool",
+    `This is a live local-tool certification. Use your local editing tool to replace the entire contents of local-tool-proof.txt with exactly ${localToolToken}, followed by a newline. Then use command execution to verify the file. Do not claim completion unless the file was changed.`,
+  );
+  assert.equal(localToolDelivery.activation?.type, "external_turn_requested");
+  const localToolTurn = await waitForActiveTurn();
+  await waitForTerminalEvent(localToolTurn.nativeTurnId);
+  assert.equal(
+    readFileSync(localToolPath, "utf8"),
+    `${localToolToken}\n`,
+    "live Codex turn did not apply the required local-tool mutation",
+  );
 
   const browserCreationRequest = {
     idempotencyKey: "external-service-live-browser-create",
@@ -754,6 +785,7 @@ try {
         bindingId,
         nativeThreadId: terminal.nativeThreadId,
         nativeTurnId: terminal.nativeTurnId,
+        localToolTurnId: localToolTurn.nativeTurnId,
         terminalSequenceId: terminal.sequenceId,
         steerTurnId: steerTerminal.nativeTurnId,
         interruptedTurnId: interrupted.nativeTurnId,

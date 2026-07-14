@@ -1669,6 +1669,10 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       (turnStart?.params as Record<string, unknown>)?.sandboxPolicy,
       { type: "dangerFullAccess" },
     );
+    assert.deepEqual(
+      (turnStart?.params as Record<string, unknown>)?.environments,
+      [{ environmentId: "local", cwd: "/home" }],
+    );
 
     transport.emit({
       id: "input-1",
@@ -1771,6 +1775,10 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
     assert.deepEqual(
       (defaultTurnStart?.params as Record<string, unknown>)?.sandboxPolicy,
       { type: "dangerFullAccess" },
+    );
+    assert.deepEqual(
+      (defaultTurnStart?.params as Record<string, unknown>)?.environments,
+      [{ environmentId: "local", cwd: "/home" }],
     );
   } finally {
     await controller.stop().catch(() => undefined);
