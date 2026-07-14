@@ -412,7 +412,7 @@ direction = "ts_to_rust"
 input = "core_protocol::ExternalRuntimeRegistration + expected_revision"
 output = "core_protocol::ExternalRuntimeRegistration"
 errors = "core_protocol::CoreError"
-summary = "Register or revise a version-pinned external agent runtime through Rust lifecycle authority."
+summary = "Register or revise an external agent runtime through Rust lifecycle authority."
 
 [[operation]]
 name = "authorize_external_runtime_handshake"
@@ -421,7 +421,7 @@ direction = "ts_to_rust"
 input = "core_protocol::ExternalRuntimeHandshakeObservation"
 output = "core_protocol::ExternalRuntimeHandshakeDecision"
 errors = "core_protocol::CoreError"
-summary = "Authorize an observed external runtime handshake against Rust-owned exact-version requirements."
+summary = "Classify an observed external runtime handshake against Rust-owned compatibility requirements."
 
 [[operation]]
 name = "record_external_runtime_state"

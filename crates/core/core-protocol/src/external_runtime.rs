@@ -99,6 +99,21 @@ pub enum ExternalRuntimeObservedState {
     Incompatible,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalRuntimeCompatibilityState {
+    Unassessed,
+    CompatibleUncertified,
+    Incompatible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalRuntimeContractCompatibility {
+    Compatible,
+    Incompatible,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalEndpoint {
@@ -114,9 +129,9 @@ pub struct ExternalRuntimeRegistration {
     pub endpoint: ExternalEndpoint,
     pub process_ownership: ExternalProcessOwnership,
     pub codex_home_ref: Option<String>,
-    pub expected_cli_version: String,
-    pub executable_sha256: String,
-    pub protocol_schema_sha256: String,
+    pub observed_cli_version: Option<String>,
+    pub consumed_contract_revision: Option<String>,
+    pub compatibility_state: ExternalRuntimeCompatibilityState,
     pub desired_state: ExternalRuntimeDesiredState,
     pub observed_state: ExternalRuntimeObservedState,
     pub observed_reason_code: Option<String>,
@@ -138,8 +153,9 @@ pub struct ExternalRuntimeHandshakeObservation {
     pub runtime_id: ExternalRuntimeId,
     pub controller: ExternalControllerContext,
     pub cli_version: String,
-    pub executable_sha256: String,
-    pub protocol_schema_sha256: String,
+    pub consumed_contract_revision: String,
+    pub contract_compatibility: ExternalRuntimeContractCompatibility,
+    pub incompatibility_reason_code: Option<String>,
     pub observed_at: IsoTimestamp,
 }
 
@@ -147,6 +163,7 @@ pub struct ExternalRuntimeHandshakeObservation {
 #[serde(rename_all = "camelCase")]
 pub struct ExternalRuntimeHandshakeDecision {
     pub accepted: bool,
+    pub compatibility_state: ExternalRuntimeCompatibilityState,
     pub reason_code: Option<String>,
     pub registration: ExternalRuntimeRegistration,
 }
@@ -751,12 +768,48 @@ pub fn validate_external_runtime_registration(
 ) -> CoreResult<()> {
     validate_non_empty("runtime_id", &registration.runtime_id.0)?;
     validate_non_empty("endpoint.address", &registration.endpoint.address)?;
-    validate_non_empty("expected_cli_version", &registration.expected_cli_version)?;
-    validate_sha256("executable_sha256", &registration.executable_sha256)?;
-    validate_sha256(
-        "protocol_schema_sha256",
-        &registration.protocol_schema_sha256,
-    )?;
+    if let Some(cli_version) = &registration.observed_cli_version {
+        validate_non_empty("observed_cli_version", cli_version)?;
+    }
+    if let Some(contract_revision) = &registration.consumed_contract_revision {
+        validate_non_empty("consumed_contract_revision", contract_revision)?;
+    }
+    if registration.compatibility_state == ExternalRuntimeCompatibilityState::Unassessed
+        && (registration.observed_cli_version.is_some()
+            || registration.consumed_contract_revision.is_some())
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "unassessed external runtime cannot carry observed compatibility identity",
+        ));
+    }
+    if registration.compatibility_state != ExternalRuntimeCompatibilityState::Unassessed
+        && (registration.observed_cli_version.is_none()
+            || registration.consumed_contract_revision.is_none())
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "assessed external runtime requires observed CLI and consumed contract identity",
+        ));
+    }
+    if registration.observed_state == ExternalRuntimeObservedState::Ready
+        && registration.compatibility_state
+            != ExternalRuntimeCompatibilityState::CompatibleUncertified
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "ready external runtime requires compatible contract state",
+        ));
+    }
+    if registration.compatibility_state == ExternalRuntimeCompatibilityState::Incompatible
+        && (registration.observed_state != ExternalRuntimeObservedState::Incompatible
+            || registration.observed_reason_code.is_none())
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "incompatible external runtime requires incompatible observed state and reason",
+        ));
+    }
     if registration.kind == ExternalRuntimeKind::CodexAppServer
         && registration.endpoint.transport != ExternalEndpointTransport::UnixWebSocket
     {
@@ -766,6 +819,34 @@ pub fn validate_external_runtime_registration(
         ));
     }
     Ok(())
+}
+
+pub fn validate_external_runtime_handshake_observation(
+    observation: &ExternalRuntimeHandshakeObservation,
+) -> CoreResult<()> {
+    validate_non_empty("runtime_id", &observation.runtime_id.0)?;
+    validate_non_empty("cli_version", &observation.cli_version)?;
+    validate_non_empty(
+        "consumed_contract_revision",
+        &observation.consumed_contract_revision,
+    )?;
+    match (
+        observation.contract_compatibility,
+        observation.incompatibility_reason_code.as_deref(),
+    ) {
+        (ExternalRuntimeContractCompatibility::Compatible, None) => Ok(()),
+        (ExternalRuntimeContractCompatibility::Compatible, Some(_)) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "compatible external runtime cannot report an incompatibility reason",
+        )),
+        (ExternalRuntimeContractCompatibility::Incompatible, Some(reason_code)) => {
+            validate_non_empty("incompatibility_reason_code", reason_code)
+        }
+        (ExternalRuntimeContractCompatibility::Incompatible, None) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "incompatible external runtime requires an incompatibility reason",
+        )),
+    }
 }
 
 pub fn validate_external_turn_transition(
@@ -791,19 +872,43 @@ fn validate_non_empty(field: &str, value: &str) -> CoreResult<()> {
     Ok(())
 }
 
-fn validate_sha256(field: &str, value: &str) -> CoreResult<()> {
-    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            format!("{field} must be a 64-character hexadecimal SHA-256"),
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contract_compatibility_reports_require_coherent_reasoning() {
+        let mut observation = ExternalRuntimeHandshakeObservation {
+            runtime_id: ExternalRuntimeId::new("codex-local"),
+            controller: ExternalControllerContext {
+                holder_instance_id: "controller-a".into(),
+                generation: 1,
+            },
+            cli_version: "0.144.3".into(),
+            consumed_contract_revision: "contract-v1".into(),
+            contract_compatibility: ExternalRuntimeContractCompatibility::Compatible,
+            incompatibility_reason_code: None,
+            observed_at: "2026-07-14T00:00:00Z".into(),
+        };
+        validate_external_runtime_handshake_observation(&observation).unwrap();
+
+        observation.incompatibility_reason_code = Some("unexpected_reason".into());
+        assert_eq!(
+            validate_external_runtime_handshake_observation(&observation)
+                .unwrap_err()
+                .kind,
+            CoreErrorKind::InvalidInput
+        );
+
+        observation.contract_compatibility = ExternalRuntimeContractCompatibility::Incompatible;
+        observation.incompatibility_reason_code = None;
+        assert_eq!(
+            validate_external_runtime_handshake_observation(&observation)
+                .unwrap_err()
+                .kind,
+            CoreErrorKind::InvalidInput
+        );
+    }
 
     #[test]
     fn terminal_external_turns_cannot_resurrect() {

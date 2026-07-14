@@ -3336,6 +3336,20 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "compatibilityState": {
+            "enum": [
+              "unassessed",
+              "compatible_uncertified",
+              "incompatible"
+            ],
+            "type": "string"
+          },
+          "consumedContractRevision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string"
           },
@@ -3364,17 +3378,17 @@ export const bridgeWireSchemaArtifact = {
             ],
             "type": "object"
           },
-          "executableSha256": {
-            "type": "string"
-          },
-          "expectedCliVersion": {
-            "type": "string"
-          },
           "kind": {
             "enum": [
               "codex_app_server"
             ],
             "type": "string"
+          },
+          "observedCliVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "observedReasonCode": {
             "type": [
@@ -3399,9 +3413,6 @@ export const bridgeWireSchemaArtifact = {
             ],
             "type": "string"
           },
-          "protocolSchemaSha256": {
-            "type": "string"
-          },
           "revision": {
             "format": "uint64",
             "minimum": 0,
@@ -3419,9 +3430,7 @@ export const bridgeWireSchemaArtifact = {
           "kind",
           "endpoint",
           "processOwnership",
-          "expectedCliVersion",
-          "executableSha256",
-          "protocolSchemaSha256",
+          "compatibilityState",
           "desiredState",
           "observedState",
           "revision",
@@ -5372,6 +5381,20 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "compatibilityState": {
+          "enum": [
+            "unassessed",
+            "compatible_uncertified",
+            "incompatible"
+          ],
+          "type": "string"
+        },
+        "consumedContractRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "createdAt": {
           "type": "string"
         },
@@ -5400,17 +5423,17 @@ export const bridgeWireSchemaArtifact = {
           ],
           "type": "object"
         },
-        "executableSha256": {
-          "type": "string"
-        },
-        "expectedCliVersion": {
-          "type": "string"
-        },
         "kind": {
           "enum": [
             "codex_app_server"
           ],
           "type": "string"
+        },
+        "observedCliVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "observedReasonCode": {
           "type": [
@@ -5435,9 +5458,6 @@ export const bridgeWireSchemaArtifact = {
           ],
           "type": "string"
         },
-        "protocolSchemaSha256": {
-          "type": "string"
-        },
         "revision": {
           "format": "uint64",
           "minimum": 0,
@@ -5455,9 +5475,7 @@ export const bridgeWireSchemaArtifact = {
         "kind",
         "endpoint",
         "processOwnership",
-        "expectedCliVersion",
-        "executableSha256",
-        "protocolSchemaSha256",
+        "compatibilityState",
         "desiredState",
         "observedState",
         "revision",
@@ -17792,6 +17810,14 @@ export const bridgeWireSchemaArtifact = {
         "accepted": {
           "type": "boolean"
         },
+        "compatibilityState": {
+          "enum": [
+            "unassessed",
+            "compatible_uncertified",
+            "incompatible"
+          ],
+          "type": "string"
+        },
         "reasonCode": {
           "type": [
             "string",
@@ -17801,6 +17827,20 @@ export const bridgeWireSchemaArtifact = {
         "registration": {
           "properties": {
             "codexHomeRef": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "compatibilityState": {
+              "enum": [
+                "unassessed",
+                "compatible_uncertified",
+                "incompatible"
+              ],
+              "type": "string"
+            },
+            "consumedContractRevision": {
               "type": [
                 "string",
                 "null"
@@ -17834,17 +17874,17 @@ export const bridgeWireSchemaArtifact = {
               ],
               "type": "object"
             },
-            "executableSha256": {
-              "type": "string"
-            },
-            "expectedCliVersion": {
-              "type": "string"
-            },
             "kind": {
               "enum": [
                 "codex_app_server"
               ],
               "type": "string"
+            },
+            "observedCliVersion": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "observedReasonCode": {
               "type": [
@@ -17869,9 +17909,6 @@ export const bridgeWireSchemaArtifact = {
               ],
               "type": "string"
             },
-            "protocolSchemaSha256": {
-              "type": "string"
-            },
             "revision": {
               "format": "uint64",
               "minimum": 0,
@@ -17889,9 +17926,7 @@ export const bridgeWireSchemaArtifact = {
             "kind",
             "endpoint",
             "processOwnership",
-            "expectedCliVersion",
-            "executableSha256",
-            "protocolSchemaSha256",
+            "compatibilityState",
             "desiredState",
             "observedState",
             "revision",
@@ -17903,6 +17938,7 @@ export const bridgeWireSchemaArtifact = {
       },
       "required": [
         "accepted",
+        "compatibilityState",
         "registration"
       ],
       "title": "ExternalRuntimeHandshakeDecision",
@@ -17911,6 +17947,20 @@ export const bridgeWireSchemaArtifact = {
     "rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration": {
       "properties": {
         "codexHomeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibilityState": {
+          "enum": [
+            "unassessed",
+            "compatible_uncertified",
+            "incompatible"
+          ],
+          "type": "string"
+        },
+        "consumedContractRevision": {
           "type": [
             "string",
             "null"
@@ -17944,17 +17994,17 @@ export const bridgeWireSchemaArtifact = {
           ],
           "type": "object"
         },
-        "executableSha256": {
-          "type": "string"
-        },
-        "expectedCliVersion": {
-          "type": "string"
-        },
         "kind": {
           "enum": [
             "codex_app_server"
           ],
           "type": "string"
+        },
+        "observedCliVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "observedReasonCode": {
           "type": [
@@ -17979,9 +18029,6 @@ export const bridgeWireSchemaArtifact = {
           ],
           "type": "string"
         },
-        "protocolSchemaSha256": {
-          "type": "string"
-        },
         "revision": {
           "format": "uint64",
           "minimum": 0,
@@ -17999,9 +18046,7 @@ export const bridgeWireSchemaArtifact = {
         "kind",
         "endpoint",
         "processOwnership",
-        "expectedCliVersion",
-        "executableSha256",
-        "protocolSchemaSha256",
+        "compatibilityState",
         "desiredState",
         "observedState",
         "revision",

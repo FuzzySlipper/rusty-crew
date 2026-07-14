@@ -1831,8 +1831,8 @@ export class ServiceExternalRuntimeController {
       runtimeId: controlled.registration.runtimeId,
       controller: this.#controllerContext(controlled),
       cliVersion: parseCodexCliVersion(identity.userAgent),
-      executableSha256: CODEX_APP_SERVER_PROTOCOL.nativeExecutableSha256,
-      protocolSchemaSha256: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+      consumedContractRevision: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+      contractCompatibility: "compatible",
       observedAt: this.#now().toISOString(),
     });
     controlled.registration = decision.registration;

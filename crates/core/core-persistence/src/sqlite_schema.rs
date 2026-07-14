@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 42;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 43;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -228,6 +228,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 42,
         description: "add roleplay mechanic session associations and diagnostics",
         apply: migrate_v42_add_roleplay_mechanic_sessions_and_diagnostics,
+    },
+    SchemaMigration {
+        version: 43,
+        description: "replace exact external runtime pins with compatibility state",
+        apply: repos::external_runtime::migrate_v43_external_runtime_compatibility_state,
     },
 ];
 
@@ -2537,6 +2542,76 @@ mod tests {
             assert!(index_exists(&db_path, index), "missing index {index}");
         }
 
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn external_runtime_pin_migration_rewrites_json_without_legacy_aliases() {
+        let db_path = temp_db_path("external-runtime-compatibility-migration");
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            prepare_migration_metadata(&conn).unwrap();
+            apply_schema_migrations(&mut conn, &SCHEMA_MIGRATIONS[..42]).unwrap();
+            let legacy_record = serde_json::json!({
+                "runtimeId": "codex-local",
+                "kind": "codex_app_server",
+                "endpoint": {
+                    "transport": "unix_web_socket",
+                    "address": "/run/user/1001/codex.sock"
+                },
+                "processOwnership": "attached",
+                "codexHomeRef": "/home/agent/.codex",
+                "expectedCliVersion": "0.144.1",
+                "executableSha256": "a".repeat(64),
+                "protocolSchemaSha256": "b".repeat(64),
+                "desiredState": "enabled",
+                "observedState": "ready",
+                "observedReasonCode": null,
+                "revision": 1,
+                "createdAt": "2026-07-10T00:00:00Z",
+                "updatedAt": "2026-07-10T00:00:00Z"
+            })
+            .to_string();
+            conn.execute(
+                "INSERT INTO external_runtime_registrations
+                    (runtime_id, observed_state, revision, record_json)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params!["codex-local", "\"ready\"", 1_i64, legacy_record],
+            )
+            .unwrap();
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let registration = store
+            .get_external_runtime_registration(&ExternalRuntimeId::new("codex-local"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            registration.compatibility_state,
+            rusty_crew_core_protocol::ExternalRuntimeCompatibilityState::Unassessed
+        );
+        assert_eq!(
+            registration.observed_state,
+            rusty_crew_core_protocol::ExternalRuntimeObservedState::Disconnected
+        );
+        assert!(registration.observed_cli_version.is_none());
+        assert!(registration.consumed_contract_revision.is_none());
+
+        let conn = Connection::open(&db_path).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT record_json FROM external_runtime_registrations WHERE runtime_id = ?1",
+                params!["codex-local"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(json.get("expectedCliVersion").is_none());
+        assert!(json.get("executableSha256").is_none());
+        assert!(json.get("protocolSchemaSha256").is_none());
+
+        drop(conn);
+        drop(store);
         remove_temp_db(&db_path);
     }
 

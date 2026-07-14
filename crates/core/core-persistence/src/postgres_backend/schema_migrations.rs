@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 27;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 28;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -150,7 +150,40 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add roleplay mechanic session associations and diagnostics",
         apply: Some(apply_postgres_roleplay_mechanic_sessions_and_diagnostics),
     },
+    PostgresSchemaMigration {
+        version: 28,
+        description: "replace exact external runtime pins with compatibility state",
+        apply: Some(apply_postgres_external_runtime_compatibility_state),
+    },
 ];
+
+fn apply_postgres_external_runtime_compatibility_state(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.external_runtime_registrations
+         SET observed_state = '\"disconnected\"',
+             record_json = ((
+                 record_json::jsonb
+                 - 'expectedCliVersion'
+                 - 'executableSha256'
+                 - 'protocolSchemaSha256'
+             ) || jsonb_build_object(
+                 'observedCliVersion', NULL,
+                 'consumedContractRevision', NULL,
+                 'compatibilityState', 'unassessed',
+                 'observedState', 'disconnected',
+                 'observedReasonCode', NULL
+             ))::text;"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "replace PostgreSQL external runtime pins with compatibility state",
+            error,
+        )
+    })
+}
 
 fn apply_postgres_roleplay_mechanic_sessions_and_diagnostics(
     tx: &mut Transaction<'_>,

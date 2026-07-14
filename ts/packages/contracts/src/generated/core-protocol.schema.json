@@ -2988,6 +2988,21 @@
       ],
       "type": "string"
     },
+    "ExternalRuntimeCompatibilityState": {
+      "enum": [
+        "unassessed",
+        "compatible_uncertified",
+        "incompatible"
+      ],
+      "type": "string"
+    },
+    "ExternalRuntimeContractCompatibility": {
+      "enum": [
+        "compatible",
+        "incompatible"
+      ],
+      "type": "string"
+    },
     "ExternalRuntimeDesiredState": {
       "enum": [
         "enabled",
@@ -3061,6 +3076,9 @@
         "accepted": {
           "type": "boolean"
         },
+        "compatibilityState": {
+          "$ref": "#/$defs/ExternalRuntimeCompatibilityState"
+        },
         "reasonCode": {
           "type": [
             "string",
@@ -3073,6 +3091,7 @@
       },
       "required": [
         "accepted",
+        "compatibilityState",
         "registration"
       ],
       "type": "object"
@@ -3082,16 +3101,22 @@
         "cliVersion": {
           "type": "string"
         },
+        "consumedContractRevision": {
+          "type": "string"
+        },
+        "contractCompatibility": {
+          "$ref": "#/$defs/ExternalRuntimeContractCompatibility"
+        },
         "controller": {
           "$ref": "#/$defs/ExternalControllerContext"
         },
-        "executableSha256": {
-          "type": "string"
+        "incompatibilityReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "observedAt": {
-          "type": "string"
-        },
-        "protocolSchemaSha256": {
           "type": "string"
         },
         "runtimeId": {
@@ -3102,8 +3127,8 @@
         "runtimeId",
         "controller",
         "cliVersion",
-        "executableSha256",
-        "protocolSchemaSha256",
+        "consumedContractRevision",
+        "contractCompatibility",
         "observedAt"
       ],
       "type": "object"
@@ -3132,6 +3157,15 @@
             "null"
           ]
         },
+        "compatibilityState": {
+          "$ref": "#/$defs/ExternalRuntimeCompatibilityState"
+        },
+        "consumedContractRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "createdAt": {
           "type": "string"
         },
@@ -3141,14 +3175,14 @@
         "endpoint": {
           "$ref": "#/$defs/ExternalEndpoint"
         },
-        "executableSha256": {
-          "type": "string"
-        },
-        "expectedCliVersion": {
-          "type": "string"
-        },
         "kind": {
           "$ref": "#/$defs/ExternalRuntimeKind"
+        },
+        "observedCliVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "observedReasonCode": {
           "type": [
@@ -3161,9 +3195,6 @@
         },
         "processOwnership": {
           "$ref": "#/$defs/ExternalProcessOwnership"
-        },
-        "protocolSchemaSha256": {
-          "type": "string"
         },
         "revision": {
           "format": "uint64",
@@ -3182,9 +3213,7 @@
         "kind",
         "endpoint",
         "processOwnership",
-        "expectedCliVersion",
-        "executableSha256",
-        "protocolSchemaSha256",
+        "compatibilityState",
         "desiredState",
         "observedState",
         "revision",

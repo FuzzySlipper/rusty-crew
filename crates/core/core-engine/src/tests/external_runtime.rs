@@ -7,6 +7,7 @@ use rusty_crew_core_protocol::{
     ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
     ExternalControlKind, ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
     ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
+    ExternalRuntimeCompatibilityState, ExternalRuntimeContractCompatibility,
     ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
     ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
     ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
@@ -290,13 +291,22 @@ fn handshake_and_runtime_event_replay_require_current_controller_authority() {
         .authorize_external_runtime_handshake(&ExternalRuntimeHandshakeObservation {
             runtime_id: ExternalRuntimeId::new("codex-local"),
             controller: controller.clone(),
-            cli_version: "0.144.1".into(),
-            executable_sha256: "a".repeat(64),
-            protocol_schema_sha256: "b".repeat(64),
+            cli_version: "0.144.3".into(),
+            consumed_contract_revision: "contract-v1".into(),
+            contract_compatibility: ExternalRuntimeContractCompatibility::Compatible,
+            incompatibility_reason_code: None,
             observed_at: "2026-06-19T00:00:01Z".into(),
         })
         .unwrap();
     assert!(accepted.accepted);
+    assert_eq!(
+        accepted.compatibility_state,
+        ExternalRuntimeCompatibilityState::CompatibleUncertified
+    );
+    assert_eq!(
+        accepted.registration.observed_cli_version.as_deref(),
+        Some("0.144.3")
+    );
 
     let first = engine
         .record_external_runtime_event(
@@ -362,6 +372,54 @@ fn handshake_and_runtime_event_replay_require_current_controller_authority() {
             .unwrap_err()
             .kind,
         CoreErrorKind::ActionRejected
+    );
+}
+
+#[test]
+fn required_contract_failure_is_incompatible_without_version_pinning() {
+    let engine = test_engine();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let lease = engine
+        .acquire_external_runtime_controller(
+            &ExternalControllerLease {
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                holder_instance_id: "controller-a".into(),
+                generation: 0,
+                acquired_at: "2026-06-19T00:00:00Z".into(),
+                renewed_at: "2026-06-19T00:00:00Z".into(),
+                expires_at: "2026-06-19T00:10:00Z".into(),
+                revision: 0,
+            },
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+    let decision = engine
+        .authorize_external_runtime_handshake(&ExternalRuntimeHandshakeObservation {
+            runtime_id: ExternalRuntimeId::new("codex-local"),
+            controller: ExternalControllerContext {
+                holder_instance_id: "controller-a".into(),
+                generation: lease.generation,
+            },
+            cli_version: "0.200.0".into(),
+            consumed_contract_revision: "contract-v1".into(),
+            contract_compatibility: ExternalRuntimeContractCompatibility::Incompatible,
+            incompatibility_reason_code: Some("external_runtime_required_method_missing".into()),
+            observed_at: "2026-06-19T00:00:01Z".into(),
+        })
+        .unwrap();
+
+    assert!(!decision.accepted);
+    assert_eq!(
+        decision.compatibility_state,
+        ExternalRuntimeCompatibilityState::Incompatible
+    );
+    assert_eq!(
+        decision.reason_code.as_deref(),
+        Some("external_runtime_required_method_missing")
+    );
+    assert_eq!(
+        decision.registration.observed_state,
+        ExternalRuntimeObservedState::Incompatible
     );
 }
 
@@ -1477,9 +1535,9 @@ fn runtime() -> ExternalRuntimeRegistration {
         },
         process_ownership: ExternalProcessOwnership::Attached,
         codex_home_ref: Some("/home/agent/.codex".into()),
-        expected_cli_version: "0.144.1".into(),
-        executable_sha256: "a".repeat(64),
-        protocol_schema_sha256: "b".repeat(64),
+        observed_cli_version: Some("0.144.1".into()),
+        consumed_contract_revision: Some("contract-v1".into()),
+        compatibility_state: ExternalRuntimeCompatibilityState::CompatibleUncertified,
         desired_state: ExternalRuntimeDesiredState::Enabled,
         observed_state: ExternalRuntimeObservedState::Ready,
         observed_reason_code: None,

@@ -146,15 +146,21 @@ enum ExternalProcessOwnership {
     Managed,  // reserved for a later explicit supervisor implementation
 }
 
+enum ExternalRuntimeCompatibilityState {
+    Unassessed,
+    CompatibleUncertified,
+    Incompatible,
+}
+
 struct ExternalRuntimeRegistration {
     runtime_id: ExternalRuntimeId,
     kind: ExternalRuntimeKind,
     endpoint: ExternalEndpoint,
     process_ownership: ExternalProcessOwnership,
     codex_home_ref: Option<String>,
-    expected_cli_version: String,
-    executable_sha256: String,
-    protocol_schema_sha256: String,
+    observed_cli_version: Option<String>,
+    consumed_contract_revision: Option<String>,
+    compatibility_state: ExternalRuntimeCompatibilityState,
     enabled: bool,
     revision: u64,
 }
@@ -573,19 +579,24 @@ Crew records projection lag and replays from persisted native/normalized cursors
 where possible. Observation failure does not steal coordination authority or
 cause duplicate native turns.
 
-## Exact-Version Boundary
+## Compatibility Boundary
 
-The installed executable generates the protocol contract. A Codex update must:
+Crew records the connected CLI version and the revision of the protocol subset
+its controller consumes. A CLI version change is not itself an incompatibility.
+After initialization, the controller reports whether the required consumed
+contract is compatible; Rust records the result as `compatible_uncertified` or
+`incompatible` and remains authoritative for turn admission.
 
-1. regenerate stable and required experimental schemas;
-2. record CLI, launcher, executable, and generated-schema fingerprints;
-3. regenerate or validate the TS codec layer;
-4. run offline request-routing fixtures;
-5. run the attached-Unix live compatibility smoke;
-6. require an explicit accepted fingerprint before production turns resume.
+Additive fields and unknown methods must not require a Crew release when the
+consumed operations remain valid. Missing required operations, malformed known
+messages, or failed required capability probes are concrete incompatibilities
+and must block turns with stable reason codes.
 
-The generated contract should eventually drive bridge types. Hand-maintained TS
-mirrors are temporary drift points and may not become policy authority.
+Durable `certified` status and debug-to-live promotion are added by the Codex
+compatibility campaign rooted at task `#5783`. Until that evidence repository is
+present, a successful handshake remains explicitly `compatible_uncertified`.
+Generated schemas still drive bridge types; hand-maintained TS mirrors may not
+become compatibility-policy authority.
 
 ## Existing Direct Brains
 

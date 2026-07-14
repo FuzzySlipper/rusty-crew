@@ -2,17 +2,19 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentActivation, AgentMessageDeliveryStatus, AgentRoundStatus, ExternalAgentBinding,
-    ExternalAgentBindingMetadataWrite, ExternalAgentSessionCreationId,
-    ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRecord,
-    ExternalAgentSessionCreationRequest, ExternalAgentSessionIdentity, ExternalBindingId,
-    ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
-    ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
-    ExternalControllerContext, ExternalControllerLease, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
-    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
-    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
-    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    validate_external_runtime_handshake_observation, AgentActivation, AgentMessageDeliveryStatus,
+    AgentRoundStatus, ExternalAgentBinding, ExternalAgentBindingMetadataWrite,
+    ExternalAgentSessionCreationId, ExternalAgentSessionCreationPhase,
+    ExternalAgentSessionCreationRecord, ExternalAgentSessionCreationRequest,
+    ExternalAgentSessionIdentity, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
+    ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlReceipt,
+    ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
+    ExternalControllerLease, ExternalInteractionRecord, ExternalInteractionStatus,
+    ExternalRuntimeCompatibilityState, ExternalRuntimeContractCompatibility,
+    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
+    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -161,6 +163,7 @@ impl CoreEngine {
         &self,
         observation: &ExternalRuntimeHandshakeObservation,
     ) -> CoreResult<ExternalRuntimeHandshakeDecision> {
+        validate_external_runtime_handshake_observation(observation)?;
         self.validate_external_controller(&observation.runtime_id, &observation.controller)?;
         let current = self
             .store
@@ -170,20 +173,36 @@ impl CoreEngine {
             })?;
         let reason_code = if current.desired_state != ExternalRuntimeDesiredState::Enabled {
             Some("external_runtime_disabled")
-        } else if current.expected_cli_version != observation.cli_version {
-            Some("external_runtime_cli_version_mismatch")
-        } else if current.executable_sha256 != observation.executable_sha256 {
-            Some("external_runtime_executable_mismatch")
-        } else if current.protocol_schema_sha256 != observation.protocol_schema_sha256 {
-            Some("external_runtime_protocol_schema_mismatch")
+        } else if observation.contract_compatibility
+            == ExternalRuntimeContractCompatibility::Incompatible
+        {
+            Some(
+                observation
+                    .incompatibility_reason_code
+                    .as_deref()
+                    .unwrap_or("external_runtime_required_contract_incompatible"),
+            )
         } else {
             None
         };
+        let compatibility_state = match observation.contract_compatibility {
+            ExternalRuntimeContractCompatibility::Compatible => {
+                ExternalRuntimeCompatibilityState::CompatibleUncertified
+            }
+            ExternalRuntimeContractCompatibility::Incompatible => {
+                ExternalRuntimeCompatibilityState::Incompatible
+            }
+        };
         let mut next = current.clone();
-        next.observed_state = if reason_code.is_none() {
-            ExternalRuntimeObservedState::Ready
-        } else {
-            ExternalRuntimeObservedState::Incompatible
+        next.observed_cli_version = Some(observation.cli_version.clone());
+        next.consumed_contract_revision = Some(observation.consumed_contract_revision.clone());
+        next.compatibility_state = compatibility_state;
+        next.observed_state = match (reason_code, compatibility_state) {
+            (None, _) => ExternalRuntimeObservedState::Ready,
+            (Some(_), ExternalRuntimeCompatibilityState::Incompatible) => {
+                ExternalRuntimeObservedState::Incompatible
+            }
+            (Some(_), _) => ExternalRuntimeObservedState::Degraded,
         };
         next.observed_reason_code = reason_code.map(str::to_owned);
         next.updated_at = observation.observed_at.clone();
@@ -192,6 +211,7 @@ impl CoreEngine {
             .put_external_runtime_registration(&next, Some(current.revision))?;
         Ok(ExternalRuntimeHandshakeDecision {
             accepted: reason_code.is_none(),
+            compatibility_state,
             reason_code: reason_code.map(str::to_owned),
             registration: saved,
         })

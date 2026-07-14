@@ -233,6 +233,29 @@ pub(crate) fn migrate_v39_allow_operator_agent_rounds(
     .map_err(|error| persistence_error("apply schema migration 39", error))
 }
 
+pub(crate) fn migrate_v43_external_runtime_compatibility_state(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE external_runtime_registrations
+         SET observed_state = '\"disconnected\"',
+             record_json = json_remove(
+                 json_set(
+                     record_json,
+                     '$.observedCliVersion', NULL,
+                     '$.consumedContractRevision', NULL,
+                     '$.compatibilityState', 'unassessed',
+                     '$.observedState', 'disconnected',
+                     '$.observedReasonCode', NULL
+                 ),
+                 '$.expectedCliVersion',
+                 '$.executableSha256',
+                 '$.protocolSchemaSha256'
+             );",
+    )
+    .map_err(|error| persistence_error("apply schema migration 43", error))
+}
+
 impl CoordinationStore {
     pub fn put_external_runtime_registration(
         &self,
@@ -1519,10 +1542,10 @@ mod tests {
         ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
         ExternalEndpoint, ExternalEndpointTransport, ExternalInteractionId,
         ExternalInteractionKind, ExternalInteractionRecord, ExternalInteractionStatus,
-        ExternalProcessOwnership, ExternalRuntimeDesiredState, ExternalRuntimeKind,
-        ExternalRuntimeObservedState, ExternalTurnInputPart, ExternalTurnPhase, SessionHandle,
-        SessionKind, SessionState, SessionStatus, ToolProfile, TurnInputProvenance,
-        TurnInputProvenanceKind,
+        ExternalProcessOwnership, ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState,
+        ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalTurnInputPart,
+        ExternalTurnPhase, SessionHandle, SessionKind, SessionState, SessionStatus, ToolProfile,
+        TurnInputProvenance, TurnInputProvenanceKind,
     };
     use serde_json::json;
     use std::fs;
@@ -1814,9 +1837,9 @@ mod tests {
             },
             process_ownership: ExternalProcessOwnership::Attached,
             codex_home_ref: Some("/home/agent/.codex".into()),
-            expected_cli_version: "0.144.1".into(),
-            executable_sha256: "a".repeat(64),
-            protocol_schema_sha256: "b".repeat(64),
+            observed_cli_version: None,
+            consumed_contract_revision: None,
+            compatibility_state: ExternalRuntimeCompatibilityState::Unassessed,
             desired_state: ExternalRuntimeDesiredState::Enabled,
             observed_state: ExternalRuntimeObservedState::Disconnected,
             observed_reason_code: None,

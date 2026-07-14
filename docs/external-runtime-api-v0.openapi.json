@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -2841,6 +2841,14 @@
         "enum": ["attached", "managed"],
         "type": "string"
       },
+      "ExternalRuntimeCompatibilityState": {
+        "enum": ["unassessed", "compatible_uncertified", "incompatible"],
+        "type": "string"
+      },
+      "ExternalRuntimeContractCompatibility": {
+        "enum": ["compatible", "incompatible"],
+        "type": "string"
+      },
       "ExternalRuntimeDesiredState": {
         "enum": ["enabled", "disabled"],
         "type": "string"
@@ -2865,31 +2873,37 @@
       "ExternalRuntimeHandshakeDecision": {
         "properties": {
           "accepted": { "type": "boolean" },
+          "compatibilityState": {
+            "$ref": "#/components/schemas/ExternalRuntimeCompatibilityState"
+          },
           "reasonCode": { "type": ["string", "null"] },
           "registration": {
             "$ref": "#/components/schemas/ExternalRuntimeRegistration"
           }
         },
-        "required": ["accepted", "registration"],
+        "required": ["accepted", "compatibilityState", "registration"],
         "type": "object"
       },
       "ExternalRuntimeHandshakeObservation": {
         "properties": {
           "cliVersion": { "type": "string" },
+          "consumedContractRevision": { "type": "string" },
+          "contractCompatibility": {
+            "$ref": "#/components/schemas/ExternalRuntimeContractCompatibility"
+          },
           "controller": {
             "$ref": "#/components/schemas/ExternalControllerContext"
           },
-          "executableSha256": { "type": "string" },
+          "incompatibilityReasonCode": { "type": ["string", "null"] },
           "observedAt": { "type": "string" },
-          "protocolSchemaSha256": { "type": "string" },
           "runtimeId": { "type": "string" }
         },
         "required": [
           "runtimeId",
           "controller",
           "cliVersion",
-          "executableSha256",
-          "protocolSchemaSha256",
+          "consumedContractRevision",
+          "contractCompatibility",
           "observedAt"
         ],
         "type": "object"
@@ -2908,14 +2922,17 @@
       "ExternalRuntimeRegistration": {
         "properties": {
           "codexHomeRef": { "type": ["string", "null"] },
+          "compatibilityState": {
+            "$ref": "#/components/schemas/ExternalRuntimeCompatibilityState"
+          },
+          "consumedContractRevision": { "type": ["string", "null"] },
           "createdAt": { "type": "string" },
           "desiredState": {
             "$ref": "#/components/schemas/ExternalRuntimeDesiredState"
           },
           "endpoint": { "$ref": "#/components/schemas/ExternalEndpoint" },
-          "executableSha256": { "type": "string" },
-          "expectedCliVersion": { "type": "string" },
           "kind": { "$ref": "#/components/schemas/ExternalRuntimeKind" },
+          "observedCliVersion": { "type": ["string", "null"] },
           "observedReasonCode": { "type": ["string", "null"] },
           "observedState": {
             "$ref": "#/components/schemas/ExternalRuntimeObservedState"
@@ -2923,7 +2940,6 @@
           "processOwnership": {
             "$ref": "#/components/schemas/ExternalProcessOwnership"
           },
-          "protocolSchemaSha256": { "type": "string" },
           "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
           "runtimeId": { "type": "string" },
           "updatedAt": { "type": "string" }
@@ -2933,9 +2949,7 @@
           "kind",
           "endpoint",
           "processOwnership",
-          "expectedCliVersion",
-          "executableSha256",
-          "protocolSchemaSha256",
+          "compatibilityState",
           "desiredState",
           "observedState",
           "revision",

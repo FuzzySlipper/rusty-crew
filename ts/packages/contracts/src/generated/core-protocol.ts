@@ -729,6 +729,10 @@ export type ExternalInteractionStatus = "pending" | "resolved" | "expired" | "lo
 
 export type ExternalProcessOwnership = "attached" | "managed";
 
+export type ExternalRuntimeCompatibilityState = "unassessed" | "compatible_uncertified" | "incompatible";
+
+export type ExternalRuntimeContractCompatibility = "compatible" | "incompatible";
+
 export type ExternalRuntimeDesiredState = "enabled" | "disabled";
 
 export type ExternalRuntimeEventInput = {
@@ -747,16 +751,18 @@ export type ExternalRuntimeEventInput = {
 
 export type ExternalRuntimeHandshakeDecision = {
   accepted: boolean;
+  compatibilityState: ExternalRuntimeCompatibilityState;
   reasonCode?: string | null;
   registration: ExternalRuntimeRegistration;
 };
 
 export type ExternalRuntimeHandshakeObservation = {
   cliVersion: string;
+  consumedContractRevision: string;
+  contractCompatibility: ExternalRuntimeContractCompatibility;
   controller: ExternalControllerContext;
-  executableSha256: string;
+  incompatibilityReasonCode?: string | null;
   observedAt: string;
-  protocolSchemaSha256: string;
   runtimeId: string;
 };
 
@@ -766,16 +772,16 @@ export type ExternalRuntimeObservedState = "disconnected" | "connecting" | "read
 
 export type ExternalRuntimeRegistration = {
   codexHomeRef?: string | null;
+  compatibilityState: ExternalRuntimeCompatibilityState;
+  consumedContractRevision?: string | null;
   createdAt: string;
   desiredState: ExternalRuntimeDesiredState;
   endpoint: ExternalEndpoint;
-  executableSha256: string;
-  expectedCliVersion: string;
   kind: ExternalRuntimeKind;
+  observedCliVersion?: string | null;
   observedReasonCode?: string | null;
   observedState: ExternalRuntimeObservedState;
   processOwnership: ExternalProcessOwnership;
-  protocolSchemaSha256: string;
   revision: number;
   runtimeId: string;
   updatedAt: string;

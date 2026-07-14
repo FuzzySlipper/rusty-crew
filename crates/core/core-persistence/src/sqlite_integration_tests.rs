@@ -2698,9 +2698,10 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
         },
         process_ownership: rusty_crew_core_protocol::ExternalProcessOwnership::Attached,
         codex_home_ref: None,
-        expected_cli_version: "0.144.1".into(),
-        executable_sha256: "a".repeat(64),
-        protocol_schema_sha256: "b".repeat(64),
+        observed_cli_version: Some("0.144.1".into()),
+        consumed_contract_revision: Some("contract-v1".into()),
+        compatibility_state:
+            rusty_crew_core_protocol::ExternalRuntimeCompatibilityState::CompatibleUncertified,
         desired_state: rusty_crew_core_protocol::ExternalRuntimeDesiredState::Enabled,
         observed_state: rusty_crew_core_protocol::ExternalRuntimeObservedState::Ready,
         observed_reason_code: None,

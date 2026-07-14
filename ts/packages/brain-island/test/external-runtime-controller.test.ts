@@ -1530,9 +1530,9 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
         kind: "codex_app_server",
         endpoint: { transport: "unix_web_socket", address: "/tmp/fake.sock" },
         processOwnership: "attached",
-        expectedCliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
-        executableSha256: CODEX_APP_SERVER_PROTOCOL.nativeExecutableSha256,
-        protocolSchemaSha256: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+        observedCliVersion: null,
+        consumedContractRevision: null,
+        compatibilityState: "unassessed",
         desiredState: "enabled",
         observedState: "disconnected",
         revision: 0,
@@ -1563,6 +1563,21 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       },
     });
     await controller.connect("interaction-runtime");
+    const connectedRuntime = await bridge.getExternalRuntime(
+      "interaction-runtime",
+    );
+    assert.equal(
+      connectedRuntime?.compatibilityState,
+      "compatible_uncertified",
+    );
+    assert.equal(
+      connectedRuntime?.observedCliVersion,
+      CODEX_APP_SERVER_PROTOCOL.cliVersion,
+    );
+    assert.equal(
+      connectedRuntime?.consumedContractRevision,
+      CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+    );
     const planDelivery = await bridge.deliverAgentMessage({
       caller: { type: "system", senderAgentId: "operator" },
       deliveryId: "interaction-delivery",
@@ -1752,9 +1767,9 @@ test("controller expires undispatched turns and reports ambiguous native starts 
         kind: "codex_app_server",
         endpoint: { transport: "unix_web_socket", address: "/tmp/fake.sock" },
         processOwnership: "attached",
-        expectedCliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
-        executableSha256: CODEX_APP_SERVER_PROTOCOL.nativeExecutableSha256,
-        protocolSchemaSha256: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+        observedCliVersion: null,
+        consumedContractRevision: null,
+        compatibilityState: "unassessed",
         desiredState: "enabled",
         observedState: "disconnected",
         revision: 0,
@@ -1933,9 +1948,9 @@ async function externalCreationFixture(
       kind: "codex_app_server",
       endpoint: { transport: "unix_web_socket", address: "/tmp/fake.sock" },
       processOwnership: "attached",
-      expectedCliVersion: CODEX_APP_SERVER_PROTOCOL.cliVersion,
-      executableSha256: CODEX_APP_SERVER_PROTOCOL.nativeExecutableSha256,
-      protocolSchemaSha256: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
+      observedCliVersion: null,
+      consumedContractRevision: null,
+      compatibilityState: "unassessed",
       desiredState: "enabled",
       observedState: "disconnected",
       revision: 0,
