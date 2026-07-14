@@ -13,7 +13,7 @@ pub use openai_oauth::{
     OpenAiOauthTokenExchangeResult,
 };
 
-use reqwest::blocking::Client as HttpClient;
+use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
     AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
@@ -27,8 +27,12 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::io::Read;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
+use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
@@ -48,7 +52,7 @@ pub struct ResponsesBrainConfig {
     pub include: Vec<String>,
     pub service_tier: Option<String>,
     pub prompt_cache_key: Option<String>,
-    pub stream_idle_timeout_ms: u64,
+    pub provider_request_timeout_ms: Option<u64>,
 }
 
 impl ResponsesBrainConfig {
@@ -64,7 +68,7 @@ impl ResponsesBrainConfig {
             include: Vec::new(),
             service_tier: None,
             prompt_cache_key: None,
-            stream_idle_timeout_ms: 30_000,
+            provider_request_timeout_ms: None,
         }
     }
 
@@ -896,8 +900,10 @@ pub enum ResponsesStreamError {
     MissingField(&'static str),
     #[error("unknown provider event {0}")]
     UnknownEvent(String),
-    #[error("provider stream idle timeout")]
-    IdleTimeout,
+    #[error("provider request timeout")]
+    RequestTimeout,
+    #[error("provider request cancelled")]
+    Cancelled,
     #[error("provider stream closed before response.completed")]
     ClosedBeforeComplete,
     #[error("provider response failed: {0}")]
@@ -1067,26 +1073,47 @@ fn duration_ms(duration: Duration) -> u64 {
     duration.as_millis().try_into().unwrap_or(u64::MAX)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct ProviderCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl ProviderCancellation {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
 pub struct LiveResponsesClient {
-    client: HttpClient,
+    client: AsyncHttpClient,
     endpoint: String,
     bearer_token: Option<String>,
     account_id: Option<String>,
     is_fedramp_account: bool,
+    provider_request_timeout: Option<Duration>,
+    cancellation: ProviderCancellation,
+    runtime: Runtime,
 }
 
 impl LiveResponsesClient {
     pub fn new(
         base_url: impl Into<String>,
         api_key: Option<String>,
-        idle_timeout_ms: u64,
+        provider_request_timeout_ms: Option<u64>,
+        cancellation: ProviderCancellation,
     ) -> Result<Self, ResponsesStreamError> {
         let base_url = base_url.into();
         let endpoint = format!("{}/responses", base_url.trim_end_matches('/'));
-        let client = HttpClient::builder()
+        let client = AsyncHttpClient::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_millis(idle_timeout_ms))
+            .build()
+            .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_all()
             .build()
             .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
         Ok(Self {
@@ -1095,6 +1122,9 @@ impl LiveResponsesClient {
             bearer_token: api_key,
             account_id: None,
             is_fedramp_account: false,
+            provider_request_timeout: provider_request_timeout_ms.map(Duration::from_millis),
+            cancellation,
+            runtime,
         })
     }
 
@@ -1103,9 +1133,15 @@ impl LiveResponsesClient {
         bearer_token: Option<String>,
         account_id: Option<String>,
         is_fedramp_account: bool,
-        idle_timeout_ms: u64,
+        provider_request_timeout_ms: Option<u64>,
+        cancellation: ProviderCancellation,
     ) -> Result<Self, ResponsesStreamError> {
-        let mut client = Self::new(base_url, bearer_token, idle_timeout_ms)?;
+        let mut client = Self::new(
+            base_url,
+            bearer_token,
+            provider_request_timeout_ms,
+            cancellation,
+        )?;
         client.account_id = account_id;
         client.is_fedramp_account = is_fedramp_account;
         Ok(client)
@@ -1135,48 +1171,55 @@ impl ResponsesClient for LiveResponsesClient {
         if self.is_fedramp_account {
             request = request.header("X-OpenAI-Fedramp", "true");
         }
-        let mut response = request.send().map_err(transport_error)?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().map_err(transport_error)?;
-            return Err(ResponsesStreamError::Transport(format!(
-                "HTTP {status}: {body}"
-            )));
+        self.runtime.block_on(stream_responses_response(
+            request,
+            self.provider_request_timeout,
+            &self.cancellation,
+            on_event,
+        ))
+    }
+}
+
+const PROVIDER_CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+async fn stream_responses_response(
+    request: reqwest::RequestBuilder,
+    provider_request_timeout: Option<Duration>,
+    cancellation: &ProviderCancellation,
+    on_event: &mut dyn FnMut(&ResponsesEvent),
+) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
+    let deadline = provider_request_timeout.map(|timeout| Instant::now() + timeout);
+    let mut send = Box::pin(request.send());
+    let mut response = loop {
+        ensure_provider_request_active(cancellation, deadline)?;
+        let poll_for = provider_poll_duration(deadline)?;
+        match tokio::time::timeout(poll_for, &mut send).await {
+            Ok(result) => break result.map_err(transport_error)?,
+            Err(_) => continue,
         }
-        parse_sse_response(&mut response, on_event)
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let body = read_provider_response_text(&mut response, cancellation, deadline).await?;
+        return Err(ResponsesStreamError::Transport(format!(
+            "HTTP {status}: {body}"
+        )));
     }
+    parse_async_sse_response(&mut response, cancellation, deadline, on_event).await
 }
 
-fn transport_error(error: reqwest::Error) -> ResponsesStreamError {
-    if error.is_timeout() {
-        ResponsesStreamError::IdleTimeout
-    } else {
-        ResponsesStreamError::Transport(error.to_string())
-    }
-}
-
-fn parse_sse_response(
-    response: &mut reqwest::blocking::Response,
+async fn parse_async_sse_response(
+    response: &mut AsyncHttpResponse,
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
     on_event: &mut dyn FnMut(&ResponsesEvent),
 ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
     let mut events = Vec::new();
     let mut data_lines = Vec::new();
     let mut pending_line = String::new();
-    let mut buffer = [0_u8; 8192];
 
-    loop {
-        let read = response.read(&mut buffer).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::TimedOut {
-                ResponsesStreamError::IdleTimeout
-            } else {
-                ResponsesStreamError::Transport(error.to_string())
-            }
-        })?;
-        if read == 0 {
-            break;
-        }
-        let chunk = String::from_utf8_lossy(&buffer[..read]);
-        pending_line.push_str(&chunk);
+    while let Some(chunk) = next_provider_chunk(response, cancellation, deadline).await? {
+        pending_line.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(newline_index) = pending_line.find('\n') {
             let line = pending_line[..newline_index].to_string();
             pending_line.replace_range(..=newline_index, "");
@@ -1189,6 +1232,65 @@ fn parse_sse_response(
     }
     flush_sse_data(&mut data_lines, &mut events, Some(on_event))?;
     Ok(events)
+}
+
+async fn read_provider_response_text(
+    response: &mut AsyncHttpResponse,
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+) -> Result<String, ResponsesStreamError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = next_provider_chunk(response, cancellation, deadline).await? {
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+async fn next_provider_chunk(
+    response: &mut AsyncHttpResponse,
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+) -> Result<Option<Vec<u8>>, ResponsesStreamError> {
+    let mut next = Box::pin(response.chunk());
+    loop {
+        ensure_provider_request_active(cancellation, deadline)?;
+        let poll_for = provider_poll_duration(deadline)?;
+        match tokio::time::timeout(poll_for, &mut next).await {
+            Ok(result) => {
+                return result
+                    .map(|chunk| chunk.map(|value| value.to_vec()))
+                    .map_err(transport_error)
+            }
+            Err(_) => continue,
+        }
+    }
+}
+
+fn ensure_provider_request_active(
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+) -> Result<(), ResponsesStreamError> {
+    if cancellation.is_cancelled() {
+        return Err(ResponsesStreamError::Cancelled);
+    }
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(ResponsesStreamError::RequestTimeout);
+    }
+    Ok(())
+}
+
+fn provider_poll_duration(deadline: Option<Instant>) -> Result<Duration, ResponsesStreamError> {
+    let Some(deadline) = deadline else {
+        return Ok(PROVIDER_CANCELLATION_POLL_INTERVAL);
+    };
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or(ResponsesStreamError::RequestTimeout)?;
+    Ok(remaining.min(PROVIDER_CANCELLATION_POLL_INTERVAL))
+}
+
+fn transport_error(error: reqwest::Error) -> ResponsesStreamError {
+    ResponsesStreamError::Transport(error.to_string())
 }
 
 fn handle_sse_line(
@@ -1715,7 +1817,7 @@ where
         Ok(failed_result(
             &request,
             items,
-            ResponsesStreamError::IdleTimeout,
+            ResponsesStreamError::RequestTimeout,
             metrics.finish(),
             &mut sink,
         ))
@@ -2155,6 +2257,110 @@ mod tests {
         SessionStatus, ToolProfile,
     };
     use rusty_crew_core_protocol::{CoreEvent, RuntimeBufferHandle};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn delayed_responses_server(delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test provider");
+        let address = listener.local_addr().expect("test provider address");
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept provider request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).expect("read provider request");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+            thread::sleep(delay);
+            let body = concat!(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+                "data: [DONE]\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        format!("http://{address}/v1")
+    }
+
+    fn live_responses_request() -> ResponsesRequest {
+        ResponsesRequest {
+            model: "test-model".to_string(),
+            instructions: None,
+            previous_response_id: None,
+            input: Vec::new(),
+            tools: Vec::new(),
+            tool_choice: json!("auto"),
+            parallel_tool_calls: true,
+            reasoning: None,
+            store: false,
+            stream: true,
+            include: Vec::new(),
+            service_tier: None,
+            prompt_cache_key: None,
+            text: None,
+        }
+    }
+
+    #[test]
+    fn live_provider_has_no_request_deadline_by_default() {
+        let base_url = delayed_responses_server(Duration::from_millis(100));
+        let mut client =
+            LiveResponsesClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+
+        let events = client
+            .stream(live_responses_request())
+            .expect("uncapped provider request should complete");
+
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ResponsesEvent::TextDelta(text) if text == "ok")));
+    }
+
+    #[test]
+    fn configured_provider_request_deadline_remains_available() {
+        let base_url = delayed_responses_server(Duration::from_millis(200));
+        let mut client =
+            LiveResponsesClient::new(base_url, None, Some(50), ProviderCancellation::default())
+                .expect("create live client");
+
+        assert_eq!(
+            client.stream(live_responses_request()),
+            Err(ResponsesStreamError::RequestTimeout)
+        );
+    }
+
+    #[test]
+    fn cancellation_interrupts_an_uncapped_provider_request() {
+        let base_url = delayed_responses_server(Duration::from_secs(2));
+        let cancellation = ProviderCancellation::default();
+        let cancel_from_thread = cancellation.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancel_from_thread.cancel();
+        });
+        let mut client = LiveResponsesClient::new(base_url, None, None, cancellation)
+            .expect("create live client");
+        let started_at = Instant::now();
+
+        assert_eq!(
+            client.stream(live_responses_request()),
+            Err(ResponsesStreamError::Cancelled)
+        );
+        assert!(
+            started_at.elapsed() < Duration::from_millis(500),
+            "cancellation should interrupt the active HTTP future promptly"
+        );
+    }
 
     #[test]
     fn request_builder_adapts_neutral_tools_and_provider_state() {
@@ -2813,7 +3019,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_identical_function_calls_fail_before_idle_timeout() {
+    fn repeated_identical_function_calls_fail_before_provider_request_timeout() {
         let repeated_call = || {
             Ok(vec![
                 ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
@@ -2870,7 +3076,7 @@ mod tests {
         for script in [
             Ok(vec![ResponsesEvent::Failed("rate limited".to_string())]),
             Ok(vec![ResponsesEvent::Incomplete("max output".to_string())]),
-            Err(ResponsesStreamError::IdleTimeout),
+            Err(ResponsesStreamError::RequestTimeout),
             Ok(vec![ResponsesEvent::TextDelta("partial".to_string())]),
         ] {
             let mut brain = brain_with(

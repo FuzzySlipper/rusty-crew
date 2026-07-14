@@ -23,6 +23,7 @@ import type { BrainToolResolver } from "./tool-session-selection.js";
 import type { BrainHostContext } from "./brain-host-context.js";
 import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
+import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
 
 export function createPiAgentBrainHost(
@@ -144,6 +145,7 @@ function createRustPiAgentBrainHostExecutor(
           `${implementation.moduleLabel} brain requires native bridge`,
         );
       }
+      const requestTimeoutMs = providerRequestTimeoutMs("pi-agent");
       const submitEvent =
         implementation.liveEvents === false
           ? undefined
@@ -157,7 +159,9 @@ function createRustPiAgentBrainHostExecutor(
         messages: rustPiAgentMessages(wake),
         config: {
           model: context.profile.profile.modelConfig.modelName,
-          streamIdleTimeoutMs: rustPiAgentStreamIdleTimeoutMs(),
+          ...(requestTimeoutMs === undefined
+            ? {}
+            : { providerRequestTimeoutMs: requestTimeoutMs }),
           wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
           temperatureMilli:
             context.profile.profile.modelConfig.temperatureMilli,
@@ -209,21 +213,6 @@ function createRustPiAgentBrainHostExecutor(
       );
     },
   };
-}
-
-function rustPiAgentStreamIdleTimeoutMs(
-  env: Partial<
-    Pick<NodeJS.ProcessEnv, "RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS">
-  > = process.env,
-): number {
-  const configured = Number.parseInt(
-    env.RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS ?? "",
-    10,
-  );
-  if (Number.isFinite(configured) && configured > 0) {
-    return configured;
-  }
-  return 30_000;
 }
 
 function rustPiAgentMessages(

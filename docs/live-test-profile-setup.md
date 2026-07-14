@@ -43,7 +43,8 @@ Production hosts always run the live Rust brain path. Keep the provider stream
 idle timeout explicit in live certification environments:
 
 ```bash
-RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=30000
+# Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
+# RUSTY_CREW_PI_AGENT_PROVIDER_REQUEST_TIMEOUT_MS=30000
 ```
 
 This value belongs in the local debug service environment file, normally
@@ -148,7 +149,8 @@ provider with:
 - a typed `openai_oauth` credential stored through the provider OAuth admin
   flow;
 - optional live-certification idle budget:
-  `RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=300000`.
+  `RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS=300000`. Leave it
+  unset for the normal cancellation-first runtime.
 
 After the OAuth provider is active, create a second profile such as
 `tester-reasoning` using the same create-profile route with

@@ -204,7 +204,7 @@ Provider metadata should contain routing and non-secret behavior:
   },
   "request": {
     "base_url": "https://chatgpt.com/backend-api/codex",
-    "stream_idle_timeout_ms": 300000,
+    "provider_request_timeout_ms": null,
     "supports_streaming": true,
     "supports_websockets": false
   }

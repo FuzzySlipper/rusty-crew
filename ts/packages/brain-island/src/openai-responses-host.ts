@@ -19,24 +19,7 @@ import { runBufferedBrainHost } from "./buffered-brain-host.js";
 import type { BrainHostContext } from "./brain-host-context.js";
 import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
-
-export function openAiResponsesStreamIdleTimeoutMs(
-  env: Partial<
-    Pick<
-      NodeJS.ProcessEnv,
-      "RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS"
-    >
-  > = process.env,
-): number {
-  const configured = Number.parseInt(
-    env.RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS ?? "",
-    10,
-  );
-  if (Number.isFinite(configured) && configured > 0) {
-    return configured;
-  }
-  return 300_000;
-}
+import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 
 export type OpenAiResponsesClientConfig = NonNullable<
   OpenAiResponsesBrainRunInput["client"]
@@ -234,6 +217,7 @@ export async function createOpenAiResponsesBrainHost(
       if (context.bridge === undefined) {
         throw new Error("openai-responses brain requires native bridge");
       }
+      const requestTimeoutMs = providerRequestTimeoutMs("openai-responses");
       const input = {
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
@@ -243,7 +227,9 @@ export async function createOpenAiResponsesBrainHost(
         config: {
           model: context.profile.profile.modelConfig.modelName,
           instructions: responsesInstructions(wake),
-          streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
+          ...(requestTimeoutMs === undefined
+            ? {}
+            : { providerRequestTimeoutMs: requestTimeoutMs }),
           wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
         },
         client: responsesClientConfig,

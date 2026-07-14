@@ -221,7 +221,8 @@ export interface RuntimeBrainModuleDiagnostics {
     providerKind: string;
     protocol: "responses" | "chat_completions" | string;
     clientMode?: "fake" | "live" | string;
-    streamIdleTimeoutMs?: number;
+    providerRequestTimeoutMode?: "disabled" | "configured";
+    providerRequestTimeoutMs?: number;
     modelId: string;
     status?: string;
     baseUrl?: string;

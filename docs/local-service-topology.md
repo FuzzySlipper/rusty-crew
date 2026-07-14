@@ -60,7 +60,8 @@ provider request fails visibly after 30 seconds by default; this is an HTTP
 stream-idle ceiling, not a whole-turn or tool-loop ceiling:
 
 ```text
-RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=30000
+# Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
+# RUSTY_CREW_PI_AGENT_PROVIDER_REQUEST_TIMEOUT_MS=30000
 ```
 
 Deterministic provider clients are available only through explicit smoke/test

@@ -5,7 +5,8 @@
 //! and provider stream parsing. Coordination, profile loading, tool execution,
 //! and service-host wiring stay outside this crate.
 
-use reqwest::blocking::Client as HttpClient;
+use reqwest::blocking::Client as BlockingHttpClient;
+use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_protocol::{
     BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure,
     BrainWakeStreamItem, CoreErrorKind, ModelProviderRecord, SessionId,
@@ -14,9 +15,13 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::error::Error as StdError;
 use std::io::Read;
-use std::time::Duration;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant};
+use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "pi-agent-rust";
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
@@ -158,12 +163,12 @@ pub fn resolve_den_router_model<S: DenRouterModelSource>(
 #[derive(Debug, Clone)]
 pub struct LiveDenRouterModelSource {
     base_url: String,
-    client: HttpClient,
+    client: BlockingHttpClient,
 }
 
 impl LiveDenRouterModelSource {
     pub fn new(base_url: Option<String>) -> Result<Self, DenRouterSelectionError> {
-        let client = HttpClient::builder()
+        let client = BlockingHttpClient::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .build()
@@ -289,7 +294,7 @@ pub struct PiAgentChatConfig {
     pub model: String,
     pub temperature_milli: Option<u32>,
     pub max_output_tokens: Option<u32>,
-    pub stream_idle_timeout_ms: u64,
+    pub provider_request_timeout_ms: Option<u64>,
 }
 
 impl PiAgentChatConfig {
@@ -298,7 +303,7 @@ impl PiAgentChatConfig {
             model: model.into(),
             temperature_milli: None,
             max_output_tokens: Some(128),
-            stream_idle_timeout_ms: 30_000,
+            provider_request_timeout_ms: None,
         }
     }
 
@@ -307,7 +312,7 @@ impl PiAgentChatConfig {
             model: provider.model_id.clone(),
             temperature_milli: provider.temperature_milli,
             max_output_tokens: provider.max_output_tokens,
-            stream_idle_timeout_ms: 30_000,
+            provider_request_timeout_ms: None,
         }
     }
 }
@@ -1215,8 +1220,10 @@ fn non_empty_event(
 pub enum ChatCompletionsStreamError {
     #[error("provider stream missing {0}")]
     MissingField(&'static str),
-    #[error("provider stream idle timeout")]
-    IdleTimeout,
+    #[error("provider request timeout")]
+    RequestTimeout,
+    #[error("provider request cancelled")]
+    Cancelled,
     #[error("provider stream closed before [DONE] or finish reason")]
     ClosedBeforeFinish,
     #[error("provider returned error: {0}")]
@@ -1244,29 +1251,53 @@ pub trait ChatCompletionsClient {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct ProviderCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl ProviderCancellation {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
 pub struct LiveChatCompletionsClient {
-    client: HttpClient,
+    client: AsyncHttpClient,
     endpoint: String,
     bearer_token: Option<String>,
+    provider_request_timeout: Option<Duration>,
+    cancellation: ProviderCancellation,
+    runtime: Runtime,
 }
 
 impl LiveChatCompletionsClient {
     pub fn new(
         base_url: impl Into<String>,
         api_key: Option<String>,
-        idle_timeout_ms: u64,
+        provider_request_timeout_ms: Option<u64>,
+        cancellation: ProviderCancellation,
     ) -> Result<Self, ChatCompletionsStreamError> {
         let endpoint = chat_completions_endpoint(&base_url.into());
-        let client = HttpClient::builder()
+        let client = AsyncHttpClient::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_millis(idle_timeout_ms))
+            .build()
+            .map_err(|error| ChatCompletionsStreamError::Transport(error.to_string()))?;
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_all()
             .build()
             .map_err(|error| ChatCompletionsStreamError::Transport(error.to_string()))?;
         Ok(Self {
             client,
             endpoint,
             bearer_token: api_key,
+            provider_request_timeout: provider_request_timeout_ms.map(Duration::from_millis),
+            cancellation,
+            runtime,
         })
     }
 }
@@ -1288,16 +1319,111 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
         if let Some(bearer_token) = &self.bearer_token {
             request = request.bearer_auth(bearer_token);
         }
-        let mut response = request.send().map_err(transport_error)?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().map_err(transport_error)?;
-            return Err(ChatCompletionsStreamError::Transport(format!(
-                "HTTP {status}: {body}"
-            )));
-        }
-        parse_sse_response(&mut response, on_event)
+        self.runtime.block_on(stream_chat_completions_response(
+            request,
+            self.provider_request_timeout,
+            &self.cancellation,
+            on_event,
+        ))
     }
+}
+
+const PROVIDER_CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+async fn stream_chat_completions_response(
+    request: reqwest::RequestBuilder,
+    provider_request_timeout: Option<Duration>,
+    cancellation: &ProviderCancellation,
+    on_event: &mut dyn FnMut(&ChatCompletionsEvent),
+) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
+    let deadline = provider_request_timeout.map(|timeout| Instant::now() + timeout);
+    let mut send = Box::pin(request.send());
+    let mut response = loop {
+        ensure_provider_request_active(cancellation, deadline)?;
+        let poll_for = provider_poll_duration(deadline)?;
+        match tokio::time::timeout(poll_for, &mut send).await {
+            Ok(result) => break result.map_err(transport_error)?,
+            Err(_) => continue,
+        }
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let body = read_provider_response_text(&mut response, cancellation, deadline).await?;
+        return Err(ChatCompletionsStreamError::Transport(format!(
+            "HTTP {status}: {body}"
+        )));
+    }
+    parse_async_sse_response(&mut response, cancellation, deadline, on_event).await
+}
+
+async fn parse_async_sse_response(
+    response: &mut AsyncHttpResponse,
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+    on_event: &mut dyn FnMut(&ChatCompletionsEvent),
+) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
+    let mut parser = ChatCompletionsSseParser::default();
+    while let Some(chunk) = next_provider_chunk(response, cancellation, deadline).await? {
+        parser.push_text(&String::from_utf8_lossy(&chunk), on_event)?;
+    }
+    parser.finish(on_event)
+}
+
+async fn read_provider_response_text(
+    response: &mut AsyncHttpResponse,
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+) -> Result<String, ChatCompletionsStreamError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = next_provider_chunk(response, cancellation, deadline).await? {
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+async fn next_provider_chunk(
+    response: &mut AsyncHttpResponse,
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+) -> Result<Option<Vec<u8>>, ChatCompletionsStreamError> {
+    let mut next = Box::pin(response.chunk());
+    loop {
+        ensure_provider_request_active(cancellation, deadline)?;
+        let poll_for = provider_poll_duration(deadline)?;
+        match tokio::time::timeout(poll_for, &mut next).await {
+            Ok(result) => {
+                return result
+                    .map(|chunk| chunk.map(|value| value.to_vec()))
+                    .map_err(transport_error)
+            }
+            Err(_) => continue,
+        }
+    }
+}
+
+fn ensure_provider_request_active(
+    cancellation: &ProviderCancellation,
+    deadline: Option<Instant>,
+) -> Result<(), ChatCompletionsStreamError> {
+    if cancellation.is_cancelled() {
+        return Err(ChatCompletionsStreamError::Cancelled);
+    }
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(ChatCompletionsStreamError::RequestTimeout);
+    }
+    Ok(())
+}
+
+fn provider_poll_duration(
+    deadline: Option<Instant>,
+) -> Result<Duration, ChatCompletionsStreamError> {
+    let Some(deadline) = deadline else {
+        return Ok(PROVIDER_CANCELLATION_POLL_INTERVAL);
+    };
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or(ChatCompletionsStreamError::RequestTimeout)?;
+    Ok(remaining.min(PROVIDER_CANCELLATION_POLL_INTERVAL))
 }
 
 fn chat_completions_endpoint(base_url: &str) -> String {
@@ -1310,18 +1436,7 @@ fn chat_completions_endpoint(base_url: &str) -> String {
 }
 
 fn transport_error(error: reqwest::Error) -> ChatCompletionsStreamError {
-    if error.is_timeout() {
-        ChatCompletionsStreamError::IdleTimeout
-    } else {
-        ChatCompletionsStreamError::Transport(error.to_string())
-    }
-}
-
-fn parse_sse_response(
-    response: &mut reqwest::blocking::Response,
-    on_event: &mut dyn FnMut(&ChatCompletionsEvent),
-) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
-    parse_sse_reader(response, on_event)
+    ChatCompletionsStreamError::Transport(error.to_string())
 }
 
 pub fn parse_sse_reader<R: Read>(
@@ -1344,29 +1459,7 @@ pub fn parse_sse_reader<R: Read>(
 }
 
 fn io_transport_error(error: std::io::Error) -> ChatCompletionsStreamError {
-    if error_chain_is_timeout(&error) {
-        ChatCompletionsStreamError::IdleTimeout
-    } else {
-        ChatCompletionsStreamError::Transport(error.to_string())
-    }
-}
-
-fn error_chain_is_timeout(error: &(dyn StdError + 'static)) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    if message.contains("timed out") || message.contains("timeout") {
-        return true;
-    }
-    if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
-        if io_error.kind() == std::io::ErrorKind::TimedOut {
-            return true;
-        }
-    }
-    if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
-        if reqwest_error.is_timeout() {
-            return true;
-        }
-    }
-    error.source().is_some_and(error_chain_is_timeout)
+    ChatCompletionsStreamError::Transport(error.to_string())
 }
 
 #[derive(Default)]
@@ -1636,10 +1729,103 @@ fn token_usage_from_provider_value(value: &Value) -> Option<ChatTokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Cursor, Read};
+    use std::io::{Cursor, Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     fn parse(input: &str) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
         parse_sse_reader(&mut Cursor::new(input.as_bytes()), &mut |_| {})
+    }
+
+    fn delayed_chat_completions_server(delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test provider");
+        let address = listener.local_addr().expect("test provider address");
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept provider request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).expect("read provider request");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+            thread::sleep(delay);
+            let body = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: [DONE]\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        format!("http://{address}/v1")
+    }
+
+    fn live_chat_request() -> ChatCompletionsRequest {
+        ChatCompletionsRequestBuilder::new(PiAgentChatConfig::new("test-model"))
+            .build(vec![ChatCompletionMessage::user("hello")])
+    }
+
+    #[test]
+    fn live_provider_has_no_request_deadline_by_default() {
+        let base_url = delayed_chat_completions_server(Duration::from_millis(100));
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+
+        let events = client
+            .stream(live_chat_request())
+            .expect("uncapped provider request should complete");
+
+        assert!(events.iter().any(
+            |event| matches!(event, ChatCompletionsEvent::ContentDelta(text) if text == "ok")
+        ));
+    }
+
+    #[test]
+    fn configured_provider_request_deadline_remains_available() {
+        let base_url = delayed_chat_completions_server(Duration::from_millis(200));
+        let mut client = LiveChatCompletionsClient::new(
+            base_url,
+            None,
+            Some(50),
+            ProviderCancellation::default(),
+        )
+        .expect("create live client");
+
+        assert_eq!(
+            client.stream(live_chat_request()),
+            Err(ChatCompletionsStreamError::RequestTimeout)
+        );
+    }
+
+    #[test]
+    fn cancellation_interrupts_an_uncapped_provider_request() {
+        let base_url = delayed_chat_completions_server(Duration::from_secs(2));
+        let cancellation = ProviderCancellation::default();
+        let cancel_from_thread = cancellation.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancel_from_thread.cancel();
+        });
+        let mut client = LiveChatCompletionsClient::new(base_url, None, None, cancellation)
+            .expect("create live client");
+        let started_at = Instant::now();
+
+        assert_eq!(
+            client.stream(live_chat_request()),
+            Err(ChatCompletionsStreamError::Cancelled)
+        );
+        assert!(
+            started_at.elapsed() < Duration::from_millis(500),
+            "cancellation should interrupt the active HTTP future promptly"
+        );
     }
 
     #[test]
@@ -1648,7 +1834,7 @@ mod tests {
             model: "deepseek-flash".to_string(),
             temperature_milli: Some(500),
             max_output_tokens: Some(256),
-            stream_idle_timeout_ms: 45_000,
+            provider_request_timeout_ms: Some(45_000),
         })
         .tools(vec![NeutralBrainTool {
             name: "lookup".to_string(),

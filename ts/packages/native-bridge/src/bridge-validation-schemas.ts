@@ -1084,7 +1084,7 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
       {
         model: Type.String(),
         instructions: Type.Optional(Type.String()),
-        streamIdleTimeoutMs: Type.Optional(Type.Number()),
+        providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
       },
       { additionalProperties: true },
     ),
@@ -1146,7 +1146,7 @@ export const piAgentBrainRunInputSchema = Type.Object(
     config: Type.Object(
       {
         model: Type.String(),
-        streamIdleTimeoutMs: Type.Optional(Type.Number()),
+        providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
         wakeTimeoutMs: Type.Optional(Type.Number()),
         temperatureMilli: Type.Optional(Type.Number()),
         maxOutputTokens: Type.Optional(Type.Number()),

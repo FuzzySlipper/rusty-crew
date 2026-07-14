@@ -126,7 +126,8 @@ RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
 
 # Optional when direct OpenAI OAuth Responses profiles are active.
 # Direct OAuth uses provider credential envelopes, not ALLOW_NO_KEY.
-RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=300000
+# Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
+# RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS=300000
 ```
 
 The database URL value must come from a secret env source such as:

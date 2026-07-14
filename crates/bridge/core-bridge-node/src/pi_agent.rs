@@ -10,6 +10,7 @@ use rusty_crew_pi_agent_brain::{
     LiveChatCompletionsClient, NeutralBrainTool as PiAgentNeutralBrainTool,
     PendingChatFunctionCall, PiAgentBrainLoop, PiAgentBrainLoopConfig, PiAgentBrainLoopInput,
     PiAgentChatConfig, PiAgentFinalMessage, PiAgentNeutralToolExecutor, PiAgentToolOutput,
+    ProviderCancellation,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -41,7 +42,7 @@ struct JsPiAgentNeutralTool {
 struct JsPiAgentBrainConfig {
     model: String,
     #[serde(default)]
-    stream_idle_timeout_ms: Option<u64>,
+    provider_request_timeout_ms: Option<u64>,
     #[serde(default)]
     wake_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -104,6 +105,7 @@ pub(crate) struct PiAgentTransportMetrics {
 pub(crate) struct PiAgentBufferedRunPayload {
     transport_metrics: Option<PiAgentTransportMetrics>,
     provider_finished: bool,
+    provider_cancellation: ProviderCancellation,
 }
 
 pub(crate) type PiAgentBufferedRunRegistry = BufferedBrainTurnRegistry<PiAgentBufferedRunPayload>;
@@ -167,7 +169,9 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
     let max_items = max_items.unwrap_or(64).max(1) as usize;
     let terminal = buffered_runs
         .with_run_mut(&wake_id, |run| {
-            run.coordinator.timeout_if_due();
+            if run.coordinator.timeout_if_due() {
+                run.payload.provider_cancellation.cancel();
+            }
             let drain = run.coordinator.drain_stream(max_items);
             let tool_requests = run.coordinator.drain_host_tool_requests(128);
             let terminal = drain.terminal && run.payload.provider_finished;
@@ -256,6 +260,7 @@ pub(crate) fn cancel_pi_agent_brain_json(
     })?;
     let output = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
+            run.payload.provider_cancellation.cancel();
             run.coordinator
                 .cancel(input.reason_code, input.summary)
                 .map(|()| {
@@ -333,6 +338,9 @@ fn run_pi_agent_brain_with_buffered_tools(
             format!("invalid pi-agent brain input JSON: {error}"),
         )
     })?;
+    let provider_cancellation = buffered_runs
+        .with_run_mut(&wake_id, |run| run.payload.provider_cancellation.clone())
+        .map_err(brain_runtime_error_to_napi)?;
     let chat_config = pi_agent_chat_config(&input.config);
     let loop_config = PiAgentBrainLoopConfig {
         max_tool_rounds: input.config.max_tool_rounds.unwrap_or(8),
@@ -387,7 +395,8 @@ fn run_pi_agent_brain_with_buffered_tools(
             let client = LiveChatCompletionsClient::new(
                 base_url,
                 api_key,
-                chat_config.stream_idle_timeout_ms,
+                chat_config.provider_request_timeout_ms,
+                provider_cancellation,
             )
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
             let mut brain = PiAgentBrainLoop::new(
@@ -410,7 +419,7 @@ fn pi_agent_chat_config(config: &JsPiAgentBrainConfig) -> PiAgentChatConfig {
         model: config.model.clone(),
         temperature_milli: config.temperature_milli,
         max_output_tokens: config.max_output_tokens,
-        stream_idle_timeout_ms: config.stream_idle_timeout_ms.unwrap_or(30_000),
+        provider_request_timeout_ms: config.provider_request_timeout_ms,
     }
 }
 
@@ -543,6 +552,7 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
                     )));
                 }
                 if run.coordinator.timeout_if_due() {
+                    run.payload.provider_cancellation.cancel();
                     return Some(PiAgentToolOutput::timed_out(
                         run.coordinator
                             .terminal()

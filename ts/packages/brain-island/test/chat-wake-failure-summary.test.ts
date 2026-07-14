@@ -41,7 +41,7 @@ test("chat wake failure summary reports partial text, tool state, and unsuccessf
   ];
 
   const summary = buildChatWakeFailureSummaryFromEvents({
-    failureSummary: "provider stream idle timeout",
+    failureSummary: "provider request timeout",
     events,
     sessionId: "session-a",
     toolDebugLookup: {
@@ -64,7 +64,7 @@ test("chat wake failure summary reports partial text, tool state, and unsuccessf
 
   assert.match(
     summary,
-    /Assistant turn failed before it could finish: provider stream idle timeout/,
+    /Assistant turn failed before it could finish: provider request timeout/,
   );
   assert.match(summary, /Partial response before failure: Half done/);
   assert.match(summary, /Failed tool calls: web_fetch\./);

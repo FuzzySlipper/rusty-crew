@@ -39,8 +39,8 @@ struct JsOpenAiResponsesBrainConfig {
     model: String,
     #[serde(default)]
     instructions: Option<String>,
-    #[serde(default = "default_responses_stream_idle_timeout_ms")]
-    stream_idle_timeout_ms: u64,
+    #[serde(default)]
+    provider_request_timeout_ms: Option<u64>,
     #[serde(default)]
     wake_timeout_ms: Option<u64>,
 }
@@ -61,10 +61,6 @@ enum JsOpenAiResponsesClientConfig {
         #[serde(default)]
         oauth_credential_secret: Option<String>,
     },
-}
-
-fn default_responses_stream_idle_timeout_ms() -> u64 {
-    30_000
 }
 
 pub struct OpenAiOauthCodeExchangeTask {
@@ -134,6 +130,7 @@ pub(crate) struct OpenAiResponsesBufferedRunPayload {
     transport_metrics: Option<ResponsesTransportMetrics>,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
     provider_finished: bool,
+    provider_cancellation: ResponsesProviderCancellation,
 }
 
 pub(crate) type OpenAiResponsesBufferedRunRegistry =
@@ -261,7 +258,9 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
 ) -> napi::Result<String> {
     let max_items = max_items.unwrap_or(64).max(1) as usize;
     let terminal = buffered_runs.with_run_mut(&wake_id, |run| {
-        run.coordinator.timeout_if_due();
+        if run.coordinator.timeout_if_due() {
+            run.payload.provider_cancellation.cancel();
+        }
         let drain = run.coordinator.drain_stream(max_items);
         let tool_requests = run.coordinator.drain_host_tool_requests(128);
         let terminal = drain.terminal && run.payload.provider_finished;
@@ -311,6 +310,7 @@ pub(crate) fn cancel_openai_responses_brain_json(
         })?;
     let output = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
+            run.payload.provider_cancellation.cancel();
             run.coordinator
                 .cancel(input.reason_code, input.summary)
                 .map(|()| {
@@ -501,6 +501,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                     });
                 }
                 if run.coordinator.timeout_if_due() {
+                    run.payload.provider_cancellation.cancel();
                     return Some(NeutralToolOutput {
                         output: run
                             .coordinator
@@ -633,7 +634,12 @@ fn openai_oauth_exchange_error_json(error: OpenAiOauthError) -> serde_json::Valu
 
 #[cfg(test)]
 fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponsesBrainRunOutput> {
-    run_openai_responses_brain_internal(input_json, None, EchoNeutralToolExecutor)
+    run_openai_responses_brain_internal(
+        input_json,
+        None,
+        EchoNeutralToolExecutor,
+        ResponsesProviderCancellation::default(),
+    )
 }
 
 fn run_openai_responses_brain_with_buffered_tools(
@@ -642,6 +648,9 @@ fn run_openai_responses_brain_with_buffered_tools(
     input_json: String,
     sink: &mut dyn FnMut(BrainWakeStreamItem),
 ) -> napi::Result<OpenAiResponsesBrainRunOutput> {
+    let provider_cancellation = buffered_runs
+        .with_run_mut(&wake_id, |run| run.payload.provider_cancellation.clone())
+        .map_err(brain_runtime_error_to_napi)?;
     run_openai_responses_brain_internal(
         input_json,
         Some(sink),
@@ -649,6 +658,7 @@ fn run_openai_responses_brain_with_buffered_tools(
             wake_id,
             buffered_runs,
         },
+        provider_cancellation,
     )
 }
 
@@ -670,6 +680,7 @@ fn run_openai_responses_brain_internal<T>(
     input_json: String,
     mut sink: Option<&mut dyn FnMut(BrainWakeStreamItem)>,
     tool_executor: T,
+    provider_cancellation: ResponsesProviderCancellation,
 ) -> napi::Result<OpenAiResponsesBrainRunOutput>
 where
     T: NeutralToolExecutor,
@@ -683,7 +694,7 @@ where
         })?;
     let mut config = ResponsesBrainConfig::replay(input.config.model);
     config.instructions = input.config.instructions;
-    config.stream_idle_timeout_ms = input.config.stream_idle_timeout_ms;
+    config.provider_request_timeout_ms = input.config.provider_request_timeout_ms;
     let descriptors = if input.tools.is_empty() {
         input
             .body_state
@@ -788,7 +799,8 @@ where
                 bearer_token,
                 account_id,
                 is_fedramp_account,
-                config.stream_idle_timeout_ms,
+                config.provider_request_timeout_ms,
+                provider_cancellation,
             )
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
             let mut brain = ResponsesReplayBrain::new(client, tool_executor, config, descriptors);

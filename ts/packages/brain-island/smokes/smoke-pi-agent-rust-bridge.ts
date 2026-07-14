@@ -114,7 +114,7 @@ function piAgentWakeInput(
     config: {
       model: "deepseek-flash",
       wakeTimeoutMs: 10_000,
-      streamIdleTimeoutMs: 10_000,
+      providerRequestTimeoutMs: 10_000,
     },
     client: { mode: "fake" as const },
   };

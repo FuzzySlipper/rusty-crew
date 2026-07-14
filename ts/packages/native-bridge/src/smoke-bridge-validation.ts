@@ -332,7 +332,7 @@ const input: OpenAiResponsesBrainRunInput = {
   bodyState,
   config: {
     model: "gpt",
-    streamIdleTimeoutMs: 30_000,
+    providerRequestTimeoutMs: 30_000,
   },
   client: { mode: "fake" },
 };

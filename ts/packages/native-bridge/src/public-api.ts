@@ -216,7 +216,7 @@ export interface OpenAiResponsesBrainRunInput {
   config: {
     model: string;
     instructions?: string;
-    streamIdleTimeoutMs?: number;
+    providerRequestTimeoutMs?: number;
     wakeTimeoutMs?: number;
   };
   client?:
@@ -258,7 +258,7 @@ export interface PiAgentBrainRunInput {
   }>;
   config: {
     model: string;
-    streamIdleTimeoutMs?: number;
+    providerRequestTimeoutMs?: number;
     wakeTimeoutMs?: number;
     temperatureMilli?: number;
     maxOutputTokens?: number;

@@ -16,7 +16,7 @@ The host reports a configured Responses stream idle budget, defaulting to 120
 seconds, so operators can see what first-token/read window the profile expects:
 
 ```env
-RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=120000
+RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS=120000
 ```
 
 ## Deterministic Service Smoke
@@ -48,7 +48,7 @@ and complete the OpenAI login flow so the provider has a redacted
 for certification:
 
 ```bash
-RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=300000 \
+RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS=300000 \
 npm run service:start
 ```
 
@@ -87,7 +87,8 @@ Expected behavior:
 - `/v1/admin/diagnostics/provider-state` reports
   `modelProvider.clientMode: "live"` for the Responses profile;
 - the same diagnostic reports the effective
-  `modelProvider.streamIdleTimeoutMs`. Provider/router transports can still
+  `modelProvider.providerRequestTimeoutMode` and, when configured,
+  `modelProvider.providerRequestTimeoutMs`. Provider/router transports can still
   surface lower-level idle failures before that budget when they do not open the
   SSE stream or send heartbeat/data bytes;
 - production profiles always use the live Rust host; no live/fake toggle exists.

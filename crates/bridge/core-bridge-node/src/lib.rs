@@ -119,7 +119,8 @@ use rusty_crew_openai_responses_brain::{
     openai_oauth_envelope_from_exchange_result, resolve_openai_oauth_bearer, FakeResponsesClient,
     LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor, NeutralToolOutput,
     OpenAiOauthClient, OpenAiOauthCodeExchangeRequest, OpenAiOauthError, OpenAiOauthRefreshPolicy,
-    OpenAiOauthSecretStore, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
+    OpenAiOauthSecretStore, PendingResponsesFunctionCall,
+    ProviderCancellation as ResponsesProviderCancellation, ResponsesBrainConfig, ResponsesEvent,
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
 use rusty_crew_roleplay_core::{

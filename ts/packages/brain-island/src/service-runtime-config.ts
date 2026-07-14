@@ -48,7 +48,7 @@ import {
 } from "./coordination-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
 import { createBuiltInBrainHost } from "./built-in-brain-host.js";
-import { openAiResponsesStreamIdleTimeoutMs } from "./openai-responses-host.js";
+import { providerRequestTimeoutDiagnostics } from "./provider-request-timeout.js";
 import {
   resolveBrainCatalogSelection,
   type BrainModuleSelection,
@@ -1400,9 +1400,7 @@ function brainModuleDiagnostics(input: {
       ...(input.selection.moduleId === "openai-responses"
         ? { clientMode: "live" }
         : {}),
-      ...(input.selection.moduleId === "openai-responses"
-        ? { streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs() }
-        : {}),
+      ...providerRequestTimeoutDiagnostics(input.selection.moduleId),
       modelId: input.profile.profile.modelConfig.modelName,
       ...(input.profile.profile.modelConfig.baseUrl === undefined
         ? {}

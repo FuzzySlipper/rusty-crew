@@ -29,7 +29,7 @@ try {
       messages: [{ role: "user", content: "Produce one response." }],
       config: {
         model: "silent-upstream",
-        streamIdleTimeoutMs: 200,
+        providerRequestTimeoutMs: 200,
         wakeTimeoutMs: 2_000,
         maxOutputTokens: 16,
       },
@@ -54,7 +54,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.ok(terminal, "silent upstream must produce a terminal drain");
-  assert.match(terminal.error ?? "", /provider stream idle timeout/);
+  assert.match(terminal.error ?? "", /provider request timeout/);
   const elapsedMs = Date.now() - startedAt;
   assert.ok(elapsedMs >= 150, `timeout fired too early at ${elapsedMs}ms`);
   assert.ok(elapsedMs < 2_000, `host wake ceiling won at ${elapsedMs}ms`);
