@@ -12,6 +12,7 @@ import type {
   ExternalControllerLease,
   ExternalInteractionRecord,
   ExternalRuntimeRegistration,
+  ExternalRuntimeCompatibilityProbeReport,
   ExternalTurnCorrelation,
   NormalizedExternalRuntimeEvent,
 } from "@rusty-crew/contracts";
@@ -120,6 +121,10 @@ export interface ExternalRuntimeControllerStatus {
   readonly controllerInstanceId: string;
   readonly controllerGeneration: number;
   readonly leaseExpiresAt: string;
+  readonly observedCliVersion: string | null;
+  readonly consumedContractRevision: string | null;
+  readonly compatibilityState: ExternalRuntimeRegistration["compatibilityState"];
+  readonly lastCompatibilityProbe: ExternalRuntimeCompatibilityProbeReport | null;
   readonly bindingResumeFailures: readonly ExternalBindingResumeFailure[];
 }
 
@@ -331,7 +336,11 @@ export class ServiceExternalRuntimeController {
         (await this.#bridge.getExternalRuntime(runtimeId)) ?? registration;
       return this.#status(controlled);
     } catch (error) {
-      if (controlled.driver.state !== "incompatible") {
+      if (
+        controlled.driver.state !== "incompatible" &&
+        controlled.registration.lastCompatibilityProbe?.outcome !==
+          "transport_retryable"
+      ) {
         await this.#recordState(
           controlled,
           "degraded",
@@ -1167,7 +1176,19 @@ export class ServiceExternalRuntimeController {
         `external runtime ${controlled.registration.runtimeId} has no accepted handshake identity`,
       );
     }
-    const decision = await this.#authorizeHandshake(controlled, identity);
+    const probeReport =
+      controlled.driver.lastCompatibilityProbe ??
+      controlled.registration.lastCompatibilityProbe;
+    if (probeReport == null) {
+      throw new Error(
+        `external runtime ${controlled.registration.runtimeId} has no compatibility probe report`,
+      );
+    }
+    const decision = await this.#authorizeHandshake(
+      controlled,
+      identity,
+      probeReport,
+    );
     if (!decision.accepted) {
       throw new Error(
         decision.reasonCode ??
@@ -1812,8 +1833,8 @@ export class ServiceExternalRuntimeController {
 
   #authority(controlled: ControlledRuntime): CodexControllerAuthority {
     return {
-      authorizeHandshake: (identity) =>
-        this.#authorizeHandshake(controlled, identity),
+      authorizeHandshake: (identity, probeReport) =>
+        this.#authorizeHandshake(controlled, identity, probeReport),
       hasControllerLease: () => this.#hasLease(controlled),
       onEvent: (event) => this.#recordEvent(controlled, event),
       resolveServerRequest: (context) =>
@@ -1826,13 +1847,19 @@ export class ServiceExternalRuntimeController {
   async #authorizeHandshake(
     controlled: ControlledRuntime,
     identity: CodexInitializeIdentity,
-  ): Promise<{ accepted: boolean; reasonCode?: string; message?: string }> {
+    probeReport: ExternalRuntimeCompatibilityProbeReport,
+  ): Promise<{
+    accepted: boolean;
+    retryable?: boolean;
+    reasonCode?: string;
+    message?: string;
+  }> {
     const decision = await this.#bridge.authorizeExternalRuntimeHandshake({
       runtimeId: controlled.registration.runtimeId,
       controller: this.#controllerContext(controlled),
       cliVersion: parseCodexCliVersion(identity.userAgent),
       consumedContractRevision: CODEX_APP_SERVER_PROTOCOL.protocolSchemaSha256,
-      contractCompatibility: "compatible",
+      probeReport,
       observedAt: this.#now().toISOString(),
     });
     controlled.registration = decision.registration;
@@ -1841,11 +1868,12 @@ export class ServiceExternalRuntimeController {
     }
     return {
       accepted: decision.accepted,
+      retryable: decision.retryable,
       ...(decision.reasonCode == null
         ? {}
         : {
             reasonCode: decision.reasonCode,
-            message: `Rust authority rejected ${identity.userAgent}`,
+            message: `Rust authority rejected ${identity.userAgent}: ${probeReport.steps.find((step) => step.status === "failed")?.detail ?? "required compatibility probe failed"}`,
           }),
     };
   }
@@ -2511,6 +2539,12 @@ export class ServiceExternalRuntimeController {
       controllerInstanceId: this.#instanceId,
       controllerGeneration: controlled.lease.generation,
       leaseExpiresAt: controlled.lease.expiresAt,
+      observedCliVersion: controlled.registration.observedCliVersion ?? null,
+      consumedContractRevision:
+        controlled.registration.consumedContractRevision ?? null,
+      compatibilityState: controlled.registration.compatibilityState,
+      lastCompatibilityProbe:
+        controlled.registration.lastCompatibilityProbe ?? null,
       bindingResumeFailures: controlled.bindingResumeFailures.map(
         (failure) => ({ ...failure }),
       ),

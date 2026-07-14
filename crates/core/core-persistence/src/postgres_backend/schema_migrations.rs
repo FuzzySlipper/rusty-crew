@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 28;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 29;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -155,7 +155,38 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "replace exact external runtime pins with compatibility state",
         apply: Some(apply_postgres_external_runtime_compatibility_state),
     },
+    PostgresSchemaMigration {
+        version: 29,
+        description: "add external runtime compatibility probe diagnostics",
+        apply: Some(apply_postgres_external_runtime_compatibility_probe),
+    },
 ];
+
+fn apply_postgres_external_runtime_compatibility_probe(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.external_runtime_registrations
+         SET observed_state = '\"disconnected\"',
+             record_json = (
+                 record_json::jsonb || jsonb_build_object(
+                     'observedCliVersion', NULL,
+                     'consumedContractRevision', NULL,
+                     'compatibilityState', 'unassessed',
+                     'lastCompatibilityProbe', NULL,
+                     'observedState', 'disconnected',
+                     'observedReasonCode', NULL
+                 )
+             )::text;"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL external runtime compatibility probe diagnostics",
+            error,
+        )
+    })
+}
 
 fn apply_postgres_external_runtime_compatibility_state(
     tx: &mut Transaction<'_>,

@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 43;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 44;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -233,6 +233,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 43,
         description: "replace exact external runtime pins with compatibility state",
         apply: repos::external_runtime::migrate_v43_external_runtime_compatibility_state,
+    },
+    SchemaMigration {
+        version: 44,
+        description: "add external runtime compatibility probe diagnostics",
+        apply: repos::external_runtime::migrate_v44_external_runtime_compatibility_probe,
     },
 ];
 
@@ -2596,6 +2601,7 @@ mod tests {
         );
         assert!(registration.observed_cli_version.is_none());
         assert!(registration.consumed_contract_revision.is_none());
+        assert!(registration.last_compatibility_probe.is_none());
 
         let conn = Connection::open(&db_path).unwrap();
         let raw: String = conn

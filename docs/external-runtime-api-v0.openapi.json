@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.8.0",
+    "version": "0.9.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -2841,12 +2841,46 @@
         "enum": ["attached", "managed"],
         "type": "string"
       },
-      "ExternalRuntimeCompatibilityState": {
-        "enum": ["unassessed", "compatible_uncertified", "incompatible"],
+      "ExternalRuntimeCompatibilityProbeOutcome": {
+        "enum": ["passed", "transport_retryable", "incompatible"],
         "type": "string"
       },
-      "ExternalRuntimeContractCompatibility": {
-        "enum": ["compatible", "incompatible"],
+      "ExternalRuntimeCompatibilityProbeReport": {
+        "properties": {
+          "completedAt": { "type": "string" },
+          "outcome": {
+            "$ref": "#/components/schemas/ExternalRuntimeCompatibilityProbeOutcome"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeCompatibilityProbeStep"
+            },
+            "type": "array"
+          },
+          "suiteRevision": { "type": "string" }
+        },
+        "required": ["suiteRevision", "outcome", "steps", "completedAt"],
+        "type": "object"
+      },
+      "ExternalRuntimeCompatibilityProbeStep": {
+        "properties": {
+          "detail": { "type": ["string", "null"] },
+          "durationMs": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "reasonCode": { "type": ["string", "null"] },
+          "status": {
+            "$ref": "#/components/schemas/ExternalRuntimeCompatibilityProbeStepStatus"
+          },
+          "stepId": { "type": "string" }
+        },
+        "required": ["stepId", "status", "durationMs"],
+        "type": "object"
+      },
+      "ExternalRuntimeCompatibilityProbeStepStatus": {
+        "enum": ["passed", "skipped", "failed"],
+        "type": "string"
+      },
+      "ExternalRuntimeCompatibilityState": {
+        "enum": ["unassessed", "compatible_uncertified", "incompatible"],
         "type": "string"
       },
       "ExternalRuntimeDesiredState": {
@@ -2879,23 +2913,28 @@
           "reasonCode": { "type": ["string", "null"] },
           "registration": {
             "$ref": "#/components/schemas/ExternalRuntimeRegistration"
-          }
+          },
+          "retryable": { "type": "boolean" }
         },
-        "required": ["accepted", "compatibilityState", "registration"],
+        "required": [
+          "accepted",
+          "retryable",
+          "compatibilityState",
+          "registration"
+        ],
         "type": "object"
       },
       "ExternalRuntimeHandshakeObservation": {
         "properties": {
           "cliVersion": { "type": "string" },
           "consumedContractRevision": { "type": "string" },
-          "contractCompatibility": {
-            "$ref": "#/components/schemas/ExternalRuntimeContractCompatibility"
-          },
           "controller": {
             "$ref": "#/components/schemas/ExternalControllerContext"
           },
-          "incompatibilityReasonCode": { "type": ["string", "null"] },
           "observedAt": { "type": "string" },
+          "probeReport": {
+            "$ref": "#/components/schemas/ExternalRuntimeCompatibilityProbeReport"
+          },
           "runtimeId": { "type": "string" }
         },
         "required": [
@@ -2903,7 +2942,7 @@
           "controller",
           "cliVersion",
           "consumedContractRevision",
-          "contractCompatibility",
+          "probeReport",
           "observedAt"
         ],
         "type": "object"
@@ -2932,6 +2971,14 @@
           },
           "endpoint": { "$ref": "#/components/schemas/ExternalEndpoint" },
           "kind": { "$ref": "#/components/schemas/ExternalRuntimeKind" },
+          "lastCompatibilityProbe": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalRuntimeCompatibilityProbeReport"
+              },
+              { "type": "null" }
+            ]
+          },
           "observedCliVersion": { "type": ["string", "null"] },
           "observedReasonCode": { "type": ["string", "null"] },
           "observedState": {
@@ -4031,6 +4078,10 @@
           "controllerInstanceId",
           "controllerGeneration",
           "leaseExpiresAt",
+          "observedCliVersion",
+          "consumedContractRevision",
+          "compatibilityState",
+          "lastCompatibilityProbe",
           "bindingResumeFailures"
         ],
         "properties": {
@@ -4039,6 +4090,19 @@
           "controllerInstanceId": { "type": "string" },
           "controllerGeneration": { "type": "integer", "minimum": 0 },
           "leaseExpiresAt": { "type": "string", "format": "date-time" },
+          "observedCliVersion": { "type": ["string", "null"] },
+          "consumedContractRevision": { "type": ["string", "null"] },
+          "compatibilityState": {
+            "$ref": "#/components/schemas/ExternalRuntimeCompatibilityState"
+          },
+          "lastCompatibilityProbe": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExternalRuntimeCompatibilityProbeReport"
+              },
+              { "type": "null" }
+            ]
+          },
           "bindingResumeFailures": {
             "type": "array",
             "items": {

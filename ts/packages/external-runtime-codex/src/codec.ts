@@ -76,6 +76,20 @@ export class CodexProtocolCodec {
     );
   }
 
+  assertConsumedContractReady(): void {
+    for (const path of Object.values(CODEX_CONSUMED_INBOUND_SCHEMAS)) {
+      this.#validator(path, true);
+    }
+    for (const path of Object.values(CODEX_CONSUMED_RESPONSE_SCHEMAS)) {
+      this.#validator(path, true);
+    }
+    for (const path of Object.values(
+      CODEX_CONSUMED_SERVER_REQUEST_RESPONSE_SCHEMAS,
+    )) {
+      this.#validator(path, false);
+    }
+  }
+
   decode(raw: string): DecodedServerMessage {
     let candidate: unknown;
     try {
@@ -215,15 +229,7 @@ export class CodexProtocolCodec {
     allowAdditiveFields = false,
   ): void {
     const validatorKey = `${path}:${allowAdditiveFields ? "additive" : "exact"}`;
-    let validator = this.#validators.get(validatorKey);
-    if (validator === undefined) {
-      const schema = this.#readSchema(path);
-      const compiled = this.#ajv.compile(
-        allowAdditiveFields ? allowAdditiveObjectFields(schema) : schema,
-      );
-      this.#validators.set(validatorKey, compiled);
-      validator = compiled;
-    }
+    const validator = this.#validator(path, allowAdditiveFields);
     if (!validator(value)) {
       throw new CodexProtocolError(
         reasonCode,
@@ -231,6 +237,18 @@ export class CodexProtocolCodec {
         value,
       );
     }
+  }
+
+  #validator(path: string, allowAdditiveFields: boolean): ValidateFunction {
+    const validatorKey = `${path}:${allowAdditiveFields ? "additive" : "exact"}`;
+    const existing = this.#validators.get(validatorKey);
+    if (existing !== undefined) return existing;
+    const schema = this.#readSchema(path);
+    const compiled = this.#ajv.compile(
+      allowAdditiveFields ? allowAdditiveObjectFields(schema) : schema,
+    );
+    this.#validators.set(validatorKey, compiled);
+    return compiled;
   }
 
   #readSchema(path: string): object {

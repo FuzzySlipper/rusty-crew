@@ -45,11 +45,14 @@ import {
   mapNotification,
   mapUnsupportedServerRequest,
 } from "./event-mapper.js";
+import { CODEX_COORDINATION_DYNAMIC_TOOLS } from "./coordination.js";
 import { CODEX_APP_SERVER_PROTOCOL } from "./protocol-manifest.js";
 import { captureBoundedRawDetail } from "./raw-detail.js";
 import type { CodexJsonRpcTransport } from "./transport.js";
 import type {
   CodexControllerAuthority,
+  CodexCompatibilityProbeReport,
+  CodexCompatibilityProbeStep,
   CodexDriverOptions,
   CodexDriverState,
   CodexProtocolFault,
@@ -64,6 +67,10 @@ interface PendingRequest {
   readonly timer: NodeJS.Timeout;
   readonly abortCleanup?: () => void;
 }
+
+const COMPATIBILITY_PROBE_SUITE_REVISION = "codex-required-capabilities-v1";
+const PROBE_SENTINEL_THREAD_ID =
+  "rusty-crew-compatibility-probe-missing-thread";
 
 export class CodexRpcError extends Error {
   constructor(
@@ -80,6 +87,7 @@ export class CodexAppServerDriver {
   readonly #authority: CodexControllerAuthority;
   readonly #codec = new CodexProtocolCodec();
   readonly #requestTimeoutMs: number;
+  readonly #compatibilityProbeTimeoutMs: number;
   readonly #maxPendingRequests: number;
   readonly #maxRawDetailBytes: number;
   readonly #clientInfo: InitializeParams["clientInfo"];
@@ -92,6 +100,7 @@ export class CodexAppServerDriver {
   #receiveChain = Promise.resolve();
   #state: CodexDriverState = "disconnected";
   #disconnectNotified = false;
+  #lastCompatibilityProbe?: CodexCompatibilityProbeReport;
 
   constructor(
     transport: CodexJsonRpcTransport,
@@ -101,11 +110,15 @@ export class CodexAppServerDriver {
     this.#transport = transport;
     this.#authority = authority;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    this.#compatibilityProbeTimeoutMs =
+      options.compatibilityProbeTimeoutMs ?? 15_000;
     this.#maxPendingRequests = options.maxPendingRequests ?? 256;
     this.#maxRawDetailBytes = options.maxRawDetailBytes ?? 64 * 1024;
     if (
       !Number.isFinite(this.#requestTimeoutMs) ||
       this.#requestTimeoutMs <= 0 ||
+      !Number.isFinite(this.#compatibilityProbeTimeoutMs) ||
+      this.#compatibilityProbeTimeoutMs <= 0 ||
       !Number.isInteger(this.#maxPendingRequests) ||
       this.#maxPendingRequests <= 0 ||
       !Number.isInteger(this.#maxRawDetailBytes) ||
@@ -122,6 +135,10 @@ export class CodexAppServerDriver {
 
   get state(): CodexDriverState {
     return this.#state;
+  }
+
+  get lastCompatibilityProbe(): CodexCompatibilityProbeReport | undefined {
+    return this.#lastCompatibilityProbe;
   }
 
   async connect(): Promise<InitializeResponse> {
@@ -163,15 +180,22 @@ export class CodexAppServerDriver {
         undefined,
         false,
       );
-      const authorization = await this.#authority.authorizeHandshake({
+      const identity = {
         userAgent: initialized.userAgent,
         codexHome: initialized.codexHome,
         platformFamily: initialized.platformFamily,
         platformOs: initialized.platformOs,
         protocol: CODEX_APP_SERVER_PROTOCOL,
-      });
+      } as const;
+      const probeReport = await this.#runCompatibilityProbe();
+      this.#lastCompatibilityProbe = probeReport;
+      const authorization = await this.#authority.authorizeHandshake(
+        identity,
+        probeReport,
+      );
       if (!authorization.accepted) {
-        this.#state = "incompatible";
+        this.#state =
+          authorization.retryable === true ? "disconnected" : "incompatible";
         await this.#transport.close();
         throw new Error(
           `${authorization.reasonCode ?? "codex_protocol_incompatible"}: ${authorization.message ?? "Rust authority rejected Codex app-server handshake"}`,
@@ -183,6 +207,146 @@ export class CodexAppServerDriver {
       if (this.#state !== "incompatible") this.#state = "disconnected";
       throw error;
     }
+  }
+
+  async #runCompatibilityProbe(): Promise<CodexCompatibilityProbeReport> {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new Error("compatibility probe timed out")),
+      this.#compatibilityProbeTimeoutMs,
+    );
+    const steps: CodexCompatibilityProbeStep[] = [];
+    let outcome: CodexCompatibilityProbeReport["outcome"] = "passed";
+    const run = async (
+      stepId: string,
+      operation: () => Promise<void> | void,
+      options: { acceptRpcError?: boolean } = {},
+    ): Promise<boolean> => {
+      const startedAt = performance.now();
+      try {
+        await operation();
+        steps.push({
+          stepId,
+          status: "passed",
+          durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        });
+        return true;
+      } catch (error) {
+        if (
+          options.acceptRpcError === true &&
+          error instanceof CodexRpcError &&
+          error.code !== -32601
+        ) {
+          steps.push({
+            stepId,
+            status: "passed",
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+            detail: "method recognized; sentinel resource was rejected",
+          });
+          return true;
+        }
+        const transportRetryable =
+          controller.signal.aborted ||
+          (!(error instanceof CodexProtocolError) &&
+            !(error instanceof CodexRpcError));
+        outcome = transportRetryable ? "transport_retryable" : "incompatible";
+        steps.push({
+          stepId,
+          status: "failed",
+          durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          reasonCode: transportRetryable
+            ? "external_runtime_probe_transport_retryable"
+            : error instanceof CodexRpcError && error.code === -32601
+              ? "external_runtime_required_method_missing"
+              : "external_runtime_required_contract_incompatible",
+          detail: String(error).slice(0, 1_024),
+        });
+        return false;
+      }
+    };
+    const remaining = [
+      "dynamic_tools",
+      "model_list",
+      "thread_list",
+      "thread_read",
+      "thread_resume",
+    ];
+    try {
+      if (
+        !(await run("consumed_codec", () =>
+          this.#codec.assertConsumedContractReady(),
+        ))
+      ) {
+        for (const stepId of remaining) steps.push(skippedProbeStep(stepId));
+      } else if (!(await run("dynamic_tools", assertDynamicToolReadiness))) {
+        for (const stepId of remaining.slice(1))
+          steps.push(skippedProbeStep(stepId));
+      } else if (
+        !(await run("model_list", async () => {
+          await this.#request(
+            "model/list",
+            { limit: 1 },
+            controller.signal,
+            false,
+          );
+        }))
+      ) {
+        for (const stepId of remaining.slice(2))
+          steps.push(skippedProbeStep(stepId));
+      } else if (
+        !(await run("thread_list", async () => {
+          await this.#request<ThreadListResponse>(
+            "thread/list",
+            { limit: 1, useStateDbOnly: true },
+            controller.signal,
+            false,
+          );
+        }))
+      ) {
+        steps.push(
+          skippedProbeStep("thread_read"),
+          skippedProbeStep("thread_resume"),
+        );
+      } else {
+        if (
+          !(await run(
+            "thread_read",
+            async () => {
+              await this.#request(
+                "thread/read",
+                { threadId: PROBE_SENTINEL_THREAD_ID, includeTurns: false },
+                controller.signal,
+                false,
+              );
+            },
+            { acceptRpcError: true },
+          ))
+        ) {
+          steps.push(skippedProbeStep("thread_resume"));
+        } else {
+          await run(
+            "thread_resume",
+            async () => {
+              await this.#request(
+                "thread/resume",
+                { threadId: PROBE_SENTINEL_THREAD_ID, excludeTurns: true },
+                controller.signal,
+                false,
+              );
+            },
+            { acceptRpcError: true },
+          );
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    return {
+      suiteRevision: COMPATIBILITY_PROBE_SUITE_REVISION,
+      outcome,
+      steps,
+      completedAt: new Date().toISOString(),
+    };
   }
 
   threadList(
@@ -621,6 +785,36 @@ export class CodexAppServerDriver {
     if (this.#completedResponseOrder.length > 1_024) {
       const oldest = this.#completedResponseOrder.shift();
       if (oldest !== undefined) this.#completedResponseIds.delete(oldest);
+    }
+  }
+}
+
+function skippedProbeStep(stepId: string): CodexCompatibilityProbeStep {
+  return {
+    stepId,
+    status: "skipped",
+    durationMs: 0,
+    reasonCode: "previous_required_probe_failed",
+  };
+}
+
+function assertDynamicToolReadiness(): void {
+  const namespace = CODEX_COORDINATION_DYNAMIC_TOOLS.find(
+    (entry) => entry.type === "namespace" && entry.name === "rusty_crew",
+  );
+  if (namespace?.type !== "namespace") {
+    throw new CodexProtocolError(
+      "malformed_response",
+      "Rusty Crew dynamic-tool namespace is not registered",
+    );
+  }
+  const names = new Set(namespace.tools.map((tool) => tool.name));
+  for (const required of ["list_agents", "send_agent_message", "agent_round"]) {
+    if (!names.has(required)) {
+      throw new CodexProtocolError(
+        "malformed_response",
+        `Rusty Crew dynamic tool ${required} is not registered`,
+      );
     }
   }
 }

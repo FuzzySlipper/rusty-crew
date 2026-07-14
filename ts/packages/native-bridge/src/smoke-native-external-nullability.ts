@@ -35,6 +35,18 @@ try {
       observedCliVersion: "0.144.3",
       consumedContractRevision: "contract-v1",
       compatibilityState: "compatible_uncertified",
+      lastCompatibilityProbe: {
+        suiteRevision: "codex-required-capabilities-v1",
+        outcome: "passed",
+        steps: [
+          {
+            stepId: "model_list",
+            status: "passed",
+            durationMs: 1,
+          },
+        ],
+        completedAt: now,
+      },
       desiredState: "enabled",
       observedState: "ready",
       revision: 0,

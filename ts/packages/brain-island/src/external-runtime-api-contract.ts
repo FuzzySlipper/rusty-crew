@@ -4,7 +4,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.8.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.9.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -166,6 +166,10 @@ export interface ExternalRuntimeControllerStatus {
   readonly controllerInstanceId: string;
   readonly controllerGeneration: number;
   readonly leaseExpiresAt: string;
+  readonly observedCliVersion: string | null;
+  readonly consumedContractRevision: string | null;
+  readonly compatibilityState: ExternalRuntimeRegistration["compatibilityState"];
+  readonly lastCompatibilityProbe: ExternalRuntimeRegistration["lastCompatibilityProbe"];
   readonly bindingResumeFailures: readonly {
     readonly bindingId: string;
     readonly nativeThreadId: string;
@@ -685,6 +689,10 @@ function routeSchemas(): Record<string, JsonSchema> {
         "controllerInstanceId",
         "controllerGeneration",
         "leaseExpiresAt",
+        "observedCliVersion",
+        "consumedContractRevision",
+        "compatibilityState",
+        "lastCompatibilityProbe",
         "bindingResumeFailures",
       ],
       properties: {
@@ -693,6 +701,19 @@ function routeSchemas(): Record<string, JsonSchema> {
         controllerInstanceId: { type: "string" },
         controllerGeneration: { type: "integer", minimum: 0 },
         leaseExpiresAt: { type: "string", format: "date-time" },
+        observedCliVersion: { type: ["string", "null"] },
+        consumedContractRevision: { type: ["string", "null"] },
+        compatibilityState: {
+          $ref: "#/components/schemas/ExternalRuntimeCompatibilityState",
+        },
+        lastCompatibilityProbe: {
+          oneOf: [
+            {
+              $ref: "#/components/schemas/ExternalRuntimeCompatibilityProbeReport",
+            },
+            { type: "null" },
+          ],
+        },
         bindingResumeFailures: {
           type: "array",
           items: {

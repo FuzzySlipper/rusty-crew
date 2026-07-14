@@ -7,11 +7,12 @@ use rusty_crew_core_protocol::{
     ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
     ExternalControlKind, ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
     ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
-    ExternalRuntimeCompatibilityState, ExternalRuntimeContractCompatibility,
-    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeObservation,
-    ExternalRuntimeId, ExternalRuntimeKind, ExternalRuntimeObservedState,
-    ExternalRuntimeRegistration, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
-    TurnInputProvenance, TurnInputProvenanceKind,
+    ExternalRuntimeCompatibilityProbeOutcome, ExternalRuntimeCompatibilityProbeReport,
+    ExternalRuntimeCompatibilityProbeStep, ExternalRuntimeCompatibilityProbeStepStatus,
+    ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
+    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeKind,
+    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalTurnInputPart,
+    ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
 };
 use serde_json::json;
 
@@ -293,12 +294,12 @@ fn handshake_and_runtime_event_replay_require_current_controller_authority() {
             controller: controller.clone(),
             cli_version: "0.144.3".into(),
             consumed_contract_revision: "contract-v1".into(),
-            contract_compatibility: ExternalRuntimeContractCompatibility::Compatible,
-            incompatibility_reason_code: None,
+            probe_report: probe_report(ExternalRuntimeCompatibilityProbeOutcome::Passed, None),
             observed_at: "2026-06-19T00:00:01Z".into(),
         })
         .unwrap();
     assert!(accepted.accepted);
+    assert!(!accepted.retryable);
     assert_eq!(
         accepted.compatibility_state,
         ExternalRuntimeCompatibilityState::CompatibleUncertified
@@ -306,6 +307,14 @@ fn handshake_and_runtime_event_replay_require_current_controller_authority() {
     assert_eq!(
         accepted.registration.observed_cli_version.as_deref(),
         Some("0.144.3")
+    );
+    assert_eq!(
+        accepted
+            .registration
+            .last_compatibility_probe
+            .as_ref()
+            .map(|report| report.outcome),
+        Some(ExternalRuntimeCompatibilityProbeOutcome::Passed)
     );
 
     let first = engine
@@ -402,13 +411,16 @@ fn required_contract_failure_is_incompatible_without_version_pinning() {
             },
             cli_version: "0.200.0".into(),
             consumed_contract_revision: "contract-v1".into(),
-            contract_compatibility: ExternalRuntimeContractCompatibility::Incompatible,
-            incompatibility_reason_code: Some("external_runtime_required_method_missing".into()),
+            probe_report: probe_report(
+                ExternalRuntimeCompatibilityProbeOutcome::Incompatible,
+                Some("external_runtime_required_method_missing"),
+            ),
             observed_at: "2026-06-19T00:00:01Z".into(),
         })
         .unwrap();
 
     assert!(!decision.accepted);
+    assert!(!decision.retryable);
     assert_eq!(
         decision.compatibility_state,
         ExternalRuntimeCompatibilityState::Incompatible
@@ -420,6 +432,53 @@ fn required_contract_failure_is_incompatible_without_version_pinning() {
     assert_eq!(
         decision.registration.observed_state,
         ExternalRuntimeObservedState::Incompatible
+    );
+}
+
+#[test]
+fn transport_probe_failure_is_retryable_without_claiming_incompatibility() {
+    let engine = test_engine();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let lease = engine
+        .acquire_external_runtime_controller(
+            &ExternalControllerLease {
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                holder_instance_id: "controller-a".into(),
+                generation: 0,
+                acquired_at: "2026-06-19T00:00:00Z".into(),
+                renewed_at: "2026-06-19T00:00:00Z".into(),
+                expires_at: "2026-06-19T00:10:00Z".into(),
+                revision: 0,
+            },
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+    let decision = engine
+        .authorize_external_runtime_handshake(&ExternalRuntimeHandshakeObservation {
+            runtime_id: ExternalRuntimeId::new("codex-local"),
+            controller: ExternalControllerContext {
+                holder_instance_id: "controller-a".into(),
+                generation: lease.generation,
+            },
+            cli_version: "0.200.0".into(),
+            consumed_contract_revision: "contract-v1".into(),
+            probe_report: probe_report(
+                ExternalRuntimeCompatibilityProbeOutcome::TransportRetryable,
+                Some("external_runtime_probe_transport_retryable"),
+            ),
+            observed_at: "2026-06-19T00:00:01Z".into(),
+        })
+        .unwrap();
+
+    assert!(!decision.accepted);
+    assert!(decision.retryable);
+    assert_eq!(
+        decision.compatibility_state,
+        ExternalRuntimeCompatibilityState::Unassessed
+    );
+    assert_eq!(
+        decision.registration.observed_state,
+        ExternalRuntimeObservedState::Degraded
     );
 }
 
@@ -1538,12 +1597,38 @@ fn runtime() -> ExternalRuntimeRegistration {
         observed_cli_version: Some("0.144.1".into()),
         consumed_contract_revision: Some("contract-v1".into()),
         compatibility_state: ExternalRuntimeCompatibilityState::CompatibleUncertified,
+        last_compatibility_probe: Some(probe_report(
+            ExternalRuntimeCompatibilityProbeOutcome::Passed,
+            None,
+        )),
         desired_state: ExternalRuntimeDesiredState::Enabled,
         observed_state: ExternalRuntimeObservedState::Ready,
         observed_reason_code: None,
         revision: 0,
         created_at: "2026-06-19T00:00:00Z".into(),
         updated_at: "2026-06-19T00:00:00Z".into(),
+    }
+}
+
+fn probe_report(
+    outcome: ExternalRuntimeCompatibilityProbeOutcome,
+    reason_code: Option<&str>,
+) -> ExternalRuntimeCompatibilityProbeReport {
+    ExternalRuntimeCompatibilityProbeReport {
+        suite_revision: "codex-required-capabilities-v1".into(),
+        outcome,
+        steps: vec![ExternalRuntimeCompatibilityProbeStep {
+            step_id: "model_list".into(),
+            status: if reason_code.is_some() {
+                ExternalRuntimeCompatibilityProbeStepStatus::Failed
+            } else {
+                ExternalRuntimeCompatibilityProbeStepStatus::Passed
+            },
+            duration_ms: 1,
+            reason_code: reason_code.map(str::to_owned),
+            detail: None,
+        }],
+        completed_at: "2026-06-19T00:00:01Z".into(),
     }
 }
 

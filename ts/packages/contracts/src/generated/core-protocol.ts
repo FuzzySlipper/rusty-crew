@@ -729,9 +729,26 @@ export type ExternalInteractionStatus = "pending" | "resolved" | "expired" | "lo
 
 export type ExternalProcessOwnership = "attached" | "managed";
 
-export type ExternalRuntimeCompatibilityState = "unassessed" | "compatible_uncertified" | "incompatible";
+export type ExternalRuntimeCompatibilityProbeOutcome = "passed" | "transport_retryable" | "incompatible";
 
-export type ExternalRuntimeContractCompatibility = "compatible" | "incompatible";
+export type ExternalRuntimeCompatibilityProbeReport = {
+  completedAt: string;
+  outcome: ExternalRuntimeCompatibilityProbeOutcome;
+  steps: Array<ExternalRuntimeCompatibilityProbeStep>;
+  suiteRevision: string;
+};
+
+export type ExternalRuntimeCompatibilityProbeStep = {
+  detail?: string | null;
+  durationMs: number;
+  reasonCode?: string | null;
+  status: ExternalRuntimeCompatibilityProbeStepStatus;
+  stepId: string;
+};
+
+export type ExternalRuntimeCompatibilityProbeStepStatus = "passed" | "skipped" | "failed";
+
+export type ExternalRuntimeCompatibilityState = "unassessed" | "compatible_uncertified" | "incompatible";
 
 export type ExternalRuntimeDesiredState = "enabled" | "disabled";
 
@@ -754,15 +771,15 @@ export type ExternalRuntimeHandshakeDecision = {
   compatibilityState: ExternalRuntimeCompatibilityState;
   reasonCode?: string | null;
   registration: ExternalRuntimeRegistration;
+  retryable: boolean;
 };
 
 export type ExternalRuntimeHandshakeObservation = {
   cliVersion: string;
   consumedContractRevision: string;
-  contractCompatibility: ExternalRuntimeContractCompatibility;
   controller: ExternalControllerContext;
-  incompatibilityReasonCode?: string | null;
   observedAt: string;
+  probeReport: ExternalRuntimeCompatibilityProbeReport;
   runtimeId: string;
 };
 
@@ -778,6 +795,7 @@ export type ExternalRuntimeRegistration = {
   desiredState: ExternalRuntimeDesiredState;
   endpoint: ExternalEndpoint;
   kind: ExternalRuntimeKind;
+  lastCompatibilityProbe?: ExternalRuntimeCompatibilityProbeReport | null;
   observedCliVersion?: string | null;
   observedReasonCode?: string | null;
   observedState: ExternalRuntimeObservedState;

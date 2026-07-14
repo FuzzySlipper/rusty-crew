@@ -256,6 +256,25 @@ pub(crate) fn migrate_v43_external_runtime_compatibility_state(
     .map_err(|error| persistence_error("apply schema migration 43", error))
 }
 
+pub(crate) fn migrate_v44_external_runtime_compatibility_probe(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE external_runtime_registrations
+         SET observed_state = '\"disconnected\"',
+             record_json = json_set(
+                 record_json,
+                 '$.observedCliVersion', NULL,
+                 '$.consumedContractRevision', NULL,
+                 '$.compatibilityState', 'unassessed',
+                 '$.lastCompatibilityProbe', NULL,
+                 '$.observedState', 'disconnected',
+                 '$.observedReasonCode', NULL
+             );",
+    )
+    .map_err(|error| persistence_error("apply schema migration 44", error))
+}
+
 impl CoordinationStore {
     pub fn put_external_runtime_registration(
         &self,
@@ -1542,10 +1561,12 @@ mod tests {
         ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
         ExternalEndpoint, ExternalEndpointTransport, ExternalInteractionId,
         ExternalInteractionKind, ExternalInteractionRecord, ExternalInteractionStatus,
-        ExternalProcessOwnership, ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState,
-        ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalTurnInputPart,
-        ExternalTurnPhase, SessionHandle, SessionKind, SessionState, SessionStatus, ToolProfile,
-        TurnInputProvenance, TurnInputProvenanceKind,
+        ExternalProcessOwnership, ExternalRuntimeCompatibilityProbeOutcome,
+        ExternalRuntimeCompatibilityProbeReport, ExternalRuntimeCompatibilityProbeStep,
+        ExternalRuntimeCompatibilityProbeStepStatus, ExternalRuntimeCompatibilityState,
+        ExternalRuntimeDesiredState, ExternalRuntimeKind, ExternalRuntimeObservedState,
+        ExternalTurnInputPart, ExternalTurnPhase, SessionHandle, SessionKind, SessionState,
+        SessionStatus, ToolProfile, TurnInputProvenance, TurnInputProvenanceKind,
     };
     use serde_json::json;
     use std::fs;
@@ -1559,8 +1580,26 @@ mod tests {
         store
             .save_session(&session("agent-a", "session-a"))
             .unwrap();
+        let mut runtime_write = runtime();
+        runtime_write.observed_cli_version = Some("0.200.0".into());
+        runtime_write.consumed_contract_revision = Some("contract-v1".into());
+        runtime_write.compatibility_state =
+            ExternalRuntimeCompatibilityState::CompatibleUncertified;
+        runtime_write.observed_state = ExternalRuntimeObservedState::Ready;
+        runtime_write.last_compatibility_probe = Some(ExternalRuntimeCompatibilityProbeReport {
+            suite_revision: "codex-required-capabilities-v1".into(),
+            outcome: ExternalRuntimeCompatibilityProbeOutcome::Passed,
+            steps: vec![ExternalRuntimeCompatibilityProbeStep {
+                step_id: "model_list".into(),
+                status: ExternalRuntimeCompatibilityProbeStepStatus::Passed,
+                duration_ms: 3,
+                reason_code: None,
+                detail: None,
+            }],
+            completed_at: "2026-07-10T00:00:00Z".into(),
+        });
         let runtime = store
-            .put_external_runtime_registration(&runtime(), None)
+            .put_external_runtime_registration(&runtime_write, None)
             .unwrap();
         assert_eq!(runtime.revision, 1);
 
@@ -1653,6 +1692,16 @@ mod tests {
             .list_nonterminal_external_turns()
             .unwrap()
             .is_empty());
+        assert_eq!(
+            reopened
+                .get_external_runtime_registration(&ExternalRuntimeId::new("codex-local"))
+                .unwrap()
+                .unwrap()
+                .last_compatibility_probe
+                .unwrap()
+                .outcome,
+            ExternalRuntimeCompatibilityProbeOutcome::Passed
+        );
         remove_temp_db(&path);
     }
 
@@ -1840,6 +1889,7 @@ mod tests {
             observed_cli_version: None,
             consumed_contract_revision: None,
             compatibility_state: ExternalRuntimeCompatibilityState::Unassessed,
+            last_compatibility_probe: None,
             desired_state: ExternalRuntimeDesiredState::Enabled,
             observed_state: ExternalRuntimeObservedState::Disconnected,
             observed_reason_code: None,

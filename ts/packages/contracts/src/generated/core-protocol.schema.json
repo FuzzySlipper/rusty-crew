@@ -2988,17 +2988,85 @@
       ],
       "type": "string"
     },
-    "ExternalRuntimeCompatibilityState": {
+    "ExternalRuntimeCompatibilityProbeOutcome": {
       "enum": [
-        "unassessed",
-        "compatible_uncertified",
+        "passed",
+        "transport_retryable",
         "incompatible"
       ],
       "type": "string"
     },
-    "ExternalRuntimeContractCompatibility": {
+    "ExternalRuntimeCompatibilityProbeReport": {
+      "properties": {
+        "completedAt": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ExternalRuntimeCompatibilityProbeOutcome"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ExternalRuntimeCompatibilityProbeStep"
+          },
+          "type": "array"
+        },
+        "suiteRevision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "suiteRevision",
+        "outcome",
+        "steps",
+        "completedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeCompatibilityProbeStep": {
+      "properties": {
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ExternalRuntimeCompatibilityProbeStepStatus"
+        },
+        "stepId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "status",
+        "durationMs"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeCompatibilityProbeStepStatus": {
       "enum": [
-        "compatible",
+        "passed",
+        "skipped",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ExternalRuntimeCompatibilityState": {
+      "enum": [
+        "unassessed",
+        "compatible_uncertified",
         "incompatible"
       ],
       "type": "string"
@@ -3087,10 +3155,14 @@
         },
         "registration": {
           "$ref": "#/$defs/ExternalRuntimeRegistration"
+        },
+        "retryable": {
+          "type": "boolean"
         }
       },
       "required": [
         "accepted",
+        "retryable",
         "compatibilityState",
         "registration"
       ],
@@ -3104,20 +3176,14 @@
         "consumedContractRevision": {
           "type": "string"
         },
-        "contractCompatibility": {
-          "$ref": "#/$defs/ExternalRuntimeContractCompatibility"
-        },
         "controller": {
           "$ref": "#/$defs/ExternalControllerContext"
         },
-        "incompatibilityReasonCode": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "observedAt": {
           "type": "string"
+        },
+        "probeReport": {
+          "$ref": "#/$defs/ExternalRuntimeCompatibilityProbeReport"
         },
         "runtimeId": {
           "type": "string"
@@ -3128,7 +3194,7 @@
         "controller",
         "cliVersion",
         "consumedContractRevision",
-        "contractCompatibility",
+        "probeReport",
         "observedAt"
       ],
       "type": "object"
@@ -3177,6 +3243,16 @@
         },
         "kind": {
           "$ref": "#/$defs/ExternalRuntimeKind"
+        },
+        "lastCompatibilityProbe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalRuntimeCompatibilityProbeReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "observedCliVersion": {
           "type": [

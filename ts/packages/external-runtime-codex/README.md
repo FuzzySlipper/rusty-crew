@@ -38,3 +38,10 @@ Every server request is lease-gated and delegated to the required Rust authority
 callback. Unknown requests fail closed; unknown notifications remain bounded raw
 evidence. Rust remains authoritative for whether the observed contract is
 compatible and whether turns may start.
+
+After `initialize`, the driver runs a bounded, idempotent required-capability
+probe before requesting Rust admission. The probe never creates a test thread;
+missing-thread errors are used to prove `thread/read` and `thread/resume`
+method availability when inventory is empty. Only transport failures are
+retryable. The complete typed report is passed to Rust for classification and
+diagnostic persistence.

@@ -47,6 +47,21 @@ class FakeTransport implements CodexJsonRpcTransport {
         },
       });
     }
+    if (parsed.method === "model/list") {
+      this.emit({ id: parsed.id, result: { data: [], nextCursor: null } });
+    }
+    if (parsed.method === "thread/list") {
+      this.emit({
+        id: parsed.id,
+        result: { data: [], nextCursor: null, backwardsCursor: null },
+      });
+    }
+    if (parsed.method === "thread/read") {
+      this.emit({
+        id: parsed.id,
+        error: { code: -32000, message: "sentinel thread not found" },
+      });
+    }
     if (parsed.method === "turn/start") {
       const turnId = `native-turn-${this.#nextTurn}`;
       this.#nextTurn += 1;
@@ -295,6 +310,13 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       const thread = this.threads.find(
         (candidate) => candidate.id === params.threadId,
       );
+      if (thread === undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: "thread not found" },
+        });
+        return;
+      }
       this.emit({ id: parsed.id, result: { thread } });
       return;
     }
@@ -347,6 +369,13 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       const thread = this.threads.find(
         (candidate) => candidate.id === params.threadId,
       );
+      if (thread === undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: "thread not found" },
+        });
+        return;
+      }
       this.emit({ id: parsed.id, result: { thread } });
       return;
     }
@@ -364,11 +393,18 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       const thread = this.threads.find(
         (candidate) => candidate.id === params.threadId,
       );
+      if (thread === undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: "thread not found" },
+        });
+        return;
+      }
       this.emit({
         id: parsed.id,
         result: {
           ...fakeThreadStartResponse(
-            thread ?? {},
+            thread,
             this.threadSettings.get(String(params.threadId)),
           ),
           initialTurnsPage: null,
@@ -1251,6 +1287,14 @@ test("thread snapshots preserve message phase across controller reload", async (
         new CodexAppServerDriver(fixture.transport, authority),
     });
     await reloaded.connect(fixture.runtimeId);
+    const reloadedStatus = reloaded.statuses()[0];
+    assert.equal(reloadedStatus?.compatibilityState, "compatible_uncertified");
+    assert.equal(reloadedStatus?.lastCompatibilityProbe?.outcome, "passed");
+    assert.equal(
+      (await fixture.bridge.getExternalRuntime(fixture.runtimeId))
+        ?.lastCompatibilityProbe?.outcome,
+      "passed",
+    );
     const after = await reloaded.readThread(fixture.runtimeId, {
       threadId: created.thread.threadId,
       includeTurns: true,

@@ -18,7 +18,9 @@ class FakeTransport implements CodexJsonRpcTransport {
   readonly sent: Array<Record<string, unknown>> = [];
   readonly responders = new Map<
     string,
-    (request: Record<string, unknown>) => unknown
+    (
+      request: Record<string, unknown>,
+    ) => unknown | { readonly __rpcError: { code: number; message: string } }
   >();
   opened = false;
   closed = false;
@@ -39,9 +41,14 @@ class FakeTransport implements CodexJsonRpcTransport {
     if (method === undefined) return;
     const responder = this.responders.get(method);
     if (responder === undefined) return;
-    queueMicrotask(() =>
-      this.emit({ id: parsed.id, result: responder(parsed) }),
-    );
+    queueMicrotask(() => {
+      const response = responder(parsed);
+      if (isFakeRpcError(response)) {
+        this.emit({ id: parsed.id, error: response.__rpcError });
+      } else {
+        this.emit({ id: parsed.id, result: response });
+      }
+    });
   }
 
   async close(): Promise<void> {
@@ -59,9 +66,13 @@ class FakeTransport implements CodexJsonRpcTransport {
 
 class FakeAuthority implements CodexControllerAuthority {
   accepted = true;
+  retryable = false;
   leased = true;
   readonly events: NeutralExternalRuntimeEvent[] = [];
   readonly faults: CodexProtocolFault[] = [];
+  readonly probeReports: Parameters<
+    CodexControllerAuthority["authorizeHandshake"]
+  >[1][] = [];
   readonly serverRequests: string[] = [];
   readonly disconnects: Array<{
     readonly reason: string;
@@ -78,8 +89,12 @@ class FakeAuthority implements CodexControllerAuthority {
     context: Parameters<CodexControllerAuthority["resolveServerRequest"]>[0],
   ) => Promise<ServerRequestResolution>;
 
-  async authorizeHandshake(): Promise<{ accepted: boolean }> {
-    return { accepted: this.accepted };
+  async authorizeHandshake(
+    _identity: Parameters<CodexControllerAuthority["authorizeHandshake"]>[0],
+    report: Parameters<CodexControllerAuthority["authorizeHandshake"]>[1],
+  ): Promise<{ accepted: boolean; retryable?: boolean }> {
+    this.probeReports.push(report);
+    return { accepted: this.accepted, retryable: this.retryable };
   }
 
   hasControllerLease(): boolean {
@@ -107,13 +122,47 @@ class FakeAuthority implements CodexControllerAuthority {
   }
 }
 
-function configureInitialize(transport: FakeTransport): void {
+function configureInitialize(
+  transport: FakeTransport,
+  userAgent = "codex_cli_rs/0.144.1",
+): void {
   transport.responders.set("initialize", () => ({
-    userAgent: "codex_cli_rs/0.144.1",
+    userAgent,
     codexHome: "/tmp/codex-home",
     platformFamily: "unix",
     platformOs: "linux",
   }));
+  respondOnce(transport, "model/list", () => ({
+    data: [],
+    nextCursor: null,
+  }));
+  respondOnce(transport, "thread/list", () => ({
+    data: [],
+    nextCursor: null,
+    backwardsCursor: null,
+  }));
+  for (const method of ["thread/read", "thread/resume"]) {
+    respondOnce(transport, method, () => ({
+      __rpcError: { code: -32000, message: "sentinel thread not found" },
+    }));
+  }
+}
+
+function respondOnce(
+  transport: FakeTransport,
+  method: string,
+  responder: (request: Record<string, unknown>) => unknown,
+): void {
+  transport.responders.set(method, (request) => {
+    transport.responders.delete(method);
+    return responder(request);
+  });
+}
+
+function isFakeRpcError(
+  value: unknown,
+): value is { readonly __rpcError: { code: number; message: string } } {
+  return typeof value === "object" && value !== null && "__rpcError" in value;
 }
 
 async function settle(): Promise<void> {
@@ -168,12 +217,17 @@ test("driver obtains Rust handshake admission before exposing typed requests", a
   assert.deepEqual(settingsUpdate, {});
   assert.deepEqual(nameUpdate, {});
   assert.equal(driver.state, "ready");
+  assert.equal(authority.probeReports[0]?.outcome, "passed");
   assert.deepEqual(
     transport.sent
       .filter((message) => "method" in message)
       .map((message) => message.method),
     [
       "initialize",
+      "model/list",
+      "thread/list",
+      "thread/read",
+      "thread/resume",
       "thread/list",
       "collaborationMode/list",
       "model/list",
@@ -454,20 +508,84 @@ test("driver preserves supplied agent message phase without inferring delta fina
   await driver.close();
 });
 
-test("Rust authority can reject an incompatible runtime before mutation", async () => {
+test("unknown newer CLI is admitted when required capability probes pass", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport, "codex_cli_rs/0.200.0");
+  const driver = new CodexAppServerDriver(transport, authority);
+
+  const initialized = await driver.connect();
+
+  assert.equal(initialized.userAgent, "codex_cli_rs/0.200.0");
+  assert.equal(driver.state, "ready");
+  assert.equal(driver.lastCompatibilityProbe?.outcome, "passed");
+  assert.deepEqual(
+    driver.lastCompatibilityProbe?.steps.map(({ stepId, status }) => ({
+      stepId,
+      status,
+    })),
+    [
+      { stepId: "consumed_codec", status: "passed" },
+      { stepId: "dynamic_tools", status: "passed" },
+      { stepId: "model_list", status: "passed" },
+      { stepId: "thread_list", status: "passed" },
+      { stepId: "thread_read", status: "passed" },
+      { stepId: "thread_resume", status: "passed" },
+    ],
+  );
+  await driver.close();
+});
+
+test("missing required method is incompatible without reconnect semantics", async () => {
   const transport = new FakeTransport();
   const authority = new FakeAuthority();
   authority.accepted = false;
   configureInitialize(transport);
+  transport.responders.set("model/list", () => ({
+    __rpcError: { code: -32601, message: "method not found" },
+  }));
   const driver = new CodexAppServerDriver(transport, authority);
 
   await assert.rejects(driver.connect(), /rejected Codex app-server handshake/);
   assert.equal(driver.state, "incompatible");
   assert.equal(transport.closed, true);
+  assert.equal(authority.probeReports[0]?.outcome, "incompatible");
   assert.equal(
-    transport.sent.some((message) => message.method === "thread/list"),
-    false,
+    authority.probeReports[0]?.steps.find(
+      ({ stepId }) => stepId === "model_list",
+    )?.reasonCode,
+    "external_runtime_required_method_missing",
   );
+});
+
+test("probe transport timeout remains retryable and reconnectable", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  authority.accepted = false;
+  authority.retryable = true;
+  configureInitialize(transport);
+  transport.responders.delete("model/list");
+  const driver = new CodexAppServerDriver(transport, authority, {
+    requestTimeoutMs: 20,
+    compatibilityProbeTimeoutMs: 20,
+  });
+
+  await assert.rejects(driver.connect(), /rejected Codex app-server handshake/);
+
+  assert.equal(driver.state, "disconnected");
+  assert.equal(authority.probeReports[0]?.outcome, "transport_retryable");
+  assert.equal(
+    authority.probeReports[0]?.steps.find(
+      ({ stepId }) => stepId === "model_list",
+    )?.reasonCode,
+    "external_runtime_probe_transport_retryable",
+  );
+  authority.accepted = true;
+  authority.retryable = false;
+  configureInitialize(transport);
+  await driver.connect();
+  assert.equal(driver.state, "ready");
+  assert.equal(authority.probeReports[1]?.outcome, "passed");
 });
 
 test("known dynamic tools are resolved through the leased Rust callback", async () => {
@@ -538,9 +656,9 @@ test("pending server requests do not block client responses on the same socket",
 
   const listed = driver.threadList({ limit: 5 });
   await settle();
-  const listRequest = transport.sent.find(
-    (message) => message.method === "thread/list",
-  );
+  const listRequest = transport.sent
+    .filter((message) => message.method === "thread/list")
+    .at(-1);
   assert.notEqual(listRequest?.id, undefined);
   transport.emit({
     id: listRequest?.id,
@@ -732,8 +850,8 @@ test("notification order and duplicate responses are explicit", async () => {
   assert.deepEqual(
     authority.events.map((event) => [event.method, event.transportSequence]),
     [
-      ["future/one", 3],
-      ["future/two", 4],
+      ["future/one", 7],
+      ["future/two", 8],
     ],
   );
   assert.equal(authority.faults.at(-1)?.reasonCode, "duplicate_response");
@@ -777,11 +895,14 @@ test("timeouts are reported once and never retried by the TypeScript driver", as
   });
   await driver.connect();
 
+  const probeRequestCount = transport.sent.filter(
+    (message) => message.method === "thread/list",
+  ).length;
   await assert.rejects(driver.threadList({}), /timed out/);
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(
     transport.sent.filter((message) => message.method === "thread/list").length,
-    1,
+    probeRequestCount + 1,
   );
   await driver.close();
 });

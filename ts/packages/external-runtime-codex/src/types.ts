@@ -23,8 +23,29 @@ export interface CodexInitializeIdentity {
 
 export interface ControllerAuthorization {
   readonly accepted: boolean;
+  readonly retryable?: boolean;
   readonly reasonCode?: string;
   readonly message?: string;
+}
+
+export type CodexCompatibilityProbeOutcome =
+  | "passed"
+  | "transport_retryable"
+  | "incompatible";
+
+export interface CodexCompatibilityProbeStep {
+  readonly stepId: string;
+  readonly status: "passed" | "skipped" | "failed";
+  readonly durationMs: number;
+  readonly reasonCode?: string;
+  readonly detail?: string;
+}
+
+export interface CodexCompatibilityProbeReport {
+  readonly suiteRevision: string;
+  readonly outcome: CodexCompatibilityProbeOutcome;
+  readonly steps: CodexCompatibilityProbeStep[];
+  readonly completedAt: string;
 }
 
 export interface BoundedRawDetail {
@@ -129,6 +150,7 @@ export interface CodexProtocolFault {
 export interface CodexControllerAuthority {
   authorizeHandshake(
     identity: CodexInitializeIdentity,
+    probeReport: CodexCompatibilityProbeReport,
   ): Promise<ControllerAuthorization>;
   hasControllerLease(): boolean | Promise<boolean>;
   onEvent(event: NeutralExternalRuntimeEvent): void | Promise<void>;
@@ -152,6 +174,7 @@ export type CodexDriverState =
 
 export interface CodexDriverOptions {
   readonly requestTimeoutMs?: number;
+  readonly compatibilityProbeTimeoutMs?: number;
   readonly maxPendingRequests?: number;
   readonly maxRawDetailBytes?: number;
   readonly clientName?: string;

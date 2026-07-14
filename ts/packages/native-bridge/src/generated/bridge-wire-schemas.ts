@@ -3384,6 +3384,75 @@ export const bridgeWireSchemaArtifact = {
             ],
             "type": "string"
           },
+          "lastCompatibilityProbe": {
+            "properties": {
+              "completedAt": {
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "passed",
+                  "transport_retryable",
+                  "incompatible"
+                ],
+                "type": "string"
+              },
+              "steps": {
+                "items": {
+                  "properties": {
+                    "detail": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "durationMs": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "reasonCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "passed",
+                        "skipped",
+                        "failed"
+                      ],
+                      "type": "string"
+                    },
+                    "stepId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "stepId",
+                    "status",
+                    "durationMs"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "suiteRevision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "suiteRevision",
+              "outcome",
+              "steps",
+              "completedAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "observedCliVersion": {
             "type": [
               "string",
@@ -5428,6 +5497,75 @@ export const bridgeWireSchemaArtifact = {
             "codex_app_server"
           ],
           "type": "string"
+        },
+        "lastCompatibilityProbe": {
+          "properties": {
+            "completedAt": {
+              "type": "string"
+            },
+            "outcome": {
+              "enum": [
+                "passed",
+                "transport_retryable",
+                "incompatible"
+              ],
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "properties": {
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "durationMs": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "reasonCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "passed",
+                      "skipped",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stepId",
+                  "status",
+                  "durationMs"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "suiteRevision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "suiteRevision",
+            "outcome",
+            "steps",
+            "completedAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "observedCliVersion": {
           "type": [
@@ -17880,6 +18018,75 @@ export const bridgeWireSchemaArtifact = {
               ],
               "type": "string"
             },
+            "lastCompatibilityProbe": {
+              "properties": {
+                "completedAt": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "enum": [
+                    "passed",
+                    "transport_retryable",
+                    "incompatible"
+                  ],
+                  "type": "string"
+                },
+                "steps": {
+                  "items": {
+                    "properties": {
+                      "detail": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "durationMs": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "reasonCode": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "passed",
+                          "skipped",
+                          "failed"
+                        ],
+                        "type": "string"
+                      },
+                      "stepId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "stepId",
+                      "status",
+                      "durationMs"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "suiteRevision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "suiteRevision",
+                "outcome",
+                "steps",
+                "completedAt"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
             "observedCliVersion": {
               "type": [
                 "string",
@@ -17934,10 +18141,14 @@ export const bridgeWireSchemaArtifact = {
             "updatedAt"
           ],
           "type": "object"
+        },
+        "retryable": {
+          "type": "boolean"
         }
       },
       "required": [
         "accepted",
+        "retryable",
         "compatibilityState",
         "registration"
       ],
@@ -17999,6 +18210,75 @@ export const bridgeWireSchemaArtifact = {
             "codex_app_server"
           ],
           "type": "string"
+        },
+        "lastCompatibilityProbe": {
+          "properties": {
+            "completedAt": {
+              "type": "string"
+            },
+            "outcome": {
+              "enum": [
+                "passed",
+                "transport_retryable",
+                "incompatible"
+              ],
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "properties": {
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "durationMs": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "reasonCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "passed",
+                      "skipped",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stepId",
+                  "status",
+                  "durationMs"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "suiteRevision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "suiteRevision",
+            "outcome",
+            "steps",
+            "completedAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "observedCliVersion": {
           "type": [

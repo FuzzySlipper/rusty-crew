@@ -569,9 +569,10 @@ does not fabricate a response to an unknown native request ID.
 
 ### Protocol mismatch
 
-Unexpected CLI version, executable/schema fingerprint, required method shape, or
-initialize capability places the runtime in `incompatible`. No thread/turn
-mutation is sent. Read-only diagnostics remain available.
+A failed required method, malformed consumed shape, or missing initialize
+capability places the runtime in `incompatible`. A different CLI version alone
+does not. No thread/turn mutation is sent. Read-only diagnostics remain
+available.
 
 ### Partial projection failure
 
@@ -587,6 +588,15 @@ its controller consumes. A CLI version change is not itself an incompatibility.
 After initialization, the controller reports whether the required consumed
 contract is compatible; Rust records the result as `compatible_uncertified` or
 `incompatible` and remains authoritative for turn admission.
+
+The controller runs the bounded `codex-required-capabilities-v1` probe before
+asking Rust for admission. It compiles the consumed codecs, validates the Crew
+dynamic-tool registration, and probes `model/list`, `thread/list`,
+`thread/read`, and `thread/resume` without creating a test thread. Each step,
+duration, stable failure reason, observed CLI version, and consumed-contract
+revision are persisted with the runtime registration and exposed by controller
+diagnostics. Transport failures remain `unassessed` and retryable; semantic
+failures are `incompatible` and do not enter a reconnect loop.
 
 Additive fields and unknown methods must not require a Crew release when the
 consumed operations remain valid. Missing required operations, malformed known

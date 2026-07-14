@@ -10,11 +10,10 @@ use rusty_crew_core_protocol::{
     ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlReceipt,
     ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
     ExternalControllerLease, ExternalInteractionRecord, ExternalInteractionStatus,
-    ExternalRuntimeCompatibilityState, ExternalRuntimeContractCompatibility,
-    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
-    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
-    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
+    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
+    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
+    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -171,32 +170,17 @@ impl CoreEngine {
             .ok_or_else(|| {
                 CoreError::new(CoreErrorKind::NotFound, "external runtime was not found")
             })?;
-        let reason_code = if current.desired_state != ExternalRuntimeDesiredState::Enabled {
-            Some("external_runtime_disabled")
-        } else if observation.contract_compatibility
-            == ExternalRuntimeContractCompatibility::Incompatible
-        {
-            Some(
-                observation
-                    .incompatibility_reason_code
-                    .as_deref()
-                    .unwrap_or("external_runtime_required_contract_incompatible"),
-            )
-        } else {
-            None
-        };
-        let compatibility_state = match observation.contract_compatibility {
-            ExternalRuntimeContractCompatibility::Compatible => {
-                ExternalRuntimeCompatibilityState::CompatibleUncertified
-            }
-            ExternalRuntimeContractCompatibility::Incompatible => {
-                ExternalRuntimeCompatibilityState::Incompatible
-            }
-        };
+        let classification = crate::external_runtime_compatibility::classify_probe(
+            current.desired_state,
+            &observation.probe_report,
+        );
+        let compatibility_state = classification.compatibility_state;
+        let reason_code = classification.reason_code.as_deref();
         let mut next = current.clone();
         next.observed_cli_version = Some(observation.cli_version.clone());
         next.consumed_contract_revision = Some(observation.consumed_contract_revision.clone());
         next.compatibility_state = compatibility_state;
+        next.last_compatibility_probe = Some(observation.probe_report.clone());
         next.observed_state = match (reason_code, compatibility_state) {
             (None, _) => ExternalRuntimeObservedState::Ready,
             (Some(_), ExternalRuntimeCompatibilityState::Incompatible) => {
@@ -211,6 +195,7 @@ impl CoreEngine {
             .put_external_runtime_registration(&next, Some(current.revision))?;
         Ok(ExternalRuntimeHandshakeDecision {
             accepted: reason_code.is_none(),
+            retryable: classification.retryable,
             compatibility_state,
             reason_code: reason_code.map(str::to_owned),
             registration: saved,

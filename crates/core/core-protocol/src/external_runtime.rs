@@ -109,9 +109,37 @@ pub enum ExternalRuntimeCompatibilityState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ExternalRuntimeContractCompatibility {
-    Compatible,
+pub enum ExternalRuntimeCompatibilityProbeOutcome {
+    Passed,
+    TransportRetryable,
     Incompatible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalRuntimeCompatibilityProbeStepStatus {
+    Passed,
+    Skipped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeCompatibilityProbeStep {
+    pub step_id: String,
+    pub status: ExternalRuntimeCompatibilityProbeStepStatus,
+    pub duration_ms: u64,
+    pub reason_code: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeCompatibilityProbeReport {
+    pub suite_revision: String,
+    pub outcome: ExternalRuntimeCompatibilityProbeOutcome,
+    pub steps: Vec<ExternalRuntimeCompatibilityProbeStep>,
+    pub completed_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -132,6 +160,7 @@ pub struct ExternalRuntimeRegistration {
     pub observed_cli_version: Option<String>,
     pub consumed_contract_revision: Option<String>,
     pub compatibility_state: ExternalRuntimeCompatibilityState,
+    pub last_compatibility_probe: Option<ExternalRuntimeCompatibilityProbeReport>,
     pub desired_state: ExternalRuntimeDesiredState,
     pub observed_state: ExternalRuntimeObservedState,
     pub observed_reason_code: Option<String>,
@@ -154,8 +183,7 @@ pub struct ExternalRuntimeHandshakeObservation {
     pub controller: ExternalControllerContext,
     pub cli_version: String,
     pub consumed_contract_revision: String,
-    pub contract_compatibility: ExternalRuntimeContractCompatibility,
-    pub incompatibility_reason_code: Option<String>,
+    pub probe_report: ExternalRuntimeCompatibilityProbeReport,
     pub observed_at: IsoTimestamp,
 }
 
@@ -163,6 +191,7 @@ pub struct ExternalRuntimeHandshakeObservation {
 #[serde(rename_all = "camelCase")]
 pub struct ExternalRuntimeHandshakeDecision {
     pub accepted: bool,
+    pub retryable: bool,
     pub compatibility_state: ExternalRuntimeCompatibilityState,
     pub reason_code: Option<String>,
     pub registration: ExternalRuntimeRegistration,
@@ -774,13 +803,12 @@ pub fn validate_external_runtime_registration(
     if let Some(contract_revision) = &registration.consumed_contract_revision {
         validate_non_empty("consumed_contract_revision", contract_revision)?;
     }
-    if registration.compatibility_state == ExternalRuntimeCompatibilityState::Unassessed
-        && (registration.observed_cli_version.is_some()
-            || registration.consumed_contract_revision.is_some())
+    if registration.observed_cli_version.is_some()
+        != registration.consumed_contract_revision.is_some()
     {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
-            "unassessed external runtime cannot carry observed compatibility identity",
+            "external runtime compatibility identity must be complete",
         ));
     }
     if registration.compatibility_state != ExternalRuntimeCompatibilityState::Unassessed
@@ -810,6 +838,36 @@ pub fn validate_external_runtime_registration(
             "incompatible external runtime requires incompatible observed state and reason",
         ));
     }
+    if let Some(report) = &registration.last_compatibility_probe {
+        validate_external_runtime_compatibility_probe_report(report)?;
+    }
+    match (
+        registration
+            .last_compatibility_probe
+            .as_ref()
+            .map(|report| report.outcome),
+        registration.compatibility_state,
+    ) {
+        (None, ExternalRuntimeCompatibilityState::Unassessed)
+        | (
+            Some(ExternalRuntimeCompatibilityProbeOutcome::TransportRetryable),
+            ExternalRuntimeCompatibilityState::Unassessed,
+        )
+        | (
+            Some(ExternalRuntimeCompatibilityProbeOutcome::Passed),
+            ExternalRuntimeCompatibilityState::CompatibleUncertified,
+        )
+        | (
+            Some(ExternalRuntimeCompatibilityProbeOutcome::Incompatible),
+            ExternalRuntimeCompatibilityState::Incompatible,
+        ) => {}
+        _ => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external runtime compatibility state must match its latest probe report",
+            ));
+        }
+    }
     if registration.kind == ExternalRuntimeKind::CodexAppServer
         && registration.endpoint.transport != ExternalEndpointTransport::UnixWebSocket
     {
@@ -830,21 +888,70 @@ pub fn validate_external_runtime_handshake_observation(
         "consumed_contract_revision",
         &observation.consumed_contract_revision,
     )?;
-    match (
-        observation.contract_compatibility,
-        observation.incompatibility_reason_code.as_deref(),
-    ) {
-        (ExternalRuntimeContractCompatibility::Compatible, None) => Ok(()),
-        (ExternalRuntimeContractCompatibility::Compatible, Some(_)) => Err(CoreError::new(
+    validate_external_runtime_compatibility_probe_report(&observation.probe_report)
+}
+
+pub fn validate_external_runtime_compatibility_probe_report(
+    report: &ExternalRuntimeCompatibilityProbeReport,
+) -> CoreResult<()> {
+    use std::collections::HashSet;
+
+    validate_non_empty("probe_report.suite_revision", &report.suite_revision)?;
+    validate_non_empty("probe_report.completed_at", &report.completed_at)?;
+    if report.steps.is_empty() || report.steps.len() > 32 {
+        return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
-            "compatible external runtime cannot report an incompatibility reason",
-        )),
-        (ExternalRuntimeContractCompatibility::Incompatible, Some(reason_code)) => {
-            validate_non_empty("incompatibility_reason_code", reason_code)
+            "compatibility probe report requires between 1 and 32 steps",
+        ));
+    }
+    let mut step_ids = HashSet::new();
+    let mut failed_reason = None;
+    for step in &report.steps {
+        validate_non_empty("probe_report.steps.step_id", &step.step_id)?;
+        if step.step_id.len() > 128 || !step_ids.insert(step.step_id.as_str()) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "compatibility probe step identifiers must be unique and at most 128 bytes",
+            ));
         }
-        (ExternalRuntimeContractCompatibility::Incompatible, None) => Err(CoreError::new(
+        if let Some(detail) = &step.detail {
+            if detail.len() > 1_024 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "compatibility probe step detail exceeds 1024 bytes",
+                ));
+            }
+        }
+        match (step.status, step.reason_code.as_deref()) {
+            (ExternalRuntimeCompatibilityProbeStepStatus::Passed, None) => {}
+            (ExternalRuntimeCompatibilityProbeStepStatus::Skipped, Some(reason))
+            | (ExternalRuntimeCompatibilityProbeStepStatus::Failed, Some(reason)) => {
+                validate_non_empty("probe_report.steps.reason_code", reason)?;
+                if step.status == ExternalRuntimeCompatibilityProbeStepStatus::Failed
+                    && failed_reason.is_none()
+                {
+                    failed_reason = Some(reason);
+                }
+            }
+            _ => {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "probe step status and reason code are incoherent",
+                ));
+            }
+        }
+    }
+    match (report.outcome, failed_reason) {
+        (ExternalRuntimeCompatibilityProbeOutcome::Passed, None) => Ok(()),
+        (ExternalRuntimeCompatibilityProbeOutcome::Passed, Some(_)) => Err(CoreError::new(
             CoreErrorKind::InvalidInput,
-            "incompatible external runtime requires an incompatibility reason",
+            "passing compatibility probe cannot contain a failed step",
+        )),
+        (ExternalRuntimeCompatibilityProbeOutcome::TransportRetryable, Some(_))
+        | (ExternalRuntimeCompatibilityProbeOutcome::Incompatible, Some(_)) => Ok(()),
+        (_, None) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "failed compatibility probe requires a failed step with a reason code",
         )),
     }
 }
@@ -877,7 +984,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn contract_compatibility_reports_require_coherent_reasoning() {
+    fn compatibility_probe_reports_require_coherent_reasoning() {
+        let passed_report = ExternalRuntimeCompatibilityProbeReport {
+            suite_revision: "codex-required-v1".into(),
+            outcome: ExternalRuntimeCompatibilityProbeOutcome::Passed,
+            steps: vec![ExternalRuntimeCompatibilityProbeStep {
+                step_id: "model_list".into(),
+                status: ExternalRuntimeCompatibilityProbeStepStatus::Passed,
+                duration_ms: 2,
+                reason_code: None,
+                detail: None,
+            }],
+            completed_at: "2026-07-14T00:00:00Z".into(),
+        };
         let mut observation = ExternalRuntimeHandshakeObservation {
             runtime_id: ExternalRuntimeId::new("codex-local"),
             controller: ExternalControllerContext {
@@ -886,13 +1005,12 @@ mod tests {
             },
             cli_version: "0.144.3".into(),
             consumed_contract_revision: "contract-v1".into(),
-            contract_compatibility: ExternalRuntimeContractCompatibility::Compatible,
-            incompatibility_reason_code: None,
+            probe_report: passed_report,
             observed_at: "2026-07-14T00:00:00Z".into(),
         };
         validate_external_runtime_handshake_observation(&observation).unwrap();
 
-        observation.incompatibility_reason_code = Some("unexpected_reason".into());
+        observation.probe_report.steps[0].reason_code = Some("unexpected_reason".into());
         assert_eq!(
             validate_external_runtime_handshake_observation(&observation)
                 .unwrap_err()
@@ -900,8 +1018,10 @@ mod tests {
             CoreErrorKind::InvalidInput
         );
 
-        observation.contract_compatibility = ExternalRuntimeContractCompatibility::Incompatible;
-        observation.incompatibility_reason_code = None;
+        observation.probe_report.outcome = ExternalRuntimeCompatibilityProbeOutcome::Incompatible;
+        observation.probe_report.steps[0].status =
+            ExternalRuntimeCompatibilityProbeStepStatus::Failed;
+        observation.probe_report.steps[0].reason_code = None;
         assert_eq!(
             validate_external_runtime_handshake_observation(&observation)
                 .unwrap_err()
