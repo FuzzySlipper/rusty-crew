@@ -81,6 +81,16 @@ class FakeTransport implements CodexJsonRpcTransport {
         },
       });
     }
+    if (parsed.method === "turn/steer") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          turnId: String(
+            (parsed.params as Record<string, unknown>).expectedTurnId,
+          ),
+        },
+      });
+    }
     if (parsed.method === "thread/resume") {
       this.emit({
         id: parsed.id,
@@ -1728,6 +1738,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
         profileRevision: 1,
         profilePromptHash:
           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        messageDeliveryPolicy: "immediate_steer",
         purpose: "crew_agent",
         nativeThreadId: "native-thread-1",
         effectiveConfigFingerprint: "interaction-test",
@@ -1838,6 +1849,38 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       "interaction response",
     );
     assert.equal((await bridge.listActiveExternalTurns())[0]?.phase, "active");
+
+    const steerPending = await bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "active-steer-delivery",
+      idempotencyKey: "active-steer-delivery",
+      messageId: "active-steer-message",
+      toAgentId: "interaction-agent",
+      body: "include the new constraint",
+      correlationId: "review-constraint-1",
+      requireWake: true,
+      createdAt: now(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(steerPending.status, "pending");
+    assert.equal(
+      steerPending.activation?.type,
+      "external_turn_steer_requested",
+    );
+    const steered = await controller.applyCoordinationDelivery(steerPending);
+    assert.equal(steered.status, "accepted");
+    assert.equal(steered.reasonCode, "external_turn_steer_accepted");
+    const steerRequest = transport.sent.find(
+      (message) => message.method === "turn/steer",
+    );
+    assert.equal(
+      (steerRequest?.params as Record<string, unknown>).expectedTurnId,
+      "native-turn-1",
+    );
+    assert.match(
+      JSON.stringify((steerRequest?.params as Record<string, unknown>).input),
+      /message_id: active-steer-message.*from_agent_id: operator.*review-constraint-1.*include the new constraint/s,
+    );
 
     transport.emit({
       method: "turn/completed",
@@ -1989,6 +2032,7 @@ test("controller expires undispatched turns and reports ambiguous native starts 
         profileRevision: 1,
         profilePromptHash:
           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        messageDeliveryPolicy: "immediate_steer",
         purpose: "crew_agent",
         nativeThreadId: "dispatch-thread",
         effectiveConfigFingerprint: "dispatch-test",

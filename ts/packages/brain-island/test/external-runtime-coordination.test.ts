@@ -97,8 +97,9 @@ test("Codex coordination round returns the durable Rust reply", async () => {
       controllerGeneration: 8,
     },
     port,
-    onDelivery: (receipt) => {
+    onDelivery: async (receipt) => {
       delivered.push(receipt);
+      return receipt;
     },
     now: () => new Date("2026-07-10T00:00:00Z"),
   });

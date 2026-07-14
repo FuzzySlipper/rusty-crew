@@ -93,6 +93,42 @@
         },
         {
           "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "messageText": {
+              "type": "string"
+            },
+            "nativeThreadId": {
+              "type": "string"
+            },
+            "nativeTurnId": {
+              "type": "string"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "external_turn_steer_requested",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "requestId",
+            "bindingId",
+            "nativeThreadId",
+            "nativeTurnId",
+            "messageText"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "queueId": {
               "type": "string"
             },
@@ -480,6 +516,37 @@
         "requireWake",
         "createdAt",
         "expiresAt"
+      ],
+      "type": "object"
+    },
+    "AgentMessageDeliveryCompletion": {
+      "properties": {
+        "completedAt": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/AgentMessageDeliveryStatus"
+        }
+      },
+      "required": [
+        "deliveryId",
+        "expectedRevision",
+        "status",
+        "completedAt"
       ],
       "type": "object"
     },
@@ -2289,6 +2356,10 @@
             "null"
           ]
         },
+        "messageDeliveryPolicy": {
+          "$ref": "#/$defs/ExternalMessageDeliveryPolicy",
+          "default": "immediate_steer"
+        },
         "nativeThreadId": {
           "type": [
             "string",
@@ -3001,6 +3072,13 @@
         "resolved",
         "expired",
         "lost"
+      ],
+      "type": "string"
+    },
+    "ExternalMessageDeliveryPolicy": {
+      "enum": [
+        "immediate_steer",
+        "serial_next_turn"
       ],
       "type": "string"
     },
@@ -5203,6 +5281,9 @@
     "agent_message_command": {
       "$ref": "#/$defs/AgentMessageCommand"
     },
+    "agent_message_delivery_completion": {
+      "$ref": "#/$defs/AgentMessageDeliveryCompletion"
+    },
     "agent_message_delivery_receipt": {
       "$ref": "#/$defs/AgentMessageDeliveryReceipt"
     },
@@ -5457,6 +5538,7 @@
     "memory_governance_decision_record",
     "agent_directory_entry",
     "agent_message_command",
+    "agent_message_delivery_completion",
     "agent_message_delivery_receipt",
     "agent_round_command",
     "agent_round_start_receipt",

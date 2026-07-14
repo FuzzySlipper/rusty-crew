@@ -6,6 +6,7 @@ export declare class NativeBridgeBinding {
   beginAgentRoundJson(commandJson: string): string
   getAgentRoundJson(roundId: string): string | null
   getAgentMessageDeliveryJson(deliveryId: string): string | null
+  completeAgentMessageDeliveryJson(completionJson: string): string
   startBrainRunJson(moduleId: string, inputJson: string): string
   drainBrainRunJson(moduleId: string, wakeId: string, maxItems?: number | undefined | null): string
   submitBrainHostResultJson(moduleId: string, inputJson: string): string

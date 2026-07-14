@@ -55,6 +55,7 @@ struct ProtocolContractRoots {
     memory_governance_decision_record: MemoryGovernanceDecisionRecord,
     agent_directory_entry: AgentDirectoryEntry,
     agent_message_command: AgentMessageCommand,
+    agent_message_delivery_completion: AgentMessageDeliveryCompletion,
     agent_message_delivery_receipt: AgentMessageDeliveryReceipt,
     agent_round_command: AgentRoundCommand,
     agent_round_start_receipt: AgentRoundStartReceipt,

@@ -163,6 +163,9 @@ impl CoreEngine {
         if pending.status.is_terminal() {
             return Ok(pending);
         }
+        if pending.activation.is_some() {
+            return Ok(pending);
+        }
         if command.expires_at <= self.now() {
             return self.finish_agent_message_delivery(
                 pending,
@@ -256,11 +259,14 @@ impl CoreEngine {
             );
         }
 
+        let model_body = routed_agent_message_text(&pending.request);
         let activation = self.activate_agent_execution(AgentActivationRequest {
             agent_id: command.to_agent_id,
             request_id: ExternalTurnRequestId::new(format!("agent-message:{}", command.message_id)),
             idempotency_key: format!("agent-message-turn:{}", command.message_id),
-            input: vec![ExternalTurnInputPart::Text { text: command.body }],
+            input: vec![ExternalTurnInputPart::Text {
+                text: model_body.clone(),
+            }],
             collaboration_mode: command.collaboration_mode,
             provenance: TurnInputProvenance {
                 kind: TurnInputProvenanceKind::RoutedAgentMessage,
@@ -284,9 +290,12 @@ impl CoreEngine {
                 self.enqueue_body_follow_up_message_without_wake(
                     session_id,
                     sender_agent_id,
-                    message.body,
+                    model_body,
                     message.correlation_id,
                 )?;
+            }
+            AgentActivation::ExternalTurnSteerRequested { .. } => {
+                return self.observe_pending_agent_message_delivery(pending, sequence, activation);
             }
             AgentActivation::ExternalTurnRequested { .. } => {}
             AgentActivation::Rejected { reason_code } => {
@@ -388,6 +397,62 @@ impl CoreEngine {
         delivery_id: &rusty_crew_core_protocol::AgentMessageDeliveryId,
     ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
         self.store.get_agent_message_delivery(delivery_id)
+    }
+
+    pub fn complete_agent_message_delivery(
+        &self,
+        completion: rusty_crew_core_protocol::AgentMessageDeliveryCompletion,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let current = self
+            .store
+            .get_agent_message_delivery(&completion.delivery_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    "agent message delivery was not found",
+                )
+            })?;
+        if current.status.is_terminal() {
+            return Ok(current);
+        }
+        if current.revision != completion.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_delivery_revision_conflict",
+            ));
+        }
+        if !matches!(
+            current.activation,
+            Some(AgentActivation::ExternalTurnSteerRequested { .. })
+        ) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_delivery_completion_requires_pending_steer",
+            ));
+        }
+        if !matches!(
+            completion.status,
+            AgentMessageDeliveryStatus::Accepted
+                | AgentMessageDeliveryStatus::Rejected
+                | AgentMessageDeliveryStatus::Expired
+        ) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "agent message delivery completion must be terminal",
+            ));
+        }
+        let mut next = current;
+        let expected_revision = next.revision;
+        next.status = completion.status;
+        next.reason_code = completion.reason_code;
+        next.terminal_at = Some(completion.completed_at);
+        let saved = self
+            .store
+            .update_agent_message_delivery(&next, expected_revision)?;
+        self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
+            receipt: saved.clone(),
+        })?;
+        Ok(saved)
     }
 
     fn resolve_coordination_caller(
@@ -559,4 +624,33 @@ impl CoreEngine {
         })?;
         Ok(receipt)
     }
+
+    fn observe_pending_agent_message_delivery(
+        &self,
+        mut pending: AgentMessageDeliveryReceipt,
+        sequence: u64,
+        activation: AgentActivation,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let expected_revision = pending.revision;
+        pending.sequence = Some(sequence);
+        pending.activation = Some(activation);
+        let receipt = self
+            .store
+            .update_agent_message_delivery(&pending, expected_revision)?;
+        self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
+            receipt: receipt.clone(),
+        })?;
+        Ok(receipt)
+    }
+}
+
+fn routed_agent_message_text(request: &AgentMessageDeliveryRequest) -> String {
+    format!(
+        "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\ncorrelation_id: {}\nexpires_at: {}\n\n{}",
+        request.message_id,
+        request.from_agent_id.0,
+        request.correlation_id.as_deref().unwrap_or("none"),
+        request.expires_at,
+        request.body
+    )
 }

@@ -406,6 +406,15 @@ errors = "core_protocol::CoreError"
 summary = "Read durable cross-runtime message delivery and activation state."
 
 [[operation]]
+name = "complete_agent_message_delivery"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentMessageDeliveryCompletion"
+output = "core_protocol::AgentMessageDeliveryReceipt"
+errors = "core_protocol::CoreError"
+summary = "Complete a pending external-turn steer delivery only after the native app-server outcome is known."
+
+[[operation]]
 name = "register_external_runtime"
 surface = "stable"
 direction = "ts_to_rust"

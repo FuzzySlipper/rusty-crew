@@ -10,11 +10,11 @@ use rusty_crew_core_protocol::{
     ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlReceipt,
     ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
     ExternalControllerLease, ExternalInteractionRecord, ExternalInteractionStatus,
-    ExternalRuntimeCompatibilityProbeOutcome, ExternalRuntimeCompatibilityState,
-    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
-    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
-    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    ExternalMessageDeliveryPolicy, ExternalRuntimeCompatibilityProbeOutcome,
+    ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
+    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
+    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
+    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -308,6 +308,7 @@ impl CoreEngine {
             profile_id: Some(profile.profile_id.clone()),
             profile_revision: Some(profile.revision),
             profile_prompt_hash: Some(external_profile_prompt_hash(&profile)),
+            message_delivery_policy: external_message_delivery_policy(&profile)?,
             purpose: ExternalBindingPurpose::CrewAgent,
             native_thread_id: None,
             cwd: Some(cwd),
@@ -966,24 +967,6 @@ impl CoreEngine {
                     "external binding profile_id does not match the bound Crew session",
                 ));
             }
-            let profile = self
-                .get_profile_registry_record(&session.profile_id)?
-                .ok_or_else(|| {
-                    CoreError::new(
-                        CoreErrorKind::NotFound,
-                        "external binding profile was not found",
-                    )
-                })?;
-            if profile.lifecycle_status != ProfileRegistryLifecycleStatus::Active
-                || binding.profile_revision != Some(profile.revision)
-                || binding.profile_prompt_hash.as_deref()
-                    != Some(external_profile_prompt_hash(&profile).as_str())
-            {
-                return Err(CoreError::new(
-                    CoreErrorKind::ActionRejected,
-                    "external binding profile prompt provenance is stale",
-                ));
-            }
             if session.status == SessionStatus::Archived
                 && binding.status != ExternalBindingStatus::Archived
             {
@@ -1086,12 +1069,36 @@ impl CoreEngine {
                 },
             });
         }
-        if self
+        if let Some(active_turn) = self
             .store
             .list_nonterminal_external_turns()?
-            .iter()
-            .any(|turn| turn.request.session_id == session.session_id)
+            .into_iter()
+            .find(|turn| turn.request.session_id == session.session_id)
         {
+            match binding.message_delivery_policy {
+                ExternalMessageDeliveryPolicy::ImmediateSteer
+                    if active_turn.phase == ExternalTurnPhase::Active
+                        && active_turn.native_turn_id.is_some() =>
+                {
+                    return Ok(AgentActivation::ExternalTurnSteerRequested {
+                        session_id: session.session_id,
+                        request_id: active_turn.request.request_id,
+                        binding_id: binding.binding_id,
+                        native_thread_id: active_turn.native_thread_id,
+                        native_turn_id: active_turn.native_turn_id.expect("checked above"),
+                        message_text: request
+                            .input
+                            .iter()
+                            .find_map(|part| match part {
+                                ExternalTurnInputPart::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_default(),
+                    });
+                }
+                ExternalMessageDeliveryPolicy::ImmediateSteer
+                | ExternalMessageDeliveryPolicy::SerialNextTurn => {}
+            }
             return Ok(AgentActivation::QueuedForNextTurn {
                 session_id: session.session_id,
                 queue_id: request.queued_message_id,
@@ -1353,6 +1360,29 @@ impl CoreEngine {
                 .push(saved.request.delivery_id.0);
         }
         Ok(report)
+    }
+}
+
+fn external_message_delivery_policy(
+    profile: &ProfileRegistryRecord,
+) -> CoreResult<ExternalMessageDeliveryPolicy> {
+    let value = profile
+        .active_runtime_settings_json
+        .get("externalMessageDeliveryPolicy")
+        .or_else(|| {
+            profile
+                .active_runtime_settings_json
+                .get("external_message_delivery_policy")
+        })
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("immediate_steer");
+    match value {
+        "immediate_steer" => Ok(ExternalMessageDeliveryPolicy::ImmediateSteer),
+        "serial_next_turn" => Ok(ExternalMessageDeliveryPolicy::SerialNextTurn),
+        _ => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external_message_delivery_policy_invalid: expected immediate_steer or serial_next_turn",
+        )),
     }
 }
 

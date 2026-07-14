@@ -6,6 +6,7 @@ export interface NativeBridgeBinding {
   beginAgentRoundJson(commandJson: string): string
   getAgentRoundJson(roundId: string): string | null
   getAgentMessageDeliveryJson(deliveryId: string): string | null
+  completeAgentMessageDeliveryJson(completionJson: string): string
   startBrainRunJson(moduleId: string, inputJson: string): string
   drainBrainRunJson(moduleId: string, wakeId: string, maxItems?: number | undefined | null): string
   submitBrainHostResultJson(moduleId: string, inputJson: string): string
@@ -800,7 +801,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 256,
+  "manifestOperationCount": 257,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -841,6 +842,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string | null",
       "returnKind": "string",
       "operationName": "get_agent_message_delivery"
+    },
+    {
+      "name": "completeAgentMessageDeliveryJson",
+      "parameterSource": "completionJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "complete_agent_message_delivery"
     },
     {
       "name": "startBrainRunJson",

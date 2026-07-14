@@ -44,6 +44,7 @@ export const bridgeOperations = [
   {"name":"begin_agent_round","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentRoundCommand","output":"core_protocol::AgentRoundStartReceipt","errors":"core_protocol::CoreError","summary":"Persist a correlated agent round before routing its message through the runtime-neutral delivery command."},
   {"name":"get_agent_round","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentRoundId","output":"option<core_protocol::AgentCorrelatedRound>","errors":"core_protocol::CoreError","summary":"Read durable correlated-round state without process-memory subscriptions or reply matching."},
   {"name":"get_agent_message_delivery","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageDeliveryId","output":"option<core_protocol::AgentMessageDeliveryReceipt>","errors":"core_protocol::CoreError","summary":"Read durable cross-runtime message delivery and activation state."},
+  {"name":"complete_agent_message_delivery","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageDeliveryCompletion","output":"core_protocol::AgentMessageDeliveryReceipt","errors":"core_protocol::CoreError","summary":"Complete a pending external-turn steer delivery only after the native app-server outcome is known."},
   {"name":"register_external_runtime","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalRuntimeRegistration + expected_revision","output":"core_protocol::ExternalRuntimeRegistration","errors":"core_protocol::CoreError","summary":"Register or revise an external agent runtime through Rust lifecycle authority."},
   {"name":"authorize_external_runtime_handshake","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalRuntimeHandshakeObservation","output":"core_protocol::ExternalRuntimeHandshakeDecision","errors":"core_protocol::CoreError","summary":"Classify an observed external runtime handshake against Rust-owned compatibility requirements."},
   {"name":"record_external_runtime_state","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalRuntimeStateObservation","output":"core_protocol::ExternalRuntimeRegistration","errors":"core_protocol::CoreError","summary":"Record a controller-observed non-ready runtime state through Rust lease and transition authority."},
@@ -268,4 +269,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "ae3cb1cfc76ff0f649a0607caf841e2df91172d28cb85e7fc94bce4793647f67" as const;
+export const bridgeWireShapeFingerprint = "779860eac42f6e8272d8f85cc741719c48dd71d39707ad4cba6cfa4088ea711c" as const;

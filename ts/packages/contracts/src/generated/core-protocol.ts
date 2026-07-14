@@ -72,6 +72,14 @@ export type AgentActivation = {
   sessionId: string;
   type: "external_turn_requested";
 } | {
+  bindingId: string;
+  messageText: string;
+  nativeThreadId: string;
+  nativeTurnId: string;
+  requestId: string;
+  sessionId: string;
+  type: "external_turn_steer_requested";
+} | {
   queueId: string;
   sessionId: string;
   type: "queued_for_next_turn";
@@ -158,6 +166,14 @@ export type AgentMessageCommand = {
   messageId: string;
   requireWake: boolean;
   toAgentId: string;
+};
+
+export type AgentMessageDeliveryCompletion = {
+  completedAt: string;
+  deliveryId: string;
+  expectedRevision: number;
+  reasonCode?: string | null;
+  status: AgentMessageDeliveryStatus;
 };
 
 export type AgentMessageDeliveryReceipt = {
@@ -561,6 +577,7 @@ export type ExternalAgentBinding = {
   cwd?: string | null;
   effectiveConfigFingerprint: string;
   label?: string | null;
+  messageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   nativeThreadId?: string | null;
   profileId?: string | null;
   profilePromptHash?: string | null;
@@ -729,6 +746,8 @@ export type ExternalInteractionRecord = {
 };
 
 export type ExternalInteractionStatus = "pending" | "resolved" | "expired" | "lost";
+
+export type ExternalMessageDeliveryPolicy = "immediate_steer" | "serial_next_turn";
 
 export type ExternalProcessOwnership = "attached" | "managed";
 

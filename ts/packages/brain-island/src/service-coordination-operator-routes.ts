@@ -24,6 +24,9 @@ export interface CoordinationOperatorRouteContext {
   now(): string;
   requestId(request: IncomingMessage): string;
   readJsonBody(request: IncomingMessage): Promise<unknown>;
+  settleDelivery(
+    receipt: AgentMessageDeliveryReceipt,
+  ): Promise<AgentMessageDeliveryReceipt>;
 }
 
 export function isCoordinationOperatorRoute(pathname: string): boolean {
@@ -72,7 +75,7 @@ export async function handleCoordinationOperatorRequest(
       const body = requireRecord(await context.readJsonBody(request));
       const ids = commandIds(body, "operator-message");
       const createdAt = context.now();
-      const receipt = await context.bridge.deliverAgentMessage({
+      const initialReceipt = await context.bridge.deliverAgentMessage({
         caller: {
           type: "system",
           senderAgentId: operatorAgentId(context.deploymentRole),
@@ -89,6 +92,7 @@ export async function handleCoordinationOperatorRequest(
         createdAt,
         expiresAt: expiresAt(createdAt, body.ttlMs),
       });
+      const receipt = await context.settleDelivery(initialReceipt);
       return operatorDeliveryResult(requestId, context.deploymentRole, receipt);
     } catch (error) {
       return invalidInput(requestId, error);

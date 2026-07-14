@@ -631,6 +631,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         Option<protocol::AgentMessageDeliveryReceipt>
     );
     schema!(
+        "complete_agent_message_delivery",
+        protocol::AgentMessageDeliveryReceipt
+    );
+    schema!(
         "register_external_runtime",
         protocol::ExternalRuntimeRegistration
     );

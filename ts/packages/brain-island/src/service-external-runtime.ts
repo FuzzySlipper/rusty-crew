@@ -219,7 +219,7 @@ export class ServiceExternalRuntimeController {
   readonly #instanceId: string;
   readonly #onCoordinationDelivery?: (
     receipt: AgentMessageDeliveryReceipt,
-  ) => void;
+  ) => Promise<AgentMessageDeliveryReceipt>;
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -239,7 +239,9 @@ export class ServiceExternalRuntimeController {
       registration: ExternalRuntimeRegistration,
       authority: CodexControllerAuthority,
     ) => CodexAppServerDriver;
-    onCoordinationDelivery?: (receipt: AgentMessageDeliveryReceipt) => void;
+    onCoordinationDelivery?: (
+      receipt: AgentMessageDeliveryReceipt,
+    ) => Promise<AgentMessageDeliveryReceipt>;
   }) {
     this.#bridge = input.bridge;
     this.#now = input.now ?? (() => new Date());
@@ -1034,6 +1036,78 @@ export class ServiceExternalRuntimeController {
       refreshedBindings,
       unchangedBindings,
     };
+  }
+
+  async applyCoordinationDelivery(
+    receipt: AgentMessageDeliveryReceipt,
+  ): Promise<AgentMessageDeliveryReceipt> {
+    if (
+      receipt.status !== "pending" ||
+      receipt.activation?.type !== "external_turn_steer_requested"
+    ) {
+      return receipt;
+    }
+    const completedAt = this.#now().toISOString();
+    if (receipt.request.expiresAt <= completedAt) {
+      return this.#bridge.completeAgentMessageDelivery({
+        deliveryId: receipt.request.deliveryId,
+        expectedRevision: receipt.revision,
+        status: "expired",
+        reasonCode: "agent_message_expired_before_steer",
+        completedAt,
+      });
+    }
+    const activation = receipt.activation;
+    const binding = await this.#bridge.getExternalBinding(activation.bindingId);
+    const activeTurn = (await this.#bridge.listActiveExternalTurns()).find(
+      (candidate) =>
+        candidate.request.requestId === activation.requestId &&
+        candidate.nativeThreadId === activation.nativeThreadId &&
+        candidate.nativeTurnId === activation.nativeTurnId &&
+        candidate.phase === "active",
+    );
+    if (binding === undefined || activeTurn === undefined) {
+      return this.#bridge.completeAgentMessageDelivery({
+        deliveryId: receipt.request.deliveryId,
+        expectedRevision: receipt.revision,
+        status: "rejected",
+        reasonCode: "external_turn_steer_precondition_changed",
+        completedAt,
+      });
+    }
+    const controlled = await this.#requireControlled(binding.runtimeId);
+    try {
+      await controlled.driver.turnSteer({
+        threadId: activation.nativeThreadId,
+        expectedTurnId: activation.nativeTurnId,
+        clientUserMessageId: `rusty-crew:${receipt.request.messageId}`,
+        input: [
+          {
+            type: "text" as const,
+            text: activation.messageText,
+            text_elements: [],
+          },
+        ],
+      });
+      return this.#bridge.completeAgentMessageDelivery({
+        deliveryId: receipt.request.deliveryId,
+        expectedRevision: receipt.revision,
+        status: "accepted",
+        reasonCode: "external_turn_steer_accepted",
+        completedAt: this.#now().toISOString(),
+      });
+    } catch (error) {
+      return this.#bridge.completeAgentMessageDelivery({
+        deliveryId: receipt.request.deliveryId,
+        expectedRevision: receipt.revision,
+        status: "rejected",
+        reasonCode:
+          error instanceof CodexRpcError
+            ? "external_turn_steer_rejected"
+            : "external_turn_steer_outcome_unknown",
+        completedAt: this.#now().toISOString(),
+      });
+    }
   }
 
   async executeControl(

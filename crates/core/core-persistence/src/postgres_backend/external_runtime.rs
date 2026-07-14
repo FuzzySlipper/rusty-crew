@@ -4,7 +4,7 @@ use super::*;
 use rusty_crew_core_protocol::{
     validate_external_runtime_certification_invalidation,
     validate_external_runtime_certification_record, validate_external_runtime_probe_evidence,
-    validate_external_runtime_registration, validate_external_turn_transition,
+    validate_external_runtime_registration, validate_external_turn_transition, AgentActivation,
     AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
     AgentRoundStatus, ExternalAgentBinding, ExternalAgentSessionCreationId,
     ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRecord, ExternalBindingId,
@@ -1480,10 +1480,20 @@ impl PostgresBackendStore {
                 "terminal agent message delivery is immutable",
             ));
         }
-        if next.status == AgentMessageDeliveryStatus::Pending {
+        let attaches_initial_steer = next.status == AgentMessageDeliveryStatus::Pending
+            && current.status == AgentMessageDeliveryStatus::Pending
+            && current.activation.is_none()
+            && matches!(
+                next.activation.as_ref(),
+                Some(AgentActivation::ExternalTurnSteerRequested { .. })
+            )
+            && next.sequence.is_some()
+            && next.reason_code.is_none()
+            && next.terminal_at.is_none();
+        if next.status == AgentMessageDeliveryStatus::Pending && !attaches_initial_steer {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
-                "agent message delivery must transition to a terminal status",
+                "pending agent message delivery may only attach its initial steer activation",
             ));
         }
         let mut saved = next.clone();

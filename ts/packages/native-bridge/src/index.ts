@@ -680,6 +680,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     beginAgentRound: unavailable("begin_agent_round"),
     getAgentRound: unavailable("get_agent_round"),
     getAgentMessageDelivery: unavailable("get_agent_message_delivery"),
+    completeAgentMessageDelivery: unavailable(
+      "complete_agent_message_delivery",
+    ),
     registerExternalRuntime: unavailable("register_external_runtime"),
     authorizeExternalRuntimeHandshake: unavailable(
       "authorize_external_runtime_handshake",
@@ -1578,6 +1581,12 @@ function createNativeBridgeModule(
             ReturnType<NativeBridgeModule["getAgentMessageDelivery"]>
           >);
     },
+    completeAgentMessageDelivery: async (completion) =>
+      JSON.parse(
+        binding.completeAgentMessageDeliveryJson(JSON.stringify(completion)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["completeAgentMessageDelivery"]>
+      >,
     ...createNativeBridgeExternalRuntimeMethods(binding),
     ...createNativeBridgeExternalRuntimeCertificationMethods(binding),
     enqueueBodyFollowUpMessage: async (input) =>

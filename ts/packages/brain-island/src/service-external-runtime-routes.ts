@@ -474,23 +474,24 @@ export async function handleExternalRuntimeRequest(
       60_000,
     );
     const createdAt = context.now();
+    const initialReceipt = await context.bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "rusty-view-operator" },
+      deliveryId,
+      idempotencyKey,
+      messageId,
+      toAgentId: binding.agentId,
+      body: messageBody,
+      ...(collaborationMode === undefined ? {} : { collaborationMode }),
+      ...(optionalString(body.correlationId) === undefined
+        ? {}
+        : { correlationId: optionalString(body.correlationId) }),
+      requireWake: true,
+      createdAt,
+      expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
+    });
     return successRoute(
       requestId,
-      await context.bridge.deliverAgentMessage({
-        caller: { type: "system", senderAgentId: "rusty-view-operator" },
-        deliveryId,
-        idempotencyKey,
-        messageId,
-        toAgentId: binding.agentId,
-        body: messageBody,
-        ...(collaborationMode === undefined ? {} : { collaborationMode }),
-        ...(optionalString(body.correlationId) === undefined
-          ? {}
-          : { correlationId: optionalString(body.correlationId) }),
-        requireWake: true,
-        createdAt,
-        expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
-      }),
+      await context.controller.applyCoordinationDelivery(initialReceipt),
     );
   }
 

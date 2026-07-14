@@ -905,10 +905,14 @@ export async function createRustyCrewServiceApp(
     const externalRuntimeController = new ServiceExternalRuntimeController({
       bridge,
       now: () => new Date((options.now ?? (() => new Date().toISOString()))()),
-      onCoordinationDelivery: () => {
+      onCoordinationDelivery: async (receipt) => {
         const state = liveState;
-        if (state === undefined) return;
-        void drainAndDispatchWakesFromModule(
+        if (state === undefined) return receipt;
+        const settled =
+          await state.externalRuntimeController.applyCoordinationDelivery(
+            receipt,
+          );
+        await drainAndDispatchWakesFromModule(
           wakeEventDrainContext(state, "external_runtime"),
         ).catch((error) =>
           recordServiceEvent(state, {
@@ -921,6 +925,7 @@ export async function createRustyCrewServiceApp(
             ),
           }),
         );
+        return settled;
       },
     });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
@@ -1319,6 +1324,8 @@ async function handleHttpRequest(
       now: state.now,
       requestId,
       readJsonBody,
+      settleDelivery: (receipt) =>
+        state.externalRuntimeController.applyCoordinationDelivery(receipt),
     });
   }
 
@@ -4985,7 +4992,7 @@ function createServiceCoordinationRuntime(
       }
       const createdAt = new Date().toISOString();
       const identity = `${input.fromSessionId}:${input.wakeId}:${input.toolCallId}`;
-      const receipt = await state.bridge.deliverAgentMessage({
+      const initialReceipt = await state.bridge.deliverAgentMessage({
         caller: {
           type: "direct_brain",
           sessionId: input.fromSessionId as SessionId,
@@ -5004,15 +5011,21 @@ function createServiceCoordinationRuntime(
         createdAt,
         expiresAt: new Date(Date.now() + 5_000).toISOString(),
       });
+      const receipt =
+        await state.externalRuntimeController.applyCoordinationDelivery(
+          initialReceipt,
+        );
       const activation = receipt.activation;
       return {
         accepted: receipt.status === "accepted",
         sequence: receipt.sequence ?? undefined,
         wake:
-          activation?.type === "rejected" || receipt.status === "rejected"
+          activation?.type === "rejected" ||
+          receipt.status === "rejected" ||
+          receipt.status === "expired"
             ? {
                 status: "failed",
-                summary: `message delivery to ${input.toAgentId} was rejected`,
+                summary: `message delivery to ${input.toAgentId} ${receipt.status}`,
                 reasonCode:
                   activation?.type === "rejected"
                     ? activation.reasonCode
@@ -5024,13 +5037,18 @@ function createServiceCoordinationRuntime(
                   summary: `message queued for ${input.toAgentId}'s next external turn`,
                   reasonCode: "external_turn_active",
                 }
-              : {
-                  status: "completed",
-                  summary:
-                    activation?.type === "external_turn_requested"
-                      ? `external turn requested for ${input.toAgentId}`
-                      : `direct wake requested for ${input.toAgentId}`,
-                },
+              : activation?.type === "external_turn_steer_requested"
+                ? {
+                    status: "completed",
+                    summary: `message steered into ${input.toAgentId}'s active external turn`,
+                  }
+                : {
+                    status: "completed",
+                    summary:
+                      activation?.type === "external_turn_requested"
+                        ? `external turn requested for ${input.toAgentId}`
+                        : `direct wake requested for ${input.toAgentId}`,
+                  },
       };
     },
     async roundTrip(input) {

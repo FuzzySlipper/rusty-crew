@@ -3150,6 +3150,14 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "messageDeliveryPolicy": {
+            "default": "immediate_steer",
+            "enum": [
+              "immediate_steer",
+              "serial_next_turn"
+            ],
+            "type": "string"
+          },
           "nativeThreadId": {
             "type": [
               "string",
@@ -5297,6 +5305,42 @@ export const bridgeWireSchemaArtifact = {
                 },
                 {
                   "properties": {
+                    "bindingId": {
+                      "type": "string"
+                    },
+                    "messageText": {
+                      "type": "string"
+                    },
+                    "nativeThreadId": {
+                      "type": "string"
+                    },
+                    "nativeTurnId": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "external_turn_steer_requested",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "requestId",
+                    "bindingId",
+                    "nativeThreadId",
+                    "nativeTurnId",
+                    "messageText"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
                     "queueId": {
                       "type": "string"
                     },
@@ -5477,6 +5521,14 @@ export const bridgeWireSchemaArtifact = {
             "string",
             "null"
           ]
+        },
+        "messageDeliveryPolicy": {
+          "default": "immediate_steer",
+          "enum": [
+            "immediate_steer",
+            "serial_next_turn"
+          ],
+          "type": "string"
         },
         "nativeThreadId": {
           "type": [
@@ -17135,6 +17187,42 @@ export const bridgeWireSchemaArtifact = {
                 },
                 {
                   "properties": {
+                    "bindingId": {
+                      "type": "string"
+                    },
+                    "messageText": {
+                      "type": "string"
+                    },
+                    "nativeThreadId": {
+                      "type": "string"
+                    },
+                    "nativeTurnId": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "external_turn_steer_requested",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sessionId",
+                    "requestId",
+                    "bindingId",
+                    "nativeThreadId",
+                    "nativeTurnId",
+                    "messageText"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
                     "queueId": {
                       "type": "string"
                     },
@@ -17333,6 +17421,42 @@ export const bridgeWireSchemaArtifact = {
                         "sessionId",
                         "requestId",
                         "bindingId"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "bindingId": {
+                          "type": "string"
+                        },
+                        "messageText": {
+                          "type": "string"
+                        },
+                        "nativeThreadId": {
+                          "type": "string"
+                        },
+                        "nativeTurnId": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "const": "external_turn_steer_requested",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "sessionId",
+                        "requestId",
+                        "bindingId",
+                        "nativeThreadId",
+                        "nativeTurnId",
+                        "messageText"
                       ],
                       "type": "object"
                     },
@@ -17614,6 +17738,14 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "messageDeliveryPolicy": {
+          "default": "immediate_steer",
+          "enum": [
+            "immediate_steer",
+            "serial_next_turn"
+          ],
+          "type": "string"
+        },
         "nativeThreadId": {
           "type": [
             "string",
@@ -17739,6 +17871,14 @@ export const bridgeWireSchemaArtifact = {
                 "string",
                 "null"
               ]
+            },
+            "messageDeliveryPolicy": {
+              "default": "immediate_steer",
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn"
+              ],
+              "type": "string"
             },
             "nativeThreadId": {
               "type": [
@@ -22090,6 +22230,7 @@ export const bridgeWireSchemaArtifact = {
     "certify_external_runtime": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord",
     "chat_read_model_page": "rusty_crew_core_persistence::contracts::ChatReadModelPage",
     "claim_scheduled_host_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "complete_agent_message_delivery": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "complete_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "complete_external_control": "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt",
     "create_chat_attachment": "rusty_crew_core_persistence::contracts::CreateChatAttachmentResult",

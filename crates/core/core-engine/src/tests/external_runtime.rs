@@ -6,7 +6,8 @@ use rusty_crew_core_protocol::{
     ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRequest, ExternalBindingId,
     ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
     ExternalControlKind, ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
-    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport, ExternalProcessOwnership,
+    ExternalControllerLease, ExternalEndpoint, ExternalEndpointTransport,
+    ExternalMessageDeliveryPolicy, ExternalProcessOwnership,
     ExternalRuntimeCompatibilityProbeOutcome, ExternalRuntimeCompatibilityProbeReport,
     ExternalRuntimeCompatibilityProbeStep, ExternalRuntimeCompatibilityProbeStepStatus,
     ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
@@ -1053,7 +1054,8 @@ fn active_external_recipient_queues_without_brain_wake() {
         })
         .unwrap();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0].message.body, "queue for later");
+    assert!(queued[0].message.body.contains("message_id: message-busy"));
+    assert!(queued[0].message.body.ends_with("queue for later"));
     assert_eq!(
         engine.deliver_agent_message(command.clone()).unwrap(),
         receipt
@@ -1121,7 +1123,7 @@ fn active_external_recipient_queues_without_brain_wake() {
     assert_eq!(
         promoted.request.input,
         vec![ExternalTurnInputPart::Text {
-            text: "queue for later".into()
+            text: queued[0].message.body.clone()
         }]
     );
     let delivered = CoordinationStore::open(engine.config.engine_data_dir.clone())
@@ -1336,7 +1338,11 @@ fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
         })
         .unwrap();
     assert_eq!(expired.len(), 1);
-    assert_eq!(expired[0].message.body, "do not resurrect");
+    assert!(expired[0]
+        .message
+        .body
+        .contains("message_id: message-expiring"));
+    assert!(expired[0].message.body.ends_with("do not resurrect"));
     assert!(store
         .get_external_turn(&ExternalTurnRequestId::new(format!(
             "external-follow-up:{}",
@@ -1511,6 +1517,31 @@ fn external_activation_is_runtime_neutral_and_rehydrates_exact_turn() {
         )
         .unwrap();
     assert!(active.capacity_lease_id.is_some());
+    assert!(matches!(
+        engine
+            .activate_agent_execution(activation("codex-agent", "steer-request"))
+            .unwrap(),
+        AgentActivation::ExternalTurnSteerRequested {
+            native_turn_id,
+            ..
+        } if native_turn_id == "native-turn-7"
+    ));
+    let mut serial_binding = engine
+        .get_external_binding(&ExternalBindingId::new("codex-binding"))
+        .unwrap()
+        .unwrap();
+    let serial_revision = serial_binding.revision;
+    serial_binding.message_delivery_policy = ExternalMessageDeliveryPolicy::SerialNextTurn;
+    serial_binding.updated_at = "2026-06-19T00:00:02.500Z".into();
+    engine
+        .bind_external_agent(&serial_binding, Some(serial_revision))
+        .unwrap();
+    assert!(matches!(
+        engine
+            .activate_agent_execution(activation("codex-agent", "serial-request"))
+            .unwrap(),
+        AgentActivation::QueuedForNextTurn { .. }
+    ));
     let completed = engine
         .transition_external_turn(
             &active.request.request_id,
@@ -1638,9 +1669,10 @@ fn binding() -> ExternalAgentBinding {
         runtime_id: ExternalRuntimeId::new("codex-local"),
         session_id: Some(SessionId::new("codex-session")),
         agent_id: Some(AgentId::new("codex-agent")),
-        profile_id: Some(ProfileId::new("test-profile")),
+        profile_id: Some(ProfileId::new("codex-profile")),
         profile_revision: Some(1),
         profile_prompt_hash: Some("profile-prompt-hash".into()),
+        message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
         purpose: ExternalBindingPurpose::CrewAgent,
         native_thread_id: Some("native-thread-7".into()),
         cwd: Some("/home/dev/rusty-crew".into()),

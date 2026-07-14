@@ -293,6 +293,14 @@ pub enum ExternalBindingStatus {
     Archived,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalMessageDeliveryPolicy {
+    #[default]
+    ImmediateSteer,
+    SerialNextTurn,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAgentBinding {
@@ -306,6 +314,8 @@ pub struct ExternalAgentBinding {
     pub profile_revision: Option<u64>,
     #[serde(default)]
     pub profile_prompt_hash: Option<String>,
+    #[serde(default)]
+    pub message_delivery_policy: ExternalMessageDeliveryPolicy,
     pub purpose: ExternalBindingPurpose,
     pub native_thread_id: Option<String>,
     pub cwd: Option<String>,
@@ -581,6 +591,14 @@ pub enum AgentActivation {
         request_id: ExternalTurnRequestId,
         binding_id: ExternalBindingId,
     },
+    ExternalTurnSteerRequested {
+        session_id: SessionId,
+        request_id: ExternalTurnRequestId,
+        binding_id: ExternalBindingId,
+        native_thread_id: String,
+        native_turn_id: String,
+        message_text: String,
+    },
     QueuedForNextTurn {
         session_id: SessionId,
         queue_id: String,
@@ -837,6 +855,16 @@ pub struct AgentMessageDeliveryReceipt {
     pub reason_code: Option<String>,
     pub terminal_at: Option<IsoTimestamp>,
     pub revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageDeliveryCompletion {
+    pub delivery_id: AgentMessageDeliveryId,
+    pub expected_revision: u64,
+    pub status: AgentMessageDeliveryStatus,
+    pub reason_code: Option<String>,
+    pub completed_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1264,6 +1292,7 @@ mod tests {
             profile_id: None,
             profile_revision: None,
             profile_prompt_hash: None,
+            message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
             purpose: ExternalBindingPurpose::ImportedObserver,
             native_thread_id: Some("thread".into()),
             cwd: None,

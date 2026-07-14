@@ -6,6 +6,7 @@ import type {
   AgentCorrelatedRound,
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
+  AgentMessageDeliveryCompletion,
   AgentRoundCommand,
   AgentRoundStartReceipt,
   AgentMessage,
@@ -2121,6 +2122,9 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   getAgentMessageDelivery(
     deliveryId: string,
   ): Promise<AgentMessageDeliveryReceipt | undefined>;
+  completeAgentMessageDelivery(
+    completion: AgentMessageDeliveryCompletion,
+  ): Promise<AgentMessageDeliveryReceipt>;
   enqueueBodyFollowUpMessage(input: {
     sessionId: SessionId;
     from: AgentId;

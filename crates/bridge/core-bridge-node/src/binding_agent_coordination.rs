@@ -32,6 +32,13 @@ impl NativeBridge {
     ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
         self.engine()?.get_agent_message_delivery(delivery_id)
     }
+
+    pub fn complete_agent_message_delivery(
+        &self,
+        completion: AgentMessageDeliveryCompletion,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        self.engine()?.complete_agent_message_delivery(completion)
+    }
 }
 
 #[napi_derive::napi]
@@ -97,5 +104,21 @@ impl NativeBridgeBinding {
                 })
             })
             .transpose()
+    }
+
+    #[napi]
+    pub fn complete_agent_message_delivery_json(
+        &self,
+        completion_json: String,
+    ) -> napi::Result<String> {
+        let completion =
+            serde_json::from_str::<AgentMessageDeliveryCompletion>(&completion_json)
+                .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let receipt = self
+            .bridge()?
+            .complete_agent_message_delivery(completion)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&receipt)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 }
