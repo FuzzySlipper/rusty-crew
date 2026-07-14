@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import AjvModule, { type ValidateFunction } from "ajv";
 import type { ServerNotification } from "../protocol/0.144.1/ts/ServerNotification.js";
 import type { ServerRequest } from "../protocol/0.144.1/ts/ServerRequest.js";
+import {
+  allowAdditiveObjectFields,
+  CODEX_CONSUMED_INBOUND_SCHEMAS,
+  CODEX_CONSUMED_RESPONSE_SCHEMAS,
+  CODEX_CONSUMED_SERVER_REQUEST_RESPONSE_SCHEMAS,
+} from "./consumed-contract.js";
 import type { JsonRpcId } from "./types.js";
 
 export interface JsonRpcResponseMessage {
@@ -29,43 +35,6 @@ export type DecodedServerMessage =
       readonly method: string;
       readonly params: unknown;
     };
-
-const responseSchemaByMethod: Readonly<Record<string, string>> = Object.freeze({
-  initialize: "v1/InitializeResponse.json",
-  "model/list": "v2/ModelListResponse.json",
-  "thread/list": "v2/ThreadListResponse.json",
-  "thread/read": "v2/ThreadReadResponse.json",
-  "thread/archive": "v2/ThreadArchiveResponse.json",
-  "thread/unarchive": "v2/ThreadUnarchiveResponse.json",
-  "thread/loaded/list": "v2/ThreadLoadedListResponse.json",
-  "thread/start": "v2/ThreadStartResponse.json",
-  "thread/resume": "v2/ThreadResumeResponse.json",
-  "thread/turns/list": "v2/ThreadTurnsListResponse.json",
-  "thread/items/list": "v2/ThreadItemsListResponse.json",
-  "turn/start": "v2/TurnStartResponse.json",
-  "turn/steer": "v2/TurnSteerResponse.json",
-  "turn/interrupt": "v2/TurnInterruptResponse.json",
-  "thread/compact/start": "v2/ThreadCompactStartResponse.json",
-  "thread/settings/update": "v2/ThreadSettingsUpdateResponse.json",
-});
-
-const serverRequestResponseSchemaByMethod: Readonly<Record<string, string>> =
-  Object.freeze({
-    "item/commandExecution/requestApproval":
-      "CommandExecutionRequestApprovalResponse.json",
-    "item/fileChange/requestApproval": "FileChangeRequestApprovalResponse.json",
-    "item/tool/requestUserInput": "ToolRequestUserInputResponse.json",
-    "mcpServer/elicitation/request": "McpServerElicitationRequestResponse.json",
-    "item/permissions/requestApproval":
-      "PermissionsRequestApprovalResponse.json",
-    "item/tool/call": "DynamicToolCallResponse.json",
-    "account/chatgptAuthTokens/refresh":
-      "ChatgptAuthTokensRefreshResponse.json",
-    "attestation/generate": "AttestationGenerateResponse.json",
-    "currentTime/read": "CurrentTimeReadResponse.json",
-    applyPatchApproval: "ApplyPatchApprovalResponse.json",
-    execCommandApproval: "ExecCommandApprovalResponse.json",
-  });
 
 export class CodexProtocolError extends Error {
   constructor(
@@ -99,9 +68,11 @@ export class CodexProtocolCodec {
     ]) {
       this.#ajv.addFormat(format, true);
     }
-    this.#knownRequestMethods = this.#methodsFromSchema("ServerRequest.json");
+    this.#knownRequestMethods = new Set(
+      Object.keys(CODEX_CONSUMED_SERVER_REQUEST_RESPONSE_SCHEMAS),
+    );
     this.#knownNotificationMethods = this.#methodsFromSchema(
-      "ServerNotification.json",
+      CODEX_CONSUMED_INBOUND_SCHEMAS.serverNotification,
     );
   }
 
@@ -135,9 +106,10 @@ export class CodexProtocolCodec {
         };
       }
       this.#assertValid(
-        "ServerRequest.json",
+        CODEX_CONSUMED_INBOUND_SCHEMAS.serverRequest,
         candidate,
         "malformed_known_request",
+        true,
       );
       return { type: "request", request: candidate as ServerRequest };
     }
@@ -150,9 +122,10 @@ export class CodexProtocolCodec {
         };
       }
       this.#assertValid(
-        "ServerNotification.json",
+        CODEX_CONSUMED_INBOUND_SCHEMAS.serverNotification,
         candidate,
         "malformed_known_notification",
+        true,
       );
       return {
         type: "notification",
@@ -193,9 +166,15 @@ export class CodexProtocolCodec {
   }
 
   assertClientResponse(method: string, result: unknown): void {
-    const schema = responseSchemaByMethod[method];
-    if (schema === undefined) return;
-    this.#assertValid(schema, result, "malformed_response");
+    const schema = CODEX_CONSUMED_RESPONSE_SCHEMAS[method];
+    if (schema === undefined) {
+      throw new CodexProtocolError(
+        "malformed_response",
+        `no consumed response contract registered for ${method}`,
+        result,
+      );
+    }
+    this.#assertValid(schema, result, "malformed_response", true);
   }
 
   assertClientRequest(request: {
@@ -207,7 +186,7 @@ export class CodexProtocolCodec {
   }
 
   assertServerRequestResolution(method: string, result: unknown): void {
-    const schema = serverRequestResponseSchemaByMethod[method];
+    const schema = CODEX_CONSUMED_SERVER_REQUEST_RESPONSE_SCHEMAS[method];
     if (schema === undefined) {
       throw new CodexProtocolError(
         "malformed_response",
@@ -233,11 +212,16 @@ export class CodexProtocolCodec {
     path: string,
     value: unknown,
     reasonCode: CodexProtocolError["reasonCode"],
+    allowAdditiveFields = false,
   ): void {
-    let validator = this.#validators.get(path);
+    const validatorKey = `${path}:${allowAdditiveFields ? "additive" : "exact"}`;
+    let validator = this.#validators.get(validatorKey);
     if (validator === undefined) {
-      const compiled = this.#ajv.compile(this.#readSchema(path));
-      this.#validators.set(path, compiled);
+      const schema = this.#readSchema(path);
+      const compiled = this.#ajv.compile(
+        allowAdditiveFields ? allowAdditiveObjectFields(schema) : schema,
+      );
+      this.#validators.set(validatorKey, compiled);
       validator = compiled;
     }
     if (!validator(value)) {

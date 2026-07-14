@@ -94,7 +94,7 @@ may be observable without being routable Crew agents.
 - pending interaction metadata, expiry, and stale resolution;
 - normalized low-rate coordination events and browser replay sequencing;
 - durable state, retention, and redaction policy;
-- exact-version protocol compatibility requirements.
+- consumed-contract compatibility requirements and admission decisions.
 
 ### The external runtime owns
 
@@ -107,7 +107,7 @@ may be observable without being routable Crew agents.
 ### TypeScript owns
 
 - Unix WebSocket transport and JSON-RPC framing;
-- generated exact-version codec/validation glue;
+- generated protocol-baseline and consumed-contract codec/validation glue;
 - conversion between native protocol messages and manifest-owned bridge values;
 - native request response I/O after Rust has selected the policy result;
 - bounded raw-message capture after redaction.
@@ -343,12 +343,13 @@ struct ExternalControlRequest {
 Each control has an idempotent receipt. Repeating the same key and payload
 returns the same result. Reusing a key with a different payload is a conflict.
 Steer and interrupt require the expected active native turn ID. Compact requires
-an idle thread unless an exact-version capability explicitly proves otherwise.
+an idle thread unless an observed compatible capability explicitly proves
+otherwise.
 
 `ExecuteThreadCommand` carries one allow-listed command name plus an optional
 bounded argument. Rust validates the command envelope and persists its receipt;
-the exact-version TypeScript adapter performs the native protocol call. The
-browser command endpoint requires an idempotency key, and recognized command
+the generated-protocol TypeScript adapter performs the native protocol call.
+The browser command endpoint requires an idempotency key, and recognized command
 text is rejected by the ordinary external-message endpoint so it cannot become
 native user input accidentally.
 
@@ -657,8 +658,8 @@ registration names one transport/ownership mode and fails visibly if unavailable
 
 1. Add Rust protocol/persistence/runtime registration, lease, binding, turn,
    control, interaction, and normalized-event contracts.
-2. Generate the exact-version TS protocol boundary and implement the attached
-   Unix driver under Rust commands.
+2. Generate the TS protocol baseline, define the consumed-contract boundary,
+   and implement the attached Unix driver under Rust commands.
 3. Add runtime registration/admin diagnostics and browser-safe capability APIs.
 4. Implement thread discovery/attachment and read-only projection.
 5. Implement turn start/stream/control and interaction broker.

@@ -116,6 +116,7 @@ export interface CodexProtocolFault {
     | "malformed_message"
     | "malformed_known_notification"
     | "malformed_known_request"
+    | "malformed_response"
     | "malformed_server_request_resolution"
     | "duplicate_response"
     | "unknown_response"

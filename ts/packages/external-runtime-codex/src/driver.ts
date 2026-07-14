@@ -577,7 +577,9 @@ export class CodexAppServerDriver {
           ? "malformed_known_notification"
           : protocolError?.reasonCode === "malformed_known_request"
             ? "malformed_known_request"
-            : "malformed_message",
+            : protocolError?.reasonCode === "malformed_response"
+              ? "malformed_response"
+              : "malformed_message",
       message: String(error),
       fatal: true,
       rawDetail: captureBoundedRawDetail(raw, this.#maxRawDetailBytes),

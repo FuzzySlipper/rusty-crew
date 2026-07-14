@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   CodexAppServerDriver,
   CodexProtocolCodec,
+  CodexProtocolError,
   type CodexControllerAuthority,
   type CodexJsonRpcTransport,
   type CodexProtocolFault,
@@ -10,6 +11,7 @@ import {
   type NeutralExternalRuntimeEvent,
   type ServerRequestResolution,
 } from "../src/index.js";
+import { CODEX_CONSUMED_RESPONSE_SCHEMAS } from "../src/consumed-contract.js";
 
 class FakeTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
@@ -118,7 +120,7 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-test("driver authorizes exact handshake before exposing typed requests", async () => {
+test("driver obtains Rust handshake admission before exposing typed requests", async () => {
   const transport = new FakeTransport();
   const authority = new FakeAuthority();
   configureInitialize(transport);
@@ -835,7 +837,10 @@ test("codec rejects malformed known messages but preserves future methods", () =
   const codec = new CodexProtocolCodec();
   assert.throws(
     () => codec.decode(JSON.stringify({ method: "turn/started", params: {} })),
-    /validation failed/,
+    (error: unknown) =>
+      error instanceof CodexProtocolError &&
+      error.reasonCode === "malformed_known_notification" &&
+      /validation failed/.test(error.message),
   );
   assert.deepEqual(
     codec.decode(JSON.stringify({ method: "future/notice", params: { x: 1 } })),
@@ -845,4 +850,99 @@ test("codec rejects malformed known messages but preserves future methods", () =
       params: { x: 1 },
     },
   );
+
+  const additiveKnownNotification = codec.decode(
+    JSON.stringify({
+      method: "thread/settings/updated",
+      futureEnvelopeField: "preserved",
+      params: {
+        threadId: "thread-settings-future",
+        futureParamsField: true,
+        threadSettings: {
+          cwd: "/home",
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          sandboxPolicy: {
+            type: "dangerFullAccess",
+            futureSandboxField: "accepted",
+          },
+          activePermissionProfile: null,
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          effort: "high",
+          summary: null,
+          collaborationMode: {
+            mode: "default",
+            settings: {
+              model: "gpt-5.4",
+              reasoning_effort: "high",
+              developer_instructions: null,
+            },
+          },
+          multiAgentMode: "explicitRequestOnly",
+          personality: null,
+        },
+      },
+    }),
+  );
+  assert.equal(additiveKnownNotification.type, "notification");
+
+  const additiveKnownRequest = codec.decode(
+    JSON.stringify({
+      id: "future-tool-call",
+      method: "item/tool/call",
+      futureEnvelopeField: "preserved",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        callId: "call-1",
+        tool: "rusty_crew_list_agents",
+        namespace: null,
+        arguments: { futureArgument: true },
+        futureParamsField: "accepted",
+      },
+    }),
+  );
+  assert.equal(additiveKnownRequest.type, "request");
+});
+
+test("every driver response has a consumed contract and malformed results fail closed", async () => {
+  assert.deepEqual(Object.keys(CODEX_CONSUMED_RESPONSE_SCHEMAS).sort(), [
+    "collaborationMode/list",
+    "initialize",
+    "model/list",
+    "thread/archive",
+    "thread/compact/start",
+    "thread/delete",
+    "thread/items/list",
+    "thread/list",
+    "thread/loaded/list",
+    "thread/name/set",
+    "thread/read",
+    "thread/resume",
+    "thread/settings/update",
+    "thread/start",
+    "thread/turns/list",
+    "thread/unarchive",
+    "turn/interrupt",
+    "turn/start",
+    "turn/steer",
+  ]);
+
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport);
+  transport.responders.set("thread/delete", () => "not-an-object");
+  const driver = new CodexAppServerDriver(transport, authority);
+  await driver.connect();
+
+  await assert.rejects(
+    driver.threadDelete({ threadId: "thread-1" }),
+    /ThreadDeleteResponse.json validation failed/,
+  );
+  await settle();
+  assert.equal(driver.state, "incompatible");
+  assert.equal(authority.faults.at(-1)?.reasonCode, "malformed_response");
+  assert.equal(authority.faults.at(-1)?.fatal, true);
 });
