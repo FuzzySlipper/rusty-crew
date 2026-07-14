@@ -4,7 +4,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.10.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.11.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -12,6 +12,7 @@ export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
 export const EXTERNAL_RUNTIME_API_PATHS = {
   agentSessions: "/v1/external-agent-sessions",
   runtimes: "/v1/external-runtimes",
+  promotionReadiness: "/v1/admin/external-runtime-promotion-readiness",
   certifications: "/v1/admin/external-runtime-certifications",
   certification: "/v1/admin/external-runtime-certifications/{certification_id}",
   certificationInvalidate:
@@ -245,6 +246,7 @@ interface OperationContract {
 interface QueryParameter {
   readonly name: string;
   readonly schema: JsonSchema;
+  readonly required?: boolean;
 }
 
 export const EXTERNAL_RUNTIME_API_OPERATIONS = [
@@ -277,6 +279,21 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "get",
     EXTERNAL_RUNTIME_API_PATHS.runtime,
     "ExternalRuntimeDetail",
+  ),
+  operation(
+    "external.runtimes.promotion_readiness",
+    "readExternalRuntimePromotionReadiness",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.promotionReadiness,
+    "ExternalRuntimePromotionReadiness",
+    undefined,
+    [
+      {
+        name: "runtimeId",
+        schema: { type: "string", minLength: 1 },
+        required: true,
+      },
+    ],
   ),
   operation(
     "external.runtimes.certifications.list",
@@ -559,7 +576,7 @@ function openApiOperation(
     ...(operation.query ?? []).map((parameter) => ({
       name: parameter.name,
       in: "query",
-      required: false,
+      required: parameter.required ?? false,
       schema: parameter.schema,
     })),
   ];
@@ -682,6 +699,40 @@ function routeSchemas(): Record<string, JsonSchema> {
           items: {
             $ref: "#/components/schemas/ExternalRuntimeCertificationRecord",
           },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimePromotionReadiness: {
+      type: "object",
+      required: [
+        "registration",
+        "controller",
+        "activeBindings",
+        "activeTurns",
+        "pendingInteractions",
+      ],
+      properties: {
+        registration: {
+          $ref: "#/components/schemas/ExternalRuntimeRegistration",
+        },
+        controller: {
+          anyOf: [
+            { $ref: "#/components/schemas/ExternalRuntimeControllerStatus" },
+            { type: "null" },
+          ],
+        },
+        activeBindings: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalAgentBinding" },
+        },
+        activeTurns: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalTurnCorrelation" },
+        },
+        pendingInteractions: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalInteractionRecord" },
         },
       },
       additionalProperties: false,

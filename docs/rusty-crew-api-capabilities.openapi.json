@@ -1665,6 +1665,24 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/external-runtime-promotion-readiness": {
+      "get": {
+        "operationId": "externalRuntimesPromotionReadiness",
+        "summary": "Read exact external-runtime bindings, active turns, and unresolved interactions before operator promotion.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.promotion_readiness",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/healthz": {
       "get": {
         "operationId": "adminHealthz",
@@ -4894,7 +4912,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 193,
+    "capability_count": 194,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

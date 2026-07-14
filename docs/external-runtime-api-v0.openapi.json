@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.10.0",
+    "version": "0.11.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -178,6 +178,51 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/external-runtime-promotion-readiness": {
+      "get": {
+        "operationId": "readExternalRuntimePromotionReadiness",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtimeId",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimePromotionReadiness"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.promotion_readiness",
         "x-rusty-crew-contract-detail": "wire"
       }
     },
@@ -4304,6 +4349,44 @@
         },
         "additionalProperties": false
       },
+      "ExternalRuntimePromotionReadiness": {
+        "type": "object",
+        "required": [
+          "registration",
+          "controller",
+          "activeBindings",
+          "activeTurns",
+          "pendingInteractions"
+        ],
+        "properties": {
+          "registration": {
+            "$ref": "#/components/schemas/ExternalRuntimeRegistration"
+          },
+          "controller": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalRuntimeControllerStatus"
+              },
+              { "type": "null" }
+            ]
+          },
+          "activeBindings": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ExternalAgentBinding" }
+          },
+          "activeTurns": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ExternalTurnCorrelation" }
+          },
+          "pendingInteractions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalInteractionRecord"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "ExternalRuntimeCertificationWrite": {
         "type": "object",
         "required": [
@@ -5158,7 +5241,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 29,
+    "operation_count": 30,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

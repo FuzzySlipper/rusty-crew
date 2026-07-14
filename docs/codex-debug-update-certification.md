@@ -59,3 +59,23 @@ repair or update the installation using its package manager, then rerun with
 Updating the executable does not replace the already-running live app-server
 process. Live promotion is a separate guarded operation; do not restart
 `codex-app-server-live.service` as part of this workflow.
+
+## Guarded Live Promotion
+
+After the exact installed identity has an active debug certification, promote
+it with:
+
+```bash
+npm run codex:live:promote -- --promote
+```
+
+The command refuses active turns and unresolved interactions, snapshots exact
+binding, native-thread, and turn identities, restarts only the live app-server
+and live Crew units, and proves a fresh controller lease resumed the same work
+without replay. Known stale native threads are reported separately. An operator
+may bypass the active-work refusal only with the conspicuous
+`--override-active` flag after reviewing the listed IDs.
+
+Promotion evidence is stored under
+`/home/system/rusty-crew/evidence/codex-promotions`. Failure guidance never
+downgrades the CLI, replaces threads, or replays work automatically.

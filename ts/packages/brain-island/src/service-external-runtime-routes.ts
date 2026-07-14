@@ -44,6 +44,7 @@ export interface ExternalRuntimeRouteContext {
 
 export function isExternalRuntimeRoute(pathname: string): boolean {
   return (
+    pathname === "/v1/admin/external-runtime-promotion-readiness" ||
     pathname === "/v1/admin/external-runtime-certifications" ||
     pathname.startsWith("/v1/admin/external-runtime-certifications/") ||
     pathname === "/v1/external-runtimes" ||
@@ -67,6 +68,47 @@ export async function handleExternalRuntimeRequest(
   const requestId = context.requestId(request);
   const method = (request.method ?? "GET").toUpperCase();
   const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+
+  if (url.pathname === "/v1/admin/external-runtime-promotion-readiness") {
+    if (method !== "GET") return methodNotAllowed(requestId);
+    const runtimeId = stringParam(url, "runtimeId");
+    if (runtimeId === undefined || runtimeId === "") {
+      return failure(400, requestId, {
+        code: "invalid_input",
+        reason_code: "external_runtime_id_required",
+        message: "runtimeId query parameter is required",
+        retryable: false,
+      });
+    }
+    const registration = await context.bridge.getExternalRuntime(runtimeId);
+    if (registration === undefined) {
+      return notFound(
+        requestId,
+        "external_runtime_not_found",
+        "external runtime",
+      );
+    }
+    const [bindings, activeTurns, pendingInteractions] = await Promise.all([
+      context.bridge.listExternalBindings(),
+      context.bridge.listActiveExternalTurns(),
+      context.bridge.listPendingExternalInteractions(),
+    ]);
+    return successRoute(requestId, {
+      registration,
+      controller:
+        context.controller
+          .statuses()
+          .find((candidate) => candidate.runtimeId === runtimeId) ?? null,
+      activeBindings: bindings.filter(
+        (binding) =>
+          binding.runtimeId === runtimeId && binding.status === "active",
+      ),
+      activeTurns: activeTurns.filter((turn) => turn.runtimeId === runtimeId),
+      pendingInteractions: pendingInteractions.filter(
+        (interaction) => interaction.runtimeId === runtimeId,
+      ),
+    });
+  }
 
   if (url.pathname === "/v1/admin/external-runtime-certifications") {
     if (method === "GET") {

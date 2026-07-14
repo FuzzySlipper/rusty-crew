@@ -18,7 +18,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.10.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.11.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -131,6 +131,12 @@ assert.deepEqual(
   ],
 );
 assert.ok(schema("ExternalRuntimeCertificationRecord").properties?.revision);
+assert.ok(schema("ExternalRuntimePromotionReadiness").properties?.activeTurns);
+assert.equal(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.promotionReadiness]?.get
+    ?.parameters?.[0]?.required,
+  true,
+);
 assert.deepEqual(schema("ExternalRuntimeCertificationWrite").required, [
   "certificationId",
   "idempotencyKey",

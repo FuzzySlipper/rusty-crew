@@ -171,6 +171,17 @@
         "public": true
       },
       {
+        "id": "external.runtimes.promotion_readiness",
+        "method": "GET",
+        "path_template": "/v1/admin/external-runtime-promotion-readiness",
+        "description": "Read exact external-runtime bindings, active turns, and unresolved interactions before operator promotion.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "external.runtimes.certifications.list",
         "method": "GET",
         "path_template": "/v1/admin/external-runtime-certifications",
@@ -2324,6 +2335,13 @@
         "capability_id": "external.runtimes.read",
         "method": "GET",
         "path_template": "/v1/external-runtimes/{runtime_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.promotion_readiness",
+        "method": "GET",
+        "path_template": "/v1/admin/external-runtime-promotion-readiness",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

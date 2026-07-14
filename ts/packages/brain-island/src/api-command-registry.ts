@@ -585,6 +585,14 @@ export const API_CAPABILITIES = [
     ["service", "diagnostics"],
   ),
   readCapability(
+    "external.runtimes.promotion_readiness",
+    "GET",
+    "/v1/admin/external-runtime-promotion-readiness",
+    "Read exact external-runtime bindings, active turns, and unresolved interactions before operator promotion.",
+    "admin",
+    ["service", "session", "diagnostics"],
+  ),
+  readCapability(
     "external.runtimes.certifications.list",
     "GET",
     "/v1/admin/external-runtime-certifications",

@@ -242,6 +242,67 @@ test("external binding metadata route requires explicit nullable fields", async 
   );
 });
 
+test("external runtime promotion readiness projects exact Rust-owned blockers", async () => {
+  const registration = { runtimeId: "runtime-1", observedState: "ready" };
+  const activeBinding = {
+    bindingId: "binding-1",
+    runtimeId: "runtime-1",
+    status: "active",
+  };
+  const context = {
+    bridge: {
+      async getExternalRuntime() {
+        return registration;
+      },
+      async listExternalBindings() {
+        return [
+          activeBinding,
+          { bindingId: "archived", runtimeId: "runtime-1", status: "archived" },
+          { bindingId: "other", runtimeId: "runtime-2", status: "active" },
+        ];
+      },
+      async listActiveExternalTurns() {
+        return [
+          { runtimeId: "runtime-1", request: { requestId: "turn-1" } },
+          { runtimeId: "runtime-2", request: { requestId: "turn-2" } },
+        ];
+      },
+      async listPendingExternalInteractions() {
+        return [
+          { runtimeId: "runtime-1", interactionId: "interaction-1" },
+          { runtimeId: "runtime-2", interactionId: "interaction-2" },
+        ];
+      },
+    },
+    controller: {
+      statuses() {
+        return [
+          { runtimeId: "runtime-1", driverState: "ready" },
+          { runtimeId: "runtime-2", driverState: "ready" },
+        ];
+      },
+    },
+    requestId: () => "req-promotion-readiness",
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL(
+      "http://local/v1/admin/external-runtime-promotion-readiness?runtimeId=runtime-1",
+    ),
+    context,
+  );
+  assert.deepEqual(okData(result as AdminRouteResult), {
+    registration,
+    controller: { runtimeId: "runtime-1", driverState: "ready" },
+    activeBindings: [activeBinding],
+    activeTurns: [{ runtimeId: "runtime-1", request: { requestId: "turn-1" } }],
+    pendingInteractions: [
+      { runtimeId: "runtime-1", interactionId: "interaction-1" },
+    ],
+  });
+});
+
 test("external thread lifecycle routes expose archive, delete, restore, and archived listing", async () => {
   const calls: string[] = [];
   const context = {
