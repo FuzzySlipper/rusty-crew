@@ -65,7 +65,58 @@ try {
     0,
   );
   assert.equal(variantCount, 82);
+  const assistantVariantCount = assistantSlots.reduce(
+    (total: number, slot: any) => total + 1 + slot.alternates.length,
+    0,
+  );
+  assert.equal(assistantVariantCount, 47);
+  const transcriptRows = (plan as any).transcriptRows as any[];
+  assert.equal(transcriptRows.length, slots.body.data.items.length);
+  for (const [index, slot] of slots.body.data.items.entries()) {
+    const sourceRow = transcriptRows[index];
+    const variants = [slot.primary, ...slot.alternates].sort(
+      (left: any, right: any) => left.ordinal - right.ordinal,
+    );
+    const sourceBodies =
+      Array.isArray(sourceRow.swipes) && sourceRow.swipes.length > 0
+        ? sourceRow.swipes
+        : [sourceRow.body];
+    const expectedActiveOrdinal = Math.min(
+      Math.max(Number(sourceRow.swipe_id ?? 0), 0),
+      sourceBodies.length - 1,
+    );
+    const activeVariantId = slot.active_variant_id ?? slot.primary_variant_id;
+    const activeVariant = variants.find(
+      (variant: any) => variant.variant_id === activeVariantId,
+    );
+    assert.ok(activeVariant, `row ${index} active variant is readable`);
+    assert.equal(activeVariant.ordinal, expectedActiveOrdinal);
+    assert.equal(
+      activeVariant.message.body,
+      sourceBodies[expectedActiveOrdinal],
+    );
+    assert.equal(
+      activeVariant.message.metadata_json.source_index,
+      sourceRow.metadata.source_index,
+    );
+    assert.equal(activeVariant.message.metadata_json.st_name, sourceRow.name);
+    assert.equal(activeVariant.message.created_at, sourceRow.send_date);
+    assert.deepEqual(
+      activeVariant.message.metadata_json.st_source_metadata,
+      JSON.parse(JSON.stringify(sourceRow.metadata)),
+    );
+    for (const variant of variants) {
+      assert.equal(variant.message.body, sourceBodies[variant.ordinal]);
+      if (Array.isArray(sourceRow.swipe_info)) {
+        assert.deepEqual(
+          variant.message.metadata_json.variant_metadata,
+          sourceRow.swipe_info[variant.ordinal],
+        );
+      }
+    }
+  }
   const firstAssistant = assistantSlots[0];
+  assert.equal(firstAssistant.primary.message.metadata_json.source_index, 1);
   assert.equal(
     firstAssistant.primary.message.metadata_json.source,
     "st_packet_import",
@@ -73,6 +124,21 @@ try {
   assert.equal(
     typeof firstAssistant.primary.message.metadata_json.st_extra,
     "object",
+  );
+  const reasoningVariant = assistantSlots
+    .flatMap((slot: any) => [slot.primary, ...slot.alternates])
+    .find(
+      (variant: any) =>
+        typeof variant.message.metadata_json.variant_metadata?.extra
+          ?.reasoning === "string",
+    );
+  assert.ok(
+    reasoningVariant,
+    "reasoning-bearing assistant variant is readable",
+  );
+  assert.equal(
+    typeof reasoningVariant.message.metadata_json.variant_metadata.extra.model,
+    "string",
   );
 
   console.log(

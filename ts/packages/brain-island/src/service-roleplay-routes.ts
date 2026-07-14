@@ -1823,6 +1823,7 @@ async function importRoleplayTranscript(
   let variantCount = 0;
   for (const [index, rawRow] of input.rows.entries()) {
     const row = recordBody(rawRow);
+    const sourceIndex = roleplayImportSourceIndex(row, index);
     const role = roleplayImportRowRole(row);
     const actor: ChatActor =
       role === "assistant"
@@ -1863,7 +1864,7 @@ async function importRoleplayTranscript(
       metadata_json: {
         source: "st_packet_import",
         import_id: input.importId,
-        source_index: index,
+        source_index: sourceIndex,
         provenance: input.provenance,
       },
       created_at:
@@ -1900,7 +1901,7 @@ async function importRoleplayTranscript(
           metadataJson: {
             source: "st_packet_import",
             import_id: input.importId,
-            source_index: index,
+            source_index: sourceIndex,
             source_variant_index: variantIndex,
             active_source_variant_index: activeVariantIndex,
             provenance: input.provenance,
@@ -2920,9 +2921,12 @@ function roleplayImportRowVariants(row: Record<string, unknown>): Array<{
 function roleplayImportRowMetadata(
   row: Record<string, unknown>,
 ): Record<string, unknown> {
+  const sourceMetadata = optionalRecord(row.metadata);
   return compactRecord({
     st_name: row.name,
     st_send_date: row.send_date,
+    st_source_metadata: sourceMetadata,
+    st_raw_row: row.raw ?? sourceMetadata?.raw,
     st_extra: row.extra,
     st_model: row.model ?? optionalRecord(row.extra)?.model,
     st_api: row.api ?? optionalRecord(row.extra)?.api,
@@ -2937,6 +2941,20 @@ function roleplayImportRowMetadata(
     st_time_to_first_token:
       row.time_to_first_token ?? optionalRecord(row.extra)?.time_to_first_token,
   });
+}
+
+function roleplayImportSourceIndex(
+  row: Record<string, unknown>,
+  fallbackIndex: number,
+): number {
+  const sourceMetadata = optionalRecord(row.metadata);
+  const sourceIndex = integerValue(
+    row.sourceIndex ??
+      row.source_index ??
+      sourceMetadata?.sourceIndex ??
+      sourceMetadata?.source_index,
+  );
+  return sourceIndex === undefined ? fallbackIndex : Math.max(sourceIndex, 0);
 }
 
 function stableRoleplayRecordId(prefix: string, raw: string): string {

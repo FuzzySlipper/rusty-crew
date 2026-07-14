@@ -151,7 +151,9 @@ export function buildStExampleImportPlan(options: {
       swipe_info: row.swipe_info,
       extra: row.extra,
       metadata: {
-        source_index: index,
+        // The example JSONL starts with one metadata-only header row. Preserve
+        // the original file row instead of re-numbering the filtered messages.
+        source_index: index + 1,
         is_user: row.is_user,
         is_system: row.is_system,
       },
