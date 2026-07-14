@@ -1,238 +1,195 @@
-# rusty-crew
+# Rusty Crew
 
-Rusty Crew is the Rust-owned coordination runtime for agent services that grew
-out of pi-crew. The near-term goal is a local service that can host multiple
-full/prime agents, delegate bounded subagent work, connect to Den services, and
-keep deterministic coordination state in Rust while brain modules run behind a
-neutral wake contract. TypeScript owns the pi-agent brain integration, many
-tools, profiles, skills, MCP clients, and platform adapters; Rust brain modules
-are also supported when they stay behind the same wake/stream/action contract.
+Rusty Crew is a service runtime for persistent AI agents. One service can host
+multiple full agents, delegated workers, and external Codex app-server
+sessions while keeping coordination, lifecycle, and durable service data under
+one Rust-owned authority.
 
-This repository is no longer a bare scaffold. It has a working Rust engine,
-native bridge, TypeScript brain island, service host, profile loading, tool
-registry, admin diagnostics/control surfaces, Den successor adapters, and local
-field-test configuration under `/home/system/rusty-crew`.
+The project began as a structural successor to pi-crew, but it is now a working
+service rather than a scaffold. It provides profile and provider management,
+two production LLM brain loops, model-callable local and MCP tools, durable
+sessions and chat streams, direct agent messaging, delegation and worker
+lifecycle, roleplay storage/runtime surfaces, admin diagnostics, and SQLite and
+PostgreSQL storage backends.
 
-## Source Of Truth
+Rusty Crew is still under active development. Current local deployments contain
+real agents, but API and storage contracts may still make deliberate breaking
+changes when that produces a cleaner long-term path.
 
-- The architecture principles live in Den project `rusty-crew`, especially
-  `rusty-crew-unified-architecture` and `brain-body-architecture`.
-- Local docs in `docs/` are implementation notes and ADRs. When an older parity
-  audit conflicts with current code or the unified architecture, treat the audit
-  as feature inventory rather than binding design.
-- The current README is intended as the quick operational map for agents.
+## Start Here
 
-## Current Shape
+- [Deployment and storage](docs/deployment-and-storage.md) explains service
+  roots, systemd setup, SQLite and PostgreSQL configuration, health checks,
+  backups, and the live/debug split.
+- [Model providers](docs/model-providers.md) explains provider aliases,
+  supported protocols and credentials, provider APIs, OAuth, profile
+  assignment, and runtime refresh.
+- [Docs index](docs/README.md) maps the architecture records, ADRs, contracts,
+  live-test procedures, and historical material.
+- [Local service runbook](docs/local-service-runbook.md) is the detailed
+  operator reference for the current source-run deployment.
+- [API capability registry](docs/api-capability-command-catalog-ratchet.md) documents the
+  queryable API and slash-command registry.
 
-- `crates/core/core-protocol` defines transport-free protocol types,
-  `BrainAction`, sessions, tool profiles, channel records, MCP records, and
-  coordination event shapes.
-- `crates/core/core-engine` owns deterministic coordination: sessions,
-  messages, body projection, brain action validation, delegation lifecycle,
-  fan-out accounting, completion routing, counters, and backend-neutral
-  persistence.
-- `crates/bridge/core-bridge-api` is the stable bridge-facing Rust facade.
-  `crates/bridge/core-bridge-node` exposes the native Node transport.
-- `ts/packages/contracts` mirrors bridge-visible TypeScript contracts.
-- `ts/packages/native-bridge` loads the native bridge and maps Rust wire shapes
-  into TypeScript.
-- `ts/packages/brain-island` owns profile loading, role assembly, pi-agent
-  integration, model-callable tools, brain wake wiring, and adapter-neutral
-  ports consumed by the service.
-- `ts/packages/service-host` is the service composition root. It owns service
-  startup scripts, concrete adapter injection, the HTTP listener, host-level
-  CORS, browser shell/static-site mounting, configured background-loop timers,
-  storage boot preflight, and service-host smoke entrypoints.
-  `brain-island` still hosts many admin/API route handlers while decomposition
-  continues, but top-level service route ordering now goes through an explicit
-  route table and host-owned process wiring reaches brain-island through ports.
-- `crates/brains/*` contains direct Rust brain modules that implement provider
-  loops behind the neutral wake/stream/action/provider-state contract. These
-  crates may not reach into Rust coordination internals.
-- `ts/packages/adapter-den` owns Den successor Gateway integration,
-  observation/conversation/delivery/timeline projections, and Den memory
-  client helpers.
-- `ts/packages/adapter-mcp`, `adapter-telegram`, and `adapter-tui` are adapter
-  boundaries for MCP, Telegram, and operator TUI/debug surfaces.
+## Current Architecture
 
-## Service Layout
+Rust owns deterministic coordination and production brain execution:
 
-The local machine intentionally runs two Rusty Crew services:
+- the in-process agent bus, sessions, wakes, queues, TTL, and restart hydration;
+- brain selection and the production `chat-completions` and `openai-responses` loops;
+- action validation, delegation and worker lifecycle, completion routing, and
+  runtime counters;
+- backend-neutral persistence for Crew-owned data, including profiles,
+  providers, transcripts, memory, lore, and module records.
 
-- live agent service: `/home/system/rusty-crew`, port `9347`, PostgreSQL;
-- debug/test service: `/home/system/rusty-crew-debug`, port `9348`, SQLite.
+TypeScript is the service composition and capability boundary:
 
-Use the debug service for smoke tests, live certification, frontend debugging,
-and disposable LLM experiments. Use the live service for long-lived agents and
-project/channel activity that should not be polluted by test profiles.
+- HTTP/admin/chat route composition and the Node native-addon host;
+- model-callable tool implementations and Rust-issued tool execution;
+- profile/role assembly, MCP clients, skills, and platform adapters;
+- Den, Telegram, TUI, browser, and external-runtime integration.
 
-The service host should bind admin/debug HTTP surfaces on `0.0.0.0` in this
-trusted LAN development environment. Tokens and service URLs belong in local
-config/env files, not in repo docs.
+Brain implementations use a neutral wake/stream/action/provider-state
+contract. Provider protocol selects the built-in production brain unless a
+compatible module is explicitly configured:
 
-Useful commands:
+| Provider protocol  | Brain              | Intended provider surface                                       |
+| ------------------ | ------------------ | --------------------------------------------------------------- |
+| `chat_completions` | `chat-completions` | OpenAI-compatible chat-completions APIs                         |
+| `responses`        | `openai-responses` | OpenAI Responses-compatible APIs, including direct OpenAI OAuth |
 
-```sh
-npm run service:start
-npm run service:debug-turn -- --help
-npm run smoke:service-host
-npm run smoke:admin-diagnostics-api
-npm run smoke:admin-control-api
+External Codex app-server sessions are managed through a separate external
+runtime boundary. They preserve the official Codex loop and tool behavior while
+participating in Crew chat, metadata, lifecycle, and coordination surfaces.
+
+## Service Model
+
+A Rusty Crew deployment is one service process managing a fleet of agents. It
+is not one process per profile. Profiles reference database-backed provider
+aliases and local tool profiles; MCP servers are explicit per-profile bindings
+rather than an implied Den connection.
+
+Crew owns its service data. Den remains the source of truth for Den projects,
+tasks, documents, and observability, but it is not Crew's internal bus or an
+alternate persistence backend.
+
+The current development machine intentionally runs two isolated deployments:
+
+| Purpose            | Root                            | Port   | Storage    |
+| ------------------ | ------------------------------- | ------ | ---------- |
+| Long-lived agents  | `/home/system/rusty-crew`       | `9347` | PostgreSQL |
+| Disposable testing | `/home/system/rusty-crew-debug` | `9348` | SQLite     |
+
+Live tests, temporary profiles, and frontend certification belong on the debug
+service. Never point two service processes at the same runtime root, SQLite
+file, or PostgreSQL schema.
+
+## Repository Map
+
+```text
+crates/
+  core/                 Rust coordination, config, tools, and persistence
+  brains/               Rust chat-completions and OpenAI Responses brain loops
+  bridge/               napi bridge API, Node addon, and contract codegen
+  roleplay/             Rust-owned roleplay domain/storage authority
+ts/packages/
+  service-host/         Process composition and HTTP listener
+  brain-island/         Tools, profile/role assembly, routes, and host adapters
+  native-bridge/        Generated/typed Node boundary
+  contracts/            Generated and transitional TypeScript contracts
+  adapter-*/            Den, MCP, Telegram, TUI, and other external adapters
+governance/             Dependency and storage ownership rules
+ops/                    systemd units, backup timers, and operator scripts
+docs/                   ADRs, contracts, runbooks, proof records, and history
 ```
 
-## Tools And Delegation
+`governance/ownership.toml` and `governance/storage-scope.toml` are
+machine-checked boundaries. Extend those maps when adding a crate or durable
+storage scope instead of relying only on prose conventions.
 
-Tool availability is profile-based. Profiles request toolsets or concrete tool
-names; the canonical registry in `ts/packages/brain-island/src/tool-registry.ts`
-produces the selected `ToolProfile` that Rust records on the session. Do not
-reintroduce pi-crew's older `WorkerPolicy` allow/deny model as the primary tool
-gate.
+## Build And Verify
 
-The production brain resolver currently includes local code tools, web/browser
-tools, Den memory tools, dense profile memory, skills tools, planning tools,
-curator execution, channel readback, and delegation tools. Delegation tools are
-model-callable helpers that enqueue `BrainAction::RequestDelegation` actions;
-Rust still owns child session creation, wake scheduling, lineage, fan-out
-policy, completion routing, timeout, cancellation, and cleanup.
+The pinned toolchains are Rust `1.96.0`, Node `v26.2.0`, and npm `11.16.x`.
+From a fresh checkout:
 
-Delegation toolset:
-
-- `spawn_subagent`
-- `fan_out_subagents`
-- `scout_codebase`
-- `summarize_files`
-- `find_relevant_paths`
-
-Proof commands:
-
-```sh
-npm run smoke:delegation-tools
-npm run smoke:delegated-slice
-npm run smoke:delegated-role-assembly
-npm run smoke:delegated-resource-cleanup
-npm run smoke:production-delegation-wake
-```
-
-## Build And Test
-
-Pinned local toolchains:
-
-- Rust `1.96.0` with `rustfmt` and `clippy` from `rust-toolchain.toml`;
-- Node `v26.2.0` and npm `11.16.x` from `.nvmrc` / `package.json` engines.
-
-Native bridge builds require the usual local compiler toolchain plus Node/npm:
-`cargo`, `rustc`, `npm`, and `napi-rs` build dependencies installed by
-`npm ci`. PostgreSQL and SQLite CLIs are needed only for backup/live-storage
-operations, not for the offline CI gate.
-
-Use focused smokes while developing, then run the offline gate before handoff.
-GitHub Actions runs the same offline gate on pushes to `main`, pull requests,
-and manual dispatch:
-
-```sh
+```bash
 npm ci
+npm run build:native
 npm run verify:offline
 ```
 
-`verify:offline` is intentionally free of Den, live providers, local Postgres,
-running Rusty Crew services, and Rusty View. It expands to:
+`verify:offline` runs Rust format, clippy, and workspace tests; TypeScript
+typechecking and unit tests; architecture and runtime-config checks; native
+bridge contract/codegen drift checks; and the deterministic offline smoke lane.
+It does not require Den, a running service, PostgreSQL, Rusty View, or a live
+model provider.
 
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-npm run typecheck
-npm run test:unit
-npm run format
-npm run smoke:architecture-boundaries
-npm run smoke:runtime-config-parity
-npm run smoke:external-cassettes
-npm run smoke:bridge-contract-parity
-npm run smoke:bridge-native-surface
-npm run smoke:bridge-fixture-drift
-npm run smoke:bridge-fingerprint-drift
-npm run smoke:bridge-validation
-```
+List and select broader integration smokes with:
 
-The offline lane builds the native addon once before these checks. For a
-standalone build plus declaration-surface check, use
-`npm run verify:bridge-native-surface`; direct native smokes expect the addon to
-already be built.
-
-Native bridge runtime artifacts are build output. Fresh checkouts build them
-with `npm run build:native`; the repo commits
-`ts/packages/native-bridge/native/index.d.ts` as the declaration surface but
-does not commit generated `.node` or loader `.js` files. The policy and guard
-are documented in `docs/native-bridge-artifact-strategy.md` and checked by
-`npm run smoke:native-artifact-tracking`.
-
-TypeScript unit tests use Node's built-in `node:test` runner through `tsx`.
-Add package-local tests under `ts/packages/<package>/test/*.test.ts` for pure
-logic that should not require a native build, service startup, Den, Rusty View,
-or live providers. Use smokes for broader integration paths, and use Rusty
-View live certification for substantial chat/runtime deliverables where the
-user-visible path matters. The Crew-side live evidence rule and completion
-template are documented in `docs/live-deliverable-certification.md`.
-
-External response-shape cassettes live under `fixtures/external-cassettes/`.
-They are committed only after headers, tokens, cookies, provider secrets, and
-overly-large prompt/provider payloads are removed or normalized. Offline
-cassette smokes, such as `npm run smoke:external-cassettes`, preserve shape
-evidence from Den/provider/UI integrations without making CI depend on live
-systems.
-
-Use the smoke runner to inspect and run integration proofs without adding more
-one-off root aliases:
-
-```sh
+```bash
 npm run smoke -- --list
-npm run smoke -- --list --package brain-island
+npm run smoke -- --list --lane debug-service
 npm run smoke -- brain
 ```
 
-Smoke categories, environment-requirement flags, and the rule for moving new
-smokes out of package `src/` are documented in
-`docs/smoke-test-inventory.md`. Use `npm run smoke -- --list --lane offline`
-or another lane filter when deciding whether a check is CI-safe, local-service
-only, live-provider backed, or a Rusty View certification run.
+Substantial chat/runtime work is not considered field-certified by synthetic
+tests alone. Use the debug service plus a live provider and Rusty View according
+to [live deliverable certification](docs/live-deliverable-certification.md).
 
-Common focused checks:
+## Run A Service
 
-```sh
-npm run smoke:tool-registry
-npm run smoke:tool-registry-parity
-npm run smoke:tool-profile-selection
-npm run smoke:tool-session-selection
-npm run smoke:local-code-tools
-npm run smoke:memory-skills-wake
-npm run smoke:planning-runtime-wake
-npm run smoke:mcp-surfaces-e2e
-npm run smoke:den-successor-service
+The service currently runs from the source checkout and stores mutable state in
+a separate runtime root. After creating a service environment as described in
+the [deployment guide](docs/deployment-and-storage.md):
+
+```bash
+npm run service:preflight
+npm run service:start
 ```
 
-## Pi Packages
+The repo also includes user-systemd units:
 
-Use the current `https://github.com/earendil-works/pi` source and the published
-`@earendil-works/pi-*` packages for the TypeScript brain island. Older local
-checkout references in docs are historical audit context only. The current
-package pin is tracked in `docs/pi-package-source-lock.md`.
+```bash
+cp ops/systemd/rusty-crew.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now rusty-crew.service
+```
 
-## Architecture Rules
+Shallow health is unauthenticated; readiness and diagnostics use the configured
+admin auth mode:
 
-- Rust owns deterministic coordination, persistence, lifecycle validation,
-  action acceptance/rejection, body projection, wake thresholds, delegation,
-  completion routing, and runtime counters.
-- Brain modules may be TypeScript or Rust. TypeScript owns the pi-agent brain
-  integration and many tool/provider/adapter surfaces; Rust brain modules are
-  allowed only behind the neutral wake/stream/action/provider-state contract.
-- Rusty Crew owns Crew service data: coordination state, profiles, provider
-  state, transcripts, memory, lore, module data, telemetry, and diagnostics.
-- Den owns Den product/planning/observability data. Den services are not the
-  internal coordination bus and are not the storage fallback for Crew service
-  data.
-- Platform adapters should be isolated so Den Channels, Telegram, MCP, and
-  future connectors can change without reshaping Rust coordination state.
-- Queues must be treated cautiously. Durable or body-owned queues require
-  explicit TTL and should never resurrect expired instructions or messages.
-- Intentional stubs/fakes need an attached follow-up task so temporary behavior
-  does not disappear into the codebase.
+```bash
+curl http://127.0.0.1:9347/v1/admin/healthz
+curl -H "Authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  http://127.0.0.1:9347/v1/admin/readyz
+```
+
+When a static frontend is copied to `<runtime-root>/site`, Crew serves it at
+`/` alongside `/v1/*` APIs and the built-in `/admin` diagnostics page.
+
+## Source Of Truth
+
+- Den project `rusty-crew` owns current planning, task state, and live guidance.
+- `rusty-crew-unified-architecture` is the authoritative architecture document;
+  `brain-body-architecture` is its primary companion.
+- Repo ADRs and docs describe landed implementation and operator contracts.
+- Code and tests are implementation truth when older audits or planning notes
+  disagree with landed behavior.
+- `docs/historical/` preserves superseded analysis as history, not as current
+  setup guidance.
+
+## Core Rules
+
+- Rust owns coordination, lifecycle, production brain loops, and Crew storage.
+- TypeScript stays at explicit composition, tool, and external-adapter
+  boundaries; do not route around Rust authority.
+- Tool availability is profile-based. Do not restore `WorkerPolicy` as the main
+  tool gate.
+- MCP servers are explicit profile bindings and may include any number of
+  independent servers.
+- Queued instructions and messages require explicit, aggressive TTL. Expired
+  work must not be resurrected by restart or reconnect.
+- Intentional stubs, fakes, and partial paths require a discoverable follow-up
+  task and known-limitation record.
+- Use current pi sources from `https://github.com/earendil-works/pi` only when
+  pi reference behavior is needed; old local package locations are historical.

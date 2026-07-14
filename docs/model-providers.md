@@ -1,0 +1,298 @@
+# Model Providers
+
+Rusty Crew stores model providers as service-owned database records. A provider
+record gives a reusable alias to one model endpoint and its protocol,
+generation limits, optional reasoning controls, and credential. Profiles point
+to the alias; they do not carry private inline provider fallback configuration.
+
+The machine-readable API contract is
+[`model-provider-admin-api-v0.openapi.json`](model-provider-admin-api-v0.openapi.json).
+The concise route contract is
+[model-provider-admin-api-contract.md](model-provider-admin-api-contract.md).
+
+## Supported Protocols And Brains
+
+Two provider protocols are supported:
+
+| Protocol | Production brain | Provider expectation |
+| --- | --- | --- |
+| `chat_completions` | `chat-completions` | OpenAI-compatible chat-completions endpoint |
+| `responses` | `openai-responses` | OpenAI Responses-compatible endpoint |
+
+The provider protocol is authoritative for the default brain selection. A
+profile assigned to `chat_completions` resolves to `chat-completions`; a profile
+assigned to `responses` resolves to `openai-responses`. An explicitly configured
+brain must be compatible with the protocol or registration fails.
+
+`providerKind` is a lowercase routing/diagnostic label such as `openai`,
+`den-router`, or `custom`; it is not a substitute for `protocol`. Supported
+provider IDs use lowercase ASCII letters, digits, `-`, `_`, or `:` and are at
+most 128 characters.
+
+Current green paths are:
+
+- an API-key-backed OpenAI-compatible chat-completions service;
+- local den-router chat completions, where the router owns upstream secrets;
+- an API-key-backed Responses-compatible service;
+- direct OpenAI OAuth Responses through the ChatGPT/Codex endpoint.
+
+Provider compatibility still depends on the remote endpoint implementing the
+selected wire protocol. Rusty Crew does not translate Responses semantics into
+chat completions or vice versa.
+
+## Provider Fields
+
+| Field | Meaning |
+| --- | --- |
+| `alias` | Stable lowercase ID referenced by profiles |
+| `status` | `active`, `disabled`, or `archived` |
+| `protocol` | `chat_completions` or `responses` |
+| `providerKind` | Routing/diagnostic label |
+| `displayName`, `description` | Operator-facing labels |
+| `baseUrl` | Provider API base URL |
+| `modelId` | Model identifier sent to the provider |
+| `contextWindowTokens` | Declared context capacity used by context diagnostics/policy |
+| `maxOutputTokens` | Maximum requested response length |
+| `temperature` | Decimal generation temperature |
+| `temperatureMilli` | Integer storage form, `temperature * 1000` |
+| `reasoningEffort` | Provider-specific reasoning effort string |
+| `reasoningFormat` | Provider-specific reasoning/output format string |
+| `credentialSecret` | Typed secret envelope for API key or OAuth material |
+| `metadataJson` | Non-secret provider-specific metadata |
+| `expectedRevision` | Optimistic concurrency revision for updates |
+
+The API accepts decimal `temperature`, including values below `1`, and
+normalizes it to `temperatureMilli`. Readback includes both forms when set. Do
+not send a decimal value in `temperatureMilli`.
+
+Reasoning values are deliberately strings because provider vocabularies differ.
+They are passed only where the selected brain/provider path supports them; they
+do not convert a chat-completions endpoint into a Responses endpoint.
+
+## Admin API
+
+Provider administration uses these routes:
+
+- `GET /v1/admin/model-providers`
+- `POST /v1/admin/model-providers`
+- `GET /v1/admin/model-providers/{alias}`
+- `PATCH /v1/admin/model-providers/{alias}`
+- `GET /v1/admin/model-providers/{alias}/oauth/openai/status`
+- `POST /v1/admin/model-providers/{alias}/oauth/openai/start`
+- `POST /v1/admin/model-providers/{alias}/oauth/openai/complete`
+- `POST /v1/admin/model-providers/{alias}/oauth/openai/clear`
+
+The examples below assume tokenless trusted-local admin. In bearer mode add:
+
+```bash
+-H "Authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN"
+```
+
+## Chat-Completions Example
+
+```bash
+export CREW=http://127.0.0.1:9348
+
+curl -fsS -X POST "$CREW/v1/admin/model-providers?refresh=apply" \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<'JSON' | jq .
+{
+  "alias": "local-chat",
+  "status": "active",
+  "protocol": "chat_completions",
+  "providerKind": "den-router",
+  "displayName": "Local Chat",
+  "baseUrl": "http://127.0.0.1:18082/v1",
+  "modelId": "deepseek-flash",
+  "contextWindowTokens": 128000,
+  "maxOutputTokens": 4096,
+  "temperature": 0.5,
+  "metadataJson": {
+    "credential_owner": "den-router"
+  }
+}
+JSON
+```
+
+This no-secret example is specific to a proxy that owns upstream credentials.
+For a normal API-key provider, include a typed secret:
+
+```json
+{
+  "credentialSecret": {
+    "kind": "api_key",
+    "version": 1,
+    "value": "provider-api-key"
+  }
+}
+```
+
+The legacy top-level `apiKey`/`secret` input remains accepted by the current
+API, but new clients should use `credentialSecret` so credential type is
+explicit.
+
+## Responses Example
+
+For a standard API-key Responses endpoint:
+
+```bash
+curl -fsS -X POST "$CREW/v1/admin/model-providers?refresh=apply" \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<'JSON' | jq .
+{
+  "alias": "openai-responses-api",
+  "status": "active",
+  "protocol": "responses",
+  "providerKind": "openai",
+  "baseUrl": "https://api.openai.com/v1",
+  "modelId": "your-responses-model",
+  "contextWindowTokens": 200000,
+  "maxOutputTokens": 8192,
+  "reasoningEffort": "medium",
+  "credentialSecret": {
+    "kind": "api_key",
+    "version": 1,
+    "value": "provider-api-key"
+  }
+}
+JSON
+```
+
+Use a model ID actually available to the credential. Model availability is a
+provider/account concern and is not inferred from Rusty Crew's provider
+catalog.
+
+## Direct OpenAI OAuth
+
+Direct OpenAI OAuth is the green path for ChatGPT/Codex-authenticated Responses
+use without den-router. First create an active provider with:
+
+```json
+{
+  "alias": "gpt-oauth",
+  "status": "active",
+  "protocol": "responses",
+  "providerKind": "openai",
+  "baseUrl": "https://chatgpt.com/backend-api/codex",
+  "modelId": "gpt"
+}
+```
+
+Then use the provider's OAuth routes:
+
+1. `POST .../oauth/openai/start` returns a pending login and authorization URL.
+2. Open the URL and complete login.
+3. `POST .../oauth/openai/complete` with the final `callbackUrl` from the
+   browser.
+4. Confirm `GET .../oauth/openai/status` reports a stored credential.
+
+The default registered callback is localhost. A remote/LAN operator can paste
+the complete localhost callback URL back to Crew; Crew validates its state and
+uses the original PKCE verifier. Do not paste token bundles or verifier data
+into provider metadata.
+
+See [direct-openai-oauth-responses-provider.md](direct-openai-oauth-responses-provider.md)
+for the full callback, refresh, account-header, and diagnostic contract.
+
+## Credential Handling
+
+Provider secrets live in Crew storage as typed envelopes. Public provider
+readback exposes only a redacted summary such as credential kind, whether a
+secret exists, and non-secret account metadata. It never returns API keys,
+access tokens, refresh tokens, ID tokens, or PKCE verifier material.
+
+The database and its backups are still secret-bearing infrastructure. Protect
+them accordingly. Do not put real credentials in `service.json`, repo docs,
+profile files, shell history, or committed fixtures.
+
+Use `clearSecret: true` to remove a credential. A write cannot set and clear a
+secret in the same request.
+
+## Updating A Provider
+
+Provider writes use optimistic revisions. Read the current provider, include
+its `revision` as `expectedRevision`, and patch it:
+
+```bash
+current=$(curl -fsS "$CREW/v1/admin/model-providers/local-chat")
+revision=$(jq -r '.data.revision' <<<"$current")
+
+curl -fsS -X PATCH \
+  "$CREW/v1/admin/model-providers/local-chat?refresh=apply" \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<JSON | jq .
+{
+  "modelId": "deepseek-flash",
+  "protocol": "chat_completions",
+  "providerKind": "den-router",
+  "baseUrl": "http://127.0.0.1:18082/v1",
+  "temperature": 0.5,
+  "expectedRevision": $revision
+}
+JSON
+```
+
+The current `PATCH` route accepts the full `ModelProviderWrite` shape rather
+than JSON Merge Patch semantics. Read the latest record and preserve fields you
+do not intend to change; omitted optional fields may be cleared and omitted
+defaulted fields may return to their defaults.
+
+A stale write returns HTTP `409` with reason
+`model_provider_revision_mismatch`, the expected/current revisions, and the
+current provider. Clients should reconcile and retry intentionally rather than
+blindly overwriting another edit.
+
+The `refresh` mode may be supplied in the query or body:
+
+- `none`: persist only;
+- `plan`: report affected profiles/sessions without rebuilding;
+- `apply`: persist and apply the guarded runtime refresh.
+
+Use `refresh=apply` for normal operator edits that should affect running
+profiles. Runtime rebuild preserves the durable session identity and transcript
+while replacing provider/brain runtime state according to the brain's provider
+state policy.
+
+## Assigning A Provider To A Profile
+
+Create profiles through the official profile control API and supply only the
+provider alias:
+
+```bash
+curl -fsS -X POST "$CREW/v1/admin/control/profiles" \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<'JSON' | jq .
+{
+  "profileId": "research-prime",
+  "displayName": "Research Prime",
+  "providerAlias": "local-chat",
+  "kind": "full",
+  "localToolProfileId": "full_agent"
+}
+JSON
+```
+
+Crew derives the agent, session, and implementation IDs and selects the brain
+from provider protocol. Frontends should not ask operators to invent those IDs
+or duplicate endpoint/model fields inside each profile.
+
+## Diagnostics And Validation
+
+Read back a provider and its runtime effect rather than assuming a write was
+applied:
+
+```bash
+curl -fsS "$CREW/v1/admin/model-providers/local-chat" | jq .
+curl -fsS "$CREW/v1/chat/sessions/research-prime-session/context" | jq .
+```
+
+Useful contract checks:
+
+```bash
+npm run smoke:model-provider-admin-contract
+npm run smoke:brain-catalog
+```
+
+Live certification must use a real provider through the debug service. The
+repeatable setup is documented in
+[live-test-profile-setup.md](live-test-profile-setup.md).

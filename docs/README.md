@@ -28,13 +28,22 @@ by landed work; see `docs/historical/README.md`.
 ## Current brain posture
 
 Production brain loops are Rust brain modules behind the neutral
-wake/stream/action/provider-state contract. The `pi-agent-core` module id is a
-compatibility name for the Rust pi-agent brain, not a dependency on the old
-`@earendil-works/pi-*` packages. References in these docs to older local
-research checkouts, older package locations, or version-skewed comparisons are
-historical audit context only; they are not an implementation recommendation.
+wake/stream/action/provider-state contract. Chat-completions providers use the
+canonical `chat-completions` brain. The retired `pi-agent` identity and the old
+`@earendil-works/pi-*` packages are not accepted production paths. References
+in these docs to older local research checkouts, package locations, or
+version-skewed comparisons are historical audit context only.
 
 ## Start here
+
+Operator setup references:
+
+- `deployment-and-storage.md` — canonical service-root, systemd, SQLite, and
+  PostgreSQL setup guide.
+- `model-providers.md` — canonical provider alias, protocol, credential, OAuth,
+  profile assignment, and refresh guide.
+- `local-service-runbook.md` — detailed current-machine operation and recovery.
+- `local-service-topology.md` — concise live-versus-debug service map.
 
 0. **Den document `rusty-crew-unified-architecture`** — authoritative design.
    It supersedes recommendations in every local companion doc where they
@@ -71,9 +80,8 @@ historical audit context only; they are not an implementation recommendation.
    - `service-composition-decomposition-plan.md` — current migration path for
      moving service composition out of the oversized brain-island service app
      without breaking the working service.
-   - `rust-pi-agent-brain-port-contract.md` — parity matrix and cutover
-     boundary for the Rust pi-agent brain module without porting the unused
-     pi-ai provider matrix.
+   - `rust-pi-agent-brain-port-contract.md` — historical parity matrix for the
+     Rust port that is now named the Chat Completions brain.
 
 2. **Two brain surfaces, one contract.** Rust coordination wakes a brain with a
    frozen `BodyState` snapshot; brain implementations emit
@@ -82,9 +90,9 @@ historical audit context only; they are not an implementation recommendation.
    lifecycle effects, and persists coordination state. Implementations today:
    - `crates/brains/openai-responses` — Rust brain for the OpenAI Responses
      API. Wired into production wake handling through the native bridge.
-   - `crates/brains/pi-agent` — Rust brain for OpenAI-compatible
+   - `crates/brains/chat-completions` — Rust brain for OpenAI-compatible
      chat-completions style agent loops. Wired through the canonical
-     `pi-agent` catalog id and native bridge.
+     `chat-completions` catalog id and native bridge.
    - `ts/packages/brain-island` — TypeScript service/brain island. Owns
      model-callable tool implementations and adaptation, profile/role assembly,
      MCP clients, platform adapters, and execution of Rust-issued roleplay
@@ -216,7 +224,7 @@ or live-provider requirements.
 ## LLM boundary decision
 
 The Rust coordination core does **not** call LLM provider APIs as part of
-coordination. Rust owns the production pi-agent and OpenAI Responses loops
+coordination. Rust owns the production Chat Completions and OpenAI Responses loops
 behind the neutral wake/stream/action/provider-state contract. TypeScript owns
 narrow provider client adaptation plus concrete tool and debug/adapter
 projection, but not brain identity or loop policy. Rust brain crates do not
