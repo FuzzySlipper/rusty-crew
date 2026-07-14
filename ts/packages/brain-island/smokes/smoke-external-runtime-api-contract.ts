@@ -18,7 +18,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.9.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.10.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -116,7 +116,26 @@ assert.ok(schema("ExternalRuntimeRegistration").properties?.runtimeId);
 assert.deepEqual(schema("ExternalRuntimeCompatibilityState").enum, [
   "unassessed",
   "compatible_uncertified",
+  "certified",
   "incompatible",
+]);
+assert.deepEqual(
+  propertySchema("ExternalRuntimeControllerStatus", "compatibilityDiagnostic")
+    .enum,
+  [
+    "certified",
+    "compatible_uncertified",
+    "incompatible",
+    "probe_failed",
+    "disconnected",
+  ],
+);
+assert.ok(schema("ExternalRuntimeCertificationRecord").properties?.revision);
+assert.deepEqual(schema("ExternalRuntimeCertificationWrite").required, [
+  "certificationId",
+  "idempotencyKey",
+  "runtimeId",
+  "evidenceSummary",
 ]);
 assert.ok(schema("ExternalRuntimeRegistration").properties?.observedCliVersion);
 assert.ok(

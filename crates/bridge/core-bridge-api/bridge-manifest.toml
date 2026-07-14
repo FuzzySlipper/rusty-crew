@@ -433,6 +433,42 @@ errors = "core_protocol::CoreError"
 summary = "Record a controller-observed non-ready runtime state through Rust lease and transition authority."
 
 [[operation]]
+name = "certify_external_runtime"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeCertificationRequest"
+output = "core_protocol::ExternalRuntimeCertificationRecord"
+errors = "core_protocol::CoreError"
+summary = "Record bounded certification evidence derived from a passing runtime probe."
+
+[[operation]]
+name = "invalidate_external_runtime_certification"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalRuntimeCertificationInvalidation"
+output = "core_protocol::ExternalRuntimeCertificationRecord"
+errors = "core_protocol::CoreError"
+summary = "Revision-check and invalidate active external runtime certification evidence."
+
+[[operation]]
+name = "list_external_runtime_certifications"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::ExternalRuntimeCertificationRecord>"
+errors = "core_protocol::CoreError"
+summary = "List durable external runtime certification and promotion history."
+
+[[operation]]
+name = "get_external_runtime_certification"
+surface = "stable"
+direction = "ts_to_rust"
+input = "string"
+output = "option<core_protocol::ExternalRuntimeCertificationRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one durable external runtime certification record."
+
+[[operation]]
 name = "list_external_runtimes"
 surface = "stable"
 direction = "ts_to_rust"

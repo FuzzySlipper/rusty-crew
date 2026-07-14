@@ -4,7 +4,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.9.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.10.0";
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -12,6 +12,10 @@ export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
 export const EXTERNAL_RUNTIME_API_PATHS = {
   agentSessions: "/v1/external-agent-sessions",
   runtimes: "/v1/external-runtimes",
+  certifications: "/v1/admin/external-runtime-certifications",
+  certification: "/v1/admin/external-runtime-certifications/{certification_id}",
+  certificationInvalidate:
+    "/v1/admin/external-runtime-certifications/{certification_id}/invalidate",
   runtime: "/v1/external-runtimes/{runtime_id}",
   connect: "/v1/external-runtimes/{runtime_id}/connect",
   threads: "/v1/external-runtimes/{runtime_id}/threads",
@@ -273,6 +277,36 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "get",
     EXTERNAL_RUNTIME_API_PATHS.runtime,
     "ExternalRuntimeDetail",
+  ),
+  operation(
+    "external.runtimes.certifications.list",
+    "listExternalRuntimeCertifications",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.certifications,
+    "ExternalRuntimeCertificationList",
+  ),
+  operation(
+    "external.runtimes.certifications.create",
+    "certifyExternalRuntime",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.certifications,
+    "ExternalRuntimeCertificationRecord",
+    "ExternalRuntimeCertificationWrite",
+  ),
+  operation(
+    "external.runtimes.certifications.read",
+    "readExternalRuntimeCertification",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.certification,
+    "ExternalRuntimeCertificationRecord",
+  ),
+  operation(
+    "external.runtimes.certifications.invalidate",
+    "invalidateExternalRuntimeCertification",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.certificationInvalidate,
+    "ExternalRuntimeCertificationRecord",
+    "ExternalRuntimeCertificationInvalidationWrite",
   ),
   operation(
     "external.runtimes.connect",
@@ -639,6 +673,44 @@ function rewriteReferences(value: unknown): unknown {
 function routeSchemas(): Record<string, JsonSchema> {
   const nullableString = { type: ["string", "null"] };
   return {
+    ExternalRuntimeCertificationList: {
+      type: "object",
+      required: ["certifications"],
+      properties: {
+        certifications: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalRuntimeCertificationRecord",
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeCertificationWrite: {
+      type: "object",
+      required: [
+        "certificationId",
+        "idempotencyKey",
+        "runtimeId",
+        "evidenceSummary",
+      ],
+      properties: {
+        certificationId: { type: "string", minLength: 1, maxLength: 256 },
+        idempotencyKey: { type: "string", minLength: 1, maxLength: 256 },
+        runtimeId: { type: "string", minLength: 1, maxLength: 256 },
+        evidenceSummary: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeCertificationInvalidationWrite: {
+      type: "object",
+      required: ["expectedRevision", "reason"],
+      properties: {
+        expectedRevision: { type: "integer", minimum: 1 },
+        reason: { type: "string", minLength: 1, maxLength: 1024 },
+      },
+      additionalProperties: false,
+    },
     ApiMeta: {
       type: "object",
       required: ["request_id", "schema_version"],
@@ -692,6 +764,7 @@ function routeSchemas(): Record<string, JsonSchema> {
         "observedCliVersion",
         "consumedContractRevision",
         "compatibilityState",
+        "compatibilityDiagnostic",
         "lastCompatibilityProbe",
         "bindingResumeFailures",
       ],
@@ -705,6 +778,16 @@ function routeSchemas(): Record<string, JsonSchema> {
         consumedContractRevision: { type: ["string", "null"] },
         compatibilityState: {
           $ref: "#/components/schemas/ExternalRuntimeCompatibilityState",
+        },
+        compatibilityDiagnostic: {
+          type: "string",
+          enum: [
+            "certified",
+            "compatible_uncertified",
+            "incompatible",
+            "probe_failed",
+            "disconnected",
+          ],
         },
         lastCompatibilityProbe: {
           oneOf: [

@@ -124,6 +124,12 @@ export interface ExternalRuntimeControllerStatus {
   readonly observedCliVersion: string | null;
   readonly consumedContractRevision: string | null;
   readonly compatibilityState: ExternalRuntimeRegistration["compatibilityState"];
+  readonly compatibilityDiagnostic:
+    | "certified"
+    | "compatible_uncertified"
+    | "incompatible"
+    | "probe_failed"
+    | "disconnected";
   readonly lastCompatibilityProbe: ExternalRuntimeCompatibilityProbeReport | null;
   readonly bindingResumeFailures: readonly ExternalBindingResumeFailure[];
 }
@@ -2543,6 +2549,7 @@ export class ServiceExternalRuntimeController {
       consumedContractRevision:
         controlled.registration.consumedContractRevision ?? null,
       compatibilityState: controlled.registration.compatibilityState,
+      compatibilityDiagnostic: compatibilityDiagnostic(controlled.registration),
       lastCompatibilityProbe:
         controlled.registration.lastCompatibilityProbe ?? null,
       bindingResumeFailures: controlled.bindingResumeFailures.map(
@@ -2550,6 +2557,17 @@ export class ServiceExternalRuntimeController {
       ),
     };
   }
+}
+
+function compatibilityDiagnostic(
+  registration: ExternalRuntimeRegistration,
+): ExternalRuntimeControllerStatus["compatibilityDiagnostic"] {
+  if (registration.observedState === "disconnected") return "disconnected";
+  if (registration.lastCompatibilityProbe?.outcome === "transport_retryable") {
+    return "probe_failed";
+  }
+  if (registration.compatibilityState === "unassessed") return "probe_failed";
+  return registration.compatibilityState;
 }
 
 function externalAgentSessionCreationFailureReason(

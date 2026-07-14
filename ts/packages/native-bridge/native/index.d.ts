@@ -101,6 +101,10 @@ export declare class NativeBridgeBinding {
   recordExternalRuntimeStateJson(inputJson: string): string
   listExternalRuntimesJson(): string
   getExternalRuntimeJson(runtimeId: string): string
+  certifyExternalRuntimeJson(inputJson: string): string
+  invalidateExternalRuntimeCertificationJson(inputJson: string): string
+  listExternalRuntimeCertificationsJson(): string
+  getExternalRuntimeCertificationJson(certificationId: string): string
   acquireExternalControllerJson(inputJson: string): string
   releaseExternalControllerJson(inputJson: string): string
   bindExternalAgentJson(inputJson: string): string

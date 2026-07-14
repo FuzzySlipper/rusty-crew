@@ -18,8 +18,8 @@ import type {
   ExternalTurnPhase,
   NormalizedExternalRuntimeEvent,
 } from "@rusty-crew/contracts";
-
-export interface NativeExternalRuntimeBridgeMethods {
+import type { NativeExternalRuntimeCertificationBridgeMethods } from "./external-runtime-certification-public-api.js";
+export interface NativeExternalRuntimeBridgeMethods extends NativeExternalRuntimeCertificationBridgeMethods {
   registerExternalRuntime(input: {
     registration: ExternalRuntimeRegistration;
     expectedRevision?: number;

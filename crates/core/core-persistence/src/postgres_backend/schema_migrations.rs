@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 29;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 30;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -160,7 +160,52 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add external runtime compatibility probe diagnostics",
         apply: Some(apply_postgres_external_runtime_compatibility_probe),
     },
+    PostgresSchemaMigration {
+        version: 30,
+        description: "add typed external runtime compatibility certifications",
+        apply: Some(apply_postgres_external_runtime_certifications),
+    },
 ];
+
+fn apply_postgres_external_runtime_certifications(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.external_runtime_certifications (
+            certification_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            runtime_kind TEXT NOT NULL,
+            observed_cli_version TEXT NOT NULL,
+            consumed_contract_revision TEXT NOT NULL,
+            probe_suite_revision TEXT NOT NULL,
+            status TEXT NOT NULL,
+            revision BIGINT NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS external_runtime_certifications_identity_idx
+            ON {schema}.external_runtime_certifications(
+                runtime_kind,
+                observed_cli_version,
+                consumed_contract_revision,
+                probe_suite_revision,
+                status
+            );
+         CREATE TABLE IF NOT EXISTS {schema}.external_runtime_probe_evidence (
+            runtime_id TEXT PRIMARY KEY REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            observed_cli_version TEXT NOT NULL,
+            consumed_contract_revision TEXT NOT NULL,
+            probe_suite_revision TEXT NOT NULL,
+            record_json TEXT NOT NULL
+         );"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL external runtime compatibility certifications",
+            error,
+        )
+    })
+}
 
 fn apply_postgres_external_runtime_compatibility_probe(
     tx: &mut Transaction<'_>,

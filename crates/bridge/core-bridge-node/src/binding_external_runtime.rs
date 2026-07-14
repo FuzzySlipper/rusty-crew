@@ -188,6 +188,62 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn certify_external_runtime_json(&self, input_json: String) -> napi::Result<String> {
+        let request = parse_json::<ExternalRuntimeCertificationRequest>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .certify_external_runtime(&request)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn invalidate_external_runtime_certification_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let invalidation = parse_json::<ExternalRuntimeCertificationInvalidation>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .invalidate_external_runtime_certification(&invalidation)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn list_external_runtime_certifications_json(&self) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .list_external_runtime_certifications()
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn get_external_runtime_certification_json(
+        &self,
+        certification_id: String,
+    ) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .get_external_runtime_certification(&certification_id)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
     pub fn acquire_external_controller_json(&self, input_json: String) -> napi::Result<String> {
         let input = parse_json::<ControllerAcquire>(&input_json)?;
         serialize_json(

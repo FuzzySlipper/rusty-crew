@@ -243,6 +243,95 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn record_external_runtime_certification(
+        &self,
+        record: &ExternalRuntimeCertificationRecord,
+    ) -> CoreResult<ExternalRuntimeCertificationRecord> {
+        match self {
+            Self::Sqlite(store) => store.record_external_runtime_certification(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.record_external_runtime_certification(record),
+        }
+    }
+
+    pub fn put_external_runtime_probe_evidence(
+        &self,
+        evidence: &ExternalRuntimeProbeEvidenceRecord,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(store) => store.put_external_runtime_probe_evidence(evidence),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_external_runtime_probe_evidence(evidence),
+        }
+    }
+
+    pub fn get_external_runtime_probe_evidence(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalRuntimeProbeEvidenceRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_runtime_probe_evidence(runtime_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_runtime_probe_evidence(runtime_id),
+        }
+    }
+
+    pub fn get_external_runtime_certification(
+        &self,
+        certification_id: &str,
+    ) -> CoreResult<Option<ExternalRuntimeCertificationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_external_runtime_certification(certification_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_external_runtime_certification(certification_id),
+        }
+    }
+
+    pub fn list_external_runtime_certifications(
+        &self,
+    ) -> CoreResult<Vec<ExternalRuntimeCertificationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_external_runtime_certifications(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_external_runtime_certifications(),
+        }
+    }
+
+    pub fn find_active_external_runtime_certification(
+        &self,
+        runtime_kind: &ExternalRuntimeKind,
+        observed_cli_version: &str,
+        consumed_contract_revision: &str,
+        probe_suite_revision: &str,
+    ) -> CoreResult<Option<ExternalRuntimeCertificationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.find_active_external_runtime_certification(
+                runtime_kind,
+                observed_cli_version,
+                consumed_contract_revision,
+                probe_suite_revision,
+            ),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.find_active_external_runtime_certification(
+                runtime_kind,
+                observed_cli_version,
+                consumed_contract_revision,
+                probe_suite_revision,
+            ),
+        }
+    }
+
+    pub fn invalidate_external_runtime_certification(
+        &self,
+        invalidation: &ExternalRuntimeCertificationInvalidation,
+    ) -> CoreResult<ExternalRuntimeCertificationRecord> {
+        match self {
+            Self::Sqlite(store) => store.invalidate_external_runtime_certification(invalidation),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.invalidate_external_runtime_certification(invalidation),
+        }
+    }
+
     pub fn acquire_external_controller_lease(
         &self,
         candidate: &ExternalControllerLease,

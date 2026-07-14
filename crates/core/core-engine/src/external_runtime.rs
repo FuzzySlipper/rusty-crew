@@ -10,10 +10,11 @@ use rusty_crew_core_protocol::{
     ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlReceipt,
     ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
     ExternalControllerLease, ExternalInteractionRecord, ExternalInteractionStatus,
-    ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
-    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
-    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
-    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    ExternalRuntimeCompatibilityProbeOutcome, ExternalRuntimeCompatibilityState,
+    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
+    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -170,9 +171,24 @@ impl CoreEngine {
             .ok_or_else(|| {
                 CoreError::new(CoreErrorKind::NotFound, "external runtime was not found")
             })?;
+        let has_active_certification = if observation.probe_report.outcome
+            == ExternalRuntimeCompatibilityProbeOutcome::Passed
+        {
+            self.store
+                .find_active_external_runtime_certification(
+                    &current.kind,
+                    &observation.cli_version,
+                    &observation.consumed_contract_revision,
+                    &observation.probe_report.suite_revision,
+                )?
+                .is_some()
+        } else {
+            false
+        };
         let classification = crate::external_runtime_compatibility::classify_probe(
             current.desired_state,
             &observation.probe_report,
+            has_active_certification,
         );
         let compatibility_state = classification.compatibility_state;
         let reason_code = classification.reason_code.as_deref();
@@ -193,6 +209,7 @@ impl CoreEngine {
         let saved = self
             .store
             .put_external_runtime_registration(&next, Some(current.revision))?;
+        self.record_external_runtime_probe_evidence(observation, current.kind)?;
         Ok(ExternalRuntimeHandshakeDecision {
             accepted: reason_code.is_none(),
             retryable: classification.retryable,

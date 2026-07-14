@@ -14,8 +14,12 @@ pub(super) struct ProbeClassification {
 pub(super) fn classify_probe(
     desired_state: ExternalRuntimeDesiredState,
     report: &ExternalRuntimeCompatibilityProbeReport,
+    has_active_certification: bool,
 ) -> ProbeClassification {
     let compatibility_state = match report.outcome {
+        ExternalRuntimeCompatibilityProbeOutcome::Passed if has_active_certification => {
+            ExternalRuntimeCompatibilityState::Certified
+        }
         ExternalRuntimeCompatibilityProbeOutcome::Passed => {
             ExternalRuntimeCompatibilityState::CompatibleUncertified
         }

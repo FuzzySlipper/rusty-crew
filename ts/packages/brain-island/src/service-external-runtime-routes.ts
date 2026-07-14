@@ -44,6 +44,8 @@ export interface ExternalRuntimeRouteContext {
 
 export function isExternalRuntimeRoute(pathname: string): boolean {
   return (
+    pathname === "/v1/admin/external-runtime-certifications" ||
+    pathname.startsWith("/v1/admin/external-runtime-certifications/") ||
     pathname === "/v1/external-runtimes" ||
     pathname.startsWith("/v1/external-runtimes/") ||
     pathname === "/v1/external-agent-sessions" ||
@@ -65,6 +67,73 @@ export async function handleExternalRuntimeRequest(
   const requestId = context.requestId(request);
   const method = (request.method ?? "GET").toUpperCase();
   const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+
+  if (url.pathname === "/v1/admin/external-runtime-certifications") {
+    if (method === "GET") {
+      return successRoute(requestId, {
+        certifications:
+          await context.bridge.listExternalRuntimeCertifications(),
+      });
+    }
+    if (method === "POST") {
+      const body = requireRecord(await context.readJsonBody(request));
+      return successRoute(
+        requestId,
+        await context.bridge.certifyExternalRuntime({
+          certificationId: boundedRequiredString(
+            body.certificationId,
+            256,
+            "certificationId",
+          ),
+          idempotencyKey: boundedRequiredString(
+            body.idempotencyKey,
+            256,
+            "idempotencyKey",
+          ),
+          runtimeId: boundedRequiredString(body.runtimeId, 256, "runtimeId"),
+          evidenceSummary: boundedRequiredString(
+            body.evidenceSummary,
+            4_096,
+            "evidenceSummary",
+          ),
+          requestedAt: context.now(),
+        }),
+      );
+    }
+    return methodNotAllowed(requestId);
+  }
+
+  if (
+    parts[1] === "admin" &&
+    parts[2] === "external-runtime-certifications" &&
+    parts.length >= 4
+  ) {
+    const certificationId = parts[3] ?? "";
+    if (parts.length === 4 && method === "GET") {
+      const certification =
+        await context.bridge.getExternalRuntimeCertification(certificationId);
+      return certification === undefined
+        ? notFound(
+            requestId,
+            "external_runtime_certification_not_found",
+            "external runtime certification",
+          )
+        : successRoute(requestId, certification);
+    }
+    if (parts.length === 5 && parts[4] === "invalidate" && method === "POST") {
+      const body = requireRecord(await context.readJsonBody(request));
+      return successRoute(
+        requestId,
+        await context.bridge.invalidateExternalRuntimeCertification({
+          certificationId,
+          expectedRevision: requiredInteger(body.expectedRevision),
+          reason: boundedRequiredString(body.reason, 1_024, "reason"),
+          invalidatedAt: context.now(),
+        }),
+      );
+    }
+    return methodNotAllowed(requestId);
+  }
 
   if (url.pathname === "/v1/external-agent-sessions") {
     if (method !== "POST") return methodNotAllowed(requestId);

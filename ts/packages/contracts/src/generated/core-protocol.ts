@@ -729,6 +729,41 @@ export type ExternalInteractionStatus = "pending" | "resolved" | "expired" | "lo
 
 export type ExternalProcessOwnership = "attached" | "managed";
 
+export type ExternalRuntimeCertificationInvalidation = {
+  certificationId: string;
+  expectedRevision: number;
+  invalidatedAt: string;
+  reason: string;
+};
+
+export type ExternalRuntimeCertificationRecord = {
+  certificationId: string;
+  certifiedRuntimeId: string;
+  consumedContractRevision: string;
+  createdAt: string;
+  evidenceSummary: string;
+  idempotencyKey: string;
+  invalidatedAt?: string | null;
+  invalidationReason?: string | null;
+  observedCliVersion: string;
+  probeSuiteRevision: string;
+  revision: number;
+  runtimeKind: ExternalRuntimeKind;
+  status: ExternalRuntimeCertificationStatus;
+  supersededByCertificationId?: string | null;
+  updatedAt: string;
+};
+
+export type ExternalRuntimeCertificationRequest = {
+  certificationId: string;
+  evidenceSummary: string;
+  idempotencyKey: string;
+  requestedAt: string;
+  runtimeId: string;
+};
+
+export type ExternalRuntimeCertificationStatus = "active" | "superseded" | "invalidated";
+
 export type ExternalRuntimeCompatibilityProbeOutcome = "passed" | "transport_retryable" | "incompatible";
 
 export type ExternalRuntimeCompatibilityProbeReport = {
@@ -748,7 +783,7 @@ export type ExternalRuntimeCompatibilityProbeStep = {
 
 export type ExternalRuntimeCompatibilityProbeStepStatus = "passed" | "skipped" | "failed";
 
-export type ExternalRuntimeCompatibilityState = "unassessed" | "compatible_uncertified" | "incompatible";
+export type ExternalRuntimeCompatibilityState = "unassessed" | "compatible_uncertified" | "certified" | "incompatible";
 
 export type ExternalRuntimeDesiredState = "enabled" | "disabled";
 

@@ -1579,6 +1579,92 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/external-runtime-certifications": {
+      "get": {
+        "operationId": "externalRuntimesCertificationsList",
+        "summary": "List durable external runtime compatibility certification history.",
+        "tags": ["service", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "externalRuntimesCertificationsCreate",
+        "summary": "Certify the exact identity of a ready runtime from passing probe evidence.",
+        "tags": ["service", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/external-runtime-certifications/{certification_id}": {
+      "get": {
+        "operationId": "externalRuntimesCertificationsRead",
+        "summary": "Read one durable external runtime compatibility certification.",
+        "tags": ["service", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/external-runtime-certifications/{certification_id}/invalidate": {
+      "post": {
+        "operationId": "externalRuntimesCertificationsInvalidate",
+        "summary": "Revision-check and invalidate one active runtime certification.",
+        "tags": ["service", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.invalidate",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/healthz": {
       "get": {
         "operationId": "adminHealthz",
@@ -4808,7 +4894,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 189,
+    "capability_count": 193,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

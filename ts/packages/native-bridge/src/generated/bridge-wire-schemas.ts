@@ -3327,6 +3327,93 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_ExternalInteractionRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>": {
+      "items": {
+        "properties": {
+          "certificationId": {
+            "type": "string"
+          },
+          "certifiedRuntimeId": {
+            "type": "string"
+          },
+          "consumedContractRevision": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "evidenceSummary": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "invalidatedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invalidationReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observedCliVersion": {
+            "type": "string"
+          },
+          "probeSuiteRevision": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtimeKind": {
+            "enum": [
+              "codex_app_server"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "superseded",
+              "invalidated"
+            ],
+            "type": "string"
+          },
+          "supersededByCertificationId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "certificationId",
+          "idempotencyKey",
+          "certifiedRuntimeId",
+          "runtimeKind",
+          "observedCliVersion",
+          "consumedContractRevision",
+          "probeSuiteRevision",
+          "evidenceSummary",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ExternalRuntimeCertificationRecord",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>": {
       "items": {
         "properties": {
@@ -3340,6 +3427,7 @@ export const bridgeWireSchemaArtifact = {
             "enum": [
               "unassessed",
               "compatible_uncertified",
+              "certified",
               "incompatible"
             ],
             "type": "string"
@@ -5442,6 +5530,93 @@ export const bridgeWireSchemaArtifact = {
         "null"
       ]
     },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>": {
+      "properties": {
+        "certificationId": {
+          "type": "string"
+        },
+        "certifiedRuntimeId": {
+          "type": "string"
+        },
+        "consumedContractRevision": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "invalidatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalidationReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedCliVersion": {
+          "type": "string"
+        },
+        "probeSuiteRevision": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeKind": {
+          "enum": [
+            "codex_app_server"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "superseded",
+            "invalidated"
+          ],
+          "type": "string"
+        },
+        "supersededByCertificationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificationId",
+        "idempotencyKey",
+        "certifiedRuntimeId",
+        "runtimeKind",
+        "observedCliVersion",
+        "consumedContractRevision",
+        "probeSuiteRevision",
+        "evidenceSummary",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Nullable_ExternalRuntimeCertificationRecord",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>": {
       "properties": {
         "codexHomeRef": {
@@ -5454,6 +5629,7 @@ export const bridgeWireSchemaArtifact = {
           "enum": [
             "unassessed",
             "compatible_uncertified",
+            "certified",
             "incompatible"
           ],
           "type": "string"
@@ -17943,6 +18119,90 @@ export const bridgeWireSchemaArtifact = {
       "title": "ExternalInteractionRecord",
       "type": "object"
     },
+    "rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord": {
+      "properties": {
+        "certificationId": {
+          "type": "string"
+        },
+        "certifiedRuntimeId": {
+          "type": "string"
+        },
+        "consumedContractRevision": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "invalidatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalidationReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedCliVersion": {
+          "type": "string"
+        },
+        "probeSuiteRevision": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeKind": {
+          "enum": [
+            "codex_app_server"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "superseded",
+            "invalidated"
+          ],
+          "type": "string"
+        },
+        "supersededByCertificationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificationId",
+        "idempotencyKey",
+        "certifiedRuntimeId",
+        "runtimeKind",
+        "observedCliVersion",
+        "consumedContractRevision",
+        "probeSuiteRevision",
+        "evidenceSummary",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "ExternalRuntimeCertificationRecord",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::external_runtime::ExternalRuntimeHandshakeDecision": {
       "properties": {
         "accepted": {
@@ -17952,6 +18212,7 @@ export const bridgeWireSchemaArtifact = {
           "enum": [
             "unassessed",
             "compatible_uncertified",
+            "certified",
             "incompatible"
           ],
           "type": "string"
@@ -17974,6 +18235,7 @@ export const bridgeWireSchemaArtifact = {
               "enum": [
                 "unassessed",
                 "compatible_uncertified",
+                "certified",
                 "incompatible"
               ],
               "type": "string"
@@ -18167,6 +18429,7 @@ export const bridgeWireSchemaArtifact = {
           "enum": [
             "unassessed",
             "compatible_uncertified",
+            "certified",
             "incompatible"
           ],
           "type": "string"
@@ -21732,6 +21995,7 @@ export const bridgeWireSchemaArtifact = {
     "build_roleplay_prompt_context": "rusty_crew_roleplay_core::RoleplayPromptContextOutput",
     "build_session_memory_prompt_context": "rusty_crew_core_persistence::contracts::SessionMemoryPromptContext",
     "capture_lore_fact": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
+    "certify_external_runtime": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord",
     "chat_read_model_page": "rusty_crew_core_persistence::contracts::ChatReadModelPage",
     "claim_scheduled_host_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "complete_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
@@ -21758,6 +22022,7 @@ export const bridgeWireSchemaArtifact = {
     "get_conversation_branch_state": "rusty_crew_core_persistence::contracts::ConversationBranchStateRecord",
     "get_external_binding": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
     "get_external_runtime": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",
+    "get_external_runtime_certification": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>",
     "get_external_turn": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "get_lore_entry": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreRecord>",
     "get_lore_layer": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
@@ -21770,10 +22035,12 @@ export const bridgeWireSchemaArtifact = {
     "get_roleplay_mechanic_session_association": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord>",
     "get_roleplay_player_persona": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord>",
     "get_roleplay_session_metadata": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
+    "invalidate_external_runtime_certification": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord",
     "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "list_agent_directory": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentDirectoryEntry>",
     "list_entries_by_layer": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin>",
     "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
+    "list_external_runtime_certifications": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>",
     "list_external_runtimes": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",
     "list_lore_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
     "list_pending_external_interactions": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord>",

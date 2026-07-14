@@ -101,6 +101,10 @@ export interface NativeBridgeBinding {
   recordExternalRuntimeStateJson(inputJson: string): string
   listExternalRuntimesJson(): string
   getExternalRuntimeJson(runtimeId: string): string
+  certifyExternalRuntimeJson(inputJson: string): string
+  invalidateExternalRuntimeCertificationJson(inputJson: string): string
+  listExternalRuntimeCertificationsJson(): string
+  getExternalRuntimeCertificationJson(certificationId: string): string
   acquireExternalControllerJson(inputJson: string): string
   releaseExternalControllerJson(inputJson: string): string
   bindExternalAgentJson(inputJson: string): string
@@ -796,7 +800,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 252,
+  "manifestOperationCount": 256,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1597,6 +1601,38 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_external_runtime"
+    },
+    {
+      "name": "certifyExternalRuntimeJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "certify_external_runtime"
+    },
+    {
+      "name": "invalidateExternalRuntimeCertificationJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "invalidate_external_runtime_certification"
+    },
+    {
+      "name": "listExternalRuntimeCertificationsJson",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_external_runtime_certifications"
+    },
+    {
+      "name": "getExternalRuntimeCertificationJson",
+      "parameterSource": "certificationId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_external_runtime_certification"
     },
     {
       "name": "acquireExternalControllerJson",

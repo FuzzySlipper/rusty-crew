@@ -2,13 +2,17 @@
 
 use super::super::*;
 use rusty_crew_core_protocol::{
+    validate_external_runtime_certification_invalidation,
+    validate_external_runtime_certification_record, validate_external_runtime_probe_evidence,
     validate_external_runtime_registration, validate_external_turn_transition,
     AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
     AgentRoundStatus, ExternalAgentBinding, ExternalAgentSessionCreationId,
     ExternalAgentSessionCreationRecord, ExternalBindingId, ExternalControlId,
     ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRuntimeId, ExternalRuntimeRegistration,
-    ExternalTurnCorrelation, ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
+    ExternalInteractionStatus, ExternalRuntimeCertificationInvalidation,
+    ExternalRuntimeCertificationRecord, ExternalRuntimeCertificationStatus, ExternalRuntimeId,
+    ExternalRuntimeProbeEvidenceRecord, ExternalRuntimeRegistration, ExternalTurnCorrelation,
+    ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
 };
 
 pub(crate) fn migrate_v35_add_external_runtime(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -275,6 +279,41 @@ pub(crate) fn migrate_v44_external_runtime_compatibility_probe(
     .map_err(|error| persistence_error("apply schema migration 44", error))
 }
 
+pub(crate) fn migrate_v45_external_runtime_certifications(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS external_runtime_certifications (
+            certification_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            runtime_kind TEXT NOT NULL,
+            observed_cli_version TEXT NOT NULL,
+            consumed_contract_revision TEXT NOT NULL,
+            probe_suite_revision TEXT NOT NULL,
+            status TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS external_runtime_certifications_identity_idx
+            ON external_runtime_certifications(
+                runtime_kind,
+                observed_cli_version,
+                consumed_contract_revision,
+                probe_suite_revision,
+                status
+            );
+         CREATE TABLE IF NOT EXISTS external_runtime_probe_evidence (
+            runtime_id TEXT PRIMARY KEY,
+            observed_cli_version TEXT NOT NULL,
+            consumed_contract_revision TEXT NOT NULL,
+            probe_suite_revision TEXT NOT NULL,
+            record_json TEXT NOT NULL,
+            FOREIGN KEY(runtime_id) REFERENCES external_runtime_registrations(runtime_id)
+         );",
+    )
+    .map_err(|error| persistence_error("apply schema migration 45", error))
+}
+
 impl CoordinationStore {
     pub fn put_external_runtime_registration(
         &self,
@@ -344,6 +383,247 @@ impl CoordinationStore {
             [],
             "list external runtime registrations",
         )
+    }
+
+    pub fn record_external_runtime_certification(
+        &self,
+        record: &ExternalRuntimeCertificationRecord,
+    ) -> CoreResult<ExternalRuntimeCertificationRecord> {
+        validate_external_runtime_certification_record(record)?;
+        if record.status != ExternalRuntimeCertificationStatus::Active || record.revision != 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "new external runtime certification must be active at revision zero",
+            ));
+        }
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start external runtime certification", error))?;
+        let by_id = load_json_optional::<ExternalRuntimeCertificationRecord, _>(
+            &tx,
+            "SELECT record_json FROM external_runtime_certifications WHERE certification_id = ?1",
+            params![record.certification_id.as_str()],
+            "load certification by identifier",
+        )?;
+        let by_key = load_json_optional::<ExternalRuntimeCertificationRecord, _>(
+            &tx,
+            "SELECT record_json FROM external_runtime_certifications WHERE idempotency_key = ?1",
+            params![record.idempotency_key.as_str()],
+            "load certification by idempotency key",
+        )?;
+        if let Some(existing) = by_id.or(by_key) {
+            if same_certification_request(&existing, record) {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external runtime certification identifier or idempotency key was reused",
+            ));
+        }
+
+        let active = load_json_list::<ExternalRuntimeCertificationRecord, _>(
+            &tx,
+            "SELECT record_json FROM external_runtime_certifications
+             WHERE runtime_kind = ?1
+               AND observed_cli_version = ?2
+               AND consumed_contract_revision = ?3
+               AND probe_suite_revision = ?4
+               AND status = 'active'",
+            params![
+                enum_json(&record.runtime_kind)?,
+                record.observed_cli_version.as_str(),
+                record.consumed_contract_revision.as_str(),
+                record.probe_suite_revision.as_str(),
+            ],
+            "load active external runtime certifications",
+        )?;
+        for mut previous in active {
+            previous.status = ExternalRuntimeCertificationStatus::Superseded;
+            previous.superseded_by_certification_id = Some(record.certification_id.clone());
+            previous.revision += 1;
+            previous.updated_at = record.created_at.clone();
+            validate_external_runtime_certification_record(&previous)?;
+            tx.execute(
+                "UPDATE external_runtime_certifications
+                 SET status = 'superseded', revision = ?2, record_json = ?3
+                 WHERE certification_id = ?1",
+                params![
+                    previous.certification_id,
+                    previous.revision as i64,
+                    to_json_text(&previous)?,
+                ],
+            )
+            .map_err(|error| persistence_error("supersede runtime certification", error))?;
+        }
+
+        let mut saved = record.clone();
+        saved.revision = 1;
+        tx.execute(
+            "INSERT INTO external_runtime_certifications (
+                certification_id, idempotency_key, runtime_kind,
+                observed_cli_version, consumed_contract_revision,
+                probe_suite_revision, status, revision, record_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8)",
+            params![
+                saved.certification_id,
+                saved.idempotency_key,
+                enum_json(&saved.runtime_kind)?,
+                saved.observed_cli_version,
+                saved.consumed_contract_revision,
+                saved.probe_suite_revision,
+                saved.revision as i64,
+                to_json_text(&saved)?,
+            ],
+        )
+        .map_err(|error| persistence_error("insert external runtime certification", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit external runtime certification", error))?;
+        Ok(saved)
+    }
+
+    pub fn put_external_runtime_probe_evidence(
+        &self,
+        evidence: &ExternalRuntimeProbeEvidenceRecord,
+    ) -> CoreResult<()> {
+        validate_external_runtime_probe_evidence(evidence)?;
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO external_runtime_probe_evidence (
+                runtime_id, observed_cli_version, consumed_contract_revision,
+                probe_suite_revision, record_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(runtime_id) DO UPDATE SET
+                observed_cli_version = excluded.observed_cli_version,
+                consumed_contract_revision = excluded.consumed_contract_revision,
+                probe_suite_revision = excluded.probe_suite_revision,
+                record_json = excluded.record_json",
+            params![
+                evidence.runtime_id.0,
+                evidence.observed_cli_version,
+                evidence.consumed_contract_revision,
+                evidence.probe_report.suite_revision,
+                to_json_text(evidence)?,
+            ],
+        )
+        .map_err(|error| persistence_error("save runtime probe evidence", error))?;
+        Ok(())
+    }
+
+    pub fn get_external_runtime_probe_evidence(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalRuntimeProbeEvidenceRecord>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM external_runtime_probe_evidence WHERE runtime_id = ?1",
+            params![runtime_id.0.as_str()],
+            "load runtime probe evidence",
+        )
+    }
+
+    pub fn get_external_runtime_certification(
+        &self,
+        certification_id: &str,
+    ) -> CoreResult<Option<ExternalRuntimeCertificationRecord>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM external_runtime_certifications WHERE certification_id = ?1",
+            params![certification_id],
+            "load external runtime certification",
+        )
+    }
+
+    pub fn list_external_runtime_certifications(
+        &self,
+    ) -> CoreResult<Vec<ExternalRuntimeCertificationRecord>> {
+        let conn = self.conn()?;
+        load_json_list(
+            &conn,
+            "SELECT record_json FROM external_runtime_certifications
+             ORDER BY certification_id",
+            [],
+            "list external runtime certifications",
+        )
+    }
+
+    pub fn find_active_external_runtime_certification(
+        &self,
+        runtime_kind: &rusty_crew_core_protocol::ExternalRuntimeKind,
+        observed_cli_version: &str,
+        consumed_contract_revision: &str,
+        probe_suite_revision: &str,
+    ) -> CoreResult<Option<ExternalRuntimeCertificationRecord>> {
+        let conn = self.conn()?;
+        load_json_optional(
+            &conn,
+            "SELECT record_json FROM external_runtime_certifications
+             WHERE runtime_kind = ?1
+               AND observed_cli_version = ?2
+               AND consumed_contract_revision = ?3
+               AND probe_suite_revision = ?4
+               AND status = 'active'
+             ORDER BY certification_id DESC LIMIT 1",
+            params![
+                enum_json(runtime_kind)?,
+                observed_cli_version,
+                consumed_contract_revision,
+                probe_suite_revision,
+            ],
+            "find active external runtime certification",
+        )
+    }
+
+    pub fn invalidate_external_runtime_certification(
+        &self,
+        invalidation: &ExternalRuntimeCertificationInvalidation,
+    ) -> CoreResult<ExternalRuntimeCertificationRecord> {
+        validate_external_runtime_certification_invalidation(invalidation)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start certification invalidation", error))?;
+        let mut current = load_json_optional::<ExternalRuntimeCertificationRecord, _>(
+            &tx,
+            "SELECT record_json FROM external_runtime_certifications WHERE certification_id = ?1",
+            params![invalidation.certification_id.as_str()],
+            "load certification for invalidation",
+        )?
+        .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "certification was not found"))?;
+        validate_expected_revision(
+            "external runtime certification",
+            &current.certification_id,
+            Some(current.revision),
+            Some(invalidation.expected_revision),
+        )?;
+        if current.status != ExternalRuntimeCertificationStatus::Active {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "only an active certification can be invalidated",
+            ));
+        }
+        current.status = ExternalRuntimeCertificationStatus::Invalidated;
+        current.invalidated_at = Some(invalidation.invalidated_at.clone());
+        current.invalidation_reason = Some(invalidation.reason.clone());
+        current.updated_at = invalidation.invalidated_at.clone();
+        current.revision += 1;
+        validate_external_runtime_certification_record(&current)?;
+        tx.execute(
+            "UPDATE external_runtime_certifications
+             SET status = 'invalidated', revision = ?2, record_json = ?3
+             WHERE certification_id = ?1",
+            params![
+                current.certification_id,
+                current.revision as i64,
+                to_json_text(&current)?,
+            ],
+        )
+        .map_err(|error| persistence_error("invalidate runtime certification", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit certification invalidation", error))?;
+        Ok(current)
     }
 
     pub fn acquire_external_controller_lease(
@@ -1544,6 +1824,20 @@ fn validate_expected_revision(
             format!("{label} {id} revision mismatch: expected {expected:?}, found {found}"),
         )),
     }
+}
+
+fn same_certification_request(
+    current: &ExternalRuntimeCertificationRecord,
+    candidate: &ExternalRuntimeCertificationRecord,
+) -> bool {
+    current.certification_id == candidate.certification_id
+        && current.idempotency_key == candidate.idempotency_key
+        && current.certified_runtime_id == candidate.certified_runtime_id
+        && current.runtime_kind == candidate.runtime_kind
+        && current.observed_cli_version == candidate.observed_cli_version
+        && current.consumed_contract_revision == candidate.consumed_contract_revision
+        && current.probe_suite_revision == candidate.probe_suite_revision
+        && current.evidence_summary == candidate.evidence_summary
 }
 
 fn revision_conflict<T>(label: &str, expected: u64, found: u64) -> CoreResult<T> {

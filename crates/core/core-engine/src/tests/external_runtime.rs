@@ -1584,7 +1584,7 @@ fn restart_reconciliation_terminalizes_archived_session_without_replay() {
     assert!(turn.capacity_lease_id.is_none());
 }
 
-fn runtime() -> ExternalRuntimeRegistration {
+pub(super) fn runtime() -> ExternalRuntimeRegistration {
     ExternalRuntimeRegistration {
         runtime_id: ExternalRuntimeId::new("codex-local"),
         kind: ExternalRuntimeKind::CodexAppServer,
@@ -1610,7 +1610,7 @@ fn runtime() -> ExternalRuntimeRegistration {
     }
 }
 
-fn probe_report(
+pub(super) fn probe_report(
     outcome: ExternalRuntimeCompatibilityProbeOutcome,
     reason_code: Option<&str>,
 ) -> ExternalRuntimeCompatibilityProbeReport {

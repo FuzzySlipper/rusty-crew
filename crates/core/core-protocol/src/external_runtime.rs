@@ -104,6 +104,7 @@ pub enum ExternalRuntimeObservedState {
 pub enum ExternalRuntimeCompatibilityState {
     Unassessed,
     CompatibleUncertified,
+    Certified,
     Incompatible,
 }
 
@@ -140,6 +141,64 @@ pub struct ExternalRuntimeCompatibilityProbeReport {
     pub outcome: ExternalRuntimeCompatibilityProbeOutcome,
     pub steps: Vec<ExternalRuntimeCompatibilityProbeStep>,
     pub completed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeProbeEvidenceRecord {
+    pub runtime_id: ExternalRuntimeId,
+    pub runtime_kind: ExternalRuntimeKind,
+    pub observed_cli_version: String,
+    pub consumed_contract_revision: String,
+    pub probe_report: ExternalRuntimeCompatibilityProbeReport,
+    pub observed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalRuntimeCertificationStatus {
+    Active,
+    Superseded,
+    Invalidated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeCertificationRecord {
+    pub certification_id: String,
+    pub idempotency_key: String,
+    pub certified_runtime_id: ExternalRuntimeId,
+    pub runtime_kind: ExternalRuntimeKind,
+    pub observed_cli_version: String,
+    pub consumed_contract_revision: String,
+    pub probe_suite_revision: String,
+    pub evidence_summary: String,
+    pub status: ExternalRuntimeCertificationStatus,
+    pub superseded_by_certification_id: Option<String>,
+    pub invalidated_at: Option<IsoTimestamp>,
+    pub invalidation_reason: Option<String>,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeCertificationRequest {
+    pub certification_id: String,
+    pub idempotency_key: String,
+    pub runtime_id: ExternalRuntimeId,
+    pub evidence_summary: String,
+    pub requested_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalRuntimeCertificationInvalidation {
+    pub certification_id: String,
+    pub expected_revision: u64,
+    pub reason: String,
+    pub invalidated_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -821,8 +880,11 @@ pub fn validate_external_runtime_registration(
         ));
     }
     if registration.observed_state == ExternalRuntimeObservedState::Ready
-        && registration.compatibility_state
-            != ExternalRuntimeCompatibilityState::CompatibleUncertified
+        && !matches!(
+            registration.compatibility_state,
+            ExternalRuntimeCompatibilityState::CompatibleUncertified
+                | ExternalRuntimeCompatibilityState::Certified
+        )
     {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
@@ -858,6 +920,10 @@ pub fn validate_external_runtime_registration(
             ExternalRuntimeCompatibilityState::CompatibleUncertified,
         )
         | (
+            Some(ExternalRuntimeCompatibilityProbeOutcome::Passed),
+            ExternalRuntimeCompatibilityState::Certified,
+        )
+        | (
             Some(ExternalRuntimeCompatibilityProbeOutcome::Incompatible),
             ExternalRuntimeCompatibilityState::Incompatible,
         ) => {}
@@ -874,6 +940,139 @@ pub fn validate_external_runtime_registration(
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "codex_app_server requires unix_web_socket transport",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_external_runtime_certification_record(
+    record: &ExternalRuntimeCertificationRecord,
+) -> CoreResult<()> {
+    validate_non_empty("certification_id", &record.certification_id)?;
+    validate_non_empty("idempotency_key", &record.idempotency_key)?;
+    validate_non_empty("certified_runtime_id", &record.certified_runtime_id.0)?;
+    validate_non_empty("observed_cli_version", &record.observed_cli_version)?;
+    validate_non_empty(
+        "consumed_contract_revision",
+        &record.consumed_contract_revision,
+    )?;
+    validate_non_empty("probe_suite_revision", &record.probe_suite_revision)?;
+    validate_bounded_certification_text("evidence_summary", &record.evidence_summary, 4_096)?;
+    validate_non_empty("created_at", &record.created_at)?;
+    validate_non_empty("updated_at", &record.updated_at)?;
+    if record.certification_id.len() > 256 || record.idempotency_key.len() > 256 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "certification identifiers exceed 256 bytes",
+        ));
+    }
+    match record.status {
+        ExternalRuntimeCertificationStatus::Active => {
+            if record.superseded_by_certification_id.is_some()
+                || record.invalidated_at.is_some()
+                || record.invalidation_reason.is_some()
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "active certification cannot carry terminal metadata",
+                ));
+            }
+        }
+        ExternalRuntimeCertificationStatus::Superseded => {
+            let successor = record
+                .superseded_by_certification_id
+                .as_deref()
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "superseded certification requires successor identifier",
+                    )
+                })?;
+            validate_non_empty("superseded_by_certification_id", successor)?;
+            if record.invalidated_at.is_some() || record.invalidation_reason.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "superseded certification cannot carry invalidation metadata",
+                ));
+            }
+        }
+        ExternalRuntimeCertificationStatus::Invalidated => {
+            let at = record.invalidated_at.as_deref().ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "invalidated certification requires timestamp",
+                )
+            })?;
+            let reason = record.invalidation_reason.as_deref().ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "invalidated certification requires reason",
+                )
+            })?;
+            validate_non_empty("invalidated_at", at)?;
+            validate_bounded_certification_text("invalidation_reason", reason, 1_024)?;
+            if record.superseded_by_certification_id.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "invalidated certification cannot carry successor metadata",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_external_runtime_probe_evidence(
+    evidence: &ExternalRuntimeProbeEvidenceRecord,
+) -> CoreResult<()> {
+    validate_non_empty("runtime_id", &evidence.runtime_id.0)?;
+    validate_non_empty("observed_cli_version", &evidence.observed_cli_version)?;
+    validate_non_empty(
+        "consumed_contract_revision",
+        &evidence.consumed_contract_revision,
+    )?;
+    validate_non_empty("observed_at", &evidence.observed_at)?;
+    validate_external_runtime_compatibility_probe_report(&evidence.probe_report)?;
+    if evidence.probe_report.outcome != ExternalRuntimeCompatibilityProbeOutcome::Passed {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "durable compatibility evidence requires a passing probe",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_external_runtime_certification_request(
+    request: &ExternalRuntimeCertificationRequest,
+) -> CoreResult<()> {
+    validate_non_empty("certification_id", &request.certification_id)?;
+    validate_non_empty("idempotency_key", &request.idempotency_key)?;
+    validate_non_empty("runtime_id", &request.runtime_id.0)?;
+    validate_bounded_certification_text("evidence_summary", &request.evidence_summary, 4_096)?;
+    validate_non_empty("requested_at", &request.requested_at)?;
+    if request.certification_id.len() > 256 || request.idempotency_key.len() > 256 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "certification identifiers exceed 256 bytes",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_external_runtime_certification_invalidation(
+    invalidation: &ExternalRuntimeCertificationInvalidation,
+) -> CoreResult<()> {
+    validate_non_empty("certification_id", &invalidation.certification_id)?;
+    validate_bounded_certification_text("reason", &invalidation.reason, 1_024)?;
+    validate_non_empty("invalidated_at", &invalidation.invalidated_at)
+}
+
+fn validate_bounded_certification_text(label: &str, value: &str, max: usize) -> CoreResult<()> {
+    validate_non_empty(label, value)?;
+    if value.len() > max {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} exceeds {max} bytes"),
         ));
     }
     Ok(())

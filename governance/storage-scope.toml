@@ -92,6 +92,8 @@ id = "external_agent_runtime"
 label = "External Agent Runtime"
 owns = [
   "external_runtime_registrations",
+  "external_runtime_probe_evidence",
+  "external_runtime_certifications",
   "external_controller_leases",
   "external_agent_bindings",
   "external_agent_session_creations",
@@ -101,7 +103,7 @@ owns = [
   "external_runtime_events",
   "external_correlated_rounds",
 ]
-notes = "External runtime registrations, exclusive controller generations, idempotent agent-session creation, Crew/native identity correlation, turn/control/interaction state, normalized replay events, and the retired pre-runtime-neutral round migration table."
+notes = "External runtime registrations, private compatibility probe evidence, durable certification history, exclusive controller generations, idempotent agent-session creation, Crew/native identity correlation, turn/control/interaction state, normalized replay events, and the retired pre-runtime-neutral round migration table."
 
 [[scope]]
 id = "profile_registry"

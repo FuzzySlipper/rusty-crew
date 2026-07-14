@@ -2,12 +2,16 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
+    validate_external_runtime_certification_invalidation,
+    validate_external_runtime_certification_record, validate_external_runtime_probe_evidence,
     validate_external_runtime_registration, validate_external_turn_transition,
     AgentCorrelatedRound, AgentId, AgentMessageDeliveryReceipt, AgentMessageDeliveryStatus,
     AgentRoundStatus, ExternalAgentBinding, ExternalAgentSessionCreationId,
     ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRecord, ExternalBindingId,
     ExternalControlId, ExternalControlReceipt, ExternalControllerLease, ExternalInteractionRecord,
-    ExternalInteractionStatus, ExternalRuntimeEventInput, ExternalRuntimeId,
+    ExternalInteractionStatus, ExternalRuntimeCertificationInvalidation,
+    ExternalRuntimeCertificationRecord, ExternalRuntimeCertificationStatus,
+    ExternalRuntimeEventInput, ExternalRuntimeId, ExternalRuntimeProbeEvidenceRecord,
     ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent,
 };
@@ -91,6 +95,280 @@ impl PostgresBackendStore {
             &[],
             "list PostgreSQL external runtimes",
         )
+    }
+
+    pub fn record_external_runtime_certification(
+        &self,
+        record: &ExternalRuntimeCertificationRecord,
+    ) -> CoreResult<ExternalRuntimeCertificationRecord> {
+        validate_external_runtime_certification_record(record)?;
+        if record.status != ExternalRuntimeCertificationStatus::Active || record.revision != 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "new external runtime certification must be active at revision zero",
+            ));
+        }
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL external runtime certification", error)
+        })?;
+        let by_id = load_optional::<ExternalRuntimeCertificationRecord>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 WHERE certification_id = $1 FOR UPDATE"
+            ),
+            &[&record.certification_id],
+            "load PostgreSQL certification by identifier",
+        )?;
+        let by_key = load_optional::<ExternalRuntimeCertificationRecord>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 WHERE idempotency_key = $1 FOR UPDATE"
+            ),
+            &[&record.idempotency_key],
+            "load PostgreSQL certification by idempotency key",
+        )?;
+        if let Some(existing) = by_id.or(by_key) {
+            if same_certification_request(&existing, record) {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external runtime certification identifier or idempotency key was reused",
+            ));
+        }
+        let active = load_list::<ExternalRuntimeCertificationRecord>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 WHERE runtime_kind = $1
+                   AND observed_cli_version = $2
+                   AND consumed_contract_revision = $3
+                   AND probe_suite_revision = $4
+                   AND status = 'active'
+                 FOR UPDATE"
+            ),
+            &[
+                &enum_json(&record.runtime_kind)?,
+                &record.observed_cli_version,
+                &record.consumed_contract_revision,
+                &record.probe_suite_revision,
+            ],
+            "load active PostgreSQL runtime certifications",
+        )?;
+        for mut previous in active {
+            previous.status = ExternalRuntimeCertificationStatus::Superseded;
+            previous.superseded_by_certification_id = Some(record.certification_id.clone());
+            previous.revision += 1;
+            previous.updated_at = record.created_at.clone();
+            validate_external_runtime_certification_record(&previous)?;
+            tx.execute(
+                &format!(
+                    "UPDATE {schema}.external_runtime_certifications
+                     SET status = 'superseded', revision = $2, record_json = $3
+                     WHERE certification_id = $1"
+                ),
+                &[
+                    &previous.certification_id,
+                    &(previous.revision as i64),
+                    &to_json_text(&previous)?,
+                ],
+            )
+            .map_err(|error| postgres_error("supersede PostgreSQL runtime certification", error))?;
+        }
+        let mut saved = record.clone();
+        saved.revision = 1;
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_runtime_certifications (
+                    certification_id, idempotency_key, runtime_kind,
+                    observed_cli_version, consumed_contract_revision,
+                    probe_suite_revision, status, revision, record_json
+                 ) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)"
+            ),
+            &[
+                &saved.certification_id,
+                &saved.idempotency_key,
+                &enum_json(&saved.runtime_kind)?,
+                &saved.observed_cli_version,
+                &saved.consumed_contract_revision,
+                &saved.probe_suite_revision,
+                &(saved.revision as i64),
+                &to_json_text(&saved)?,
+            ],
+        )
+        .map_err(|error| postgres_error("insert PostgreSQL runtime certification", error))?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL external runtime certification", error)
+        })?;
+        Ok(saved)
+    }
+
+    pub fn put_external_runtime_probe_evidence(
+        &self,
+        evidence: &ExternalRuntimeProbeEvidenceRecord,
+    ) -> CoreResult<()> {
+        validate_external_runtime_probe_evidence(evidence)?;
+        let schema = self.quoted_schema();
+        self.client()?
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.external_runtime_probe_evidence (
+                        runtime_id, observed_cli_version, consumed_contract_revision,
+                        probe_suite_revision, record_json
+                     ) VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT(runtime_id) DO UPDATE SET
+                        observed_cli_version = EXCLUDED.observed_cli_version,
+                        consumed_contract_revision = EXCLUDED.consumed_contract_revision,
+                        probe_suite_revision = EXCLUDED.probe_suite_revision,
+                        record_json = EXCLUDED.record_json"
+                ),
+                &[
+                    &evidence.runtime_id.0,
+                    &evidence.observed_cli_version,
+                    &evidence.consumed_contract_revision,
+                    &evidence.probe_report.suite_revision,
+                    &to_json_text(evidence)?,
+                ],
+            )
+            .map_err(|error| postgres_error("save PostgreSQL runtime probe evidence", error))?;
+        Ok(())
+    }
+
+    pub fn get_external_runtime_probe_evidence(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+    ) -> CoreResult<Option<ExternalRuntimeProbeEvidenceRecord>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_probe_evidence
+                 WHERE runtime_id = $1"
+            ),
+            &[&runtime_id.0],
+            "load PostgreSQL runtime probe evidence",
+        )
+    }
+
+    pub fn get_external_runtime_certification(
+        &self,
+        certification_id: &str,
+    ) -> CoreResult<Option<ExternalRuntimeCertificationRecord>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 WHERE certification_id = $1"
+            ),
+            &[&certification_id],
+            "load PostgreSQL external runtime certification",
+        )
+    }
+
+    pub fn list_external_runtime_certifications(
+        &self,
+    ) -> CoreResult<Vec<ExternalRuntimeCertificationRecord>> {
+        let schema = self.quoted_schema();
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 ORDER BY certification_id"
+            ),
+            &[],
+            "list PostgreSQL external runtime certifications",
+        )
+    }
+
+    pub fn find_active_external_runtime_certification(
+        &self,
+        runtime_kind: &rusty_crew_core_protocol::ExternalRuntimeKind,
+        observed_cli_version: &str,
+        consumed_contract_revision: &str,
+        probe_suite_revision: &str,
+    ) -> CoreResult<Option<ExternalRuntimeCertificationRecord>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 WHERE runtime_kind = $1
+                   AND observed_cli_version = $2
+                   AND consumed_contract_revision = $3
+                   AND probe_suite_revision = $4
+                   AND status = 'active'
+                 ORDER BY certification_id DESC LIMIT 1"
+            ),
+            &[
+                &enum_json(runtime_kind)?,
+                &observed_cli_version,
+                &consumed_contract_revision,
+                &probe_suite_revision,
+            ],
+            "find active PostgreSQL runtime certification",
+        )
+    }
+
+    pub fn invalidate_external_runtime_certification(
+        &self,
+        invalidation: &ExternalRuntimeCertificationInvalidation,
+    ) -> CoreResult<ExternalRuntimeCertificationRecord> {
+        validate_external_runtime_certification_invalidation(invalidation)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL certification invalidation", error)
+        })?;
+        let mut current = load_optional::<ExternalRuntimeCertificationRecord>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_certifications
+                 WHERE certification_id = $1 FOR UPDATE"
+            ),
+            &[&invalidation.certification_id],
+            "load PostgreSQL certification for invalidation",
+        )?
+        .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "certification was not found"))?;
+        validate_expected_revision(
+            "external runtime certification",
+            &current.certification_id,
+            Some(current.revision),
+            Some(invalidation.expected_revision),
+        )?;
+        if current.status != ExternalRuntimeCertificationStatus::Active {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "only an active certification can be invalidated",
+            ));
+        }
+        current.status = ExternalRuntimeCertificationStatus::Invalidated;
+        current.invalidated_at = Some(invalidation.invalidated_at.clone());
+        current.invalidation_reason = Some(invalidation.reason.clone());
+        current.updated_at = invalidation.invalidated_at.clone();
+        current.revision += 1;
+        validate_external_runtime_certification_record(&current)?;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.external_runtime_certifications
+                 SET status = 'invalidated', revision = $2, record_json = $3
+                 WHERE certification_id = $1"
+            ),
+            &[
+                &current.certification_id,
+                &(current.revision as i64),
+                &to_json_text(&current)?,
+            ],
+        )
+        .map_err(|error| postgres_error("invalidate PostgreSQL certification", error))?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL certification invalidation", error)
+        })?;
+        Ok(current)
     }
 
     pub fn acquire_external_controller_lease(
@@ -1454,6 +1732,20 @@ fn validate_expected_revision(
             format!("{label} {id} revision mismatch: expected {expected:?}, found {found}"),
         )),
     }
+}
+
+fn same_certification_request(
+    current: &ExternalRuntimeCertificationRecord,
+    candidate: &ExternalRuntimeCertificationRecord,
+) -> bool {
+    current.certification_id == candidate.certification_id
+        && current.idempotency_key == candidate.idempotency_key
+        && current.certified_runtime_id == candidate.certified_runtime_id
+        && current.runtime_kind == candidate.runtime_kind
+        && current.observed_cli_version == candidate.observed_cli_version
+        && current.consumed_contract_revision == candidate.consumed_contract_revision
+        && current.probe_suite_revision == candidate.probe_suite_revision
+        && current.evidence_summary == candidate.evidence_summary
 }
 
 fn revision_conflict<T>(label: &str, expected: u64, found: u64) -> CoreResult<T> {

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.9.0",
+    "version": "0.10.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -178,6 +178,188 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/external-runtime-certifications": {
+      "get": {
+        "operationId": "listExternalRuntimeCertifications",
+        "tags": ["external-runtime"],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeCertificationList"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.list",
+        "x-rusty-crew-contract-detail": "wire"
+      },
+      "post": {
+        "operationId": "certifyExternalRuntime",
+        "tags": ["external-runtime"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalRuntimeCertificationWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeCertificationRecord"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.create",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/external-runtime-certifications/{certification_id}": {
+      "get": {
+        "operationId": "readExternalRuntimeCertification",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeCertificationRecord"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/external-runtime-certifications/{certification_id}/invalidate": {
+      "post": {
+        "operationId": "invalidateExternalRuntimeCertification",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalRuntimeCertificationInvalidationWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeCertificationRecord"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.certifications.invalidate",
         "x-rusty-crew-contract-detail": "wire"
       }
     },
@@ -2841,6 +3023,82 @@
         "enum": ["attached", "managed"],
         "type": "string"
       },
+      "ExternalRuntimeCertificationInvalidation": {
+        "properties": {
+          "certificationId": { "type": "string" },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "invalidatedAt": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": [
+          "certificationId",
+          "expectedRevision",
+          "reason",
+          "invalidatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalRuntimeCertificationRecord": {
+        "properties": {
+          "certificationId": { "type": "string" },
+          "certifiedRuntimeId": { "type": "string" },
+          "consumedContractRevision": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "evidenceSummary": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "invalidatedAt": { "type": ["string", "null"] },
+          "invalidationReason": { "type": ["string", "null"] },
+          "observedCliVersion": { "type": "string" },
+          "probeSuiteRevision": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "runtimeKind": { "$ref": "#/components/schemas/ExternalRuntimeKind" },
+          "status": {
+            "$ref": "#/components/schemas/ExternalRuntimeCertificationStatus"
+          },
+          "supersededByCertificationId": { "type": ["string", "null"] },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "certificationId",
+          "idempotencyKey",
+          "certifiedRuntimeId",
+          "runtimeKind",
+          "observedCliVersion",
+          "consumedContractRevision",
+          "probeSuiteRevision",
+          "evidenceSummary",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalRuntimeCertificationRequest": {
+        "properties": {
+          "certificationId": { "type": "string" },
+          "evidenceSummary": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "requestedAt": { "type": "string" },
+          "runtimeId": { "type": "string" }
+        },
+        "required": [
+          "certificationId",
+          "idempotencyKey",
+          "runtimeId",
+          "evidenceSummary",
+          "requestedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalRuntimeCertificationStatus": {
+        "enum": ["active", "superseded", "invalidated"],
+        "type": "string"
+      },
       "ExternalRuntimeCompatibilityProbeOutcome": {
         "enum": ["passed", "transport_retryable", "incompatible"],
         "type": "string"
@@ -2880,7 +3138,12 @@
         "type": "string"
       },
       "ExternalRuntimeCompatibilityState": {
-        "enum": ["unassessed", "compatible_uncertified", "incompatible"],
+        "enum": [
+          "unassessed",
+          "compatible_uncertified",
+          "certified",
+          "incompatible"
+        ],
         "type": "string"
       },
       "ExternalRuntimeDesiredState": {
@@ -4028,6 +4291,56 @@
         "required": ["member_id"],
         "type": "object"
       },
+      "ExternalRuntimeCertificationList": {
+        "type": "object",
+        "required": ["certifications"],
+        "properties": {
+          "certifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalRuntimeCertificationRecord"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeCertificationWrite": {
+        "type": "object",
+        "required": [
+          "certificationId",
+          "idempotencyKey",
+          "runtimeId",
+          "evidenceSummary"
+        ],
+        "properties": {
+          "certificationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "runtimeId": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "evidenceSummary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeCertificationInvalidationWrite": {
+        "type": "object",
+        "required": ["expectedRevision", "reason"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 1 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "additionalProperties": false
+      },
       "ApiMeta": {
         "type": "object",
         "required": ["request_id", "schema_version"],
@@ -4081,6 +4394,7 @@
           "observedCliVersion",
           "consumedContractRevision",
           "compatibilityState",
+          "compatibilityDiagnostic",
           "lastCompatibilityProbe",
           "bindingResumeFailures"
         ],
@@ -4094,6 +4408,16 @@
           "consumedContractRevision": { "type": ["string", "null"] },
           "compatibilityState": {
             "$ref": "#/components/schemas/ExternalRuntimeCompatibilityState"
+          },
+          "compatibilityDiagnostic": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "compatible_uncertified",
+              "incompatible",
+              "probe_failed",
+              "disconnected"
+            ]
           },
           "lastCompatibilityProbe": {
             "oneOf": [
@@ -4834,7 +5158,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 25,
+    "operation_count": 29,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

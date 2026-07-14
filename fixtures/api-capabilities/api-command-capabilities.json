@@ -171,6 +171,50 @@
         "public": true
       },
       {
+        "id": "external.runtimes.certifications.list",
+        "method": "GET",
+        "path_template": "/v1/admin/external-runtime-certifications",
+        "description": "List durable external runtime compatibility certification history.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.certifications.create",
+        "method": "POST",
+        "path_template": "/v1/admin/external-runtime-certifications",
+        "description": "Certify the exact identity of a ready runtime from passing probe evidence.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.certifications.read",
+        "method": "GET",
+        "path_template": "/v1/admin/external-runtime-certifications/{certification_id}",
+        "description": "Read one durable external runtime compatibility certification.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "external.runtimes.certifications.invalidate",
+        "method": "POST",
+        "path_template": "/v1/admin/external-runtime-certifications/{certification_id}/invalidate",
+        "description": "Revision-check and invalidate one active runtime certification.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "external.runtimes.connect",
         "method": "POST",
         "path_template": "/v1/external-runtimes/{runtime_id}/connect",
@@ -2280,6 +2324,34 @@
         "capability_id": "external.runtimes.read",
         "method": "GET",
         "path_template": "/v1/external-runtimes/{runtime_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.certifications.list",
+        "method": "GET",
+        "path_template": "/v1/admin/external-runtime-certifications",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.certifications.create",
+        "method": "POST",
+        "path_template": "/v1/admin/external-runtime-certifications",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.certifications.read",
+        "method": "GET",
+        "path_template": "/v1/admin/external-runtime-certifications/{certification_id}",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.certifications.invalidate",
+        "method": "POST",
+        "path_template": "/v1/admin/external-runtime-certifications/{certification_id}/invalidate",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

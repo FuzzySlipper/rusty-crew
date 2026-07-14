@@ -61,6 +61,7 @@ import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
 import { createNativeBridgeBrainCatalogMethods } from "./brain-wrappers.js";
 import { createNativeBridgeExternalRuntimeMethods } from "./external-runtime-wrappers.js";
+import { createNativeBridgeExternalRuntimeCertificationMethods } from "./external-runtime-certification-wrappers.js";
 import {
   assertCanonicalBrainRunModule,
   piAgentTransportMetricsFromRaw,
@@ -686,6 +687,16 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     recordExternalRuntimeState: unavailable("record_external_runtime_state"),
     listExternalRuntimes: unavailable("list_external_runtimes"),
     getExternalRuntime: unavailable("get_external_runtime"),
+    certifyExternalRuntime: unavailable("certify_external_runtime"),
+    invalidateExternalRuntimeCertification: unavailable(
+      "invalidate_external_runtime_certification",
+    ),
+    listExternalRuntimeCertifications: unavailable(
+      "list_external_runtime_certifications",
+    ),
+    getExternalRuntimeCertification: unavailable(
+      "get_external_runtime_certification",
+    ),
     acquireExternalController: unavailable("acquire_external_controller"),
     releaseExternalController: unavailable("release_external_controller"),
     bindExternalAgent: unavailable("bind_external_agent"),
@@ -1568,6 +1579,7 @@ function createNativeBridgeModule(
           >);
     },
     ...createNativeBridgeExternalRuntimeMethods(binding),
+    ...createNativeBridgeExternalRuntimeCertificationMethods(binding),
     enqueueBodyFollowUpMessage: async (input) =>
       binding.enqueueBodyFollowUpMessage(
         input.sessionId,

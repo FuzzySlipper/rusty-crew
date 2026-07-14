@@ -15032,6 +15032,81 @@ mod tests {
                 .generation,
             1
         );
+        let probe_report = rusty_crew_core_protocol::ExternalRuntimeCompatibilityProbeReport {
+            suite_revision: "codex-required-capabilities-v1".into(),
+            outcome: rusty_crew_core_protocol::ExternalRuntimeCompatibilityProbeOutcome::Passed,
+            steps: vec![rusty_crew_core_protocol::ExternalRuntimeCompatibilityProbeStep {
+                step_id: "model_list".into(),
+                status:
+                    rusty_crew_core_protocol::ExternalRuntimeCompatibilityProbeStepStatus::Passed,
+                duration_ms: 1,
+                reason_code: None,
+                detail: None,
+            }],
+            completed_at: "2026-07-10T00:00:01Z".into(),
+        };
+        let evidence = rusty_crew_core_protocol::ExternalRuntimeProbeEvidenceRecord {
+            runtime_id: runtime.runtime_id.clone(),
+            runtime_kind: runtime.kind,
+            observed_cli_version: "0.144.3".into(),
+            consumed_contract_revision: "contract-v1".into(),
+            probe_report,
+            observed_at: "2026-07-10T00:00:01Z".into(),
+        };
+        store
+            .put_external_runtime_probe_evidence(&evidence)
+            .unwrap();
+        assert_eq!(
+            store
+                .get_external_runtime_probe_evidence(&runtime.runtime_id)
+                .unwrap(),
+            Some(evidence)
+        );
+        let certification = rusty_crew_core_protocol::ExternalRuntimeCertificationRecord {
+            certification_id: "postgres-cert-1".into(),
+            idempotency_key: "postgres-cert-key-1".into(),
+            certified_runtime_id: runtime.runtime_id.clone(),
+            runtime_kind: runtime.kind,
+            observed_cli_version: "0.144.3".into(),
+            consumed_contract_revision: "contract-v1".into(),
+            probe_suite_revision: "codex-required-capabilities-v1".into(),
+            evidence_summary: "PostgreSQL certification conformance".into(),
+            status: rusty_crew_core_protocol::ExternalRuntimeCertificationStatus::Active,
+            superseded_by_certification_id: None,
+            invalidated_at: None,
+            invalidation_reason: None,
+            revision: 0,
+            created_at: "2026-07-10T00:00:02Z".into(),
+            updated_at: "2026-07-10T00:00:02Z".into(),
+        };
+        let saved_certification = store
+            .record_external_runtime_certification(&certification)
+            .unwrap();
+        assert_eq!(saved_certification.revision, 1);
+        assert_eq!(
+            store
+                .record_external_runtime_certification(&certification)
+                .unwrap(),
+            saved_certification
+        );
+        let invalidated = store
+            .invalidate_external_runtime_certification(
+                &rusty_crew_core_protocol::ExternalRuntimeCertificationInvalidation {
+                    certification_id: saved_certification.certification_id.clone(),
+                    expected_revision: saved_certification.revision,
+                    reason: "conformance complete".into(),
+                    invalidated_at: "2026-07-10T00:00:03Z".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            invalidated.status,
+            rusty_crew_core_protocol::ExternalRuntimeCertificationStatus::Invalidated
+        );
+        assert_eq!(
+            store.list_external_runtime_certifications().unwrap(),
+            vec![invalidated]
+        );
         let binding = rusty_crew_core_protocol::ExternalAgentBinding {
             binding_id: rusty_crew_core_protocol::ExternalBindingId::new("codex-binding"),
             runtime_id: runtime.runtime_id.clone(),

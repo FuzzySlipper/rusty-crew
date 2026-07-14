@@ -643,6 +643,22 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         protocol::ExternalRuntimeRegistration
     );
     schema!(
+        "certify_external_runtime",
+        protocol::ExternalRuntimeCertificationRecord
+    );
+    schema!(
+        "invalidate_external_runtime_certification",
+        protocol::ExternalRuntimeCertificationRecord
+    );
+    schema!(
+        "list_external_runtime_certifications",
+        Vec<protocol::ExternalRuntimeCertificationRecord>
+    );
+    schema!(
+        "get_external_runtime_certification",
+        Option<protocol::ExternalRuntimeCertificationRecord>
+    );
+    schema!(
         "list_external_runtimes",
         Vec<protocol::ExternalRuntimeRegistration>
     );

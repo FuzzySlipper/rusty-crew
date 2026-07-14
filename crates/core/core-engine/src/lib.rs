@@ -11,6 +11,7 @@ mod curator;
 mod delegation;
 mod delegation_store;
 mod external_runtime;
+mod external_runtime_certification;
 mod external_runtime_compatibility;
 mod github_gate;
 mod github_gate_wait;

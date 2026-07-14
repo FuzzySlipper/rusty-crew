@@ -2988,6 +2988,141 @@
       ],
       "type": "string"
     },
+    "ExternalRuntimeCertificationInvalidation": {
+      "properties": {
+        "certificationId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "invalidatedAt": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificationId",
+        "expectedRevision",
+        "reason",
+        "invalidatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeCertificationRecord": {
+      "properties": {
+        "certificationId": {
+          "type": "string"
+        },
+        "certifiedRuntimeId": {
+          "type": "string"
+        },
+        "consumedContractRevision": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "invalidatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalidationReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedCliVersion": {
+          "type": "string"
+        },
+        "probeSuiteRevision": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeKind": {
+          "$ref": "#/$defs/ExternalRuntimeKind"
+        },
+        "status": {
+          "$ref": "#/$defs/ExternalRuntimeCertificationStatus"
+        },
+        "supersededByCertificationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificationId",
+        "idempotencyKey",
+        "certifiedRuntimeId",
+        "runtimeKind",
+        "observedCliVersion",
+        "consumedContractRevision",
+        "probeSuiteRevision",
+        "evidenceSummary",
+        "status",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeCertificationRequest": {
+      "properties": {
+        "certificationId": {
+          "type": "string"
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "runtimeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificationId",
+        "idempotencyKey",
+        "runtimeId",
+        "evidenceSummary",
+        "requestedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeCertificationStatus": {
+      "enum": [
+        "active",
+        "superseded",
+        "invalidated"
+      ],
+      "type": "string"
+    },
     "ExternalRuntimeCompatibilityProbeOutcome": {
       "enum": [
         "passed",
@@ -3067,6 +3202,7 @@
       "enum": [
         "unassessed",
         "compatible_uncertified",
+        "certified",
         "incompatible"
       ],
       "type": "string"
@@ -5147,6 +5283,15 @@
     "external_interaction_record": {
       "$ref": "#/$defs/ExternalInteractionRecord"
     },
+    "external_runtime_certification_invalidation": {
+      "$ref": "#/$defs/ExternalRuntimeCertificationInvalidation"
+    },
+    "external_runtime_certification_record": {
+      "$ref": "#/$defs/ExternalRuntimeCertificationRecord"
+    },
+    "external_runtime_certification_request": {
+      "$ref": "#/$defs/ExternalRuntimeCertificationRequest"
+    },
     "external_runtime_event_input": {
       "$ref": "#/$defs/ExternalRuntimeEventInput"
     },
@@ -5297,6 +5442,9 @@
     "external_controller_context",
     "external_runtime_handshake_observation",
     "external_runtime_handshake_decision",
+    "external_runtime_certification_record",
+    "external_runtime_certification_request",
+    "external_runtime_certification_invalidation",
     "external_runtime_state_observation",
     "external_controller_lease",
     "external_agent_binding",
