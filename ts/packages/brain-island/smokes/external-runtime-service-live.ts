@@ -231,6 +231,21 @@ try {
     `${localToolToken}\n`,
     "live Codex turn did not apply the required local-tool mutation",
   );
+  const localToolEvents = (
+    await bridge.queryExternalRuntimeEvents({
+      runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    })
+  ).filter((event) => event.nativeTurnId === localToolTurn.nativeTurnId);
+  assert.ok(
+    localToolEvents.some((event) => event.kind === "reasoning_delta"),
+    "live Codex local-tool turn emitted no normalized reasoning event",
+  );
+  assert.ok(
+    localToolEvents.some((event) => event.kind === "command_activity"),
+    "live Codex local-tool turn emitted no normalized command event",
+  );
 
   const browserCreationRequest = {
     idempotencyKey: "external-service-live-browser-create",
@@ -786,6 +801,14 @@ try {
         nativeThreadId: terminal.nativeThreadId,
         nativeTurnId: terminal.nativeTurnId,
         localToolTurnId: localToolTurn.nativeTurnId,
+        localToolEventCounts: Object.fromEntries(
+          [...new Set(localToolEvents.map((event) => event.kind))]
+            .sort()
+            .map((kind) => [
+              kind,
+              localToolEvents.filter((event) => event.kind === kind).length,
+            ]),
+        ),
         terminalSequenceId: terminal.sequenceId,
         steerTurnId: steerTerminal.nativeTurnId,
         interruptedTurnId: interrupted.nativeTurnId,

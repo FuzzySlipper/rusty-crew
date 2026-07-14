@@ -4,11 +4,14 @@ Status: Accepted
 
 Date: 2026-07-10
 
-Related tasks: `#5515`, `#5517`, `#5518`, `#5610`, `#5739`
+Related tasks: `#5515`, `#5517`, `#5518`, `#5610`, `#5739`, `#5783`,
+`#5790`
 
 Related evidence:
 
 - `docs/codex-app-server-0.144.1-live-semantics-spike.md`
+- `docs/codex-app-server-0.144.3-live-certification.md`
+- `docs/codex-debug-update-certification.md`
 - `[doc: rusty-crew/codex-app-server-external-agent-lane]`
 - `[doc: rusty-crew/responses-brain-codex-translation-plan-2026-06-24]`
 
@@ -30,6 +33,13 @@ Unix WebSocket. A non-ephemeral thread performed a real code edit, ran tests,
 used Den MCP, called a Crew dynamic tool, resumed after app-server replacement,
 and recovered an in-flight hard-killed turn as interrupted. That evidence
 supersedes the earlier managed-stdio-first planning assumption.
+
+Task `#5790` subsequently certified `codex-cli 0.144.3` without regenerating or
+editing the `0.144.1` protocol baseline. The consumed contract remained
+compatible, the debug workflow passed real provider/tool/restart checks, and a
+guarded promotion preserved live Crew binding and native thread identity. This
+proves that generated protocol artifacts are a development baseline, not an
+operator-edited runtime version pin.
 
 Rusty Crew needs a runtime-neutral architecture that can host Codex now and other
 complete external agent runtimes later without making every agent a
@@ -149,6 +159,7 @@ enum ExternalProcessOwnership {
 enum ExternalRuntimeCompatibilityState {
     Unassessed,
     CompatibleUncertified,
+    Certified,
     Incompatible,
 }
 
@@ -603,11 +614,20 @@ consumed operations remain valid. Missing required operations, malformed known
 messages, or failed required capability probes are concrete incompatibilities
 and must block turns with stable reason codes.
 
-Durable `certified` status and debug-to-live promotion are added by the Codex
-compatibility campaign rooted at task `#5783`. Until that evidence repository is
-present, a successful handshake remains explicitly `compatible_uncertified`.
-Generated schemas still drive bridge types; hand-maintained TS mirrors may not
-become compatibility-policy authority.
+Durable `certified` status and debug-to-live promotion are owned by the Codex
+compatibility workflow rooted at task `#5783`. A successful handshake remains
+`compatible_uncertified` until the exact CLI version, consumed-contract
+revision, and probe-suite revision have a passing debug certification. The
+guarded live promotion records a separate live certification after it preserves
+binding/thread identity and proves a fresh controller lease.
+
+Routine Codex updates do not edit source version pins or regenerate protocol
+artifacts merely because the CLI version changed. Operators stage the installed
+CLI on debug, run `npm run codex:debug:update-certify`, and then run
+`npm run codex:live:promote`. Regeneration is required only when Crew deliberately
+changes the generated protocol baseline or its consumed contract. Generated
+schemas still drive bridge types; hand-maintained TS mirrors may not become
+compatibility-policy authority.
 
 ## Existing Direct Brains
 
@@ -677,3 +697,5 @@ registration names one transport/ownership mode and fails visibly if unavailable
    messaging.
 7. Add restart, stale request, capacity, wait/resume, and cross-backend tests.
 8. Certify a real coding turn through the deployed debug service and Rusty View.
+9. Stage future CLI updates through debug certification and guarded live
+   promotion; revise source contracts only when the consumed protocol changes.

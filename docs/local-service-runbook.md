@@ -51,6 +51,22 @@ Frequent Codex CLI updates must be staged and certified through the debug-only
 operator workflow before live promotion. See
 [Codex debug update and certification](codex-debug-update-certification.md).
 
+The routine update sequence is:
+
+```bash
+cd /home/dev/rusty-crew
+npm run codex:debug:update-certify -- --update
+npm run codex:live:promote -- --promote
+```
+
+When the executable was updated separately, replace `--update` with
+`--skip-update`. The first command may restart only the debug app-server and
+debug Crew. The second refuses active live work by default, snapshots exact
+binding/thread identities, and restarts only the live app-server and live Crew.
+Do not update source protocol version strings merely because `codex --version`
+changed. See the [0.144.3 live certification](codex-app-server-0.144.3-live-certification.md)
+for the first update completed under this contract.
+
 Bootstrap the private debug home without copying live sessions, history, or
 state databases:
 
