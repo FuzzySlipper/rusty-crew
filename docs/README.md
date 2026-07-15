@@ -44,6 +44,8 @@ Operator setup references:
   profile assignment, and refresh guide.
 - `local-service-runbook.md` — detailed current-machine operation and recovery.
 - `local-service-topology.md` — concise live-versus-debug service map.
+- `review-agent-inbox-and-prompt-guidance.md` — copy-ready reviewer and
+  requester prompts plus the durable serial inbox contract.
 
 0. **Den document `rusty-crew-unified-architecture`** — authoritative design.
    It supersedes recommendations in every local companion doc where they

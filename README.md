@@ -30,6 +30,8 @@ changes when that produces a cleaner long-term path.
   operator reference for the current source-run deployment.
 - [API capability registry](docs/api-capability-command-catalog-ratchet.md) documents the
   queryable API and slash-command registry.
+- [Review-agent inbox guidance](docs/review-agent-inbox-and-prompt-guidance.md)
+  provides copy-ready prompts and the durable serial review contract.
 
 ## Current Architecture
 
