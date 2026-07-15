@@ -757,6 +757,13 @@ pub enum AgentMessageDeliveryStatus {
     Expired,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMessageInputKind {
+    Operator,
+    RoutedAgentMessage,
+}
+
 impl AgentMessageDeliveryStatus {
     pub const fn is_terminal(self) -> bool {
         !matches!(self, Self::Pending)
@@ -774,6 +781,7 @@ pub struct AgentMessageDeliveryRequest {
     pub to_agent_id: AgentId,
     pub to_session_id: Option<SessionId>,
     pub reply_to_message_id: Option<String>,
+    pub input_kind: AgentMessageInputKind,
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<ExternalCollaborationMode>,
@@ -861,6 +869,7 @@ pub struct AgentMessageCommand {
     pub idempotency_key: String,
     pub message_id: String,
     pub to_agent_id: AgentId,
+    pub input_kind: AgentMessageInputKind,
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<ExternalCollaborationMode>,

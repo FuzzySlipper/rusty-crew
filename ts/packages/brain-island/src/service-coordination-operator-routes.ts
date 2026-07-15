@@ -104,6 +104,7 @@ export async function handleCoordinationOperatorRequest(
         idempotencyKey: ids.idempotencyKey,
         messageId: ids.messageId,
         toAgentId: requiredString(body.toAgentId) as AgentId,
+        inputKind: "routed_agent_message",
         body: requiredString(body.body),
         ...(optionalString(body.correlationId) === undefined
           ? {}

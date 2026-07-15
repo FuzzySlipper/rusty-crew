@@ -333,6 +333,73 @@ pub(crate) fn migrate_v47_add_agent_message_reply_links(
     .map_err(|error| persistence_error("add agent message session and reply linkage", error))
 }
 
+pub(crate) fn migrate_v48_add_agent_message_input_kind(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "DELETE FROM queued_messages WHERE state_reason LIKE 'agent_delivery:%';
+         UPDATE agent_message_delivery_receipts
+            SET record_json = json_set(
+                record_json,
+                '$.request.inputKind',
+                CASE
+                    WHEN json_extract(record_json, '$.request.fromAgentId') = 'rusty-view-operator'
+                    THEN 'operator'
+                    ELSE 'routed_agent_message'
+                END
+            );",
+    )
+    .map_err(|error| persistence_error("add explicit agent message input kind", error))
+}
+
+pub(crate) fn migrate_v49_add_agent_message_event_input_kind(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE agent_message_delivery_receipts
+            SET record_json = json_set(
+                record_json,
+                '$.request.inputKind',
+                CASE
+                    WHEN json_extract(record_json, '$.request.fromAgentId') = 'rusty-view-operator'
+                    THEN 'operator'
+                    ELSE 'routed_agent_message'
+                END
+            );
+         UPDATE event_history
+            SET event_json = json_set(
+                event_json,
+                '$.receipt.request.inputKind',
+                CASE
+                    WHEN json_extract(event_json, '$.receipt.request.fromAgentId') = 'rusty-view-operator'
+                    THEN 'operator'
+                    ELSE 'routed_agent_message'
+                END
+            )
+          WHERE json_type(event_json, '$.receipt.request') IS NOT NULL;",
+    )
+    .map_err(|error| persistence_error("add agent message input kind to event history", error))
+}
+
+pub(crate) fn migrate_v50_repair_agent_message_event_input_kind(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE event_history
+            SET event_json = json_set(
+                event_json,
+                '$.receipt.request.inputKind',
+                CASE
+                    WHEN json_extract(event_json, '$.receipt.request.fromAgentId') = 'rusty-view-operator'
+                    THEN 'operator'
+                    ELSE 'routed_agent_message'
+                END
+            )
+          WHERE json_type(event_json, '$.receipt.request') IS NOT NULL;",
+    )
+    .map_err(|error| persistence_error("repair agent message event input kind", error))
+}
+
 impl CoordinationStore {
     pub fn put_external_runtime_registration(
         &self,

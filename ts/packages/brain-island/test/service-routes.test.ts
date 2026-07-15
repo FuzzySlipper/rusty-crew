@@ -451,6 +451,7 @@ test("external thread lifecycle routes expose archive, delete, restore, and arch
 test("external command routes are typed and recognized commands cannot leak to messages", async () => {
   let body: Record<string, unknown> = {};
   let delivered = false;
+  let deliveredCommand: Record<string, unknown> | undefined;
   const context = {
     bridge: {
       async getExternalBinding() {
@@ -465,9 +466,10 @@ test("external command routes are typed and recognized commands cannot leak to m
       async getAgentMessageDelivery() {
         return undefined;
       },
-      async deliverAgentMessage() {
+      async deliverAgentMessage(command: Record<string, unknown>) {
         delivered = true;
-        return {};
+        deliveredCommand = command;
+        return { status: "accepted", request: command };
       },
     },
     controller: {
@@ -483,6 +485,9 @@ test("external command routes are typed and recognized commands cannot leak to m
           command: parsed.command,
           idempotencyKey: input.idempotencyKey,
         };
+      },
+      async applyCoordinationDelivery(receipt: unknown) {
+        return receipt;
       },
     },
     now: () => "2026-07-12T00:00:00.000Z",
@@ -535,6 +540,16 @@ test("external command routes are typed and recognized commands cannot leak to m
     "external_command_requires_command_route",
   );
   assert.equal(delivered, false);
+
+  body = { body: "plain operator prompt" };
+  const submitted = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/messages"),
+    context,
+  );
+  assert.equal((submitted as AdminRouteResult).status, 200);
+  assert.equal(deliveredCommand?.inputKind, "operator");
+  assert.equal(deliveredCommand?.body, "plain operator prompt");
 });
 
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {

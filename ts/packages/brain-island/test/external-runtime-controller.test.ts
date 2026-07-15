@@ -1770,6 +1770,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       idempotencyKey: "interaction-delivery",
       messageId: "interaction-message",
       toAgentId: "interaction-agent",
+      inputKind: "operator",
       body: "request approval",
       collaborationMode: "plan",
       requireWake: true,
@@ -1815,6 +1816,13 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       (turnStart?.params as Record<string, unknown>)?.environments,
       [{ environmentId: "local", cwd: "/home" }],
     );
+    assert.deepEqual((turnStart?.params as Record<string, unknown>)?.input, [
+      {
+        type: "text",
+        text: "request approval",
+        text_elements: [],
+      },
+    ]);
 
     transport.emit({
       id: "input-1",
@@ -1856,6 +1864,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       idempotencyKey: "active-steer-delivery",
       messageId: "active-steer-message",
       toAgentId: "interaction-agent",
+      inputKind: "operator",
       body: "include the new constraint",
       correlationId: "review-constraint-1",
       requireWake: true,
@@ -1877,10 +1886,13 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       (steerRequest?.params as Record<string, unknown>).expectedTurnId,
       "native-turn-1",
     );
-    assert.match(
-      JSON.stringify((steerRequest?.params as Record<string, unknown>).input),
-      /message_id: active-steer-message.*from_agent_id: operator.*review-constraint-1.*include the new constraint/s,
-    );
+    assert.deepEqual((steerRequest?.params as Record<string, unknown>).input, [
+      {
+        type: "text",
+        text: "include the new constraint",
+        text_elements: [],
+      },
+    ]);
 
     transport.emit({
       method: "turn/completed",
@@ -1908,6 +1920,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       idempotencyKey: "default-delivery",
       messageId: "default-message",
       toAgentId: "interaction-agent",
+      inputKind: "operator",
       body: "perform a normal mutation",
       requireWake: true,
       createdAt: now(),
@@ -2050,6 +2063,7 @@ test("controller expires undispatched turns and reports ambiguous native starts 
       idempotencyKey: "dispatch-expiry-delivery",
       messageId: "dispatch-expiry-message",
       toAgentId: agentId,
+      inputKind: "operator",
       body: "expire before dispatch",
       requireWake: true,
       createdAt: now(),
@@ -2076,6 +2090,7 @@ test("controller expires undispatched turns and reports ambiguous native starts 
       idempotencyKey: "dispatch-timeout-delivery",
       messageId: "dispatch-timeout-message",
       toAgentId: agentId,
+      inputKind: "operator",
       body: "time out after native dispatch",
       requireWake: true,
       createdAt: now(),

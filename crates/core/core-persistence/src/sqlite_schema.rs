@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 47;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 50;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -253,6 +253,21 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 47,
         description: "add agent message session provenance and reply linkage",
         apply: repos::external_runtime::migrate_v47_add_agent_message_reply_links,
+    },
+    SchemaMigration {
+        version: 48,
+        description: "add explicit agent message input kind",
+        apply: repos::external_runtime::migrate_v48_add_agent_message_input_kind,
+    },
+    SchemaMigration {
+        version: 49,
+        description: "add agent message input kind to durable event history",
+        apply: repos::external_runtime::migrate_v49_add_agent_message_event_input_kind,
+    },
+    SchemaMigration {
+        version: 50,
+        description: "repair agent message input kind event discriminator",
+        apply: repos::external_runtime::migrate_v50_repair_agent_message_event_input_kind,
     },
 ];
 
@@ -2589,6 +2604,93 @@ mod tests {
         ] {
             assert!(index_exists(&db_path, index), "missing index {index}");
         }
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn agent_message_input_kind_migration_is_explicit_and_drops_pending_delivery_queue() {
+        let db_path = temp_db_path("agent-message-input-kind");
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            prepare_migration_metadata(&conn).unwrap();
+            apply_schema_migrations(&mut conn, &SCHEMA_MIGRATIONS[..47]).unwrap();
+            conn.execute(
+                "INSERT INTO agent_message_delivery_receipts
+                    (delivery_id, idempotency_key, message_id, from_agent_id, from_session_id,
+                     to_agent_id, to_session_id, reply_to_message_id, status, created_at,
+                     expires_at, revision, record_json)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL, ?6, ?7, ?8, 1, ?9)",
+                params![
+                    "legacy-delivery",
+                    "legacy-delivery-key",
+                    "legacy-message",
+                    "legacy-sender",
+                    "legacy-recipient",
+                    "pending",
+                    "2026-07-15T00:00:00Z",
+                    "2026-07-15T00:05:00Z",
+                    r#"{"request":{"body":"legacy prompt"}}"#,
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO queued_messages
+                    (message_id, owner_session_id, owner_agent_id, from_agent, to_agent, body,
+                     correlation_id, source_sequence, enqueued_at, expires_at, ttl_ms,
+                     delivery_attempts, state, terminal_at, state_reason, message_json)
+                 VALUES (?1, NULL, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, 300000, 0,
+                         'pending', NULL, ?8, '{}')",
+                params![
+                    "agent-message-queue:legacy-message",
+                    "legacy-recipient",
+                    "legacy-sender",
+                    "legacy-recipient",
+                    "legacy prompt",
+                    "2026-07-15T00:00:00Z",
+                    "2026-07-15T00:05:00Z",
+                    "agent_delivery:legacy-delivery",
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO event_history (sequence, event_kind, event_json)
+                 VALUES (9001, 'AgentMessageDeliveryObserved', ?1)",
+                params![r#"{"type":"agent_message_delivery_observed","receipt":{"request":{"fromAgentId":"rusty-view-operator","body":"operator prompt"}}}"#],
+            )
+            .unwrap();
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        let conn = Connection::open(&db_path).unwrap();
+        let input_kind: String = conn
+            .query_row(
+                "SELECT json_extract(record_json, '$.request.inputKind')
+                 FROM agent_message_delivery_receipts WHERE delivery_id = 'legacy-delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(input_kind, "routed_agent_message");
+        let queued: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM queued_messages
+                 WHERE state_reason = 'agent_delivery:legacy-delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(queued, 0);
+        let event_input_kind: String = conn
+            .query_row(
+                "SELECT json_extract(event_json, '$.receipt.request.inputKind')
+                 FROM event_history WHERE sequence = 9001",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_input_kind, "operator");
 
         remove_temp_db(&db_path);
     }

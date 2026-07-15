@@ -113,6 +113,7 @@ export async function resolveCodexCoordinationToolCall(input: {
       idempotencyKey: `codex-delivery:${identity}`,
       messageId: `codex-message:${identity}`,
       toAgentId: args.recipient,
+      inputKind: "routed_agent_message",
       body: args.body,
       ...(args.correlationId === undefined
         ? {}

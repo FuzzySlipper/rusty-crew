@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 32;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 35;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -175,7 +175,81 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add agent message session provenance and reply linkage",
         apply: Some(apply_postgres_agent_message_reply_links),
     },
+    PostgresSchemaMigration {
+        version: 33,
+        description: "add explicit agent message input kind",
+        apply: Some(apply_postgres_agent_message_input_kind),
+    },
+    PostgresSchemaMigration {
+        version: 34,
+        description: "add agent message input kind to durable event history",
+        apply: Some(apply_postgres_agent_message_event_input_kind),
+    },
+    PostgresSchemaMigration {
+        version: 35,
+        description: "repair agent message input kind event discriminator",
+        apply: Some(apply_postgres_agent_message_event_input_kind),
+    },
 ];
+
+fn apply_postgres_agent_message_event_input_kind(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.agent_message_delivery_receipts
+            SET record_json = jsonb_set(
+                record_json::jsonb,
+                '{{request,inputKind}}',
+                CASE
+                    WHEN record_json::jsonb #>> '{{request,fromAgentId}}' = 'rusty-view-operator'
+                    THEN '\"operator\"'::jsonb
+                    ELSE '\"routed_agent_message\"'::jsonb
+                END,
+                true
+            )::text;
+         UPDATE {schema}.event_history
+            SET event_json = jsonb_set(
+                event_json::jsonb,
+                '{{receipt,request,inputKind}}',
+                CASE
+                    WHEN event_json::jsonb #>> '{{receipt,request,fromAgentId}}' = 'rusty-view-operator'
+                    THEN '\"operator\"'::jsonb
+                    ELSE '\"routed_agent_message\"'::jsonb
+                END,
+                true
+            )::text
+          WHERE event_json::jsonb #> '{{receipt,request}}' IS NOT NULL;"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL agent message input kind to event history",
+            error,
+        )
+    })
+}
+
+fn apply_postgres_agent_message_input_kind(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "DELETE FROM {schema}.queued_messages
+            WHERE state_reason LIKE 'agent_delivery:%';
+         UPDATE {schema}.agent_message_delivery_receipts
+            SET record_json = jsonb_set(
+                record_json::jsonb,
+                '{{request,inputKind}}',
+                CASE
+                    WHEN record_json::jsonb #>> '{{request,fromAgentId}}' = 'rusty-view-operator'
+                    THEN '\"operator\"'::jsonb
+                    ELSE '\"routed_agent_message\"'::jsonb
+                END,
+                true
+            )::text;"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL agent message input kind", error))
+}
 
 fn apply_postgres_agent_message_reply_links(
     tx: &mut Transaction<'_>,

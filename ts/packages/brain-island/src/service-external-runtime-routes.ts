@@ -480,6 +480,7 @@ export async function handleExternalRuntimeRequest(
       idempotencyKey,
       messageId,
       toAgentId: binding.agentId,
+      inputKind: "operator",
       body: messageBody,
       ...(collaborationMode === undefined ? {} : { collaborationMode }),
       ...(optionalString(body.correlationId) === undefined

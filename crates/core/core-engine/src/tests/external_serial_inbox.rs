@@ -2,10 +2,106 @@ use super::external_runtime::{binding, runtime};
 use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
-    AgentMessageDeliveryStatus, AgentMessageReplyCommand, ExternalBindingId,
+    AgentMessageDeliveryStatus, AgentMessageInputKind, AgentMessageReplyCommand, ExternalBindingId,
     ExternalControllerLease, ExternalMessageDeliveryPolicy, ExternalRuntimeId, ExternalTurnPhase,
     ExternalTurnRequestId,
 };
+
+#[test]
+fn serial_operator_input_promotes_without_agent_reply_and_stays_plain() {
+    let engine = test_engine();
+    let recipient = engine
+        .create_session(session_config(
+            "operator-recipient-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let mut serial_binding = binding();
+    serial_binding.session_id = Some(recipient.session_id.clone());
+    serial_binding.message_delivery_policy = ExternalMessageDeliveryPolicy::SerialNextTurn;
+    engine.bind_external_agent(&serial_binding, None).unwrap();
+
+    let deliver = |index: u8, body: &str| {
+        engine
+            .deliver_agent_message(AgentMessageCommand {
+                caller: AgentCoordinationCaller::System {
+                    sender_agent_id: AgentId::new("rusty-view-operator"),
+                },
+                delivery_id: AgentMessageDeliveryId::new(format!("operator-delivery-{index}")),
+                idempotency_key: format!("operator-delivery-{index}"),
+                message_id: format!("operator-message-{index}"),
+                to_agent_id: recipient.agent_id.clone(),
+                input_kind: AgentMessageInputKind::Operator,
+                body: body.into(),
+                collaboration_mode: None,
+                correlation_id: None,
+                require_wake: true,
+                created_at: format!("2026-06-19T00:00:0{index}Z"),
+                expires_at: "2026-06-19T00:30:00Z".into(),
+            })
+            .unwrap()
+    };
+
+    let first = deliver(1, "first operator prompt");
+    assert!(matches!(
+        first.activation,
+        Some(AgentActivation::ExternalTurnRequested { .. })
+    ));
+    let first_request = ExternalTurnRequestId::new("agent-message:operator-message-1");
+    engine
+        .transition_external_turn(
+            &first_request,
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:01Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &first_request,
+            ExternalTurnPhase::Active,
+            Some("native-operator-turn-1".into()),
+            None,
+            "2026-06-19T00:00:02Z".into(),
+        )
+        .unwrap();
+
+    let second = deliver(2, "second operator prompt");
+    assert!(matches!(
+        second.activation,
+        Some(AgentActivation::QueuedForNextTurn { .. })
+    ));
+    engine
+        .transition_external_turn(
+            &first_request,
+            ExternalTurnPhase::Completed,
+            None,
+            None,
+            "2026-06-19T00:00:03Z".into(),
+        )
+        .unwrap();
+
+    let promoted = engine
+        .get_external_turn(&ExternalTurnRequestId::new(
+            "external-follow-up:agent-message-queue:operator-message-2",
+        ))
+        .unwrap()
+        .expect("operator follow-up should promote without an agent reply receipt");
+    assert_eq!(
+        promoted.request.provenance.kind,
+        rusty_crew_core_protocol::TurnInputProvenanceKind::Operator
+    );
+    assert_eq!(
+        promoted.request.input,
+        vec![rusty_crew_core_protocol::ExternalTurnInputPart::Text {
+            text: "second operator prompt".into(),
+        }]
+    );
+}
 
 #[test]
 fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
@@ -57,6 +153,7 @@ fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
             idempotency_key: "serial-delivery-1".into(),
             message_id: "serial-message-1".into(),
             to_agent_id: reviewer.agent_id.clone(),
+            input_kind: AgentMessageInputKind::RoutedAgentMessage,
             body: "review the first change".into(),
             collaboration_mode: None,
             correlation_id: Some("serial-correlation-1".into()),
@@ -154,6 +251,7 @@ fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
                 idempotency_key: format!("serial-delivery-{index}"),
                 message_id: format!("serial-message-{index}"),
                 to_agent_id: reviewer.agent_id.clone(),
+                input_kind: AgentMessageInputKind::RoutedAgentMessage,
                 body: format!("review change {index}"),
                 collaboration_mode: None,
                 correlation_id: Some(format!("serial-correlation-{index}")),
@@ -290,6 +388,7 @@ fn serial_external_inbox_does_not_advance_after_completed_turn_without_reply() {
                 idempotency_key: format!("stalled-delivery-{index}"),
                 message_id: format!("stalled-message-{index}"),
                 to_agent_id: reviewer.agent_id.clone(),
+                input_kind: AgentMessageInputKind::RoutedAgentMessage,
                 body: format!("review stalled change {index}"),
                 collaboration_mode: None,
                 correlation_id: None,
@@ -387,6 +486,7 @@ fn serial_external_inbox_cancels_pending_work_when_recipient_session_is_replaced
                 idempotency_key: format!("replacement-delivery-{index}"),
                 message_id: format!("replacement-message-{index}"),
                 to_agent_id: reviewer.agent_id.clone(),
+                input_kind: AgentMessageInputKind::RoutedAgentMessage,
                 body: format!("review replacement change {index}"),
                 collaboration_mode: None,
                 correlation_id: None,

@@ -215,6 +215,7 @@ try {
     idempotencyKey: "external-service-live-delivery",
     messageId: "external-service-live-message",
     toAgentId: agentId,
+    inputKind: "operator",
     body: "Reply with exactly EXTERNAL_SERVICE_LIVE_OK and nothing else.",
     requireWake: true,
     createdAt: now(),

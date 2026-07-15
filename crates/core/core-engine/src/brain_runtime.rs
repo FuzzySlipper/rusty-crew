@@ -55,6 +55,7 @@ impl CoreEngine {
             idempotency_key: format!("delivery-{key}"),
             message_id: format!("message-{key}"),
             to_agent_id: message.to,
+            input_kind: rusty_crew_core_protocol::AgentMessageInputKind::RoutedAgentMessage,
             body: message.body,
             collaboration_mode: None,
             correlation_id: message.correlation_id,

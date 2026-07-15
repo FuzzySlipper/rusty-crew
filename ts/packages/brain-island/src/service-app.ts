@@ -5007,6 +5007,7 @@ function createServiceCoordinationRuntime(
         idempotencyKey: `delivery:${identity}`,
         messageId: `message:${identity}`,
         toAgentId: input.toAgentId,
+        inputKind: "routed_agent_message",
         body: input.body,
         ...(input.correlationId === undefined
           ? {}

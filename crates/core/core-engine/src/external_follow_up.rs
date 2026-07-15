@@ -2,9 +2,9 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentActivation, ExternalControllerContext, ExternalMessageDeliveryPolicy,
-    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
-    TurnInputProvenance,
+    AgentActivation, AgentMessageDeliveryId, AgentMessageInputKind, ExternalControllerContext,
+    ExternalMessageDeliveryPolicy, ExternalTurnCorrelation, ExternalTurnInputPart,
+    ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
 };
 
 impl CoreEngine {
@@ -46,6 +46,28 @@ impl CoreEngine {
     ) -> CoreResult<bool> {
         if turn.request.provenance.kind
             != rusty_crew_core_protocol::TurnInputProvenanceKind::RoutedAgentMessage
+        {
+            return Ok(true);
+        }
+        let source_delivery = turn
+            .request
+            .provenance
+            .source_id
+            .as_deref()
+            .map(|source_id| {
+                source_id
+                    .strip_prefix("agent-message-queue:")
+                    .unwrap_or(source_id)
+            })
+            .map(|message_id| {
+                self.store
+                    .get_agent_message_delivery_by_message_id(message_id)
+            })
+            .transpose()?
+            .flatten();
+        if source_delivery
+            .as_ref()
+            .is_some_and(|delivery| delivery.request.reply_to_message_id.is_some())
         {
             return Ok(true);
         }
@@ -138,6 +160,32 @@ impl CoreEngine {
         }
         let request_id =
             ExternalTurnRequestId::new(format!("external-follow-up:{}", queued.message_id));
+        let provenance_kind = match queued
+            .state_reason
+            .as_deref()
+            .and_then(|reason| reason.strip_prefix("agent_delivery:"))
+        {
+            Some(delivery_id) => {
+                let delivery = self
+                    .store
+                    .get_agent_message_delivery(&AgentMessageDeliveryId::new(delivery_id))?
+                    .ok_or_else(|| {
+                        CoreError::new(
+                            CoreErrorKind::PersistenceFailure,
+                            format!(
+                                "queued external follow-up references missing delivery {delivery_id}"
+                            ),
+                        )
+                    })?;
+                match delivery.request.input_kind {
+                    AgentMessageInputKind::Operator => TurnInputProvenanceKind::Operator,
+                    AgentMessageInputKind::RoutedAgentMessage => {
+                        TurnInputProvenanceKind::RoutedAgentMessage
+                    }
+                }
+            }
+            None => TurnInputProvenanceKind::ScheduledWake,
+        };
         let activation = self.activate_agent_execution_inner(
             AgentActivationRequest {
                 agent_id: queued.message.to.clone(),
@@ -148,7 +196,7 @@ impl CoreEngine {
                 }],
                 collaboration_mode: None,
                 provenance: TurnInputProvenance {
-                    kind: rusty_crew_core_protocol::TurnInputProvenanceKind::RoutedAgentMessage,
+                    kind: provenance_kind,
                     source_id: Some(queued.message_id.clone()),
                     correlation_id: queued.message.correlation_id.clone(),
                 },

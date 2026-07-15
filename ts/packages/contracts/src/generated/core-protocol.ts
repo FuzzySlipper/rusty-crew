@@ -163,6 +163,7 @@ export type AgentMessageCommand = {
   deliveryId: string;
   expiresAt: string;
   idempotencyKey: string;
+  inputKind: AgentMessageInputKind;
   messageId: string;
   requireWake: boolean;
   toAgentId: string;
@@ -197,6 +198,7 @@ export type AgentMessageDeliveryRequest = {
   fromAgentId: string;
   fromSessionId?: string | null;
   idempotencyKey: string;
+  inputKind: AgentMessageInputKind;
   messageId: string;
   replyToMessageId?: string | null;
   requireWake: boolean;
@@ -221,6 +223,8 @@ export type AgentMessageInboxQuery = {
 };
 
 export type AgentMessageInboxStatus = "queued" | "in_progress" | "awaiting_reply" | "replied" | "no_reply" | "failed" | "expired" | "rejected";
+
+export type AgentMessageInputKind = "operator" | "routed_agent_message";
 
 export type AgentMessageProjectionHint = {
   reason?: string | null;

@@ -5,11 +5,11 @@ use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentCorrelatedRound, AgentDirectoryEntry,
     AgentDirectoryRuntimeKind, AgentMessageCommand, AgentMessageDeliveryReceipt,
     AgentMessageDeliveryRequest, AgentMessageDeliveryStatus, AgentMessageInboxItem,
-    AgentMessageInboxQuery, AgentMessageInboxStatus, AgentMessageReplyCommand, AgentRoundCommand,
-    AgentRoundStartReceipt, AgentRoundStatus, ExternalBindingPurpose, ExternalBindingStatus,
-    ExternalRuntimeDesiredState, ExternalRuntimeKind, ExternalRuntimeObservedState,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
-    TurnInputProvenanceKind,
+    AgentMessageInboxQuery, AgentMessageInboxStatus, AgentMessageInputKind,
+    AgentMessageReplyCommand, AgentRoundCommand, AgentRoundStartReceipt, AgentRoundStatus,
+    ExternalBindingPurpose, ExternalBindingStatus, ExternalRuntimeDesiredState,
+    ExternalRuntimeKind, ExternalRuntimeObservedState, ExternalTurnInputPart, ExternalTurnPhase,
+    ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
 };
 use serde_json::json;
 
@@ -160,6 +160,7 @@ impl CoreEngine {
                 .ok()
                 .map(|session| session.session_id.clone()),
             reply_to_message_id,
+            input_kind: command.input_kind,
             body: command.body.clone(),
             collaboration_mode: command.collaboration_mode,
             correlation_id: command.correlation_id.clone(),
@@ -277,7 +278,13 @@ impl CoreEngine {
             );
         }
 
-        let model_body = routed_agent_message_text(&pending.request);
+        let model_body = agent_message_model_text(&pending.request);
+        let provenance_kind = match pending.request.input_kind {
+            AgentMessageInputKind::Operator => TurnInputProvenanceKind::Operator,
+            AgentMessageInputKind::RoutedAgentMessage => {
+                TurnInputProvenanceKind::RoutedAgentMessage
+            }
+        };
         let activation = self.activate_agent_execution(AgentActivationRequest {
             agent_id: command.to_agent_id,
             request_id: ExternalTurnRequestId::new(format!("agent-message:{}", command.message_id)),
@@ -287,7 +294,7 @@ impl CoreEngine {
             }],
             collaboration_mode: command.collaboration_mode,
             provenance: TurnInputProvenance {
-                kind: TurnInputProvenanceKind::RoutedAgentMessage,
+                kind: provenance_kind,
                 source_id: Some(command.message_id.clone()),
                 correlation_id: command.correlation_id,
             },
@@ -392,6 +399,7 @@ impl CoreEngine {
             message_id: command.message_id,
             to_agent_id: command.to_agent_id,
             body: command.body,
+            input_kind: AgentMessageInputKind::RoutedAgentMessage,
             collaboration_mode: None,
             correlation_id: Some(command.correlation_id),
             require_wake: true,
@@ -638,6 +646,7 @@ impl CoreEngine {
                 message_id: command.message_id,
                 to_agent_id: original.request.from_agent_id,
                 body: command.body,
+                input_kind: AgentMessageInputKind::RoutedAgentMessage,
                 collaboration_mode: None,
                 correlation_id: original
                     .request
@@ -896,17 +905,27 @@ impl CoreEngine {
     }
 }
 
+fn agent_message_model_text(request: &AgentMessageDeliveryRequest) -> String {
+    match request.input_kind {
+        AgentMessageInputKind::Operator => request.body.clone(),
+        AgentMessageInputKind::RoutedAgentMessage => routed_agent_message_text(request),
+    }
+}
+
 fn routed_agent_message_text(request: &AgentMessageDeliveryRequest) -> String {
     let from_session_id = request
         .from_session_id
         .as_ref()
         .map(|value| value.0.as_str());
-    let reply_instruction = match from_session_id {
-        Some(_) => format!(
+    let reply_instruction = match (&request.reply_to_message_id, from_session_id) {
+        (Some(_), _) => {
+            "reply_instruction: none (this message is already a reply; do not acknowledge it with coordination tools)".to_string()
+        }
+        (None, Some(_)) => format!(
             "reply_instruction: call rusty_crew.reply_agent_message with messageId={} and your reply body",
             request.message_id
         ),
-        None => "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)".to_string(),
+        (None, None) => "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)".to_string(),
     };
     format!(
         "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\nfrom_session_id: {}\ncorrelation_id: {}\ncreated_at: {}\nexpires_at: {}\n{}\n\n{}",
@@ -952,7 +971,10 @@ mod routed_agent_message_text_tests {
 
     #[test]
     fn agent_sender_receives_reply_by_message_instruction() {
-        let text = routed_agent_message_text(&request(Some("sender-session")));
+        let text = agent_message_model_text(&request(
+            AgentMessageInputKind::RoutedAgentMessage,
+            Some("sender-session"),
+        ));
 
         assert!(text.contains("from_session_id: sender-session"));
         assert!(text.contains(
@@ -962,7 +984,8 @@ mod routed_agent_message_text_tests {
 
     #[test]
     fn operator_sender_does_not_receive_impossible_reply_instruction() {
-        let text = routed_agent_message_text(&request(None));
+        let text =
+            agent_message_model_text(&request(AgentMessageInputKind::RoutedAgentMessage, None));
 
         assert!(text.contains("from_session_id: none"));
         assert!(text.contains(
@@ -971,7 +994,34 @@ mod routed_agent_message_text_tests {
         assert!(!text.contains("call rusty_crew.reply_agent_message"));
     }
 
-    fn request(from_session_id: Option<&str>) -> AgentMessageDeliveryRequest {
+    #[test]
+    fn operator_input_is_projected_as_plain_user_text() {
+        let text = agent_message_model_text(&request(AgentMessageInputKind::Operator, None));
+
+        assert_eq!(text, "inspect this");
+        assert!(!text.contains("Rusty Crew routed message"));
+        assert!(!text.contains("reply_instruction"));
+    }
+
+    #[test]
+    fn routed_reply_does_not_request_an_acknowledgement_reply() {
+        let mut request = request(
+            AgentMessageInputKind::RoutedAgentMessage,
+            Some("sender-session"),
+        );
+        request.reply_to_message_id = Some("original-message".into());
+
+        let text = agent_message_model_text(&request);
+
+        assert!(text.contains("this message is already a reply"));
+        assert!(text.contains("do not acknowledge it with coordination tools"));
+        assert!(!text.contains("call rusty_crew.reply_agent_message"));
+    }
+
+    fn request(
+        input_kind: AgentMessageInputKind,
+        from_session_id: Option<&str>,
+    ) -> AgentMessageDeliveryRequest {
         AgentMessageDeliveryRequest {
             delivery_id: AgentMessageDeliveryId::new("delivery-1"),
             idempotency_key: "delivery-1".into(),
@@ -981,6 +1031,7 @@ mod routed_agent_message_text_tests {
             to_agent_id: AgentId::new("recipient"),
             to_session_id: Some(SessionId::new("recipient-session")),
             reply_to_message_id: None,
+            input_kind,
             body: "inspect this".into(),
             collaboration_mode: None,
             correlation_id: Some("correlation-1".into()),

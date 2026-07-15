@@ -3300,6 +3300,13 @@ export const bridgeWireSchemaArtifact = {
                   "idempotencyKey": {
                     "type": "string"
                   },
+                  "inputKind": {
+                    "enum": [
+                      "operator",
+                      "routed_agent_message"
+                    ],
+                    "type": "string"
+                  },
                   "messageId": {
                     "type": "string"
                   },
@@ -3328,6 +3335,7 @@ export const bridgeWireSchemaArtifact = {
                   "messageId",
                   "fromAgentId",
                   "toAgentId",
+                  "inputKind",
                   "body",
                   "requireWake",
                   "createdAt",
@@ -3566,6 +3574,13 @@ export const bridgeWireSchemaArtifact = {
                   "idempotencyKey": {
                     "type": "string"
                   },
+                  "inputKind": {
+                    "enum": [
+                      "operator",
+                      "routed_agent_message"
+                    ],
+                    "type": "string"
+                  },
                   "messageId": {
                     "type": "string"
                   },
@@ -3594,6 +3609,7 @@ export const bridgeWireSchemaArtifact = {
                   "messageId",
                   "fromAgentId",
                   "toAgentId",
+                  "inputKind",
                   "body",
                   "requireWake",
                   "createdAt",
@@ -5985,6 +6001,13 @@ export const bridgeWireSchemaArtifact = {
             "idempotencyKey": {
               "type": "string"
             },
+            "inputKind": {
+              "enum": [
+                "operator",
+                "routed_agent_message"
+              ],
+              "type": "string"
+            },
             "messageId": {
               "type": "string"
             },
@@ -6013,6 +6036,7 @@ export const bridgeWireSchemaArtifact = {
             "messageId",
             "fromAgentId",
             "toAgentId",
+            "inputKind",
             "body",
             "requireWake",
             "createdAt",
@@ -17885,6 +17909,13 @@ export const bridgeWireSchemaArtifact = {
             "idempotencyKey": {
               "type": "string"
             },
+            "inputKind": {
+              "enum": [
+                "operator",
+                "routed_agent_message"
+              ],
+              "type": "string"
+            },
             "messageId": {
               "type": "string"
             },
@@ -17913,6 +17944,7 @@ export const bridgeWireSchemaArtifact = {
             "messageId",
             "fromAgentId",
             "toAgentId",
+            "inputKind",
             "body",
             "requireWake",
             "createdAt",
@@ -18142,6 +18174,13 @@ export const bridgeWireSchemaArtifact = {
                 "idempotencyKey": {
                   "type": "string"
                 },
+                "inputKind": {
+                  "enum": [
+                    "operator",
+                    "routed_agent_message"
+                  ],
+                  "type": "string"
+                },
                 "messageId": {
                   "type": "string"
                 },
@@ -18170,6 +18209,7 @@ export const bridgeWireSchemaArtifact = {
                 "messageId",
                 "fromAgentId",
                 "toAgentId",
+                "inputKind",
                 "body",
                 "requireWake",
                 "createdAt",

@@ -1705,6 +1705,7 @@
           "deliveryId": { "type": "string" },
           "expiresAt": { "type": "string" },
           "idempotencyKey": { "type": "string" },
+          "inputKind": { "$ref": "#/components/schemas/AgentMessageInputKind" },
           "messageId": { "type": "string" },
           "requireWake": { "type": "boolean" },
           "toAgentId": { "type": "string" }
@@ -1715,6 +1716,7 @@
           "idempotencyKey",
           "messageId",
           "toAgentId",
+          "inputKind",
           "body",
           "requireWake",
           "createdAt",
@@ -1782,6 +1784,7 @@
           "fromAgentId": { "type": "string" },
           "fromSessionId": { "type": ["string", "null"] },
           "idempotencyKey": { "type": "string" },
+          "inputKind": { "$ref": "#/components/schemas/AgentMessageInputKind" },
           "messageId": { "type": "string" },
           "replyToMessageId": { "type": ["string", "null"] },
           "requireWake": { "type": "boolean" },
@@ -1794,6 +1797,7 @@
           "messageId",
           "fromAgentId",
           "toAgentId",
+          "inputKind",
           "body",
           "requireWake",
           "createdAt",
@@ -1846,6 +1850,10 @@
           "expired",
           "rejected"
         ],
+        "type": "string"
+      },
+      "AgentMessageInputKind": {
+        "enum": ["operator", "routed_agent_message"],
         "type": "string"
       },
       "AgentMessageProjectionHint": {

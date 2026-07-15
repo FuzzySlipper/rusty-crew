@@ -496,6 +496,9 @@
         "idempotencyKey": {
           "type": "string"
         },
+        "inputKind": {
+          "$ref": "#/$defs/AgentMessageInputKind"
+        },
         "messageId": {
           "type": "string"
         },
@@ -512,6 +515,7 @@
         "idempotencyKey",
         "messageId",
         "toAgentId",
+        "inputKind",
         "body",
         "requireWake",
         "createdAt",
@@ -649,6 +653,9 @@
         "idempotencyKey": {
           "type": "string"
         },
+        "inputKind": {
+          "$ref": "#/$defs/AgentMessageInputKind"
+        },
         "messageId": {
           "type": "string"
         },
@@ -677,6 +684,7 @@
         "messageId",
         "fromAgentId",
         "toAgentId",
+        "inputKind",
         "body",
         "requireWake",
         "createdAt",
@@ -765,6 +773,13 @@
         "failed",
         "expired",
         "rejected"
+      ],
+      "type": "string"
+    },
+    "AgentMessageInputKind": {
+      "enum": [
+        "operator",
+        "routed_agent_message"
       ],
       "type": "string"
     },
