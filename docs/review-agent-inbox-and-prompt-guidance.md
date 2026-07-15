@@ -46,12 +46,15 @@ the recipient to `<reviewer-agent-id>`, choose a `ttlSeconds` from 1 through
 commit or artifact identity, review scope, acceptance criteria, and relevant
 test evidence in `body`. Do not use `agent_round` for queued review work.
 
-Retain the accepted message/delivery identity returned by the tool. An accepted
-or queued receipt is not a completed review. Do not resend with a new identity
-merely because the request remains queued. Consume the correlated reply when it
-arrives and distinguish review findings from delivery, expiry, or runtime
-failure. Production and debug services have separate agent directories; never
-send a recipient ID discovered on one service through the other service.
+Choose a unique `correlationId` and retain it with the task or review request.
+The send tool reports an accepted, queued, or routed summary; it does not return
+durable message or delivery IDs to the requester. An accepted or queued summary
+is not a completed review. Do not resend with a new correlation merely because
+the request remains queued. Consume the correlated reply when it arrives, or
+use operator readback with that correlation when diagnosing delivery, expiry,
+or runtime failure. Production and debug services have separate agent
+directories; never send a recipient ID discovered on one service through the
+other service.
 ```
 
 ## Identity and Delivery Policy
@@ -84,12 +87,18 @@ Managed Codex app-server sessions receive namespaced dynamic tools:
 | `rusty_crew.reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
 | `rusty_crew.agent_round` | `recipient`, `body` | `correlationId`, `timeoutMs` |
 
-Built-in Crew brains receive the same capabilities without the namespace. Their
-send/round recipient field is named `toAgentId`; reply remains
-`reply_agent_message(messageId, body, ttlSeconds?)`. Both message tools default
-to a 300-second TTL and accept integer `ttlSeconds` values from 1 through
-86,400. Review requesters should set the TTL explicitly based on expected queue
-delay.
+Built-in Crew brains receive the same capabilities without the namespace:
+
+| Tool | Required arguments | Optional arguments |
+| --- | --- | --- |
+| `list_agents` | none | none |
+| `send_agent_message` | `toAgentId`, `body` | `correlationId`, `requireWake`, `ttlSeconds` |
+| `reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
+| `agent_round` | `toAgentId`, `body` | `correlationId`, `timeoutMs` |
+
+Both message tools default to a 300-second TTL and accept integer `ttlSeconds`
+values from 1 through 86,400. Review requesters should set the TTL explicitly
+based on expected queue delay.
 
 The reply tool deliberately accepts no recipient or correlation field. Rust
 loads the original accepted delivery, verifies the replying agent and session,
@@ -131,4 +140,3 @@ production route.
 
 The live FIFO, reply, restart, and expiry proof is recorded in
 [`evidence/task-5806-serial-review-inbox-live.md`](evidence/task-5806-serial-review-inbox-live.md).
-
