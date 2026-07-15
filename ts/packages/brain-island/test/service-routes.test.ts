@@ -81,6 +81,9 @@ test("coordination operator routes are deployment-bound and start system rounds"
       async listAgentDirectory() {
         return [{ agentId: "agent-a", routable: true }];
       },
+      async listAgentMessageInbox(query: Record<string, unknown>) {
+        return [{ status: "queued", query }];
+      },
       async beginAgentRound(command: Record<string, unknown>) {
         capturedRound = command;
         return {
@@ -154,6 +157,18 @@ test("coordination operator routes are deployment-bound and start system rounds"
     /recipient rusty-crew-debug-operator/,
   );
   assert.match(String(capturedRound?.body), /correlationId correlation-a/);
+
+  const inbox = await handleCoordinationOperatorRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL(
+      "http://local/v1/debug/coordination/messages?toAgentId=agent-a&limit=25",
+    ),
+    context,
+  );
+  assert.deepEqual(
+    okData<{ items: unknown[] }>(inbox as AdminRouteResult).items,
+    [{ status: "queued", query: { toAgentId: "agent-a", limit: 25 } }],
+  );
 });
 
 test("external session route translates generated Den task reference wire fields", async () => {

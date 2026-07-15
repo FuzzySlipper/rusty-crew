@@ -122,8 +122,8 @@ pub(crate) use repos::memory::{
     validate_session_memory_write,
 };
 pub(crate) use repos::queued_messages::{
-    expire_queued_messages_in_tx, load_queued_messages, purge_terminal_queued_messages_in_tx,
-    save_queued_message_in_tx,
+    expire_queued_messages_in_tx, load_queued_messages, load_queued_messages_in_tx,
+    purge_terminal_queued_messages_in_tx, save_queued_message_in_tx,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use repos::roleplay_lore::{

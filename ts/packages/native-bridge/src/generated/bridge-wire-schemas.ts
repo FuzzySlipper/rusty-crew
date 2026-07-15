@@ -3120,6 +3120,561 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_AgentDirectoryEntry",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageInboxItem>": {
+      "items": {
+        "properties": {
+          "delivery": {
+            "properties": {
+              "activation": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "direct_brain_wake_requested",
+                            "type": "string"
+                          },
+                          "wakeId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "wakeId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "external_turn_requested",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "requestId",
+                          "bindingId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "messageText": {
+                            "type": "string"
+                          },
+                          "nativeThreadId": {
+                            "type": "string"
+                          },
+                          "nativeTurnId": {
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "external_turn_steer_requested",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "requestId",
+                          "bindingId",
+                          "nativeThreadId",
+                          "nativeTurnId",
+                          "messageText"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "queueId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "queued_for_next_turn",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "queueId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "reasonCode": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "rejected",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "reasonCode"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "collaborationMode": {
+                    "enum": [
+                      "plan",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "correlationId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "deliveryId": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "fromAgentId": {
+                    "type": "string"
+                  },
+                  "fromSessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "replyToMessageId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "requireWake": {
+                    "type": "boolean"
+                  },
+                  "toAgentId": {
+                    "type": "string"
+                  },
+                  "toSessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "deliveryId",
+                  "idempotencyKey",
+                  "messageId",
+                  "fromAgentId",
+                  "toAgentId",
+                  "body",
+                  "requireWake",
+                  "createdAt",
+                  "expiresAt"
+                ],
+                "type": "object"
+              },
+              "resolvedRoundId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sequence": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected",
+                  "expired"
+                ],
+                "type": "string"
+              },
+              "terminalAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "request",
+              "status",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "externalTurnRequestId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queuedMessageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reply": {
+            "properties": {
+              "activation": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "direct_brain_wake_requested",
+                            "type": "string"
+                          },
+                          "wakeId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "wakeId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "external_turn_requested",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "requestId",
+                          "bindingId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "messageText": {
+                            "type": "string"
+                          },
+                          "nativeThreadId": {
+                            "type": "string"
+                          },
+                          "nativeTurnId": {
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "external_turn_steer_requested",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "requestId",
+                          "bindingId",
+                          "nativeThreadId",
+                          "nativeTurnId",
+                          "messageText"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "queueId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "queued_for_next_turn",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "queueId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "reasonCode": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "rejected",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "reasonCode"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "collaborationMode": {
+                    "enum": [
+                      "plan",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "correlationId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "deliveryId": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "fromAgentId": {
+                    "type": "string"
+                  },
+                  "fromSessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "replyToMessageId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "requireWake": {
+                    "type": "boolean"
+                  },
+                  "toAgentId": {
+                    "type": "string"
+                  },
+                  "toSessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "deliveryId",
+                  "idempotencyKey",
+                  "messageId",
+                  "fromAgentId",
+                  "toAgentId",
+                  "body",
+                  "requireWake",
+                  "createdAt",
+                  "expiresAt"
+                ],
+                "type": "object"
+              },
+              "resolvedRoundId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sequence": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected",
+                  "expired"
+                ],
+                "type": "string"
+              },
+              "terminalAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "request",
+              "status",
+              "revision"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "awaiting_reply",
+              "replied",
+              "no_reply",
+              "failed",
+              "expired",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "terminalReasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "delivery",
+          "status"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_AgentMessageInboxItem",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>": {
       "items": {
         "properties": {
@@ -5421,17 +5976,35 @@ export const bridgeWireSchemaArtifact = {
             "fromAgentId": {
               "type": "string"
             },
+            "fromSessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "idempotencyKey": {
               "type": "string"
             },
             "messageId": {
               "type": "string"
             },
+            "replyToMessageId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "requireWake": {
               "type": "boolean"
             },
             "toAgentId": {
               "type": "string"
+            },
+            "toSessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -17303,17 +17876,35 @@ export const bridgeWireSchemaArtifact = {
             "fromAgentId": {
               "type": "string"
             },
+            "fromSessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "idempotencyKey": {
               "type": "string"
             },
             "messageId": {
               "type": "string"
             },
+            "replyToMessageId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "requireWake": {
               "type": "boolean"
             },
             "toAgentId": {
               "type": "string"
+            },
+            "toSessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -17542,17 +18133,35 @@ export const bridgeWireSchemaArtifact = {
                 "fromAgentId": {
                   "type": "string"
                 },
+                "fromSessionId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "idempotencyKey": {
                   "type": "string"
                 },
                 "messageId": {
                   "type": "string"
                 },
+                "replyToMessageId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "requireWake": {
                   "type": "boolean"
                 },
                 "toAgentId": {
                   "type": "string"
+                },
+                "toSessionId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -22271,6 +22880,7 @@ export const bridgeWireSchemaArtifact = {
     "invalidate_external_runtime_certification": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord",
     "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "list_agent_directory": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentDirectoryEntry>",
+    "list_agent_message_inbox": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageInboxItem>",
     "list_entries_by_layer": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin>",
     "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
     "list_external_runtime_certifications": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>",
@@ -22354,6 +22964,7 @@ export const bridgeWireSchemaArtifact = {
     "reorder_chat_message_variants": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageVariantRecord>",
     "reorder_message_variants": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageVariantRecord>",
     "replace_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
+    "reply_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "request_scheduled_host_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "request_scheduled_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "resolve_conversation_jump": "rusty_crew_core_persistence::contracts::ConversationJumpResult",

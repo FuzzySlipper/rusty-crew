@@ -10,6 +10,7 @@ import {
   agentRoundTool,
   createCoordinationToolResolver,
   listAgentsTool,
+  replyAgentMessageTool,
   sendAgentMessageTool,
   type CoordinationToolRuntime,
 } from "../src/coordination-tools.js";
@@ -65,6 +66,17 @@ const runtime: CoordinationToolRuntime = {
         status: "completed",
         wakeId: "wake-target",
         summary: `woke ${input.toAgentId}`,
+      },
+    };
+  },
+  async replyMessage(input) {
+    calls.push({ kind: "reply", input });
+    return {
+      accepted: true,
+      sequence: 9,
+      wake: {
+        status: "completed",
+        summary: `replied to ${input.messageId}`,
       },
     };
   },
@@ -129,6 +141,38 @@ assert.deepEqual(
   },
 );
 
+const replyTool = replyAgentMessageTool({ runtime });
+const replyResult = await replyTool.executeWithContext?.(
+  {
+    messageId: "routed-message-1",
+    body: "review complete",
+    ttlSeconds: 3_600,
+  },
+  {
+    wake,
+    wakeId: wake.wakeId,
+    sessionId: wake.sessionId,
+    callId: "reply-call",
+    signal: new AbortController().signal,
+  },
+);
+assert.equal(replyResult?.details.ok, true);
+assert.deepEqual(
+  calls.find((call) => call.kind === "reply"),
+  {
+    kind: "reply",
+    input: {
+      fromAgentId: "coordination-agent",
+      fromSessionId: "coordination-session",
+      wakeId: "coordination-wake",
+      toolCallId: "reply-call",
+      messageId: "routed-message-1",
+      body: "review complete",
+      ttlSeconds: 3_600,
+    },
+  },
+);
+
 const roundTool = agentRoundTool({ runtime });
 const roundResult = await roundTool.executeWithContext?.(
   {
@@ -183,7 +227,7 @@ const selection = selectToolProfile({
 });
 assert.deepEqual(
   selection.toolProfile.tools.map((tool) => tool.name),
-  ["list_agents", "send_agent_message", "agent_round"],
+  ["list_agents", "send_agent_message", "reply_agent_message", "agent_round"],
 );
 const resolved = resolveToolSession({
   wake,
@@ -192,7 +236,7 @@ const resolved = resolveToolSession({
 });
 assert.deepEqual(
   resolved.tools.map((tool) => tool.name),
-  ["list_agents", "send_agent_message", "agent_round"],
+  ["list_agents", "send_agent_message", "reply_agent_message", "agent_round"],
 );
 
 const piSendTool = toChatCompletionsTool(

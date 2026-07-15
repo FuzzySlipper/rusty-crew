@@ -3921,6 +3921,22 @@
       }
     },
     "/v1/coordination/messages": {
+      "get": {
+        "operationId": "coordinationProductionMessagesList",
+        "summary": "Inspect durable production routed-message queue, turn, expiry, and reply state.",
+        "tags": ["session", "delegation", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.messages.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
       "post": {
         "operationId": "coordinationProductionMessagesCreate",
         "summary": "Send a TTL-bound operator message on the production deployment.",
@@ -4027,6 +4043,22 @@
       }
     },
     "/v1/debug/coordination/messages": {
+      "get": {
+        "operationId": "coordinationDebugMessagesList",
+        "summary": "Inspect durable debug routed-message queue, turn, expiry, and reply state.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.messages.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
       "post": {
         "operationId": "coordinationDebugMessagesCreate",
         "summary": "Send a TTL-bound operator message on the explicitly configured debug deployment.",
@@ -4912,7 +4944,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 194,
+    "capability_count": 196,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

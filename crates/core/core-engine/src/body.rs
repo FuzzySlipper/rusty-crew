@@ -1,4 +1,5 @@
 use super::*;
+use rusty_crew_core_protocol::AgentMessageDeliveryRequest;
 
 impl CoreEngine {
     pub fn project_body_state(&self, session_id: &SessionId) -> CoreResult<BodyState> {
@@ -33,14 +34,73 @@ impl CoreEngine {
         self.enqueue_body_follow_up_message_with_wake(session_id, from, body, correlation_id, true)
     }
 
-    pub(crate) fn enqueue_body_follow_up_message_without_wake(
+    pub(crate) fn enqueue_routed_agent_message_without_wake(
         &self,
         session_id: &SessionId,
-        from: AgentId,
-        body: impl Into<String>,
-        correlation_id: Option<String>,
+        request: &AgentMessageDeliveryRequest,
+        body: String,
     ) -> CoreResult<QueuedMessageRecord> {
-        self.enqueue_body_follow_up_message_with_wake(session_id, from, body, correlation_id, false)
+        const MAX_ROUTED_MESSAGE_BYTES: usize = 256 * 1024;
+        if body.len() > MAX_ROUTED_MESSAGE_BYTES {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "agent_message_body_too_large",
+            ));
+        }
+        let session = self.sessions.get_session(session_id)?;
+        if session.status == SessionStatus::Archived {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_recipient_session_archived",
+            ));
+        }
+        let state = self.body_projector.project(session_id)?;
+        let pending_count = self
+            .store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })?
+            .len();
+        if pending_count >= state.delta_policy.max_queued_messages as usize {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_serial_inbox_full",
+            ));
+        }
+        let created_at = parse_rfc3339(&request.created_at)?;
+        let expires_at = parse_rfc3339(&request.expires_at)?;
+        let ttl_ms = (expires_at - created_at).whole_milliseconds();
+        if ttl_ms <= 0 || ttl_ms > u32::MAX as i128 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "agent_message_ttl_out_of_bounds",
+            ));
+        }
+        let record = QueuedMessageRecord {
+            message_id: format!("agent-message-queue:{}", request.message_id),
+            owner_session_id: Some(session_id.clone()),
+            owner_agent_id: session.agent_id.clone(),
+            message: AgentMessage {
+                from: request.from_agent_id.clone(),
+                to: request.to_agent_id.clone(),
+                body,
+                correlation_id: request.correlation_id.clone(),
+                projection: None,
+            },
+            source_sequence: None,
+            enqueued_at: request.created_at.clone(),
+            expires_at: request.expires_at.clone(),
+            ttl_ms: ttl_ms as u32,
+            delivery_attempts: 0,
+            state: QueuedMessageState::Pending,
+            terminal_at: None,
+            state_reason: Some(format!("agent_delivery:{}", request.delivery_id.0)),
+        };
+        self.store.save_queued_message(&record)?;
+        Ok(record)
     }
 
     fn enqueue_body_follow_up_message_with_wake(

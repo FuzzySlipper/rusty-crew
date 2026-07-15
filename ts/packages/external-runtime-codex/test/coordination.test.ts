@@ -10,7 +10,7 @@ test("coordination catalog keeps model arguments small", () => {
   assert.equal(namespace.name, "rusty_crew");
   assert.deepEqual(
     namespace.tools.map((tool) => tool.name),
-    ["list_agents", "send_agent_message", "agent_round"],
+    ["list_agents", "send_agent_message", "reply_agent_message", "agent_round"],
   );
   const directorySchema = namespace.tools[0]?.inputSchema as {
     properties?: Record<string, unknown>;
@@ -23,5 +23,14 @@ test("coordination catalog keeps model arguments small", () => {
     "recipient",
     "body",
     "correlationId",
+    "ttlSeconds",
+  ]);
+  const replySchema = namespace.tools[2]?.inputSchema as {
+    properties?: Record<string, unknown>;
+  };
+  assert.deepEqual(Object.keys(replySchema.properties ?? {}), [
+    "messageId",
+    "body",
+    "ttlSeconds",
   ]);
 });

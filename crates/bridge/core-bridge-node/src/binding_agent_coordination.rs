@@ -12,6 +12,20 @@ impl NativeBridge {
         self.engine()?.deliver_agent_message(command)
     }
 
+    pub fn reply_agent_message(
+        &self,
+        command: AgentMessageReplyCommand,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        self.engine()?.reply_agent_message(command)
+    }
+
+    pub fn list_agent_message_inbox(
+        &self,
+        query: &AgentMessageInboxQuery,
+    ) -> CoreResult<Vec<AgentMessageInboxItem>> {
+        self.engine()?.list_agent_message_inbox(query)
+    }
+
     pub fn begin_agent_round(
         &self,
         command: AgentRoundCommand,
@@ -62,6 +76,30 @@ impl NativeBridgeBinding {
             .deliver_agent_message(command)
             .map_err(to_napi_error)?;
         serde_json::to_string(&receipt)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn reply_agent_message_json(&self, command_json: String) -> napi::Result<String> {
+        let command = serde_json::from_str::<AgentMessageReplyCommand>(&command_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let receipt = self
+            .bridge()?
+            .reply_agent_message(command)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&receipt)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn list_agent_message_inbox_json(&self, query_json: String) -> napi::Result<String> {
+        let query = serde_json::from_str::<AgentMessageInboxQuery>(&query_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let items = self
+            .bridge()?
+            .list_agent_message_inbox(&query)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&items)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 

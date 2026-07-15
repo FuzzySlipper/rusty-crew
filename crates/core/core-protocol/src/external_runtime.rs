@@ -770,7 +770,10 @@ pub struct AgentMessageDeliveryRequest {
     pub idempotency_key: String,
     pub message_id: String,
     pub from_agent_id: AgentId,
+    pub from_session_id: Option<SessionId>,
     pub to_agent_id: AgentId,
+    pub to_session_id: Option<SessionId>,
+    pub reply_to_message_id: Option<String>,
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<ExternalCollaborationMode>,
@@ -778,6 +781,50 @@ pub struct AgentMessageDeliveryRequest {
     pub require_wake: bool,
     pub created_at: IsoTimestamp,
     pub expires_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageReplyCommand {
+    pub caller: AgentCoordinationCaller,
+    pub delivery_id: AgentMessageDeliveryId,
+    pub idempotency_key: String,
+    pub message_id: String,
+    pub in_reply_to_message_id: String,
+    pub body: String,
+    pub created_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMessageInboxStatus {
+    Queued,
+    InProgress,
+    AwaitingReply,
+    Replied,
+    NoReply,
+    Failed,
+    Expired,
+    Rejected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageInboxItem {
+    pub delivery: AgentMessageDeliveryReceipt,
+    pub reply: Option<AgentMessageDeliveryReceipt>,
+    pub status: AgentMessageInboxStatus,
+    pub queued_message_id: Option<String>,
+    pub external_turn_request_id: Option<ExternalTurnRequestId>,
+    pub terminal_reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageInboxQuery {
+    pub to_agent_id: Option<AgentId>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

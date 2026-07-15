@@ -195,19 +195,49 @@ export type AgentMessageDeliveryRequest = {
   deliveryId: string;
   expiresAt: string;
   fromAgentId: string;
+  fromSessionId?: string | null;
   idempotencyKey: string;
   messageId: string;
+  replyToMessageId?: string | null;
   requireWake: boolean;
   toAgentId: string;
+  toSessionId?: string | null;
 };
 
 export type AgentMessageDeliveryStatus = "pending" | "accepted" | "rejected" | "expired";
+
+export type AgentMessageInboxItem = {
+  delivery: AgentMessageDeliveryReceipt;
+  externalTurnRequestId?: string | null;
+  queuedMessageId?: string | null;
+  reply?: AgentMessageDeliveryReceipt | null;
+  status: AgentMessageInboxStatus;
+  terminalReasonCode?: string | null;
+};
+
+export type AgentMessageInboxQuery = {
+  limit?: number | null;
+  toAgentId?: string | null;
+};
+
+export type AgentMessageInboxStatus = "queued" | "in_progress" | "awaiting_reply" | "replied" | "no_reply" | "failed" | "expired" | "rejected";
 
 export type AgentMessageProjectionHint = {
   reason?: string | null;
   targetRef?: ProjectionRef | null;
   visibility: ProjectionVisibility;
   workRef?: ProjectionRef | null;
+};
+
+export type AgentMessageReplyCommand = {
+  body: string;
+  caller: AgentCoordinationCaller;
+  createdAt: string;
+  deliveryId: string;
+  expiresAt: string;
+  idempotencyKey: string;
+  inReplyToMessageId: string;
+  messageId: string;
 };
 
 export type AgentRoundCommand = {

@@ -640,17 +640,35 @@
         "fromAgentId": {
           "type": "string"
         },
+        "fromSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "idempotencyKey": {
           "type": "string"
         },
         "messageId": {
           "type": "string"
         },
+        "replyToMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "requireWake": {
           "type": "boolean"
         },
         "toAgentId": {
           "type": "string"
+        },
+        "toSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -672,6 +690,81 @@
         "accepted",
         "rejected",
         "expired"
+      ],
+      "type": "string"
+    },
+    "AgentMessageInboxItem": {
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/AgentMessageDeliveryReceipt"
+        },
+        "externalTurnRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reply": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentMessageDeliveryReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/AgentMessageInboxStatus"
+        },
+        "terminalReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "delivery",
+        "status"
+      ],
+      "type": "object"
+    },
+    "AgentMessageInboxQuery": {
+      "properties": {
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "toAgentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AgentMessageInboxStatus": {
+      "enum": [
+        "queued",
+        "in_progress",
+        "awaiting_reply",
+        "replied",
+        "no_reply",
+        "failed",
+        "expired",
+        "rejected"
       ],
       "type": "string"
     },
@@ -709,6 +802,45 @@
       },
       "required": [
         "visibility"
+      ],
+      "type": "object"
+    },
+    "AgentMessageReplyCommand": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "caller": {
+          "$ref": "#/$defs/AgentCoordinationCaller"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "inReplyToMessageId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "caller",
+        "deliveryId",
+        "idempotencyKey",
+        "messageId",
+        "inReplyToMessageId",
+        "body",
+        "createdAt",
+        "expiresAt"
       ],
       "type": "object"
     },
@@ -5287,6 +5419,15 @@
     "agent_message_delivery_receipt": {
       "$ref": "#/$defs/AgentMessageDeliveryReceipt"
     },
+    "agent_message_inbox_item": {
+      "$ref": "#/$defs/AgentMessageInboxItem"
+    },
+    "agent_message_inbox_query": {
+      "$ref": "#/$defs/AgentMessageInboxQuery"
+    },
+    "agent_message_reply_command": {
+      "$ref": "#/$defs/AgentMessageReplyCommand"
+    },
     "agent_round_command": {
       "$ref": "#/$defs/AgentRoundCommand"
     },
@@ -5539,6 +5680,9 @@
     "agent_directory_entry",
     "agent_message_command",
     "agent_message_delivery_completion",
+    "agent_message_reply_command",
+    "agent_message_inbox_query",
+    "agent_message_inbox_item",
     "agent_message_delivery_receipt",
     "agent_round_command",
     "agent_round_start_receipt",

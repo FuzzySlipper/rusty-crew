@@ -3,6 +3,8 @@
 export interface NativeBridgeBinding {
   listAgentDirectoryJson(): string
   deliverAgentMessageJson(commandJson: string): string
+  replyAgentMessageJson(commandJson: string): string
+  listAgentMessageInboxJson(queryJson: string): string
   beginAgentRoundJson(commandJson: string): string
   getAgentRoundJson(roundId: string): string | null
   getAgentMessageDeliveryJson(deliveryId: string): string | null
@@ -801,7 +803,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 257,
+  "manifestOperationCount": 259,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -818,6 +820,22 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "deliver_agent_message"
+    },
+    {
+      "name": "replyAgentMessageJson",
+      "parameterSource": "commandJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "reply_agent_message"
+    },
+    {
+      "name": "listAgentMessageInboxJson",
+      "parameterSource": "queryJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_agent_message_inbox"
     },
     {
       "name": "beginAgentRoundJson",

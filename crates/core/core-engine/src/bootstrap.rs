@@ -41,6 +41,7 @@ impl CoreEngine {
             profile_tool_profiles: Arc::new(Mutex::new(HashMap::new())),
             scheduler_tick_lock: Arc::new(Mutex::new(())),
             github_gate_lock: Arc::new(Mutex::new(())),
+            external_follow_up_lock: Arc::new(Mutex::new(())),
         };
         engine.cleanup_orphaned_delegated_sessions()?;
         engine.expire_delegated_sessions()?;

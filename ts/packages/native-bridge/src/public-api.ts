@@ -5,8 +5,11 @@ import type {
   AgentId,
   AgentCorrelatedRound,
   AgentMessageCommand,
-  AgentMessageDeliveryReceipt,
   AgentMessageDeliveryCompletion,
+  AgentMessageDeliveryReceipt,
+  AgentMessageInboxItem,
+  AgentMessageInboxQuery,
+  AgentMessageReplyCommand,
   AgentRoundCommand,
   AgentRoundStartReceipt,
   AgentMessage,
@@ -2116,6 +2119,12 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
   deliverAgentMessage(
     command: AgentMessageCommand,
   ): Promise<AgentMessageDeliveryReceipt>;
+  replyAgentMessage(
+    command: AgentMessageReplyCommand,
+  ): Promise<AgentMessageDeliveryReceipt>;
+  listAgentMessageInbox(
+    query: AgentMessageInboxQuery,
+  ): Promise<AgentMessageInboxItem[]>;
   listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
   beginAgentRound(command: AgentRoundCommand): Promise<AgentRoundStartReceipt>;
   getAgentRound(roundId: string): Promise<AgentCorrelatedRound | undefined>;

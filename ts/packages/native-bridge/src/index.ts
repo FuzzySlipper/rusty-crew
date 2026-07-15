@@ -60,6 +60,7 @@ import { toSessionState, type RawSessionState } from "./session-wire.js";
 import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
 import { createNativeBridgeBrainCatalogMethods } from "./brain-wrappers.js";
+import { createNativeBridgeAgentCoordinationMethods } from "./agent-coordination-wrappers.js";
 import { createNativeBridgeExternalRuntimeMethods } from "./external-runtime-wrappers.js";
 import { createNativeBridgeExternalRuntimeCertificationMethods } from "./external-runtime-certification-wrappers.js";
 import {
@@ -677,6 +678,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     routeAgentMessage: unavailable("inject_external_event"),
     listAgentDirectory: unavailable("list_agent_directory"),
     deliverAgentMessage: unavailable("deliver_agent_message"),
+    replyAgentMessage: unavailable("reply_agent_message"),
+    listAgentMessageInbox: unavailable("list_agent_message_inbox"),
     beginAgentRound: unavailable("begin_agent_round"),
     getAgentRound: unavailable("get_agent_round"),
     getAgentMessageDelivery: unavailable("get_agent_message_delivery"),
@@ -1551,42 +1554,7 @@ function createNativeBridgeModule(
     ensureConfiguredSession: async (config) =>
       binding.ensureConfiguredSession(nativeSessionConfig(config)),
     archiveSession: async (sessionId) => binding.archiveSession(sessionId),
-    routeAgentMessage: async (from, to, body, correlationId) =>
-      binding.routeAgentMessage(from, to, body, correlationId),
-    listAgentDirectory: async () =>
-      JSON.parse(binding.listAgentDirectoryJson()) as Awaited<
-        ReturnType<NativeBridgeModule["listAgentDirectory"]>
-      >,
-    deliverAgentMessage: async (command) =>
-      JSON.parse(
-        binding.deliverAgentMessageJson(JSON.stringify(command)),
-      ) as Awaited<ReturnType<NativeBridgeModule["deliverAgentMessage"]>>,
-    beginAgentRound: async (command) =>
-      JSON.parse(
-        binding.beginAgentRoundJson(JSON.stringify(command)),
-      ) as Awaited<ReturnType<NativeBridgeModule["beginAgentRound"]>>,
-    getAgentRound: async (roundId) => {
-      const value = binding.getAgentRoundJson(roundId);
-      return value === null || value === undefined
-        ? undefined
-        : (JSON.parse(value) as Awaited<
-            ReturnType<NativeBridgeModule["getAgentRound"]>
-          >);
-    },
-    getAgentMessageDelivery: async (deliveryId) => {
-      const value = binding.getAgentMessageDeliveryJson(deliveryId);
-      return value === null || value === undefined
-        ? undefined
-        : (JSON.parse(value) as Awaited<
-            ReturnType<NativeBridgeModule["getAgentMessageDelivery"]>
-          >);
-    },
-    completeAgentMessageDelivery: async (completion) =>
-      JSON.parse(
-        binding.completeAgentMessageDeliveryJson(JSON.stringify(completion)),
-      ) as Awaited<
-        ReturnType<NativeBridgeModule["completeAgentMessageDelivery"]>
-      >,
+    ...createNativeBridgeAgentCoordinationMethods(binding),
     ...createNativeBridgeExternalRuntimeMethods(binding),
     ...createNativeBridgeExternalRuntimeCertificationMethods(binding),
     enqueueBodyFollowUpMessage: async (input) =>

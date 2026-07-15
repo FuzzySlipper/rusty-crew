@@ -1504,6 +1504,30 @@
           },
           {
             "properties": {
+              "bindingId": { "type": "string" },
+              "messageText": { "type": "string" },
+              "nativeThreadId": { "type": "string" },
+              "nativeTurnId": { "type": "string" },
+              "requestId": { "type": "string" },
+              "sessionId": { "type": "string" },
+              "type": {
+                "const": "external_turn_steer_requested",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "sessionId",
+              "requestId",
+              "bindingId",
+              "nativeThreadId",
+              "nativeTurnId",
+              "messageText"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
               "queueId": { "type": "string" },
               "sessionId": { "type": "string" },
               "type": { "const": "queued_for_next_turn", "type": "string" }
@@ -1698,6 +1722,23 @@
         ],
         "type": "object"
       },
+      "AgentMessageDeliveryCompletion": {
+        "properties": {
+          "completedAt": { "type": "string" },
+          "deliveryId": { "type": "string" },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reasonCode": { "type": ["string", "null"] },
+          "status": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryStatus"
+          }
+        },
+        "required": ["deliveryId", "expectedRevision", "status", "completedAt"],
+        "type": "object"
+      },
       "AgentMessageDeliveryReceipt": {
         "properties": {
           "activation": {
@@ -1739,10 +1780,13 @@
           "deliveryId": { "type": "string" },
           "expiresAt": { "type": "string" },
           "fromAgentId": { "type": "string" },
+          "fromSessionId": { "type": ["string", "null"] },
           "idempotencyKey": { "type": "string" },
           "messageId": { "type": "string" },
+          "replyToMessageId": { "type": ["string", "null"] },
           "requireWake": { "type": "boolean" },
-          "toAgentId": { "type": "string" }
+          "toAgentId": { "type": "string" },
+          "toSessionId": { "type": ["string", "null"] }
         },
         "required": [
           "deliveryId",
@@ -1759,6 +1803,49 @@
       },
       "AgentMessageDeliveryStatus": {
         "enum": ["pending", "accepted", "rejected", "expired"],
+        "type": "string"
+      },
+      "AgentMessageInboxItem": {
+        "properties": {
+          "delivery": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+          },
+          "externalTurnRequestId": { "type": ["string", "null"] },
+          "queuedMessageId": { "type": ["string", "null"] },
+          "reply": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentMessageDeliveryReceipt" },
+              { "type": "null" }
+            ]
+          },
+          "status": { "$ref": "#/components/schemas/AgentMessageInboxStatus" },
+          "terminalReasonCode": { "type": ["string", "null"] }
+        },
+        "required": ["delivery", "status"],
+        "type": "object"
+      },
+      "AgentMessageInboxQuery": {
+        "properties": {
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "toAgentId": { "type": ["string", "null"] }
+        },
+        "type": "object"
+      },
+      "AgentMessageInboxStatus": {
+        "enum": [
+          "queued",
+          "in_progress",
+          "awaiting_reply",
+          "replied",
+          "no_reply",
+          "failed",
+          "expired",
+          "rejected"
+        ],
         "type": "string"
       },
       "AgentMessageProjectionHint": {
@@ -1779,6 +1866,29 @@
           }
         },
         "required": ["visibility"],
+        "type": "object"
+      },
+      "AgentMessageReplyCommand": {
+        "properties": {
+          "body": { "type": "string" },
+          "caller": { "$ref": "#/components/schemas/AgentCoordinationCaller" },
+          "createdAt": { "type": "string" },
+          "deliveryId": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "inReplyToMessageId": { "type": "string" },
+          "messageId": { "type": "string" }
+        },
+        "required": [
+          "caller",
+          "deliveryId",
+          "idempotencyKey",
+          "messageId",
+          "inReplyToMessageId",
+          "body",
+          "createdAt",
+          "expiresAt"
+        ],
         "type": "object"
       },
       "AgentRoundCommand": {
@@ -2690,7 +2800,19 @@
           "cwd": { "type": ["string", "null"] },
           "effectiveConfigFingerprint": { "type": "string" },
           "label": { "type": ["string", "null"] },
+          "messageDeliveryPolicy": {
+            "$ref": "#/components/schemas/ExternalMessageDeliveryPolicy",
+            "default": "immediate_steer"
+          },
           "nativeThreadId": { "type": ["string", "null"] },
+          "profileId": { "default": null, "type": ["string", "null"] },
+          "profilePromptHash": { "default": null, "type": ["string", "null"] },
+          "profileRevision": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
           "purpose": { "$ref": "#/components/schemas/ExternalBindingPurpose" },
           "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
           "runtimeId": { "type": "string" },
@@ -3062,6 +3184,10 @@
       },
       "ExternalInteractionStatus": {
         "enum": ["pending", "resolved", "expired", "lost"],
+        "type": "string"
+      },
+      "ExternalMessageDeliveryPolicy": {
+        "enum": ["immediate_steer", "serial_next_turn"],
         "type": "string"
       },
       "ExternalProcessOwnership": {

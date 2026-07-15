@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 31;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 32;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -170,7 +170,37 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "rename chat completions brain identity",
         apply: Some(apply_postgres_rename_chat_completions_brain),
     },
+    PostgresSchemaMigration {
+        version: 32,
+        description: "add agent message session provenance and reply linkage",
+        apply: Some(apply_postgres_agent_message_reply_links),
+    },
 ];
+
+fn apply_postgres_agent_message_reply_links(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "DELETE FROM {schema}.queued_messages
+            WHERE body LIKE '[Rusty Crew routed message]%';
+         DELETE FROM {schema}.agent_message_delivery_receipts;
+         ALTER TABLE {schema}.agent_message_delivery_receipts
+            ADD COLUMN IF NOT EXISTS from_session_id TEXT;
+         ALTER TABLE {schema}.agent_message_delivery_receipts
+            ADD COLUMN IF NOT EXISTS to_session_id TEXT;
+         ALTER TABLE {schema}.agent_message_delivery_receipts
+            ADD COLUMN IF NOT EXISTS reply_to_message_id TEXT;
+         ALTER TABLE {schema}.agent_message_delivery_receipts
+            ADD COLUMN IF NOT EXISTS created_at TEXT;
+         CREATE UNIQUE INDEX IF NOT EXISTS agent_message_delivery_reply_once_idx
+            ON {schema}.agent_message_delivery_receipts(reply_to_message_id)
+            WHERE reply_to_message_id IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS agent_message_delivery_recipient_session_idx
+            ON {schema}.agent_message_delivery_receipts(to_session_id, status, expires_at);"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL agent message reply linkage", error))
+}
 
 fn apply_postgres_rename_chat_completions_brain(
     tx: &mut Transaction<'_>,

@@ -4991,6 +4991,10 @@ function createServiceCoordinationRuntime(
         throw new Error("service coordination runtime is not ready");
       }
       const createdAt = new Date().toISOString();
+      const ttlMs = Math.min(
+        Math.max((input.ttlSeconds ?? 300) * 1_000, 1_000),
+        24 * 60 * 60_000,
+      );
       const identity = `${input.fromSessionId}:${input.wakeId}:${input.toolCallId}`;
       const initialReceipt = await state.bridge.deliverAgentMessage({
         caller: {
@@ -5009,7 +5013,7 @@ function createServiceCoordinationRuntime(
           : { correlationId: input.correlationId }),
         requireWake: input.requireWake ?? true,
         createdAt,
-        expiresAt: new Date(Date.now() + 5_000).toISOString(),
+        expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
       });
       const receipt =
         await state.externalRuntimeController.applyCoordinationDelivery(
@@ -5049,6 +5053,52 @@ function createServiceCoordinationRuntime(
                         ? `external turn requested for ${input.toAgentId}`
                         : `direct wake requested for ${input.toAgentId}`,
                   },
+      };
+    },
+    async replyMessage(input) {
+      const state = getState();
+      if (state === undefined) {
+        throw new Error("service coordination runtime is not ready");
+      }
+      const createdAt = new Date().toISOString();
+      const ttlMs = Math.min(
+        Math.max((input.ttlSeconds ?? 300) * 1_000, 1_000),
+        24 * 60 * 60_000,
+      );
+      const identity = `${input.fromSessionId}:${input.wakeId}:${input.toolCallId}`;
+      const initialReceipt = await state.bridge.replyAgentMessage({
+        caller: {
+          type: "direct_brain",
+          sessionId: input.fromSessionId as SessionId,
+          wakeId: input.wakeId,
+          toolCallId: input.toolCallId,
+        },
+        deliveryId: `reply-delivery:${identity}`,
+        idempotencyKey: `reply-delivery:${identity}`,
+        messageId: `reply-message:${identity}`,
+        inReplyToMessageId: input.messageId,
+        body: input.body,
+        createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString(),
+      });
+      const receipt =
+        await state.externalRuntimeController.applyCoordinationDelivery(
+          initialReceipt,
+        );
+      return {
+        accepted: receipt.status === "accepted",
+        sequence: receipt.sequence ?? undefined,
+        wake: {
+          status:
+            receipt.status === "accepted"
+              ? ("completed" as const)
+              : ("failed" as const),
+          summary:
+            receipt.status === "accepted"
+              ? `reply accepted for message ${input.messageId}`
+              : `reply to message ${input.messageId} ${receipt.status}`,
+          reasonCode: receipt.reasonCode ?? undefined,
+        },
       };
     },
     async roundTrip(input) {

@@ -174,7 +174,7 @@ pub(crate) fn load_queued_messages(
     load_queued_messages_with_conn(conn, filter)
 }
 
-fn load_queued_messages_in_tx(
+pub(crate) fn load_queued_messages_in_tx(
     tx: &rusqlite::Transaction<'_>,
     filter: &QueuedMessageFilter,
 ) -> CoreResult<Vec<QueuedMessageRecord>> {

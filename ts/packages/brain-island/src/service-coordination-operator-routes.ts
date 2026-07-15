@@ -70,6 +70,26 @@ export async function handleCoordinationOperatorRequest(
   }
 
   if (parts.length === 1 && parts[0] === "messages") {
+    if (method === "GET") {
+      const toAgentId = url.searchParams.get("toAgentId")?.trim();
+      const limitText = url.searchParams.get("limit")?.trim();
+      const limit = limitText === undefined ? 100 : Number(limitText);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+        return invalidInput(
+          requestId,
+          new Error("limit must be an integer from 1 to 500"),
+        );
+      }
+      return successRoute(requestId, {
+        deploymentRole: context.deploymentRole,
+        items: await context.bridge.listAgentMessageInbox({
+          ...(toAgentId === undefined || toAgentId === ""
+            ? {}
+            : { toAgentId: toAgentId as AgentId }),
+          limit,
+        }),
+      });
+    }
     if (method !== "POST") return methodNotAllowed(requestId);
     try {
       const body = requireRecord(await context.readJsonBody(request));

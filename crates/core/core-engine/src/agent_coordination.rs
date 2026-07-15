@@ -4,10 +4,12 @@ use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentCorrelatedRound, AgentDirectoryEntry,
     AgentDirectoryRuntimeKind, AgentMessageCommand, AgentMessageDeliveryReceipt,
-    AgentMessageDeliveryRequest, AgentMessageDeliveryStatus, AgentRoundCommand,
+    AgentMessageDeliveryRequest, AgentMessageDeliveryStatus, AgentMessageInboxItem,
+    AgentMessageInboxQuery, AgentMessageInboxStatus, AgentMessageReplyCommand, AgentRoundCommand,
     AgentRoundStartReceipt, AgentRoundStatus, ExternalBindingPurpose, ExternalBindingStatus,
     ExternalRuntimeDesiredState, ExternalRuntimeKind, ExternalRuntimeObservedState,
-    ExternalTurnInputPart, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
+    TurnInputProvenanceKind,
 };
 use serde_json::json;
 
@@ -134,14 +136,30 @@ impl CoreEngine {
         &self,
         command: AgentMessageCommand,
     ) -> CoreResult<AgentMessageDeliveryReceipt> {
-        let (sender_agent_id, _sender_session_id, sender_request_id) =
+        self.deliver_agent_message_with_reply(command, None)
+    }
+
+    fn deliver_agent_message_with_reply(
+        &self,
+        command: AgentMessageCommand,
+        reply_to_message_id: Option<String>,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        validate_agent_message_bounds(&command.body, &command.created_at, &command.expires_at)?;
+        let (sender_agent_id, sender_session_id, sender_request_id) =
             self.resolve_coordination_caller(&command.caller)?;
+        let recipient = self.sessions.get_session_by_agent(&command.to_agent_id);
         let request = AgentMessageDeliveryRequest {
             delivery_id: command.delivery_id,
             idempotency_key: command.idempotency_key,
             message_id: command.message_id.clone(),
             from_agent_id: sender_agent_id.clone(),
+            from_session_id: sender_session_id,
             to_agent_id: command.to_agent_id.clone(),
+            to_session_id: recipient
+                .as_ref()
+                .ok()
+                .map(|session| session.session_id.clone()),
+            reply_to_message_id,
             body: command.body.clone(),
             collaboration_mode: command.collaboration_mode,
             correlation_id: command.correlation_id.clone(),
@@ -202,7 +220,7 @@ impl CoreEngine {
                 None,
             );
         }
-        let session = match self.sessions.get_session_by_agent(&command.to_agent_id) {
+        let session = match recipient {
             Ok(session) if session.status != SessionStatus::Archived => session,
             Ok(_) => {
                 return self.finish_agent_message_delivery(
@@ -287,12 +305,26 @@ impl CoreEngine {
                 })?;
             }
             AgentActivation::QueuedForNextTurn { session_id, .. } => {
-                self.enqueue_body_follow_up_message_without_wake(
+                if let Err(error) = self.enqueue_routed_agent_message_without_wake(
                     session_id,
-                    sender_agent_id,
+                    &pending.request,
                     model_body,
-                    message.correlation_id,
-                )?;
+                ) {
+                    if matches!(
+                        error.kind,
+                        CoreErrorKind::ActionRejected | CoreErrorKind::InvalidInput
+                    ) {
+                        return self.finish_agent_message_delivery(
+                            pending,
+                            AgentMessageDeliveryStatus::Rejected,
+                            Some(sequence),
+                            Some(activation.clone()),
+                            None,
+                            Some(error.message),
+                        );
+                    }
+                    return Err(error);
+                }
             }
             AgentActivation::ExternalTurnSteerRequested { .. } => {
                 return self.observe_pending_agent_message_delivery(pending, sequence, activation);
@@ -397,6 +429,226 @@ impl CoreEngine {
         delivery_id: &rusty_crew_core_protocol::AgentMessageDeliveryId,
     ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
         self.store.get_agent_message_delivery(delivery_id)
+    }
+
+    pub fn get_agent_message_delivery_by_message_id(
+        &self,
+        message_id: &str,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        self.store
+            .get_agent_message_delivery_by_message_id(message_id)
+    }
+
+    pub fn list_agent_message_inbox(
+        &self,
+        query: &AgentMessageInboxQuery,
+    ) -> CoreResult<Vec<AgentMessageInboxItem>> {
+        let limit = query.limit.unwrap_or(100).clamp(1, 500);
+        let deliveries = self
+            .store
+            .list_agent_message_inbox_deliveries(query.to_agent_id.as_ref(), limit)?;
+        deliveries
+            .into_iter()
+            .map(|delivery| self.project_agent_message_inbox_item(delivery))
+            .collect()
+    }
+
+    fn project_agent_message_inbox_item(
+        &self,
+        delivery: AgentMessageDeliveryReceipt,
+    ) -> CoreResult<AgentMessageInboxItem> {
+        let reply = self
+            .store
+            .get_agent_message_reply(&delivery.request.message_id)?;
+        let queued_message_id = format!("agent-message-queue:{}", delivery.request.message_id);
+        let queue = delivery
+            .request
+            .to_session_id
+            .as_ref()
+            .map(|session_id| {
+                self.store.load_queued_messages(&QueuedMessageFilter {
+                    state: None,
+                    owner_session_id: Some(session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+            })
+            .transpose()?
+            .unwrap_or_default()
+            .into_iter()
+            .find(|queued| queued.message_id == queued_message_id);
+        let direct_request_id =
+            ExternalTurnRequestId::new(format!("agent-message:{}", delivery.request.message_id));
+        let follow_up_request_id =
+            ExternalTurnRequestId::new(format!("external-follow-up:{queued_message_id}"));
+        let turn = self
+            .store
+            .get_external_turn(&direct_request_id)?
+            .or(self.store.get_external_turn(&follow_up_request_id)?);
+        let status = match delivery.status {
+            AgentMessageDeliveryStatus::Rejected => AgentMessageInboxStatus::Rejected,
+            AgentMessageDeliveryStatus::Expired => AgentMessageInboxStatus::Expired,
+            AgentMessageDeliveryStatus::Pending => AgentMessageInboxStatus::InProgress,
+            AgentMessageDeliveryStatus::Accepted => {
+                if matches!(
+                    queue.as_ref().map(|record| record.state),
+                    Some(QueuedMessageState::Pending)
+                ) {
+                    AgentMessageInboxStatus::Queued
+                } else if let Some(turn) = turn.as_ref() {
+                    match turn.phase {
+                        ExternalTurnPhase::Accepted
+                        | ExternalTurnPhase::Starting
+                        | ExternalTurnPhase::Active
+                        | ExternalTurnPhase::WaitingInteraction => {
+                            AgentMessageInboxStatus::InProgress
+                        }
+                        ExternalTurnPhase::Completed if reply.is_some() => {
+                            AgentMessageInboxStatus::Replied
+                        }
+                        ExternalTurnPhase::Completed
+                            if matches!(
+                                turn.terminal_reason_code.as_deref(),
+                                Some("review_no_reply" | "agent_message_no_reply")
+                            ) =>
+                        {
+                            AgentMessageInboxStatus::NoReply
+                        }
+                        ExternalTurnPhase::Completed => AgentMessageInboxStatus::AwaitingReply,
+                        ExternalTurnPhase::Failed
+                        | ExternalTurnPhase::Interrupted
+                        | ExternalTurnPhase::OutcomeUnknown => AgentMessageInboxStatus::Failed,
+                    }
+                } else if matches!(
+                    queue.as_ref().map(|record| record.state),
+                    Some(QueuedMessageState::Expired)
+                ) {
+                    AgentMessageInboxStatus::Expired
+                } else if matches!(
+                    queue.as_ref().map(|record| record.state),
+                    Some(QueuedMessageState::Cancelled)
+                ) {
+                    AgentMessageInboxStatus::Rejected
+                } else if matches!(
+                    queue.as_ref().map(|record| record.state),
+                    Some(QueuedMessageState::Discarded)
+                ) {
+                    AgentMessageInboxStatus::Failed
+                } else if reply.is_some() {
+                    AgentMessageInboxStatus::Replied
+                } else {
+                    AgentMessageInboxStatus::NoReply
+                }
+            }
+        };
+        let external_turn_request_id = turn
+            .as_ref()
+            .map(|record| record.request.request_id.clone());
+        let terminal_reason_code = turn
+            .as_ref()
+            .and_then(|record| record.terminal_reason_code.clone())
+            .or_else(|| {
+                queue
+                    .as_ref()
+                    .and_then(|record| record.state_reason.clone())
+            });
+        Ok(AgentMessageInboxItem {
+            delivery,
+            reply,
+            status,
+            queued_message_id: queue.map(|record| record.message_id),
+            external_turn_request_id,
+            terminal_reason_code,
+        })
+    }
+
+    pub fn reply_agent_message(
+        &self,
+        command: AgentMessageReplyCommand,
+    ) -> CoreResult<AgentMessageDeliveryReceipt> {
+        let (replying_agent_id, replying_session_id, _) =
+            self.resolve_coordination_caller(&command.caller)?;
+        let original = self
+            .store
+            .get_agent_message_delivery_by_message_id(&command.in_reply_to_message_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    "agent_message_reply_original_not_found",
+                )
+            })?;
+        if original.status != AgentMessageDeliveryStatus::Accepted {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_reply_original_not_accepted",
+            ));
+        }
+        if original.request.expires_at <= self.now() {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_reply_original_expired",
+            ));
+        }
+        if original.request.to_agent_id != replying_agent_id
+            || original.request.to_session_id != replying_session_id
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_reply_wrong_recipient",
+            ));
+        }
+        let expected_reply_session = original.request.from_session_id.clone().ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_reply_sender_has_no_session",
+            )
+        })?;
+        let current_reply_session = self
+            .sessions
+            .get_session_by_agent(&original.request.from_agent_id)?;
+        if current_reply_session.session_id != expected_reply_session
+            || current_reply_session.status == SessionStatus::Archived
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_reply_sender_session_changed",
+            ));
+        }
+        if let Some(existing) = self
+            .store
+            .get_agent_message_reply(&command.in_reply_to_message_id)?
+        {
+            if existing.request.delivery_id == command.delivery_id
+                && existing.request.idempotency_key == command.idempotency_key
+                && existing.request.message_id == command.message_id
+                && existing.request.body == command.body
+            {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "agent_message_reply_already_exists",
+            ));
+        }
+        self.deliver_agent_message_with_reply(
+            AgentMessageCommand {
+                caller: command.caller,
+                delivery_id: command.delivery_id,
+                idempotency_key: command.idempotency_key,
+                message_id: command.message_id,
+                to_agent_id: original.request.from_agent_id,
+                body: command.body,
+                collaboration_mode: None,
+                correlation_id: original
+                    .request
+                    .correlation_id
+                    .or(Some(command.in_reply_to_message_id.clone())),
+                require_wake: true,
+                created_at: command.created_at,
+                expires_at: command.expires_at,
+            },
+            Some(command.in_reply_to_message_id),
+        )
     }
 
     pub fn complete_agent_message_delivery(
@@ -646,11 +898,42 @@ impl CoreEngine {
 
 fn routed_agent_message_text(request: &AgentMessageDeliveryRequest) -> String {
     format!(
-        "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\ncorrelation_id: {}\nexpires_at: {}\n\n{}",
+        "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\nfrom_session_id: {}\ncorrelation_id: {}\ncreated_at: {}\nexpires_at: {}\nreply_instruction: call rusty_crew.reply_agent_message with messageId={} and your reply body\n\n{}",
         request.message_id,
         request.from_agent_id.0,
+        request
+            .from_session_id
+            .as_ref()
+            .map(|value| value.0.as_str())
+            .unwrap_or("none"),
         request.correlation_id.as_deref().unwrap_or("none"),
+        request.created_at,
         request.expires_at,
+        request.message_id,
         request.body
     )
+}
+
+fn validate_agent_message_bounds(
+    body: &str,
+    created_at: &IsoTimestamp,
+    expires_at: &IsoTimestamp,
+) -> CoreResult<()> {
+    const MIN_TTL_MS: i128 = 1;
+    const MAX_TTL_MS: i128 = 24 * 60 * 60 * 1_000;
+    const MAX_BODY_BYTES: usize = 256 * 1024;
+    if body.is_empty() || body.len() > MAX_BODY_BYTES {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "agent_message_body_size_invalid",
+        ));
+    }
+    let ttl_ms = (parse_rfc3339(expires_at)? - parse_rfc3339(created_at)?).whole_milliseconds();
+    if !(MIN_TTL_MS..=MAX_TTL_MS).contains(&ttl_ms) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "agent_message_ttl_out_of_bounds",
+        ));
+    }
+    Ok(())
 }

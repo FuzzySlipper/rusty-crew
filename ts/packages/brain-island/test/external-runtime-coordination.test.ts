@@ -6,6 +6,7 @@ import type {
   AgentDirectoryEntry,
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
+  AgentMessageReplyCommand,
   AgentRoundCommand,
   AgentRoundStartReceipt,
   SessionId,
@@ -110,9 +111,45 @@ test("Codex coordination round returns the durable Rust reply", async () => {
   assert.equal(delivered[0]?.activation?.type, "external_turn_requested");
 });
 
+test("Codex coordination replies by durable message id without model routing metadata", async () => {
+  const port = new RecordingPort();
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "review-thread",
+      turnId: "review-turn",
+      callId: "reply-call",
+      namespace: "rusty_crew",
+      tool: "reply_agent_message",
+      arguments: {
+        messageId: "review-request-17",
+        body: "review passed",
+        ttlSeconds: 3_600,
+      },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "review-binding",
+      controllerInstanceId: "review-controller",
+      controllerGeneration: 9,
+    },
+    port,
+    now: () => new Date("2026-07-10T00:00:00Z"),
+  });
+  assert.equal(result?.success, true);
+  assert.equal(port.replies.length, 1);
+  assert.equal(port.replies[0]?.inReplyToMessageId, "review-request-17");
+  assert.equal(port.replies[0]?.expiresAt, "2026-07-10T01:00:00.000Z");
+  assert.equal(
+    "toAgentId" in (port.replies[0] ?? {}),
+    false,
+    "the reply tool must not accept model-supplied routing",
+  );
+});
+
 class RecordingPort implements CodexCoordinationPort {
   directoryReads = 0;
   readonly deliveries: AgentMessageCommand[] = [];
+  readonly replies: AgentMessageReplyCommand[] = [];
   readonly rounds: AgentRoundCommand[] = [];
   #round?: AgentCorrelatedRound;
 
@@ -137,6 +174,33 @@ class RecordingPort implements CodexCoordinationPort {
   ): Promise<AgentMessageDeliveryReceipt> {
     this.deliveries.push(command);
     return deliveryReceipt(command);
+  }
+
+  async replyAgentMessage(
+    command: AgentMessageReplyCommand,
+  ): Promise<AgentMessageDeliveryReceipt> {
+    this.replies.push(command);
+    return {
+      request: {
+        deliveryId: command.deliveryId,
+        idempotencyKey: command.idempotencyKey,
+        messageId: command.messageId,
+        fromAgentId: "codex-agent",
+        fromSessionId: "codex-session" as SessionId,
+        toAgentId: "requester",
+        toSessionId: "requester-session" as SessionId,
+        replyToMessageId: command.inReplyToMessageId,
+        body: command.body,
+        correlationId: command.inReplyToMessageId,
+        requireWake: true,
+        createdAt: command.createdAt,
+        expiresAt: command.expiresAt,
+      },
+      status: "accepted",
+      sequence: 9,
+      terminalAt: command.createdAt,
+      revision: 2,
+    };
   }
 
   async beginAgentRound(
@@ -192,7 +256,10 @@ function deliveryReceipt(
       idempotencyKey: command.idempotencyKey,
       messageId: command.messageId,
       fromAgentId: "codex-agent",
+      fromSessionId: "codex-session" as SessionId,
       toAgentId: command.toAgentId,
+      toSessionId: "recipient-session" as SessionId,
+      replyToMessageId: null,
       body: command.body,
       requireWake: command.requireWake,
       createdAt: command.createdAt,

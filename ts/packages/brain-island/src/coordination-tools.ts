@@ -11,6 +11,13 @@ const sendAgentMessageParameters = Type.Object({
   body: Type.String({ minLength: 1 }),
   correlationId: Type.Optional(Type.String({ minLength: 1 })),
   requireWake: Type.Optional(Type.Boolean()),
+  ttlSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 86_400 })),
+});
+
+const replyAgentMessageParameters = Type.Object({
+  messageId: Type.String({ minLength: 1 }),
+  body: Type.String({ minLength: 1 }),
+  ttlSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 86_400 })),
 });
 
 const agentRoundParameters = Type.Object({
@@ -23,6 +30,7 @@ const agentRoundParameters = Type.Object({
 const listAgentsParameters = Type.Object({}, { additionalProperties: false });
 
 type SendAgentMessageParams = Static<typeof sendAgentMessageParameters>;
+type ReplyAgentMessageParams = Static<typeof replyAgentMessageParameters>;
 type AgentRoundParams = Static<typeof agentRoundParameters>;
 
 export interface AgentMessageRouteResult {
@@ -57,6 +65,16 @@ export interface CoordinationToolRuntime {
     body: string;
     correlationId?: string;
     requireWake?: boolean;
+    ttlSeconds?: number;
+  }): Promise<AgentMessageRouteResult>;
+  replyMessage(input: {
+    fromAgentId: string;
+    fromSessionId: string;
+    wakeId: string;
+    toolCallId: string;
+    messageId: string;
+    body: string;
+    ttlSeconds?: number;
   }): Promise<AgentMessageRouteResult>;
   roundTrip(input: {
     fromAgentId: string;
@@ -77,7 +95,11 @@ export interface CoordinationToolContext {
 
 export interface CoordinationToolDetails {
   ok: boolean;
-  operation: "list_agents" | "send_agent_message" | "agent_round";
+  operation:
+    | "list_agents"
+    | "send_agent_message"
+    | "reply_agent_message"
+    | "agent_round";
   reasonCode?: string;
   agents?: AgentDirectoryEntry[];
   routed?: AgentMessageRouteResult;
@@ -103,8 +125,37 @@ export function coordinationTools(
   return [
     listAgentsTool(context),
     sendAgentMessageTool(context),
+    replyAgentMessageTool(context),
     agentRoundTool(context),
   ];
+}
+
+export function replyAgentMessageTool(
+  context: CoordinationToolContext,
+): BrainTool<typeof replyAgentMessageParameters, CoordinationToolDetails> {
+  return {
+    name: "reply_agent_message",
+    label: "Reply to agent message",
+    description:
+      "Reply once to a routed Rusty Crew message by its message ID; Crew resolves the sender and correlation.",
+    parameters: replyAgentMessageParameters,
+    executeWithContext: async (params, toolContext) =>
+      replyAgentMessage(context, {
+        fromAgentId: toolContext.wake.state.session.agentId,
+        fromSessionId: toolContext.sessionId,
+        wakeId: toolContext.wakeId,
+        toolCallId: toolContext.callId,
+        params,
+      }),
+    execute: async () =>
+      coordinationResult({
+        ok: false,
+        operation: "reply_agent_message",
+        reasonCode: "tool_context_required",
+        queuedActions: 0,
+        text: "reply_agent_message requires wake context.",
+      }),
+  };
 }
 
 export function listAgentsTool(
@@ -266,8 +317,13 @@ async function sendAgentMessage(
       toolCallId: input.toolCallId,
       toAgentId: input.params.toAgentId,
       body: input.params.body,
-      correlationId: input.params.correlationId,
+      ...(input.params.correlationId === undefined
+        ? {}
+        : { correlationId: input.params.correlationId }),
       requireWake: input.params.requireWake ?? true,
+      ...(input.params.ttlSeconds === undefined
+        ? {}
+        : { ttlSeconds: input.params.ttlSeconds }),
     });
     return coordinationResult({
       ok: routed.accepted,
@@ -301,6 +357,47 @@ async function sendAgentMessage(
       context.actions === undefined
         ? "message could not be routed because no coordination runtime or action collector is available"
         : "message action queued for post-turn routing",
+  });
+}
+
+async function replyAgentMessage(
+  context: CoordinationToolContext,
+  input: {
+    fromAgentId: string;
+    fromSessionId: string;
+    wakeId: string;
+    toolCallId: string;
+    params: ReplyAgentMessageParams;
+  },
+): Promise<BrainToolResult<CoordinationToolDetails>> {
+  if (context.runtime === undefined) {
+    return coordinationResult({
+      ok: false,
+      operation: "reply_agent_message",
+      reasonCode: "coordination_runtime_unavailable",
+      queuedActions: 0,
+      text: "reply_agent_message requires the Rusty Crew service coordination runtime.",
+    });
+  }
+  const routed = await context.runtime.replyMessage({
+    fromAgentId: input.fromAgentId,
+    fromSessionId: input.fromSessionId,
+    wakeId: input.wakeId,
+    toolCallId: input.toolCallId,
+    messageId: input.params.messageId,
+    body: input.params.body,
+    ...(input.params.ttlSeconds === undefined
+      ? {}
+      : { ttlSeconds: input.params.ttlSeconds }),
+  });
+  return coordinationResult({
+    ok: routed.accepted,
+    operation: "reply_agent_message",
+    routed,
+    queuedActions: 0,
+    text: routed.accepted
+      ? `reply accepted for message ${input.params.messageId}`
+      : `reply rejected for message ${input.params.messageId}`,
   });
 }
 

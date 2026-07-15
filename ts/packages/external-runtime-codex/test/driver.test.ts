@@ -1036,6 +1036,7 @@ test("every driver response has a consumed contract and malformed results fail c
     "thread/archive",
     "thread/compact/start",
     "thread/delete",
+    "thread/fork",
     "thread/items/list",
     "thread/list",
     "thread/loaded/list",

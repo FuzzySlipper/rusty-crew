@@ -195,6 +195,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "reply_agent_message",
+      "description": "Reply once to a routed Rusty Crew message by durable message ID without supplying recipient or correlation metadata.",
+      "category": "coordination",
+      "toolsets": ["agent_coordination", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "coordination.reply_agent_message_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "agent_round",
       "description": "Send a Rusty Crew internal message to another agent, wake it, and wait for one correlated reply.",
       "category": "coordination",

@@ -624,6 +624,11 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "deliver_agent_message",
         protocol::AgentMessageDeliveryReceipt
     );
+    schema!("reply_agent_message", protocol::AgentMessageDeliveryReceipt);
+    schema!(
+        "list_agent_message_inbox",
+        Vec<protocol::AgentMessageInboxItem>
+    );
     schema!("begin_agent_round", protocol::AgentRoundStartReceipt);
     schema!("get_agent_round", Option<protocol::AgentCorrelatedRound>);
     schema!(

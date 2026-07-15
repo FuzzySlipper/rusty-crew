@@ -170,6 +170,30 @@ fn external_agent_session_creation_is_idempotent_and_recovers_native_start() {
 }
 
 #[test]
+fn external_agent_creation_reads_explicit_serial_delivery_policy_from_profile() {
+    let engine = test_engine();
+    let mut profile = profile_registry_write("codex-profile", "gpt", "configured-codex-session");
+    profile.active_runtime_settings_json["externalMessageDeliveryPolicy"] =
+        json!("serial_next_turn");
+    engine.create_profile_registry_record(&profile).unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine
+        .acquire_external_runtime_controller(
+            &external_controller_lease(),
+            &"2026-06-19T00:00:00Z".into(),
+        )
+        .unwrap();
+
+    let prepared = engine
+        .prepare_external_agent_session_creation(external_creation_request("serial-create"))
+        .unwrap();
+    assert_eq!(
+        prepared.binding.message_delivery_policy,
+        ExternalMessageDeliveryPolicy::SerialNextTurn
+    );
+}
+
+#[test]
 fn external_agent_session_creation_rejects_changed_retry_and_invalid_dependencies() {
     let engine = test_engine();
     ready_external_creation_dependencies(&engine);
@@ -1159,7 +1183,9 @@ fn external_collaboration_mode_is_persisted_on_the_requested_turn() {
         ))
         .unwrap();
     engine.register_external_runtime(&runtime(), None).unwrap();
-    engine.bind_external_agent(&binding(), None).unwrap();
+    let mut serial_binding = binding();
+    serial_binding.message_delivery_policy = ExternalMessageDeliveryPolicy::SerialNextTurn;
+    engine.bind_external_agent(&serial_binding, None).unwrap();
 
     let receipt = engine
         .deliver_agent_message(AgentMessageCommand {
@@ -1663,7 +1689,7 @@ pub(super) fn probe_report(
     }
 }
 
-fn binding() -> ExternalAgentBinding {
+pub(super) fn binding() -> ExternalAgentBinding {
     ExternalAgentBinding {
         binding_id: ExternalBindingId::new("codex-binding"),
         runtime_id: ExternalRuntimeId::new("codex-local"),
@@ -1686,7 +1712,7 @@ fn binding() -> ExternalAgentBinding {
     }
 }
 
-fn external_controller_lease() -> ExternalControllerLease {
+pub(super) fn external_controller_lease() -> ExternalControllerLease {
     ExternalControllerLease {
         runtime_id: ExternalRuntimeId::new("codex-local"),
         holder_instance_id: "controller-a".into(),

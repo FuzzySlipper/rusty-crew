@@ -379,6 +379,24 @@ errors = "core_protocol::CoreError"
 summary = "Durably accept an identity-bound internal message and select direct wake, external turn, queue, round resolution, expiry, or rejection in Rust."
 
 [[operation]]
+name = "reply_agent_message"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentMessageReplyCommand"
+output = "core_protocol::AgentMessageDeliveryReceipt"
+errors = "core_protocol::CoreError"
+summary = "Resolve an original routed message in Rust and send one idempotent reply without model-supplied recipient or correlation metadata."
+
+[[operation]]
+name = "list_agent_message_inbox"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentMessageInboxQuery"
+output = "vec<core_protocol::AgentMessageInboxItem>"
+errors = "core_protocol::CoreError"
+summary = "Project durable routed-message queue, turn, expiry, and reply state for operator inspection."
+
+[[operation]]
 name = "begin_agent_round"
 surface = "stable"
 direction = "ts_to_rust"

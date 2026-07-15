@@ -15253,6 +15253,63 @@ mod tests {
         assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
         assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
         assert_eq!(store.list_nonterminal_external_turns().unwrap().len(), 1);
+        let queued = QueuedMessageRecord {
+            message_id: "queued-external-turn-a".into(),
+            owner_session_id: Some(session.session_id.clone()),
+            owner_agent_id: session.agent_id.clone(),
+            message: rusty_crew_core_protocol::AgentMessage {
+                from: AgentId::new("requester-agent"),
+                to: session.agent_id.clone(),
+                body: "review queued change".into(),
+                correlation_id: Some("queued-correlation-a".into()),
+                projection: None,
+            },
+            source_sequence: None,
+            enqueued_at: "2026-07-10T00:00:01Z".into(),
+            expires_at: "2026-07-10T00:10:00Z".into(),
+            ttl_ms: 599_000,
+            delivery_attempts: 0,
+            state: QueuedMessageState::Pending,
+            terminal_at: None,
+            state_reason: None,
+        };
+        store.save_queued_message(&queued).unwrap();
+        let mut promoted_turn = turn.clone();
+        promoted_turn.request.request_id =
+            rusty_crew_core_protocol::ExternalTurnRequestId::new("request-promoted-a");
+        promoted_turn.request.idempotency_key = "turn-key-promoted-a".into();
+        promoted_turn.request.provenance.source_id = Some(queued.message_id.clone());
+        promoted_turn.updated_at = "2026-07-10T00:00:02Z".into();
+        assert_eq!(
+            store
+                .promote_queued_message_to_external_turn(
+                    &queued.message_id,
+                    &"2026-07-10T00:00:02Z".into(),
+                    &promoted_turn,
+                )
+                .unwrap(),
+            Some(promoted_turn.clone())
+        );
+        let delivered_queue = store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Delivered),
+                owner_session_id: Some(session.session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(delivered_queue.len(), 1);
+        assert_eq!(delivered_queue[0].message_id, queued.message_id);
+        assert_eq!(
+            store
+                .promote_queued_message_to_external_turn(
+                    &queued.message_id,
+                    &"2026-07-10T00:00:03Z".into(),
+                    &promoted_turn,
+                )
+                .unwrap(),
+            Some(promoted_turn)
+        );
         let recipient = SessionState {
             handle: SessionHandle::new(2),
             session_id: SessionId::new("recipient-session"),
@@ -15279,7 +15336,10 @@ mod tests {
                 idempotency_key: "delivery-key-a".into(),
                 message_id: "message-a".into(),
                 from_agent_id: session.agent_id.clone(),
+                from_session_id: Some(session.session_id.clone()),
                 to_agent_id: recipient.agent_id.clone(),
+                to_session_id: Some(recipient.session_id.clone()),
+                reply_to_message_id: None,
                 body: "inspect".into(),
                 collaboration_mode: None,
                 correlation_id: Some("correlation-a".into()),
@@ -15306,12 +15366,53 @@ mod tests {
         let mut accepted = delivery.clone();
         accepted.status = rusty_crew_core_protocol::AgentMessageDeliveryStatus::Accepted;
         accepted.terminal_at = Some("2026-07-10T00:00:01Z".into());
+        let accepted = store
+            .update_agent_message_delivery(&accepted, delivery.revision)
+            .unwrap();
+        assert_eq!(accepted.revision, 2);
         assert_eq!(
             store
-                .update_agent_message_delivery(&accepted, delivery.revision)
-                .unwrap()
-                .revision,
-            2
+                .get_agent_message_delivery_by_message_id("message-a")
+                .unwrap(),
+            Some(accepted.clone())
+        );
+        assert_eq!(
+            store
+                .list_agent_message_inbox_deliveries(Some(&accepted.request.to_agent_id), 10)
+                .unwrap(),
+            vec![accepted.clone()]
+        );
+        let reply = rusty_crew_core_protocol::AgentMessageDeliveryReceipt {
+            request: rusty_crew_core_protocol::AgentMessageDeliveryRequest {
+                delivery_id: rusty_crew_core_protocol::AgentMessageDeliveryId::new(
+                    "reply-delivery-a",
+                ),
+                idempotency_key: "reply-delivery-key-a".into(),
+                message_id: "reply-message-a".into(),
+                from_agent_id: accepted.request.to_agent_id.clone(),
+                from_session_id: accepted.request.to_session_id.clone(),
+                to_agent_id: accepted.request.from_agent_id.clone(),
+                to_session_id: accepted.request.from_session_id.clone(),
+                reply_to_message_id: Some("message-a".into()),
+                body: "review passed".into(),
+                collaboration_mode: None,
+                correlation_id: accepted.request.correlation_id.clone(),
+                require_wake: true,
+                created_at: "2026-07-10T00:00:02Z".into(),
+                expires_at: "2026-07-10T00:05:02Z".into(),
+            },
+            status: rusty_crew_core_protocol::AgentMessageDeliveryStatus::Accepted,
+            sequence: Some(2),
+            activation: None,
+            resolved_round_id: None,
+            reason_code: None,
+            terminal_at: Some("2026-07-10T00:00:02Z".into()),
+            revision: 1,
+        };
+        store.create_agent_message_delivery(&reply).unwrap();
+        assert_eq!(
+            store.get_agent_message_reply("message-a").unwrap(),
+            Some(reply)
         );
         let round = rusty_crew_core_protocol::AgentCorrelatedRound {
             round_id: rusty_crew_core_protocol::AgentRoundId::new("round-a"),

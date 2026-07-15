@@ -470,6 +470,23 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn promote_queued_message_to_external_turn(
+        &self,
+        queued_message_id: &str,
+        now: &IsoTimestamp,
+        record: &ExternalTurnCorrelation,
+    ) -> CoreResult<Option<ExternalTurnCorrelation>> {
+        match self {
+            Self::Sqlite(store) => {
+                store.promote_queued_message_to_external_turn(queued_message_id, now, record)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.promote_queued_message_to_external_turn(queued_message_id, now, record)
+            }
+        }
+    }
+
     pub fn update_external_turn(
         &self,
         next: &ExternalTurnCorrelation,
@@ -658,6 +675,40 @@ impl CoreCoordinationStore {
             Self::Sqlite(store) => store.get_agent_message_delivery(delivery_id),
             #[cfg(feature = "postgres")]
             Self::Postgres(store) => store.get_agent_message_delivery(delivery_id),
+        }
+    }
+
+    pub fn get_agent_message_delivery_by_message_id(
+        &self,
+        message_id: &str,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.get_agent_message_delivery_by_message_id(message_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_agent_message_delivery_by_message_id(message_id),
+        }
+    }
+
+    pub fn get_agent_message_reply(
+        &self,
+        message_id: &str,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.get_agent_message_reply(message_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_agent_message_reply(message_id),
+        }
+    }
+
+    pub fn list_agent_message_inbox_deliveries(
+        &self,
+        to_agent_id: Option<&AgentId>,
+        limit: u32,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.list_agent_message_inbox_deliveries(to_agent_id, limit),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_agent_message_inbox_deliveries(to_agent_id, limit),
         }
     }
 

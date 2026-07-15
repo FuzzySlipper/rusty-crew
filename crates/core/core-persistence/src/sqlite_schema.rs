@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 46;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 47;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -248,6 +248,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 46,
         description: "rename chat completions brain identity",
         apply: migrate_v46_rename_chat_completions_brain,
+    },
+    SchemaMigration {
+        version: 47,
+        description: "add agent message session provenance and reply linkage",
+        apply: repos::external_runtime::migrate_v47_add_agent_message_reply_links,
     },
 ];
 

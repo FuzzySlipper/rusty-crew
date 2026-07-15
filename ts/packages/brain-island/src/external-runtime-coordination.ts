@@ -3,6 +3,7 @@ import type {
   AgentDirectoryEntry,
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
+  AgentMessageReplyCommand,
   AgentRoundCommand,
   AgentRoundStartReceipt,
 } from "@rusty-crew/contracts";
@@ -14,7 +15,8 @@ import type {
 const COORDINATION_NAMESPACE = "rusty_crew";
 const MAX_ROUND_TIMEOUT_MS = 300_000;
 const DEFAULT_ROUND_TIMEOUT_MS = 30_000;
-const MESSAGE_TTL_MS = 5_000;
+const DEFAULT_MESSAGE_TTL_MS = 5 * 60_000;
+const MAX_MESSAGE_TTL_MS = 24 * 60 * 60_000;
 
 export interface CodexCoordinationBinding {
   readonly runtimeId: string;
@@ -27,6 +29,9 @@ export interface CodexCoordinationPort {
   listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
   deliverAgentMessage(
     command: AgentMessageCommand,
+  ): Promise<AgentMessageDeliveryReceipt>;
+  replyAgentMessage(
+    command: AgentMessageReplyCommand,
   ): Promise<AgentMessageDeliveryReceipt>;
   beginAgentRound(command: AgentRoundCommand): Promise<AgentRoundStartReceipt>;
   getAgentRound(roundId: string): Promise<AgentCorrelatedRound | undefined>;
@@ -46,6 +51,7 @@ export async function resolveCodexCoordinationToolCall(input: {
   if (
     params.tool !== "list_agents" &&
     params.tool !== "send_agent_message" &&
+    params.tool !== "reply_agent_message" &&
     params.tool !== "agent_round"
   ) {
     return failed(`unsupported Rusty Crew coordination tool ${params.tool}`);
@@ -62,8 +68,6 @@ export async function resolveCodexCoordinationToolCall(input: {
     const agents = await input.port.listAgentDirectory();
     return succeeded(formatAgentDirectory(agents));
   }
-  const args = parseArguments(params.arguments);
-  if (typeof args === "string") return failed(args);
   const now = input.now?.() ?? new Date();
   const identity = `${input.binding.bindingId}:${params.threadId}:${params.turnId}:${params.callId}`;
   const caller = {
@@ -76,7 +80,33 @@ export async function resolveCodexCoordinationToolCall(input: {
     nativeTurnId: params.turnId,
     nativeRequestId: params.callId,
   };
+  if (params.tool === "reply_agent_message") {
+    const replyArgs = parseReplyArguments(params.arguments);
+    if (typeof replyArgs === "string") return failed(replyArgs);
+    const ttlMs = boundedMessageTtlMs(replyArgs.ttlSeconds);
+    const initialReceipt = await input.port.replyAgentMessage({
+      caller,
+      deliveryId: `codex-reply-delivery:${identity}`,
+      idempotencyKey: `codex-reply-delivery:${identity}`,
+      messageId: `codex-reply-message:${identity}`,
+      inReplyToMessageId: replyArgs.messageId,
+      body: replyArgs.body,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+    });
+    const receipt = input.onDelivery
+      ? await input.onDelivery(initialReceipt)
+      : initialReceipt;
+    return receipt.status === "accepted"
+      ? succeeded(
+          `reply accepted: messageId=${receipt.request.messageId}; deliveryId=${receipt.request.deliveryId}`,
+        )
+      : failed(receipt.reasonCode ?? `reply ${receipt.status}`);
+  }
+  const args = parseArguments(params.arguments);
+  if (typeof args === "string") return failed(args);
   if (params.tool === "send_agent_message") {
+    const ttlMs = boundedMessageTtlMs(args.ttlSeconds);
     const command: AgentMessageCommand = {
       caller,
       deliveryId: `codex-delivery:${identity}`,
@@ -89,7 +119,7 @@ export async function resolveCodexCoordinationToolCall(input: {
         : { correlationId: args.correlationId }),
       requireWake: true,
       createdAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + MESSAGE_TTL_MS).toISOString(),
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
     };
     const initialReceipt = await input.port.deliverAgentMessage(command);
     const receipt = input.onDelivery
@@ -141,6 +171,13 @@ interface CoordinationArguments {
   readonly body: string;
   readonly correlationId?: string;
   readonly timeoutMs?: number;
+  readonly ttlSeconds?: number;
+}
+
+interface ReplyArguments {
+  readonly messageId: string;
+  readonly body: string;
+  readonly ttlSeconds?: number;
 }
 
 function parseArguments(value: unknown): CoordinationArguments | string {
@@ -162,6 +199,15 @@ function parseArguments(value: unknown): CoordinationArguments | string {
     return "correlationId must be a non-empty string when supplied";
   }
   if (
+    record.ttlSeconds !== undefined &&
+    (typeof record.ttlSeconds !== "number" ||
+      !Number.isInteger(record.ttlSeconds) ||
+      record.ttlSeconds <= 0 ||
+      record.ttlSeconds * 1_000 > MAX_MESSAGE_TTL_MS)
+  ) {
+    return "ttlSeconds must be an integer between 1 and 86400 when supplied";
+  }
+  if (
     record.timeoutMs !== undefined &&
     (typeof record.timeoutMs !== "number" ||
       !Number.isInteger(record.timeoutMs) ||
@@ -178,7 +224,49 @@ function parseArguments(value: unknown): CoordinationArguments | string {
     ...(record.timeoutMs === undefined
       ? {}
       : { timeoutMs: record.timeoutMs as number }),
+    ...(record.ttlSeconds === undefined
+      ? {}
+      : { ttlSeconds: record.ttlSeconds as number }),
   };
+}
+
+function parseReplyArguments(value: unknown): ReplyArguments | string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return "reply_agent_message arguments must be an object";
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.messageId !== "string" || record.messageId.trim() === "") {
+    return "messageId must be a non-empty string";
+  }
+  if (typeof record.body !== "string" || record.body.trim() === "") {
+    return "body must be a non-empty string";
+  }
+  if (
+    record.ttlSeconds !== undefined &&
+    (typeof record.ttlSeconds !== "number" ||
+      !Number.isInteger(record.ttlSeconds) ||
+      record.ttlSeconds <= 0 ||
+      record.ttlSeconds * 1_000 > MAX_MESSAGE_TTL_MS)
+  ) {
+    return "ttlSeconds must be an integer between 1 and 86400 when supplied";
+  }
+  return {
+    messageId: record.messageId,
+    body: record.body,
+    ...(record.ttlSeconds === undefined
+      ? {}
+      : { ttlSeconds: record.ttlSeconds as number }),
+  };
+}
+
+function boundedMessageTtlMs(ttlSeconds: number | undefined): number {
+  return Math.min(
+    Math.max(
+      ttlSeconds === undefined ? DEFAULT_MESSAGE_TTL_MS : ttlSeconds * 1_000,
+      1_000,
+    ),
+    MAX_MESSAGE_TTL_MS,
+  );
 }
 
 function succeeded(text: string): DynamicToolCallResponse {

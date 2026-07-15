@@ -479,6 +479,17 @@
         "public": true
       },
       {
+        "id": "coordination.production.messages.list",
+        "method": "GET",
+        "path_template": "/v1/coordination/messages",
+        "description": "Inspect durable production routed-message queue, turn, expiry, and reply state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "delegation", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "coordination.production.rounds.create",
         "method": "POST",
         "path_template": "/v1/coordination/rounds",
@@ -530,6 +541,17 @@
         "auth": "admin",
         "mutation": "write",
         "stability": "experimental",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.messages.list",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/messages",
+        "description": "Inspect durable debug routed-message queue, turn, expiry, and reply state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
         "tags": ["session", "diagnostics"],
         "public": true
       },
@@ -2535,6 +2557,13 @@
         "auth_phase": "after_auth"
       },
       {
+        "capability_id": "coordination.production.messages.list",
+        "method": "GET",
+        "path_template": "/v1/coordination/messages",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
         "capability_id": "coordination.production.rounds.create",
         "method": "POST",
         "path_template": "/v1/coordination/rounds",
@@ -2565,6 +2594,13 @@
       {
         "capability_id": "coordination.debug.messages.create",
         "method": "POST",
+        "path_template": "/v1/debug/coordination/messages",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.messages.list",
+        "method": "GET",
         "path_template": "/v1/debug/coordination/messages",
         "route_id": "coordination_operator",
         "auth_phase": "after_auth"

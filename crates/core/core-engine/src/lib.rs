@@ -10,6 +10,7 @@ mod chat_store;
 mod curator;
 mod delegation;
 mod delegation_store;
+mod external_follow_up;
 mod external_runtime;
 mod external_runtime_certification;
 mod external_runtime_compatibility;
@@ -182,6 +183,7 @@ pub struct CoreEngine {
     profile_tool_profiles: Arc<Mutex<HashMap<ProfileId, ToolProfile>>>,
     scheduler_tick_lock: Arc<Mutex<()>>,
     github_gate_lock: Arc<Mutex<()>>,
+    external_follow_up_lock: Arc<Mutex<()>>,
 }
 
 fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {

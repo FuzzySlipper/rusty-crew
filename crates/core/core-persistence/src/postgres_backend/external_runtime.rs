@@ -835,6 +835,96 @@ impl PostgresBackendStore {
         Ok(record.clone())
     }
 
+    pub fn promote_queued_message_to_external_turn(
+        &self,
+        queued_message_id: &str,
+        now: &IsoTimestamp,
+        record: &ExternalTurnCorrelation,
+    ) -> CoreResult<Option<ExternalTurnCorrelation>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL queued external turn promotion", error)
+        })?;
+        let existing = load_optional::<ExternalTurnCorrelation>(
+            &mut tx,
+            &format!(
+                "SELECT record_json FROM {schema}.external_turns
+                 WHERE idempotency_key = $1 FOR UPDATE"
+            ),
+            &[&record.request.idempotency_key],
+            "load PostgreSQL idempotent queued external turn",
+        )?;
+        if let Some(existing) = existing {
+            if existing == *record {
+                return Ok(Some(existing));
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "external turn idempotency key conflicts with a different queued request",
+            ));
+        }
+        let Some(mut queued) = self
+            .load_queued_messages_in_tx(
+                &mut tx,
+                &QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(record.request.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                },
+            )?
+            .into_iter()
+            .find(|queued| queued.message_id == queued_message_id)
+        else {
+            return Ok(None);
+        };
+        if queued.expires_at <= *now {
+            queued.state = QueuedMessageState::Expired;
+            queued.terminal_at = Some(now.clone());
+            queued.state_reason = Some("ttl_expired_before_external_turn_claim".into());
+            self.save_queued_message_in_tx(&mut tx, &queued)?;
+            tx.commit().map_err(|error| {
+                postgres_error("commit expired PostgreSQL queued external turn", error)
+            })?;
+            return Ok(None);
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_turns
+                    (request_id, idempotency_key, runtime_id, binding_id, session_id,
+                     native_thread_id, native_turn_id, phase, revision, updated_at, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            ),
+            &[
+                &record.request.request_id.0,
+                &record.request.idempotency_key,
+                &record.runtime_id.0,
+                &record.request.binding_id.0,
+                &record.request.session_id.0,
+                &record.native_thread_id,
+                &record.native_turn_id,
+                &enum_json(&record.phase)?,
+                &(record.revision as i64),
+                &record.updated_at,
+                &to_json_text(record)?,
+            ],
+        )
+        .map_err(|error| postgres_error("save promoted PostgreSQL external turn", error))?;
+        queued.state = QueuedMessageState::Delivered;
+        queued.delivery_attempts += 1;
+        queued.terminal_at = Some(now.clone());
+        queued.state_reason = Some(format!(
+            "promoted_to_external_turn:{}",
+            record.request.request_id.0
+        ));
+        self.save_queued_message_in_tx(&mut tx, &queued)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL queued external turn promotion", error)
+        })?;
+        Ok(Some(record.clone()))
+    }
+
     pub fn update_external_turn(
         &self,
         next: &ExternalTurnCorrelation,
@@ -1423,17 +1513,30 @@ impl PostgresBackendStore {
         tx.execute(
             &format!(
                 "INSERT INTO {schema}.agent_message_delivery_receipts
-                    (delivery_id, idempotency_key, message_id, from_agent_id, to_agent_id,
-                     status, expires_at, revision, record_json)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+                    (delivery_id, idempotency_key, message_id, from_agent_id, from_session_id,
+                     to_agent_id, to_session_id, reply_to_message_id, status, created_at,
+                     expires_at, revision, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
             ),
             &[
                 &record.request.delivery_id.0,
                 &record.request.idempotency_key,
                 &record.request.message_id,
                 &record.request.from_agent_id.0,
+                &record
+                    .request
+                    .from_session_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
                 &record.request.to_agent_id.0,
+                &record
+                    .request
+                    .to_session_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                &record.request.reply_to_message_id,
                 &enum_json(&record.status)?,
+                &record.request.created_at,
                 &record.request.expires_at,
                 &(record.revision as i64),
                 &to_json_text(record)?,
@@ -1547,6 +1650,59 @@ impl PostgresBackendStore {
             ),
             &[&delivery_id.0],
             "load PostgreSQL agent message delivery",
+        )
+    }
+
+    pub fn get_agent_message_delivery_by_message_id(
+        &self,
+        message_id: &str,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE message_id = $1"
+            ),
+            &[&message_id],
+            "load PostgreSQL agent message delivery by message id",
+        )
+    }
+
+    pub fn get_agent_message_reply(
+        &self,
+        message_id: &str,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        let schema = self.quoted_schema();
+        load_optional(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE reply_to_message_id = $1"
+            ),
+            &[&message_id],
+            "load PostgreSQL agent message reply",
+        )
+    }
+
+    pub fn list_agent_message_inbox_deliveries(
+        &self,
+        to_agent_id: Option<&AgentId>,
+        limit: u32,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        let schema = self.quoted_schema();
+        let agent = to_agent_id.map(|value| value.0.as_str());
+        let limit = i64::from(limit);
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE reply_to_message_id IS NULL
+                   AND ($1::TEXT IS NULL OR to_agent_id = $1)
+                 ORDER BY created_at, delivery_id LIMIT $2"
+            ),
+            &[&agent, &limit],
+            "list PostgreSQL agent message inbox deliveries",
         )
     }
 
