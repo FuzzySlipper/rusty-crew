@@ -2,6 +2,8 @@ export type ExternalRuntimeCommandName =
   | "help"
   | "commands"
   | "status"
+  | "new"
+  | "restart"
   | "model"
   | "effort"
   | "compact";
@@ -38,6 +40,15 @@ export const EXTERNAL_RUNTIME_COMMAND_DEFINITIONS = Object.freeze([
       "Report controller, binding, thread, active-turn, settings, and token usage state.",
     mutates: false,
     requiredCapabilities: [],
+  },
+  {
+    name: "new",
+    aliases: ["restart"],
+    usage: "/new",
+    description:
+      "Start a fresh native Codex thread while preserving this Crew session and its configured identity.",
+    mutates: true,
+    requiredCapabilities: ["thread/start", "thread/archive"],
   },
   {
     name: "model",

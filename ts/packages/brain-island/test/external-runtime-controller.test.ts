@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { ExternalAgentSessionCreationRequest } from "@rusty-crew/contracts";
+import type {
+  ExternalAgentBinding,
+  ExternalAgentSessionCreationRequest,
+} from "@rusty-crew/contracts";
 import {
   CODEX_APP_SERVER_PROTOCOL,
   CodexAppServerDriver,
@@ -364,10 +368,17 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
         String(params.threadSource),
       );
       this.threads.push(thread);
+      const config = (params.config ?? {}) as Record<string, unknown>;
       this.threadSettings.set(String(thread.id), {
-        model: "gpt-5.4",
-        modelProvider: "openai",
-        effort: null,
+        model: typeof params.model === "string" ? params.model : "gpt-5.4",
+        modelProvider:
+          typeof params.modelProvider === "string"
+            ? params.modelProvider
+            : "openai",
+        effort:
+          typeof config.model_reasoning_effort === "string"
+            ? config.model_reasoning_effort
+            : null,
       });
       if (this.#loseFirstStartResponse) {
         this.#loseFirstStartResponse = false;
@@ -853,7 +864,12 @@ test("profile prompt refresh forks history and preserves Crew identity", async (
 });
 
 test("external commands use native catalogs and settings without creating turns", async () => {
-  const fixture = await externalCreationFixture(false);
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    true,
+  );
   try {
     const created = await fixture.controller.createAgentSession({
       idempotencyKey: "command-session",
@@ -873,6 +889,12 @@ test("external commands use native catalogs and settings without creating turns"
     assert.deepEqual(
       catalog.models[1]?.supportedEfforts.map((effort) => effort.value),
       ["low", "medium"],
+    );
+    assert.ok(
+      catalog.commands.some(
+        (command) =>
+          command.name === "new" && command.aliases.includes("restart"),
+      ),
     );
 
     fixture.transport.emit({
@@ -976,6 +998,130 @@ test("external commands use native catalogs and settings without creating turns"
       idempotencyKey: "command-compact",
     });
     assert.equal(compact.status, "applied");
+    assert.equal(
+      fixture.transport.sent.some(
+        (message) => message.method === "thread/start",
+      ),
+      true,
+      "initial session creation should be the only thread start before /new",
+    );
+    const bindingBeforeRestart =
+      await fixture.bridge.getExternalBinding(bindingId);
+    assert.ok(bindingBeforeRestart);
+    const restart = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/restart",
+      idempotencyKey: "command-restart",
+    });
+    assert.equal(restart.status, "applied", JSON.stringify(restart));
+    assert.equal(restart.command, "restart");
+    const replacement = restart.result.threadReplacement;
+    assert.ok(replacement);
+    assert.equal(replacement.bindingId, bindingId);
+    assert.equal(replacement.previousNativeThreadId, threadId);
+    assert.notEqual(replacement.nativeThreadId, threadId);
+    assert.equal(replacement.previousNativeThreadArchived, true);
+    assert.equal(replacement.settingsPreserved, true);
+    assert.equal(replacement.settings.model, "gpt-5.4-mini");
+    assert.equal(replacement.settings.effort, "medium");
+    assert.equal(replacement.cwd, bindingBeforeRestart.cwd);
+    assert.equal(replacement.label, bindingBeforeRestart.label ?? null);
+    assert.equal(replacement.profileId, fixture.profileId);
+    assert.deepEqual(replacement.taskRef, bindingBeforeRestart.taskRef ?? null);
+    const bindingAfterRestart =
+      await fixture.bridge.getExternalBinding(bindingId);
+    assert.ok(bindingAfterRestart);
+    assert.equal(bindingAfterRestart.sessionId, bindingBeforeRestart.sessionId);
+    assert.equal(bindingAfterRestart.profileId, bindingBeforeRestart.profileId);
+    assert.equal(bindingAfterRestart.cwd, bindingBeforeRestart.cwd);
+    assert.equal(bindingAfterRestart.label, bindingBeforeRestart.label);
+    assert.deepEqual(bindingAfterRestart.taskRef, bindingBeforeRestart.taskRef);
+    assert.equal(
+      bindingAfterRestart.nativeThreadId,
+      replacement.nativeThreadId,
+    );
+    assert.ok(fixture.transport.archivedThreadIds.has(threadId));
+    const replacementNativeThread = fixture.transport.threads.find(
+      (thread) => thread.id === replacement.nativeThreadId,
+    );
+    assert.deepEqual(replacementNativeThread?.turns, []);
+    const replacementStart = fixture.transport.sent
+      .filter((message) => message.method === "thread/start")
+      .at(-1);
+    assert.equal(
+      (replacementStart?.params as Record<string, unknown>).cwd,
+      bindingBeforeRestart.cwd,
+    );
+    assert.equal(
+      (replacementStart?.params as Record<string, unknown>).model,
+      "gpt-5.4-mini",
+    );
+    assert.deepEqual(
+      (replacementStart?.params as Record<string, unknown>).config,
+      { model_reasoning_effort: "medium" },
+    );
+    assert.equal(
+      (replacementStart?.params as Record<string, unknown>)
+        .developerInstructions,
+      "CREATION_PROFILE_SOUL_MARKER",
+    );
+
+    const recoveryIdempotencyKey = "command-restart-after-rebind-crash";
+    const recoveryControlId = `external-command:${createHash("sha256")
+      .update(`${bindingId}\0${recoveryIdempotencyKey}`)
+      .digest("hex")
+      .slice(0, 32)}`;
+    const recoveryThreadId = "created-thread-recovered-after-rebind";
+    fixture.transport.threads.push(
+      fakeCreationThread(
+        recoveryThreadId,
+        bindingAfterRestart.cwd ?? fixture.dataDir,
+        `rusty-crew:command:${recoveryControlId}:replace:${replacement.nativeThreadId}`,
+      ),
+    );
+    fixture.transport.threadSettings.set(recoveryThreadId, {
+      model: "gpt-5.4-mini",
+      modelProvider: "openai",
+      effort: "medium",
+    });
+    await fixture.bridge.bindExternalAgent({
+      binding: {
+        ...bindingAfterRestart,
+        nativeThreadId: recoveryThreadId,
+        updatedAt: new Date().toISOString(),
+      },
+      expectedRevision: bindingAfterRestart.revision,
+    });
+    const recoveredRestart = await fixture.controller.executeCommand({
+      bindingId,
+      commandInput: "/new",
+      idempotencyKey: recoveryIdempotencyKey,
+    });
+    assert.equal(
+      recoveredRestart.status,
+      "applied",
+      JSON.stringify(recoveredRestart),
+    );
+    assert.equal(
+      recoveredRestart.result.threadReplacement?.previousNativeThreadId,
+      replacement.nativeThreadId,
+    );
+    assert.equal(
+      recoveredRestart.result.threadReplacement?.nativeThreadId,
+      recoveryThreadId,
+    );
+    assert.ok(
+      fixture.transport.archivedThreadIds.has(replacement.nativeThreadId),
+    );
+    assert.equal(
+      fixture.transport.archivedThreadIds.has(recoveryThreadId),
+      false,
+      "crash recovery archived the already rebound current thread",
+    );
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(bindingId))?.nativeThreadId,
+      recoveryThreadId,
+    );
     await waitUntil(async () => {
       const events = await fixture.bridge.queryExternalRuntimeEvents({
         runtimeId: fixture.runtimeId,
@@ -1588,6 +1734,69 @@ test("controller isolates stale binding resume failures and repairs degraded rea
   }
 });
 
+test("controller repairs historical profileless binding reads before startup resume", async () => {
+  const fixture = await externalCreationFixture(false);
+  let recoveryController: ServiceExternalRuntimeController | undefined;
+  try {
+    const original = await fixture.controller.createAgentSession({
+      idempotencyKey: "profileless-startup-repair-original",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const nativeThreadId = original.creation.binding.nativeThreadId;
+    assert.equal(typeof nativeThreadId, "string");
+    const originalRevision = original.creation.binding.revision;
+    await fixture.controller.stop();
+
+    const recoveryBridge = new Proxy(fixture.bridge, {
+      get(target, property, receiver) {
+        if (property === "listExternalBindings") {
+          return async () =>
+            (await target.listExternalBindings()).map((binding) =>
+              withoutProfileProvenance(binding),
+            );
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }) as NativeBridgeModule;
+    recoveryController = new ServiceExternalRuntimeController({
+      bridge: recoveryBridge,
+      instanceId: "profileless-startup-repair-controller",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+
+    const recovered = await recoveryController.connect(fixture.runtimeId);
+    assert.deepEqual(recovered.bindingResumeFailures, []);
+    const repaired = await fixture.bridge.getExternalBinding(
+      original.creation.binding.bindingId,
+    );
+    assert.ok(repaired);
+    assert.equal(repaired.profileId, fixture.profileId);
+    assert.equal(repaired.profileRevision, 1);
+    assert.equal(typeof repaired.profilePromptHash, "string");
+    assert.ok(repaired.revision > originalRevision);
+    const resume = fixture.transport.sent
+      .filter((message) => message.method === "thread/resume")
+      .at(-1);
+    assert.equal(
+      (resume?.params as Record<string, unknown>).threadId,
+      nativeThreadId,
+    );
+    assert.equal(
+      (resume?.params as Record<string, unknown>).developerInstructions,
+      "CREATION_PROFILE_SOUL_MARKER",
+    );
+  } finally {
+    await recoveryController?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
 test("controller recovers a lost native thread start response without duplicating the thread", async () => {
   const fixture = await externalCreationFixture(true);
   try {
@@ -2192,6 +2401,7 @@ async function externalCreationFixture(
     operation: "mark_native_starting" | "complete";
     message: string;
   },
+  profilelessBindingReads = false,
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
@@ -2207,6 +2417,13 @@ async function externalCreationFixture(
       ) {
         return async () => {
           throw new Error(bridgeFailure.message);
+        };
+      }
+      if (profilelessBindingReads && property === "getExternalBinding") {
+        return async (bindingId: string) => {
+          const binding = await target.getExternalBinding(bindingId);
+          if (binding === undefined) return undefined;
+          return withoutProfileProvenance(binding);
         };
       }
       if (
@@ -2282,6 +2499,17 @@ async function externalCreationFixture(
       await bridge.shutdownEngine({ engine, drainTimeoutMs: 5_000 });
       rmSync(dataDir, { recursive: true, force: true });
     },
+  };
+}
+
+function withoutProfileProvenance(
+  binding: ExternalAgentBinding,
+): ExternalAgentBinding {
+  return {
+    ...binding,
+    profileId: null,
+    profileRevision: null,
+    profilePromptHash: null,
   };
 }
 

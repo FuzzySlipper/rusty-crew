@@ -175,7 +175,9 @@ export class ExternalRuntimeCommandError extends Error {
       | "external_command_capability_unavailable"
       | "external_command_model_invalid"
       | "external_command_effort_invalid"
-      | "external_command_settings_unavailable",
+      | "external_command_settings_unavailable"
+      | "external_command_thread_busy"
+      | "external_command_restart_failed",
     message: string,
     readonly retryable = false,
   ) {
@@ -738,7 +740,7 @@ export class ServiceExternalRuntimeController {
     const settings = await this.#effectiveThreadSettings(controlled, binding);
     const modelResult = await this.#tryModelCatalog(controlled);
     return {
-      contractVersion: "0.7.0",
+      contractVersion: "0.8.0",
       runtimeId: binding.runtimeId,
       bindingId: binding.bindingId,
       nativeThreadId: binding.nativeThreadId,
@@ -797,7 +799,12 @@ export class ServiceExternalRuntimeController {
     );
     try {
       const outcome = browserSafeNativeValue(
-        await this.#applyThreadCommand(controlled, binding, parsed),
+        await this.#applyThreadCommand(
+          controlled,
+          binding,
+          parsed,
+          receipt.request.controlId,
+        ),
       );
       receipt = await this.#bridge.completeExternalControl({
         controller: this.#controllerContext(controlled),
@@ -1316,26 +1323,36 @@ export class ServiceExternalRuntimeController {
         continue;
       }
       try {
-        const developerInstructions =
-          await this.#developerInstructionsForBinding(binding);
+        const promptContext = await this.#bindingPromptContext(binding);
+        const currentBinding = promptContext.binding;
+        if (typeof currentBinding.nativeThreadId !== "string") {
+          throw new ExternalAgentSessionCreationError(
+            "external_agent_creation_profile_invalid",
+            `external binding ${currentBinding.bindingId} lost its native thread during profile repair`,
+            false,
+          );
+        }
+        const nativeThreadId = currentBinding.nativeThreadId;
         const resumed = await controlled.driver.threadResume({
-          threadId: binding.nativeThreadId,
-          ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
+          threadId: nativeThreadId,
+          ...(typeof currentBinding.cwd === "string"
+            ? { cwd: currentBinding.cwd }
+            : {}),
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           excludeTurns: true,
-          developerInstructions,
+          developerInstructions: promptContext.developerInstructions,
         });
-        controlled.threadSettings.set(binding.nativeThreadId, {
+        controlled.threadSettings.set(nativeThreadId, {
           model: resumed.model,
           modelProvider: resumed.modelProvider,
           reasoning_effort: resumed.reasoningEffort,
-          developer_instructions: developerInstructions,
+          developer_instructions: promptContext.developerInstructions,
         });
-        if (typeof binding.label === "string") {
+        if (typeof currentBinding.label === "string") {
           await controlled.driver.threadSetName({
-            threadId: binding.nativeThreadId,
-            name: binding.label,
+            threadId: nativeThreadId,
+            name: currentBinding.label,
           });
         }
       } catch (error) {
@@ -1352,6 +1369,53 @@ export class ServiceExternalRuntimeController {
   async #developerInstructionsForBinding(
     binding: ExternalAgentBinding,
   ): Promise<string | null> {
+    return (await this.#bindingPromptContext(binding)).developerInstructions;
+  }
+
+  async #bindingPromptContext(binding: ExternalAgentBinding): Promise<{
+    binding: ExternalAgentBinding;
+    developerInstructions: string | null;
+  }> {
+    if (
+      binding.profileId == null &&
+      binding.profileRevision == null &&
+      binding.profilePromptHash == null
+    ) {
+      if (typeof binding.sessionId !== "string") {
+        throw new ExternalAgentSessionCreationError(
+          "external_agent_creation_profile_invalid",
+          `external binding ${binding.bindingId} has no Crew session for profile repair`,
+          false,
+        );
+      }
+      const session = (await this.#bridge.listSessions()).find(
+        (candidate) => candidate.sessionId === binding.sessionId,
+      );
+      if (session === undefined) {
+        throw new ExternalAgentSessionCreationError(
+          "external_agent_creation_profile_invalid",
+          `external binding ${binding.bindingId} Crew session ${binding.sessionId} was not found`,
+          false,
+        );
+      }
+      const profile = await this.#profileDeveloperInstructions(
+        session.profileId,
+      );
+      const repaired = await this.#bridge.bindExternalAgent({
+        binding: {
+          ...binding,
+          profileId: session.profileId,
+          profileRevision: profile.revision,
+          profilePromptHash: profile.promptHash,
+          updatedAt: this.#now().toISOString(),
+        },
+        expectedRevision: binding.revision,
+      });
+      return {
+        binding: repaired,
+        developerInstructions: profile.developerInstructions,
+      };
+    }
     if (
       typeof binding.profileId !== "string" ||
       typeof binding.profileRevision !== "number" ||
@@ -1374,7 +1438,7 @@ export class ServiceExternalRuntimeController {
         false,
       );
     }
-    return profile.developerInstructions;
+    return { binding, developerInstructions: profile.developerInstructions };
   }
 
   async #profileDeveloperInstructions(profileId: string): Promise<{
@@ -1431,6 +1495,7 @@ export class ServiceExternalRuntimeController {
   async #findThreadBySource(
     controlled: ControlledRuntime,
     threadSource: string,
+    match: "exact" | "prefix" = "exact",
   ) {
     let cursor: string | null = null;
     for (let page = 0; page < 100; page += 1) {
@@ -1443,7 +1508,10 @@ export class ServiceExternalRuntimeController {
         useStateDbOnly: true,
       });
       const found = result.data.find(
-        (candidate) => candidate.threadSource === threadSource,
+        (candidate) =>
+          candidate.threadSource === threadSource ||
+          (match === "prefix" &&
+            candidate.threadSource?.startsWith(threadSource)),
       );
       if (found !== undefined) return found;
       cursor = result.nextCursor;
@@ -1768,6 +1836,7 @@ export class ServiceExternalRuntimeController {
     controlled: ControlledRuntime,
     binding: ExternalAgentBinding & { nativeThreadId: string },
     command: ParsedExternalRuntimeCommand,
+    controlId: string,
   ): Promise<{ message: string; result: ExternalRuntimeCommandResultData }> {
     switch (command.command) {
       case "help":
@@ -1797,6 +1866,9 @@ export class ServiceExternalRuntimeController {
           result: { status },
         };
       }
+      case "new":
+      case "restart":
+        return this.#replaceNativeThread(controlled, binding, controlId);
       case "model": {
         const settings = await this.#effectiveThreadSettings(
           controlled,
@@ -1904,6 +1976,227 @@ export class ServiceExternalRuntimeController {
         };
       }
     }
+  }
+
+  async #replaceNativeThread(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding & { nativeThreadId: string },
+    controlId: string,
+  ): Promise<{ message: string; result: ExternalRuntimeCommandResultData }> {
+    try {
+      await this.#assertThreadHasNoCrewWork(
+        binding.runtimeId,
+        binding.nativeThreadId,
+        [binding],
+      );
+    } catch (error) {
+      throw new ExternalRuntimeCommandError(
+        "external_command_thread_busy",
+        error instanceof Error ? error.message : String(error),
+        true,
+      );
+    }
+
+    let promptContext: {
+      binding: ExternalAgentBinding;
+      developerInstructions: string | null;
+    };
+    try {
+      promptContext = await this.#bindingPromptContext(binding);
+    } catch (error) {
+      throw new ExternalRuntimeCommandError(
+        "external_command_restart_failed",
+        error instanceof Error ? error.message : String(error),
+        true,
+      );
+    }
+    const currentBinding = promptContext.binding;
+    if (typeof currentBinding.nativeThreadId !== "string") {
+      throw new ExternalRuntimeCommandError(
+        "external_command_restart_failed",
+        `external binding ${currentBinding.bindingId} lost its native thread during profile repair`,
+        true,
+      );
+    }
+    const currentNativeThreadId = currentBinding.nativeThreadId;
+    let previousNativeThreadId = currentNativeThreadId;
+    const cwd = currentBinding.cwd ?? "/home";
+    const developerInstructions = promptContext.developerInstructions;
+    const previousSettings =
+      controlled.threadSettings.get(previousNativeThreadId) ??
+      (await this.#effectiveThreadSettings(controlled, {
+        ...currentBinding,
+        nativeThreadId: currentNativeThreadId,
+      }).catch(() => undefined));
+    const threadSourcePrefix = `rusty-crew:command:${controlId}:replace:`;
+    const threadSource = `${threadSourcePrefix}${previousNativeThreadId}`;
+    let nativeThreadId: string | undefined;
+    let nextSettings: ControlledThreadSettings | undefined;
+    let rebound: ExternalAgentBinding | undefined;
+    let bindingAlreadyRebound = false;
+    let candidateMayBeDeleted = false;
+
+    try {
+      const recovered = await this.#findThreadBySource(
+        controlled,
+        threadSourcePrefix,
+        "prefix",
+      );
+      if (recovered === undefined) {
+        const started = await controlled.driver.threadStart({
+          ...(previousSettings === undefined
+            ? {}
+            : {
+                model: previousSettings.model,
+                modelProvider: previousSettings.modelProvider,
+                ...(previousSettings.reasoning_effort === null
+                  ? {}
+                  : {
+                      config: {
+                        model_reasoning_effort:
+                          previousSettings.reasoning_effort,
+                      },
+                    }),
+              }),
+          cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          ephemeral: false,
+          environments: [{ environmentId: "local", cwd }],
+          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+          threadSource,
+          developerInstructions,
+        });
+        nativeThreadId = started.thread.id;
+        candidateMayBeDeleted = true;
+        nextSettings = {
+          model: started.model,
+          modelProvider: started.modelProvider,
+          reasoning_effort: started.reasoningEffort,
+          developer_instructions: developerInstructions,
+        };
+      } else {
+        if (
+          typeof recovered.threadSource !== "string" ||
+          !recovered.threadSource.startsWith(threadSourcePrefix)
+        ) {
+          throw new Error(
+            `recovered Codex thread ${recovered.id} has invalid replacement provenance`,
+          );
+        }
+        previousNativeThreadId = recovered.threadSource.slice(
+          threadSourcePrefix.length,
+        );
+        if (previousNativeThreadId.length === 0) {
+          throw new Error(
+            `recovered Codex thread ${recovered.id} has no replaced thread identity`,
+          );
+        }
+        nativeThreadId = recovered.id;
+        bindingAlreadyRebound = currentBinding.nativeThreadId === recovered.id;
+        candidateMayBeDeleted = !bindingAlreadyRebound;
+        const resumed = await controlled.driver.threadResume({
+          threadId: recovered.id,
+          cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          excludeTurns: true,
+          developerInstructions,
+        });
+        nextSettings = threadSettingsFromResume(resumed);
+      }
+
+      if (
+        previousSettings !== undefined &&
+        nextSettings.modelProvider !== previousSettings.modelProvider
+      ) {
+        throw new Error(
+          `fresh Codex thread selected provider ${nextSettings.modelProvider}; expected ${previousSettings.modelProvider}`,
+        );
+      }
+      if (
+        previousSettings !== undefined &&
+        (nextSettings.model !== previousSettings.model ||
+          nextSettings.reasoning_effort !== previousSettings.reasoning_effort)
+      ) {
+        await controlled.driver.threadSettingsUpdate({
+          threadId: nativeThreadId,
+          model: previousSettings.model,
+          effort: previousSettings.reasoning_effort,
+        });
+        nextSettings = await this.#refreshThreadSettings(
+          controlled,
+          nativeThreadId,
+          {
+            model: previousSettings.model,
+            effort: previousSettings.reasoning_effort,
+          },
+        );
+      }
+      if (typeof currentBinding.label === "string") {
+        await controlled.driver.threadSetName({
+          threadId: nativeThreadId,
+          name: currentBinding.label,
+        });
+      }
+      if (bindingAlreadyRebound) {
+        rebound = currentBinding;
+      } else {
+        rebound = await this.#bridge.bindExternalAgent({
+          binding: {
+            ...currentBinding,
+            nativeThreadId,
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: currentBinding.revision,
+        });
+        candidateMayBeDeleted = false;
+      }
+    } catch (error) {
+      if (nativeThreadId !== undefined && candidateMayBeDeleted) {
+        await controlled.driver
+          .threadDelete({ threadId: nativeThreadId })
+          .catch(() => undefined);
+      }
+      throw new ExternalRuntimeCommandError(
+        "external_command_restart_failed",
+        error instanceof Error ? error.message : String(error),
+        true,
+      );
+    }
+
+    controlled.threadSettings.delete(previousNativeThreadId);
+    controlled.threadUsage.delete(previousNativeThreadId);
+    controlled.threadSettings.set(nativeThreadId, nextSettings);
+    const previousNativeThreadArchived =
+      previousNativeThreadId === nativeThreadId
+        ? false
+        : await controlled.driver
+            .threadArchive({ threadId: previousNativeThreadId })
+            .then(() => {
+              controlled.archivedThreadIds.add(previousNativeThreadId);
+              return true;
+            })
+            .catch(() => false);
+    return {
+      message: `Started a fresh Codex thread for ${currentBinding.label ?? currentBinding.bindingId}.`,
+      result: {
+        threadReplacement: {
+          bindingId: rebound.bindingId,
+          bindingRevision: rebound.revision,
+          sessionId: rebound.sessionId ?? null,
+          profileId: rebound.profileId ?? null,
+          cwd,
+          label: rebound.label ?? null,
+          taskRef: rebound.taskRef ?? null,
+          previousNativeThreadId,
+          nativeThreadId,
+          previousNativeThreadArchived,
+          settingsPreserved: previousSettings !== undefined,
+          settings: projectThreadSettings(nextSettings),
+        },
+      },
+    };
   }
 
   async #refreshThreadSettings(
@@ -2040,6 +2333,7 @@ export class ServiceExternalRuntimeController {
           parseExternalRuntimeCommand(
             `/${command}${argument === null ? "" : ` ${argument}`}`,
           ),
+          request.controlId,
         );
       }
       case "reconcile_runtime":

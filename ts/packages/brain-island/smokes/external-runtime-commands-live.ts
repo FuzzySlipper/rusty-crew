@@ -47,6 +47,11 @@ const initialCatalog = await apiGet<CommandCatalog>(
 );
 assert.ok(initialCatalog.commands.some((command) => command.name === "status"));
 assert.ok(
+  initialCatalog.commands.some(
+    (command) => command.name === "new" && command.aliases.includes("restart"),
+  ),
+);
+assert.ok(
   initialCatalog.models.length > 0,
   "live model/list returned no models",
 );
@@ -161,11 +166,44 @@ assert.equal(
 );
 
 await restoreSettings(binding.bindingId, originalSettings, runId);
+const bindingBeforeRestart = await apiGet<{
+  bindings: Array<{
+    bindingId: string;
+    nativeThreadId?: string;
+    sessionId?: string;
+    profileId?: string;
+    cwd?: string;
+    label?: string;
+    taskRef?: unknown;
+  }>;
+}>("/v1/external-bindings").then((result) =>
+  result.bindings.find(
+    (candidate) => candidate.bindingId === binding.bindingId,
+  ),
+);
+assert.ok(bindingBeforeRestart?.nativeThreadId);
+const restarted = await command(binding.bindingId, "/new", `${runId}:new`);
+assert.equal(restarted.status, "applied");
+const replacement = restarted.result.threadReplacement;
+assert.ok(replacement);
+assert.equal(replacement.bindingId, binding.bindingId);
+assert.equal(replacement.previousNativeThreadId, binding.nativeThreadId);
+assert.notEqual(replacement.nativeThreadId, binding.nativeThreadId);
+assert.equal(replacement.cwd, bindingBeforeRestart.cwd);
+assert.equal(replacement.label, bindingBeforeRestart.label ?? null);
+assert.deepEqual(replacement.taskRef, bindingBeforeRestart.taskRef ?? null);
+const postRestartTurn = await deliverLiveTurn(
+  binding.bindingId,
+  `${runId}:post-restart-turn`,
+);
+assert.equal(postRestartTurn.phase, "completed");
+assert.equal(postRestartTurn.nativeThreadId, replacement.nativeThreadId);
 const events = await waitForEvents(binding.runtimeId, eventCursor, [
   `${status.commandId}:command_started`,
   `${status.commandId}:command_completed`,
   `${invalidEffort.commandId}:command_failed`,
   `${compact.commandId}:command_completed`,
+  `${restarted.commandId}:command_completed`,
 ]);
 assert.ok(
   events.some(
@@ -198,6 +236,9 @@ console.log(
     selectedSettingsTurnId: liveTurn.nativeTurnId,
     statusCommandId: status.commandId,
     compactCommandId: compact.commandId,
+    restartCommandId: restarted.commandId,
+    replacementNativeThreadId: replacement.nativeThreadId,
+    postRestartTurnId: postRestartTurn.nativeTurnId,
     replayedEvents: events.length,
     nativeTurnsBeforeStatus: before.thread.turns.length,
     nativeTurnsAfterStatus: afterStatus.thread.turns.length,

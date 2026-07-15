@@ -64,6 +64,22 @@ fn interrupt_control_uses_only_rust_validated_turn_identity() {
         )
         .unwrap();
 
+    let restart_while_active = ExternalControlRequest {
+        control_id: ExternalControlId::new("restart-active-thread"),
+        idempotency_key: "restart-active-thread".into(),
+        binding_id: ExternalBindingId::new("codex-binding"),
+        expected_binding_revision: 1,
+        expected_native_turn_id: None,
+        kind: ExternalControlKind::ExecuteThreadCommand,
+        payload: json!({"command": "new", "argument": null}),
+        requested_at: "2026-06-19T00:00:02Z".into(),
+    };
+    let restart_error = engine
+        .submit_external_control(restart_while_active)
+        .unwrap_err();
+    assert_eq!(restart_error.kind, CoreErrorKind::ActionRejected);
+    assert!(restart_error.message.contains("idle binding"));
+
     let request = ExternalControlRequest {
         control_id: ExternalControlId::new("interrupt-current-turn"),
         idempotency_key: "interrupt-current-turn".into(),

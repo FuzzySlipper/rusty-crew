@@ -719,12 +719,12 @@ impl CoreEngine {
         }
         if (request.kind == ExternalControlKind::CompactThread
             || (request.kind == ExternalControlKind::ExecuteThreadCommand
-                && external_thread_command_name(&request.payload) == Some("compact")))
+                && external_thread_command_requires_idle(&request.payload)))
             && active_turn.is_some()
         {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
-                "external thread compaction requires an idle binding",
+                "external thread command requires an idle binding",
             ));
         }
         if let Some(expected_native_turn_id) = &request.expected_native_turn_id {
@@ -1375,6 +1375,13 @@ fn external_thread_command_name(payload: &serde_json::Value) -> Option<&str> {
     payload.get("command")?.as_str()
 }
 
+fn external_thread_command_requires_idle(payload: &serde_json::Value) -> bool {
+    matches!(
+        external_thread_command_name(payload),
+        Some("compact" | "new" | "restart")
+    )
+}
+
 fn validate_external_control_payload(request: &ExternalControlRequest) -> CoreResult<()> {
     if request.kind != ExternalControlKind::InterruptTurn {
         return Ok(());
@@ -1421,7 +1428,7 @@ fn validate_external_thread_command(payload: &serde_json::Value) -> CoreResult<(
         })?;
     if !matches!(
         command,
-        "help" | "commands" | "status" | "model" | "effort" | "compact"
+        "help" | "commands" | "status" | "new" | "restart" | "model" | "effort" | "compact"
     ) {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,

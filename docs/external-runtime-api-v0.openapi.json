@@ -5012,7 +5012,49 @@
               "$ref": "#/components/schemas/ExternalRuntimeReasoningEffortOption"
             }
           },
+          "threadReplacement": {
+            "$ref": "#/components/schemas/ExternalRuntimeThreadReplacementResult"
+          },
           "nativeResult": true
+        },
+        "additionalProperties": false
+      },
+      "ExternalRuntimeThreadReplacementResult": {
+        "type": "object",
+        "required": [
+          "bindingId",
+          "bindingRevision",
+          "sessionId",
+          "profileId",
+          "cwd",
+          "label",
+          "taskRef",
+          "previousNativeThreadId",
+          "nativeThreadId",
+          "previousNativeThreadArchived",
+          "settingsPreserved",
+          "settings"
+        ],
+        "properties": {
+          "bindingId": { "type": "string" },
+          "bindingRevision": { "type": "integer", "minimum": 0 },
+          "sessionId": { "type": ["string", "null"] },
+          "profileId": { "type": ["string", "null"] },
+          "cwd": { "type": "string" },
+          "label": { "type": ["string", "null"] },
+          "taskRef": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DenRuntimeReference" },
+              { "type": "null" }
+            ]
+          },
+          "previousNativeThreadId": { "type": "string" },
+          "nativeThreadId": { "type": "string" },
+          "previousNativeThreadArchived": { "type": "boolean" },
+          "settingsPreserved": { "type": "boolean" },
+          "settings": {
+            "$ref": "#/components/schemas/ExternalThreadSettingsProjection"
+          }
         },
         "additionalProperties": false
       },

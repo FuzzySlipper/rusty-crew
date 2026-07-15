@@ -1,4 +1,5 @@
 import type {
+  DenRuntimeReference,
   ExternalAgentSessionCreationRecord,
   ExternalControlReceipt,
   ExternalRuntimeRegistration,
@@ -215,7 +216,23 @@ export interface ExternalRuntimeCommandResultData {
   readonly settings?: ExternalThreadSettingsProjection;
   readonly models?: readonly ExternalRuntimeModelOption[];
   readonly validEfforts?: readonly ExternalRuntimeReasoningEffortOption[];
+  readonly threadReplacement?: ExternalRuntimeThreadReplacementResult;
   readonly nativeResult?: unknown;
+}
+
+export interface ExternalRuntimeThreadReplacementResult {
+  readonly bindingId: string;
+  readonly bindingRevision: number;
+  readonly sessionId: string | null;
+  readonly profileId: string | null;
+  readonly cwd: string;
+  readonly label: string | null;
+  readonly taskRef: DenRuntimeReference | null;
+  readonly previousNativeThreadId: string;
+  readonly nativeThreadId: string;
+  readonly previousNativeThreadArchived: boolean;
+  readonly settingsPreserved: boolean;
+  readonly settings: ExternalThreadSettingsProjection;
 }
 
 export interface ExternalRuntimeCommandExecutionResult {
@@ -1188,7 +1205,49 @@ function routeSchemas(): Record<string, JsonSchema> {
             $ref: "#/components/schemas/ExternalRuntimeReasoningEffortOption",
           },
         },
+        threadReplacement: {
+          $ref: "#/components/schemas/ExternalRuntimeThreadReplacementResult",
+        },
         nativeResult: true,
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeThreadReplacementResult: {
+      type: "object",
+      required: [
+        "bindingId",
+        "bindingRevision",
+        "sessionId",
+        "profileId",
+        "cwd",
+        "label",
+        "taskRef",
+        "previousNativeThreadId",
+        "nativeThreadId",
+        "previousNativeThreadArchived",
+        "settingsPreserved",
+        "settings",
+      ],
+      properties: {
+        bindingId: { type: "string" },
+        bindingRevision: { type: "integer", minimum: 0 },
+        sessionId: nullableString,
+        profileId: nullableString,
+        cwd: { type: "string" },
+        label: nullableString,
+        taskRef: {
+          anyOf: [
+            { $ref: "#/components/schemas/DenRuntimeReference" },
+            { type: "null" },
+          ],
+        },
+        previousNativeThreadId: { type: "string" },
+        nativeThreadId: { type: "string" },
+        previousNativeThreadArchived: { type: "boolean" },
+        settingsPreserved: { type: "boolean" },
+        settings: {
+          $ref: "#/components/schemas/ExternalThreadSettingsProjection",
+        },
       },
       additionalProperties: false,
     },
