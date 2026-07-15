@@ -897,19 +897,26 @@ impl CoreEngine {
 }
 
 fn routed_agent_message_text(request: &AgentMessageDeliveryRequest) -> String {
+    let from_session_id = request
+        .from_session_id
+        .as_ref()
+        .map(|value| value.0.as_str());
+    let reply_instruction = match from_session_id {
+        Some(_) => format!(
+            "reply_instruction: call rusty_crew.reply_agent_message with messageId={} and your reply body",
+            request.message_id
+        ),
+        None => "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)".to_string(),
+    };
     format!(
-        "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\nfrom_session_id: {}\ncorrelation_id: {}\ncreated_at: {}\nexpires_at: {}\nreply_instruction: call rusty_crew.reply_agent_message with messageId={} and your reply body\n\n{}",
+        "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\nfrom_session_id: {}\ncorrelation_id: {}\ncreated_at: {}\nexpires_at: {}\n{}\n\n{}",
         request.message_id,
         request.from_agent_id.0,
-        request
-            .from_session_id
-            .as_ref()
-            .map(|value| value.0.as_str())
-            .unwrap_or("none"),
+        from_session_id.unwrap_or("none"),
         request.correlation_id.as_deref().unwrap_or("none"),
         request.created_at,
         request.expires_at,
-        request.message_id,
+        reply_instruction,
         request.body
     )
 }
@@ -936,4 +943,50 @@ fn validate_agent_message_bounds(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod routed_agent_message_text_tests {
+    use super::*;
+    use rusty_crew_core_protocol::{AgentId, AgentMessageDeliveryId, SessionId};
+
+    #[test]
+    fn agent_sender_receives_reply_by_message_instruction() {
+        let text = routed_agent_message_text(&request(Some("sender-session")));
+
+        assert!(text.contains("from_session_id: sender-session"));
+        assert!(text.contains(
+            "reply_instruction: call rusty_crew.reply_agent_message with messageId=message-1 and your reply body"
+        ));
+    }
+
+    #[test]
+    fn operator_sender_does_not_receive_impossible_reply_instruction() {
+        let text = routed_agent_message_text(&request(None));
+
+        assert!(text.contains("from_session_id: none"));
+        assert!(text.contains(
+            "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)"
+        ));
+        assert!(!text.contains("call rusty_crew.reply_agent_message"));
+    }
+
+    fn request(from_session_id: Option<&str>) -> AgentMessageDeliveryRequest {
+        AgentMessageDeliveryRequest {
+            delivery_id: AgentMessageDeliveryId::new("delivery-1"),
+            idempotency_key: "delivery-1".into(),
+            message_id: "message-1".into(),
+            from_agent_id: AgentId::new("sender"),
+            from_session_id: from_session_id.map(SessionId::new),
+            to_agent_id: AgentId::new("recipient"),
+            to_session_id: Some(SessionId::new("recipient-session")),
+            reply_to_message_id: None,
+            body: "inspect this".into(),
+            collaboration_mode: None,
+            correlation_id: Some("correlation-1".into()),
+            require_wake: true,
+            created_at: "2026-07-15T00:00:00Z".into(),
+            expires_at: "2026-07-15T00:10:00Z".into(),
+        }
+    }
 }

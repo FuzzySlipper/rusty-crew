@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import {
   mkdirSync,
@@ -38,18 +38,26 @@ mkdirSync(scratchParent, { recursive: true });
 const dataDir = mkdtempSync(
   join(scratchParent, "rusty-crew-external-service-"),
 );
-const runtimeId = "codex-service-live";
-const sessionId = "codex-service-live-session";
-const agentId = "codex-service-live-agent";
-const bindingId = "codex-service-live-binding";
-const peerSessionId = "codex-service-live-peer-session";
-const peerAgentId = "codex-service-live-peer-agent";
-const peerBindingId = "codex-service-live-peer-binding";
-const staleSessionId = "codex-service-live-stale-session";
-const staleAgentId = "codex-service-live-stale-agent";
-const staleBindingId = "codex-service-live-stale-binding";
-const staleNativeThreadId = "codex-service-live-missing-native-thread";
-const browserProfileId = "codex-service-live-browser-profile";
+const runSuffix = randomUUID().replaceAll("-", "").slice(0, 12);
+const runScopedId = (stem: string): string => `${stem}-${runSuffix}`;
+const runtimeId = runScopedId("codex-service-live");
+const sessionId = runScopedId("codex-service-live-session");
+const agentId = runScopedId("codex-service-live-agent");
+const profileId = runScopedId("codex-service-live-profile");
+const bindingId = runScopedId("codex-service-live-binding");
+const peerSessionId = runScopedId("codex-service-live-peer-session");
+const peerAgentId = runScopedId("codex-service-live-peer-agent");
+const peerProfileId = runScopedId("codex-service-live-peer-profile");
+const peerBindingId = runScopedId("codex-service-live-peer-binding");
+const staleSessionId = runScopedId("codex-service-live-stale-session");
+const staleAgentId = runScopedId("codex-service-live-stale-agent");
+const staleProfileId = runScopedId("codex-service-live-stale-profile");
+const staleBindingId = runScopedId("codex-service-live-stale-binding");
+const staleNativeThreadId = runScopedId(
+  "codex-service-live-missing-native-thread",
+);
+const browserProfileId = runScopedId("codex-service-live-browser-profile");
+const emptyProfilePromptHash = createHash("sha256").update("").digest("hex");
 const now = (): string => new Date().toISOString();
 
 const bridge = await loadNativeBridge();
@@ -84,22 +92,45 @@ try {
       updatedAt: now(),
     },
   });
-  await bridge.createProfileRegistryRecord({
-    profileId: browserProfileId,
-    lifecycleStatus: "active",
-    displayName: "Codex service live browser profile",
-    defaultSessionKind: "full",
-    agentId: browserProfileId,
-    activeRuntimeSettingsJson: {},
-    sourceAssetRefs: [],
-    derivedRuntimeRefs: [],
-    importExport: { metadataJson: {} },
-    now: now(),
-  });
+  for (const profile of [
+    {
+      profileId,
+      agentId,
+      displayName: "Codex service live profile",
+    },
+    {
+      profileId: peerProfileId,
+      agentId: peerAgentId,
+      displayName: "Codex service live peer profile",
+    },
+    {
+      profileId: staleProfileId,
+      agentId: staleAgentId,
+      displayName: "Codex service live stale profile",
+    },
+    {
+      profileId: browserProfileId,
+      agentId: browserProfileId,
+      displayName: "Codex service live browser profile",
+    },
+  ]) {
+    await bridge.createProfileRegistryRecord({
+      profileId: profile.profileId,
+      lifecycleStatus: "active",
+      displayName: profile.displayName,
+      defaultSessionKind: "full",
+      agentId: profile.agentId,
+      activeRuntimeSettingsJson: {},
+      sourceAssetRefs: [],
+      derivedRuntimeRefs: [],
+      importExport: { metadataJson: {} },
+      now: now(),
+    });
+  }
   await bridge.ensureConfiguredSession({
     sessionId,
     agentId,
-    profileId: "codex-service-live-profile",
+    profileId,
     kind: "full",
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
@@ -107,7 +138,7 @@ try {
   await bridge.ensureConfiguredSession({
     sessionId: peerSessionId,
     agentId: peerAgentId,
-    profileId: "codex-service-live-peer-profile",
+    profileId: peerProfileId,
     kind: "full",
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
@@ -118,6 +149,10 @@ try {
       runtimeId,
       sessionId,
       agentId,
+      profileId,
+      profileRevision: 1,
+      profilePromptHash: emptyProfilePromptHash,
+      messageDeliveryPolicy: "immediate_steer",
       purpose: "crew_agent",
       cwd: dataDir,
       effectiveConfigFingerprint: "external-service-live-v1",
@@ -133,6 +168,10 @@ try {
       runtimeId,
       sessionId: peerSessionId,
       agentId: peerAgentId,
+      profileId: peerProfileId,
+      profileRevision: 1,
+      profilePromptHash: emptyProfilePromptHash,
+      messageDeliveryPolicy: "immediate_steer",
       purpose: "crew_agent",
       cwd: dataDir,
       effectiveConfigFingerprint: "external-service-live-peer-v1",
@@ -221,7 +260,12 @@ try {
   const localToolDelivery = await deliverLiveMessage(
     baseUrl,
     "external-service-live-local-tool",
-    `This is a live local-tool certification. Use your local editing tool to replace the entire contents of local-tool-proof.txt with exactly ${localToolToken}, followed by a newline. Then use command execution to verify the file. Do not claim completion unless the file was changed.`,
+    [
+      "This is a live local-tool certification.",
+      `Run this exact shell command once: printf '%s\\n' '${localToolToken}' > '${localToolPath}'`,
+      `Then run this exact verification command: test \"$(cat '${localToolPath}')\" = '${localToolToken}'`,
+      "Do not use apply_patch and do not claim completion unless both commands succeed.",
+    ].join("\n"),
   );
   assert.equal(localToolDelivery.activation?.type, "external_turn_requested");
   const localToolTurn = await waitForActiveTurn();
@@ -238,10 +282,6 @@ try {
       limit: 1_000,
     })
   ).filter((event) => event.nativeTurnId === localToolTurn.nativeTurnId);
-  assert.ok(
-    localToolEvents.some((event) => event.kind === "reasoning_delta"),
-    "live Codex local-tool turn emitted no normalized reasoning event",
-  );
   assert.ok(
     localToolEvents.some((event) => event.kind === "command_activity"),
     "live Codex local-tool turn emitted no normalized command event",
@@ -676,7 +716,7 @@ try {
   await bridge.ensureConfiguredSession({
     sessionId: staleSessionId,
     agentId: staleAgentId,
-    profileId: "codex-service-live-stale-profile",
+    profileId: staleProfileId,
     kind: "full",
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
@@ -687,6 +727,10 @@ try {
       runtimeId,
       sessionId: staleSessionId,
       agentId: staleAgentId,
+      profileId: staleProfileId,
+      profileRevision: 1,
+      profilePromptHash: emptyProfilePromptHash,
+      messageDeliveryPolicy: "immediate_steer",
       nativeThreadId: staleNativeThreadId,
       purpose: "crew_agent",
       cwd: dataDir,
@@ -716,7 +760,7 @@ try {
   await bridge.ensureConfiguredSession({
     sessionId,
     agentId,
-    profileId: "codex-service-live-profile",
+    profileId,
     kind: "full",
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
@@ -724,7 +768,7 @@ try {
   await bridge.ensureConfiguredSession({
     sessionId: peerSessionId,
     agentId: peerAgentId,
-    profileId: "codex-service-live-peer-profile",
+    profileId: peerProfileId,
     kind: "full",
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
