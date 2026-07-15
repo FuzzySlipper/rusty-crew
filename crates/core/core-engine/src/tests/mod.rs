@@ -40,6 +40,7 @@ mod delegation_fanout;
 mod delegation_lifecycle;
 mod external_runtime;
 mod external_runtime_certification;
+mod external_runtime_controls;
 mod external_serial_inbox;
 mod profile_admin;
 mod restart_hydration;

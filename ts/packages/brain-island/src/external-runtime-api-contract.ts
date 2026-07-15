@@ -985,7 +985,10 @@ function routeSchemas(): Record<string, JsonSchema> {
         expectedBindingRevision: { type: "integer", minimum: 0 },
         expectedNativeTurnId: { type: "string" },
         kind: { $ref: "#/components/schemas/ExternalControlKind" },
-        payload: true,
+        payload: {
+          description:
+            "Operation-specific payload. interrupt_turn requires an empty object; Crew derives native thread and turn identity from Rust-validated state.",
+        },
       },
       additionalProperties: false,
     },

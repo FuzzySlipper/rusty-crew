@@ -641,6 +641,7 @@ impl CoreEngine {
         &self,
         request: ExternalControlRequest,
     ) -> CoreResult<ExternalControlReceipt> {
+        validate_external_control_payload(&request)?;
         let mut request_fingerprint_input = serde_json::json!({
             "bindingId": request.binding_id,
             "expectedNativeTurnId": request.expected_native_turn_id,
@@ -1372,6 +1373,25 @@ fn hex_sha256(bytes: &[u8]) -> String {
 
 fn external_thread_command_name(payload: &serde_json::Value) -> Option<&str> {
     payload.get("command")?.as_str()
+}
+
+fn validate_external_control_payload(request: &ExternalControlRequest) -> CoreResult<()> {
+    if request.kind != ExternalControlKind::InterruptTurn {
+        return Ok(());
+    }
+    let payload = request.payload.as_object().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external interrupt payload must be an object",
+        )
+    })?;
+    if !payload.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external interrupt payload must be empty; Rust-owned binding and turn identity determine native interrupt parameters",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_external_thread_command(payload: &serde_json::Value) -> CoreResult<()> {

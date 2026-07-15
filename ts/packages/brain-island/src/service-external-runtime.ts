@@ -2016,11 +2016,7 @@ export class ServiceExternalRuntimeController {
           request.payload as Parameters<CodexAppServerDriver["turnSteer"]>[0],
         );
       case "interrupt_turn":
-        return controlled.driver.turnInterrupt(
-          request.payload as Parameters<
-            CodexAppServerDriver["turnInterrupt"]
-          >[0],
-        );
+        return this.#interruptTurn(controlled, binding, request);
       case "compact_thread":
         return controlled.driver.compactThread(
           request.payload as Parameters<
@@ -2071,6 +2067,38 @@ export class ServiceExternalRuntimeController {
           "resolve_interaction uses the typed interaction resolution operation",
         );
     }
+  }
+
+  async #interruptTurn(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding,
+    request: ExternalControlRequest,
+  ): Promise<{
+    readonly interrupted: true;
+    readonly nativeThreadId: string;
+    readonly nativeTurnId: string;
+    readonly nativeResult: unknown;
+  }> {
+    if (typeof binding.nativeThreadId !== "string") {
+      throw new Error(
+        "external interrupt requires a binding with a native thread",
+      );
+    }
+    if (typeof request.expectedNativeTurnId !== "string") {
+      throw new Error(
+        "external interrupt requires a Rust-validated expected native turn",
+      );
+    }
+    const nativeResult = await controlled.driver.turnInterrupt({
+      threadId: binding.nativeThreadId,
+      turnId: request.expectedNativeTurnId,
+    });
+    return {
+      interrupted: true,
+      nativeThreadId: binding.nativeThreadId,
+      nativeTurnId: request.expectedNativeTurnId,
+      nativeResult,
+    };
   }
 
   #authority(controlled: ControlledRuntime): CodexControllerAuthority {

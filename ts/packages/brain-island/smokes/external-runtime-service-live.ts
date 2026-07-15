@@ -702,12 +702,15 @@ try {
   const interruptResponse = await postControl(baseUrl, {
     kind: "interrupt_turn",
     expectedNativeTurnId: interruptTurn.nativeTurnId,
-    payload: {
-      threadId: interruptTurn.nativeThreadId,
-      turnId: interruptTurn.nativeTurnId,
-    },
+    payload: {},
   });
   assert.equal(interruptResponse.status, "applied");
+  assert.deepEqual(interruptResponse.outcome, {
+    interrupted: true,
+    nativeThreadId: interruptTurn.nativeThreadId,
+    nativeTurnId: interruptTurn.nativeTurnId,
+    nativeResult: {},
+  });
   const interrupted = await waitForTerminalEvent(interruptTurn.nativeTurnId);
   assert.equal(interrupted.payload.nativeMethod, "turn/completed");
   assert.equal(interrupted.payload.status, "interrupted");

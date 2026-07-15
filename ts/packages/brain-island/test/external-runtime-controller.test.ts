@@ -91,6 +91,26 @@ class FakeTransport implements CodexJsonRpcTransport {
         },
       });
     }
+    if (parsed.method === "turn/interrupt") {
+      const params = parsed.params as Record<string, unknown>;
+      this.emit({ id: parsed.id, result: {} });
+      this.emit({
+        method: "turn/completed",
+        params: {
+          threadId: params.threadId,
+          turn: {
+            id: params.turnId,
+            items: [],
+            itemsView: "full",
+            status: "interrupted",
+            error: null,
+            startedAt: 1,
+            completedAt: 2,
+            durationMs: 1_000,
+          },
+        },
+      });
+    }
     if (parsed.method === "thread/resume") {
       this.emit({
         id: parsed.id,
@@ -1939,6 +1959,38 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
           (turn) => turn.nativeTurnId === "native-turn-2",
         ),
       "default turn activation",
+    );
+    const activeBinding = await bridge.getExternalBinding(
+      "interaction-binding",
+    );
+    assert.ok(activeBinding);
+    const interruptReceipt = await controller.executeControl({
+      controlId: "interaction-interrupt",
+      idempotencyKey: "interaction-interrupt",
+      bindingId: activeBinding.bindingId,
+      expectedBindingRevision: activeBinding.revision,
+      expectedNativeTurnId: "native-turn-2",
+      kind: "interrupt_turn",
+      payload: {},
+      requestedAt: now(),
+    });
+    assert.equal(interruptReceipt.status, "applied");
+    assert.deepEqual(interruptReceipt.outcome, {
+      interrupted: true,
+      nativeThreadId: "native-thread-1",
+      nativeTurnId: "native-turn-2",
+      nativeResult: {},
+    });
+    const interruptRequest = transport.sent.find(
+      (message) => message.method === "turn/interrupt",
+    );
+    assert.deepEqual(interruptRequest?.params, {
+      threadId: "native-thread-1",
+      turnId: "native-turn-2",
+    });
+    await waitUntil(
+      async () => (await bridge.listActiveExternalTurns()).length === 0,
+      "interrupted turn completion",
     );
     const turnStarts = transport.sent.filter(
       (message) => message.method === "turn/start",
