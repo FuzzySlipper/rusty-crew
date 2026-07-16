@@ -1736,6 +1736,8 @@ export interface NativeDenProductIngressPolicyPlan {
 export interface NativeCreateProfileRequest {
   profileId: string;
   displayName?: string;
+  soulMarkdown?: string;
+  memoryMarkdown?: string;
   agentId?: string;
   sessionId?: string;
   implementationId?: string;

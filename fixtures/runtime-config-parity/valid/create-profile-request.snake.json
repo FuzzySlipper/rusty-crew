@@ -1,6 +1,8 @@
 {
   "profile_id": "parity-created",
   "display_name": "Parity Created",
+  "soul_markdown": "# Parity soul\n\nPreserve this prompt exactly.\n",
+  "memory_markdown": "# Parity memory\n",
   "agent_id": "parity-created-agent",
   "session_id": "parity-created-session",
   "implementation_id": "parity-created-brain",

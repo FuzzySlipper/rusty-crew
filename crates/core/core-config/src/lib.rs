@@ -393,6 +393,8 @@ pub enum ReloadMcpControlActionKind {
 pub struct CreateProfileRequest {
     pub profile_id: String,
     pub display_name: Option<String>,
+    pub soul_markdown: Option<String>,
+    pub memory_markdown: Option<String>,
     pub agent_id: Option<String>,
     pub session_id: Option<String>,
     pub implementation_id: Option<String>,
@@ -1613,8 +1615,8 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         default_session_kind: Some(runtime_session.kind.clone()),
         agent_id: Some(runtime_session.agent_id.clone()),
         owner_id: runtime_session.owner_id.clone(),
-        prompt_soul_markdown: None,
-        prompt_memory_markdown: None,
+        prompt_soul_markdown: input.request.soul_markdown.clone(),
+        prompt_memory_markdown: input.request.memory_markdown.clone(),
         active_runtime_settings_json: create_profile_runtime_settings_json(
             &provider_alias,
             &brain,
@@ -4395,6 +4397,8 @@ mod tests {
             request: CreateProfileRequest {
                 profile_id: "field-created-profile".to_string(),
                 display_name: Some("Field Created Profile".to_string()),
+                soul_markdown: Some("# Field soul\n\n  Preserve spacing.\n".to_string()),
+                memory_markdown: Some("# Field memory\n".to_string()),
                 agent_id: None,
                 session_id: None,
                 implementation_id: None,
@@ -4459,6 +4463,14 @@ mod tests {
             ProfileRegistryLifecycleStatus::Active
         );
         assert_eq!(
+            registry_write.prompt_soul_markdown.as_deref(),
+            Some("# Field soul\n\n  Preserve spacing.\n")
+        );
+        assert_eq!(
+            registry_write.prompt_memory_markdown.as_deref(),
+            Some("# Field memory\n")
+        );
+        assert_eq!(
             registry_write.import_export.imported_from.as_deref(),
             Some("template:starter")
         );
@@ -4497,6 +4509,8 @@ mod tests {
             request: CreateProfileRequest {
                 profile_id: "field-created-profile".to_string(),
                 display_name: None,
+                soul_markdown: None,
+                memory_markdown: None,
                 agent_id: None,
                 session_id: None,
                 implementation_id: None,
@@ -4532,6 +4546,12 @@ mod tests {
         let plan = plan_create_profile(&input);
         assert!(plan.ok(), "{:?}", plan.diagnostics);
         assert_eq!(plan.profile_mcp_config, None);
+        let registry_write = plan
+            .registry_write
+            .as_ref()
+            .expect("registry write should be planned");
+        assert_eq!(registry_write.prompt_soul_markdown, None);
+        assert_eq!(registry_write.prompt_memory_markdown, None);
         assert_eq!(plan.runtime_mcp_bindings.len(), 2);
         assert_eq!(
             plan.runtime_mcp_bindings[0],
@@ -4578,6 +4598,8 @@ mod tests {
             request: CreateProfileRequest {
                 profile_id: "runner".to_string(),
                 display_name: None,
+                soul_markdown: None,
+                memory_markdown: None,
                 agent_id: Some("runner-agent".to_string()),
                 session_id: Some("runner-session".to_string()),
                 implementation_id: Some("runner-brain".to_string()),
@@ -4622,6 +4644,8 @@ mod tests {
             request: CreateProfileRequest {
                 profile_id: "../bad".to_string(),
                 display_name: None,
+                soul_markdown: None,
+                memory_markdown: None,
                 agent_id: None,
                 session_id: None,
                 implementation_id: None,

@@ -2432,6 +2432,8 @@ fn sample_create_profile_plan_input() -> CreateProfilePlanInput {
         request: CreateProfileRequest {
             profile_id: "field-created-profile".to_owned(),
             display_name: Some("Field Created Profile".to_owned()),
+            soul_markdown: Some("# Field soul\n\nKeep exact spacing.\n".to_owned()),
+            memory_markdown: Some("# Field memory\n".to_owned()),
             agent_id: Some("field-created-agent".to_owned()),
             session_id: Some("field-created-session".to_owned()),
             implementation_id: Some("field-created-brain".to_owned()),

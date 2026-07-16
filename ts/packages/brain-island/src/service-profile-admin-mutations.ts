@@ -555,6 +555,8 @@ export async function createServiceProfile(
 ): Promise<CreatedServiceProfile> {
   const profileId = requiredBodyString(command, "profileId");
   const displayName = optionalBodyString(command, "displayName");
+  const soulMarkdown = optionalBodyMarkdown(command, "soulMarkdown");
+  const memoryMarkdown = optionalBodyMarkdown(command, "memoryMarkdown");
   const providerAlias =
     optionalBodyString(command, "providerAlias") ?? "default";
   const modelProvider = await context.bridge.getModelProvider(providerAlias);
@@ -592,6 +594,8 @@ export async function createServiceProfile(
     request: {
       profileId,
       ...(displayName === undefined ? {} : { displayName }),
+      ...(soulMarkdown === undefined ? {} : { soulMarkdown }),
+      ...(memoryMarkdown === undefined ? {} : { memoryMarkdown }),
       agentId: optionalBodyString(command, "agentId"),
       sessionId: optionalBodyString(command, "sessionId"),
       implementationId: optionalBodyString(command, "implementationId"),
@@ -1320,6 +1324,18 @@ function optionalBodyString(
 ): string | undefined {
   const value = command.body[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalBodyMarkdown(
+  command: AdminControlCommand,
+  key: string,
+): string | undefined {
+  const value = command.body[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new Error(`control body field ${key} must be a string or null`);
+  }
+  return value;
 }
 
 function optionalBodyBoolean(

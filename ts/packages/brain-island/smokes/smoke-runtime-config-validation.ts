@@ -264,6 +264,8 @@ const createPlan = await planCreateProfileWithRust({
   request: {
     profileId: "field-created-profile",
     displayName: "Field Created Profile",
+    soulMarkdown: "# Field soul\n\n  Preserve exact spacing.\n",
+    memoryMarkdown: "# Field memory\n",
     mcpToolProfile: "field-created-profile",
     source: { templateId: "starter" },
     now: "2026-06-26T09:30:00.000Z",
@@ -275,6 +277,14 @@ assert.equal(createPlan.registryWrite?.profileId, "field-created-profile");
 assert.equal(createPlan.registryWrite?.lifecycleStatus, "active");
 assert.equal(createPlan.registryWrite?.defaultSessionKind, "full");
 assert.equal(createPlan.registryWrite?.agentId, "field-created-profile");
+assert.equal(
+  createPlan.registryWrite?.promptSoulMarkdown,
+  "# Field soul\n\n  Preserve exact spacing.\n",
+);
+assert.equal(
+  createPlan.registryWrite?.promptMemoryMarkdown,
+  "# Field memory\n",
+);
 assert.equal(
   createPlan.registryWrite?.importExport.importedFrom,
   "template:starter",
