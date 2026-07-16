@@ -663,55 +663,141 @@ export async function createServiceProfile(
                 }),
           },
         };
-  const registryRecord = registryWrite
-    ? await context.bridge.createProfileRegistryRecord(registryWrite)
-    : undefined;
+  const [runtimeConfigSnapshot, profileFileSnapshot] = await Promise.all([
+    captureFileSnapshot(context.serviceConfigFile),
+    captureFileSnapshot(plannedProfilePath),
+  ]);
+  let registryRecord: CreatedServiceProfile["registryRecord"];
+  let mutationStarted = false;
+  let runtimeApplyAttempted = false;
+  try {
+    if (registryWrite !== undefined) {
+      registryRecord =
+        await context.bridge.createProfileRegistryRecord(registryWrite);
+      mutationStarted = true;
+    }
 
-  await mkdir(context.runtimeConfig.profilesDir, { recursive: true });
-  await writeJsonFileAtomic(plannedProfilePath, {
-    profileId: profileSeed.profileId,
-    ...(profileSeed.displayName === undefined
-      ? {}
-      : { displayName: profileSeed.displayName }),
-    providerAlias: profileSeed.providerAlias,
-    brain: profileSeed.brain,
-    ...(profileMcpConfig === undefined ? {} : { mcpConfig: profileMcpConfig }),
-    ...(localToolProfile === undefined
-      ? {}
-      : {
-          localToolProfileId: localToolProfile.id,
-          toolPolicy: localToolProfile.toolPolicy,
-        }),
-    skills: profileSeed.skillsMode,
-  });
+    await mkdir(context.runtimeConfig.profilesDir, { recursive: true });
+    await writeJsonFileAtomic(plannedProfilePath, {
+      profileId: profileSeed.profileId,
+      ...(profileSeed.displayName === undefined
+        ? {}
+        : { displayName: profileSeed.displayName }),
+      providerAlias: profileSeed.providerAlias,
+      brain: profileSeed.brain,
+      ...(profileMcpConfig === undefined
+        ? {}
+        : { mcpConfig: profileMcpConfig }),
+      ...(localToolProfile === undefined
+        ? {}
+        : {
+            localToolProfileId: localToolProfile.id,
+            toolPolicy: localToolProfile.toolPolicy,
+          }),
+      skills: profileSeed.skillsMode,
+    });
+    mutationStarted = true;
 
-  runtimeConfigFile.array("brains").push(runtimeBrain);
-  runtimeConfigFile.array("sessions").push(runtimeSession);
-  runtimeConfigFile.array("mcpBindings").push(...plan.runtimeMcpBindings);
-  await writeJsonFileAtomic(context.serviceConfigFile, runtimeConfigFile.value);
+    runtimeConfigFile.array("brains").push(runtimeBrain);
+    runtimeConfigFile.array("sessions").push(runtimeSession);
+    runtimeConfigFile.array("mcpBindings").push(...plan.runtimeMcpBindings);
+    await writeJsonFileAtomic(
+      context.serviceConfigFile,
+      runtimeConfigFile.value,
+    );
 
-  const applyResult = await context.applyRuntimeConfigFromDisk({
-    createMissingSessions: true,
-    eventType: "profile_created",
-    summaryPrefix: `Profile ${profileId} created`,
-  });
-  return {
-    profileId: profileSeed.profileId,
-    ...(profileSeed.displayName === undefined
-      ? {}
-      : { displayName: profileSeed.displayName }),
-    agentId: runtimeSession.agentId,
-    sessionId: runtimeSession.sessionId,
-    implementationId: runtimeBrain.implementationId,
-    profilePath: plannedProfilePath,
-    runtimeConfigPath: context.serviceConfigFile,
-    registryWrite,
-    registryRecord,
-    localToolProfileId: localToolProfile?.id,
-    fileAssetActions: plan.fileAssetActions,
-    derivedRuntimeActions: plan.derivedRuntimeActions,
-    applyResult,
+    runtimeApplyAttempted = true;
+    const applyResult = await context.applyRuntimeConfigFromDisk({
+      createMissingSessions: true,
+      eventType: "profile_created",
+      summaryPrefix: `Profile ${profileId} created`,
+    });
+    return {
+      profileId: profileSeed.profileId,
+      ...(profileSeed.displayName === undefined
+        ? {}
+        : { displayName: profileSeed.displayName }),
+      agentId: runtimeSession.agentId,
+      sessionId: runtimeSession.sessionId,
+      implementationId: runtimeBrain.implementationId,
+      profilePath: plannedProfilePath,
+      runtimeConfigPath: context.serviceConfigFile,
+      registryWrite,
+      registryRecord,
+      localToolProfileId: localToolProfile?.id,
+      fileAssetActions: plan.fileAssetActions,
+      derivedRuntimeActions: plan.derivedRuntimeActions,
+      applyResult,
+    };
+  } catch (error) {
+    if (!mutationStarted) throw error;
+    const rollbackErrors = await rollbackFailedProfileCreate({
+      context,
+      profileId: profileSeed.profileId,
+      runtimeConfigSnapshot,
+      profileFileSnapshot,
+      runtimeApplyAttempted,
+    });
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        `profile ${profileId} creation failed and rollback was incomplete`,
+      );
+    }
+    throw error;
+  }
+}
+
+async function rollbackFailedProfileCreate(input: {
+  context: ServiceProfileAdminMutationContext;
+  profileId: string;
+  runtimeConfigSnapshot: FileSnapshot;
+  profileFileSnapshot: FileSnapshot;
+  runtimeApplyAttempted: boolean;
+}): Promise<Error[]> {
+  const errors: Error[] = [];
+  const attempt = async (
+    label: string,
+    operation: () => Promise<void>,
+  ): Promise<boolean> => {
+    try {
+      await operation();
+      return true;
+    } catch (error) {
+      errors.push(
+        new Error(
+          `${label}: ${errorMessage(error, "profile create rollback failed")}`,
+          { cause: error },
+        ),
+      );
+      return false;
+    }
   };
+
+  const runtimeConfigRestored = await attempt(
+    "restore service runtime config",
+    () => restoreFileSnapshot(input.runtimeConfigSnapshot),
+  );
+  await attempt("restore profile config", () =>
+    restoreFileSnapshot(input.profileFileSnapshot),
+  );
+  await attempt("unregister profile brain", async () => {
+    await unregisterServiceProfileBrain(input.context, input.profileId);
+  });
+  await attempt("purge profile runtime state", async () => {
+    const report = await input.context.bridge.purgeProfile(input.profileId);
+    input.context.forgetPurgedSessions(report.sessionIds.map(String));
+  });
+  if (input.runtimeApplyAttempted && runtimeConfigRestored) {
+    await attempt("restore active runtime config", async () => {
+      await input.context.applyRuntimeConfigFromDisk({
+        createMissingSessions: false,
+        eventType: "profile_create_rolled_back",
+        summaryPrefix: `Profile ${input.profileId} create rolled back`,
+      });
+    });
+  }
+  return errors;
 }
 
 async function loadRuntimeConfigProfiles(
@@ -1014,6 +1100,11 @@ export interface RuntimeConfigFileForMutation {
   array(key: string): unknown[];
 }
 
+interface FileSnapshot {
+  path: string;
+  contents?: string;
+}
+
 export async function readRuntimeConfigFileForMutation(
   context: ServiceProfileAdminMutationContext,
 ): Promise<RuntimeConfigFileForMutation> {
@@ -1060,9 +1151,30 @@ export async function writeJsonFileAtomic(
   path: string,
   value: unknown,
 ): Promise<void> {
+  await writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function captureFileSnapshot(path: string): Promise<FileSnapshot> {
+  try {
+    return { path, contents: await readFile(path, "utf8") };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return { path };
+    throw error;
+  }
+}
+
+async function restoreFileSnapshot(snapshot: FileSnapshot): Promise<void> {
+  if (snapshot.contents === undefined) {
+    await rm(snapshot.path, { force: true });
+    return;
+  }
+  await writeFileAtomic(snapshot.path, snapshot.contents);
+}
+
+async function writeFileAtomic(path: string, contents: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = `${path}.${process.pid}.${Date.now()}.${randomBytes(8).toString("hex")}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(tmpPath, contents);
   await rename(tmpPath, path);
 }
 
