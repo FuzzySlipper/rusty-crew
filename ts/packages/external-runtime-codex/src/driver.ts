@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { InitializeParams } from "../protocol/0.144.1/ts/InitializeParams.js";
 import type { InitializeResponse } from "../protocol/0.144.1/ts/InitializeResponse.js";
 import type { ModelListParams } from "../protocol/0.144.1/ts/v2/ModelListParams.js";
@@ -70,9 +71,20 @@ interface PendingRequest {
   readonly abortCleanup?: () => void;
 }
 
-const COMPATIBILITY_PROBE_SUITE_REVISION = "codex-required-capabilities-v1";
-const PROBE_SENTINEL_THREAD_ID =
-  "rusty-crew-compatibility-probe-missing-thread";
+const COMPATIBILITY_PROBE_SUITE_REVISION = "codex-required-capabilities-v2";
+
+function isExpectedMissingThreadError(
+  error: CodexRpcError,
+  threadId: string,
+  operation: "read" | "resume",
+): boolean {
+  if (error.code !== -32600) return false;
+  const expectedMessage =
+    operation === "read"
+      ? `thread not loaded: ${threadId}`
+      : `no rollout found for thread id ${threadId}`;
+  return error.message === expectedMessage;
+}
 
 export class CodexRpcError extends Error {
   constructor(
@@ -218,11 +230,14 @@ export class CodexAppServerDriver {
       this.#compatibilityProbeTimeoutMs,
     );
     const steps: CodexCompatibilityProbeStep[] = [];
+    const sentinelThreadId = randomUUID();
     let outcome: CodexCompatibilityProbeReport["outcome"] = "passed";
     const run = async (
       stepId: string,
       operation: () => Promise<void> | void,
-      options: { acceptRpcError?: boolean } = {},
+      options: {
+        acceptRpcError?: (error: CodexRpcError) => boolean;
+      } = {},
     ): Promise<boolean> => {
       const startedAt = performance.now();
       try {
@@ -235,9 +250,9 @@ export class CodexAppServerDriver {
         return true;
       } catch (error) {
         if (
-          options.acceptRpcError === true &&
+          options.acceptRpcError !== undefined &&
           error instanceof CodexRpcError &&
-          error.code !== -32601
+          options.acceptRpcError(error)
         ) {
           steps.push({
             stepId,
@@ -316,12 +331,15 @@ export class CodexAppServerDriver {
             async () => {
               await this.#request(
                 "thread/read",
-                { threadId: PROBE_SENTINEL_THREAD_ID, includeTurns: false },
+                { threadId: sentinelThreadId, includeTurns: false },
                 controller.signal,
                 false,
               );
             },
-            { acceptRpcError: true },
+            {
+              acceptRpcError: (error) =>
+                isExpectedMissingThreadError(error, sentinelThreadId, "read"),
+            },
           ))
         ) {
           steps.push(skippedProbeStep("thread_resume"));
@@ -331,12 +349,15 @@ export class CodexAppServerDriver {
             async () => {
               await this.#request(
                 "thread/resume",
-                { threadId: PROBE_SENTINEL_THREAD_ID, excludeTurns: true },
+                { threadId: sentinelThreadId, excludeTurns: true },
                 controller.signal,
                 false,
               );
             },
-            { acceptRpcError: true },
+            {
+              acceptRpcError: (error) =>
+                isExpectedMissingThreadError(error, sentinelThreadId, "resume"),
+            },
           );
         }
       }

@@ -141,11 +141,30 @@ function configureInitialize(
     nextCursor: null,
     backwardsCursor: null,
   }));
-  for (const method of ["thread/read", "thread/resume"]) {
-    respondOnce(transport, method, () => ({
-      __rpcError: { code: -32000, message: "sentinel thread not found" },
-    }));
+  respondOnce(transport, "thread/read", (request) => ({
+    __rpcError: {
+      code: -32600,
+      message: `thread not loaded: ${requestThreadId(request)}`,
+    },
+  }));
+  respondOnce(transport, "thread/resume", (request) => ({
+    __rpcError: {
+      code: -32600,
+      message: `no rollout found for thread id ${requestThreadId(request)}`,
+    },
+  }));
+}
+
+function requestThreadId(request: Record<string, unknown>): string {
+  const params = request.params;
+  if (typeof params !== "object" || params === null) {
+    throw new Error("probe request params must be an object");
   }
+  const threadId = (params as Record<string, unknown>).threadId;
+  if (typeof threadId !== "string") {
+    throw new Error("probe request threadId must be a string");
+  }
+  return threadId;
 }
 
 function respondOnce(
@@ -535,6 +554,38 @@ test("unknown newer CLI is admitted when required capability probes pass", async
   );
   await driver.close();
 });
+
+for (const [method, stepId] of [
+  ["thread/read", "thread_read"],
+  ["thread/resume", "thread_resume"],
+] as const) {
+  test(`${method} invalid params fail the compatibility probe`, async () => {
+    const transport = new FakeTransport();
+    const authority = new FakeAuthority();
+    authority.accepted = false;
+    configureInitialize(transport);
+    transport.responders.set(method, () => ({
+      __rpcError: { code: -32602, message: "Invalid params" },
+    }));
+    const driver = new CodexAppServerDriver(transport, authority);
+
+    await assert.rejects(
+      driver.connect(),
+      /rejected Codex app-server handshake/,
+    );
+
+    assert.equal(driver.state, "incompatible");
+    assert.equal(authority.probeReports[0]?.outcome, "incompatible");
+    const failedStep = authority.probeReports[0]?.steps.find(
+      (step) => step.stepId === stepId,
+    );
+    assert.equal(failedStep?.status, "failed");
+    assert.equal(
+      failedStep?.reasonCode,
+      "external_runtime_required_contract_incompatible",
+    );
+  });
+}
 
 test("missing required method is incompatible without reconnect semantics", async () => {
   const transport = new FakeTransport();

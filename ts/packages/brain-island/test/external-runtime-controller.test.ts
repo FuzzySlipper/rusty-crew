@@ -26,6 +26,12 @@ import {
   ServiceExternalRuntimeController,
 } from "../src/service-external-runtime.js";
 
+function isCompatibilityProbeThreadId(threadId: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    threadId,
+  );
+}
+
 class FakeTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -61,9 +67,12 @@ class FakeTransport implements CodexJsonRpcTransport {
       });
     }
     if (parsed.method === "thread/read") {
+      const threadId = String(
+        (parsed.params as Record<string, unknown>).threadId,
+      );
       this.emit({
         id: parsed.id,
-        error: { code: -32000, message: "sentinel thread not found" },
+        error: { code: -32600, message: `thread not loaded: ${threadId}` },
       });
     }
     if (parsed.method === "turn/start") {
@@ -116,6 +125,19 @@ class FakeTransport implements CodexJsonRpcTransport {
       });
     }
     if (parsed.method === "thread/resume") {
+      const threadId = String(
+        (parsed.params as Record<string, unknown>).threadId,
+      );
+      if (isCompatibilityProbeThreadId(threadId)) {
+        this.emit({
+          id: parsed.id,
+          error: {
+            code: -32600,
+            message: `no rollout found for thread id ${threadId}`,
+          },
+        });
+        return;
+      }
       this.emit({
         id: parsed.id,
         result: {
@@ -428,6 +450,14 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       return;
     }
     if (parsed.method === "thread/read") {
+      const threadId = String(params.threadId);
+      if (isCompatibilityProbeThreadId(threadId)) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32600, message: `thread not loaded: ${threadId}` },
+        });
+        return;
+      }
       if (
         params.includeTurns !== false &&
         this.unmaterializedThreadIds.has(String(params.threadId))
@@ -455,6 +485,17 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       return;
     }
     if (parsed.method === "thread/resume") {
+      const threadId = String(params.threadId);
+      if (isCompatibilityProbeThreadId(threadId)) {
+        this.emit({
+          id: parsed.id,
+          error: {
+            code: -32600,
+            message: `no rollout found for thread id ${threadId}`,
+          },
+        });
+        return;
+      }
       if (this.resumeFailureThreadIds.has(String(params.threadId))) {
         this.emit({
           id: parsed.id,
