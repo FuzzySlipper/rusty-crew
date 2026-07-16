@@ -9,19 +9,19 @@ use rusty_crew_core_protocol::{
     ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
     ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
     ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind, TaskId,
+    MAX_RESOURCE_DELEGATION_DEPTH, MAX_RESOURCE_DURATION_MS,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 mod runtime_graph;
 
 pub use runtime_graph::*;
 
 const MAX_HISTORY_MESSAGES: u32 = 10_000;
-const MAX_DURATION_MS: u32 = 30 * 24 * 60 * 60 * 1_000;
-const MAX_DELEGATION_DEPTH: u32 = 64;
 const MAX_TURN_TIMEOUT_MS: u32 = 24 * 60 * 60 * 1_000;
 pub const DEFAULT_POSTGRES_SCHEMA: &str = "rusty_crew";
 const ID_PATTERN_DESCRIPTION: &str =
@@ -3245,26 +3245,34 @@ fn validate_resource_limits(
     limits: Option<&ResourceLimits>,
 ) {
     let Some(limits) = limits else { return };
-    if limits.workdir.as_deref().is_some_and(str::is_empty) {
-        validator.error(
-            "invalid_resource_limits",
-            format!("{path}.workdir"),
-            "workdir must not be empty when provided",
-        );
+    if let Some(workdir) = limits.workdir.as_deref() {
+        if workdir.trim().is_empty() {
+            validator.error(
+                "invalid_resource_limits",
+                format!("{path}.workdir"),
+                "workdir must not be blank when provided",
+            );
+        } else if !Path::new(workdir).is_absolute() {
+            validator.error(
+                "invalid_resource_limits",
+                format!("{path}.workdir"),
+                "workdir must be an absolute path",
+            );
+        }
     }
     validate_optional_max(
         validator,
         "invalid_resource_limits",
         &format!("{path}.maxDurationMs"),
         limits.max_duration_ms,
-        MAX_DURATION_MS,
+        MAX_RESOURCE_DURATION_MS,
     );
     validate_optional_max(
         validator,
         "invalid_resource_limits",
         &format!("{path}.maxDelegationDepth"),
         limits.max_delegation_depth,
-        MAX_DELEGATION_DEPTH,
+        MAX_RESOURCE_DELEGATION_DEPTH,
     );
 }
 
@@ -4125,8 +4133,8 @@ mod tests {
         draft.sessions[0].session_id = SessionId::new(" bad");
         draft.sessions[0].resource_limits = Some(ResourceLimits {
             workdir: Some(String::new()),
-            max_duration_ms: Some(MAX_DURATION_MS + 1),
-            max_delegation_depth: Some(MAX_DELEGATION_DEPTH + 1),
+            max_duration_ms: Some(MAX_RESOURCE_DURATION_MS + 1),
+            max_delegation_depth: Some(MAX_RESOURCE_DELEGATION_DEPTH + 1),
         });
         draft.scheduled_jobs[0].schedule = "not a cron".to_string();
 

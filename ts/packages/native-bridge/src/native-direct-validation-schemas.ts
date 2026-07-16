@@ -27,6 +27,31 @@ const nativeSessionHistoryWindowSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const nativeSessionResourceLimitsSchema = Type.Object(
+  {
+    workdir: Type.Optional(Type.String()),
+    maxDurationMs: Type.Optional(Type.Number({ minimum: 0 })),
+    maxDelegationDepth: Type.Optional(Type.Number({ minimum: 0 })),
+  },
+  { additionalProperties: false },
+);
+
+const nativeSessionToolProfileSchema = Type.Object(
+  {
+    tools: Type.Array(
+      Type.Object(
+        {
+          name: Type.String(),
+          description: Type.String(),
+          inputSchema: Type.Optional(Type.Number({ minimum: 0 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export const nativeSessionStateSummarySchema = Type.Object(
   {
     handle: nativeHandleSchema,
@@ -43,6 +68,8 @@ export const nativeSessionStateSummarySchema = Type.Object(
       Type.Literal("idle"),
       Type.Literal("archived"),
     ]),
+    resourceLimits: nativeSessionResourceLimitsSchema,
+    toolProfile: nativeSessionToolProfileSchema,
     historyWindow: Type.Optional(nativeSessionHistoryWindowSchema),
   },
   { additionalProperties: false },

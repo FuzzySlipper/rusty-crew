@@ -247,7 +247,7 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     "admin.control.sessions.create",
     "POST",
     "/v1/admin/control/sessions",
-    "Create a runtime session.",
+    "Create a runtime session with optional bounded resourceLimits, including an absolute workdir.",
     "create_session",
     ["session"],
   ),

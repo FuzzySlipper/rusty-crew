@@ -336,6 +336,9 @@ pub struct ResourceLimits {
     pub max_delegation_depth: Option<u32>,
 }
 
+pub const MAX_RESOURCE_DURATION_MS: u32 = 30 * 24 * 60 * 60 * 1_000;
+pub const MAX_RESOURCE_DELEGATION_DEPTH: u32 = 64;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DelegationLineage {
     pub parent_session_id: SessionId,

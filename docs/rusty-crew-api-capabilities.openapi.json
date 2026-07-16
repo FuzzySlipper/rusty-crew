@@ -985,7 +985,7 @@
     "/v1/admin/control/sessions": {
       "post": {
         "operationId": "adminControlSessionsCreate",
-        "summary": "Create a runtime session.",
+        "summary": "Create a runtime session with optional bounded resourceLimits, including an absolute workdir.",
         "tags": ["session"],
         "security": [{ "AdminBearer": [] }],
         "responses": {

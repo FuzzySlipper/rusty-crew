@@ -1874,7 +1874,7 @@
         "id": "admin.control.sessions.create",
         "method": "POST",
         "path_template": "/v1/admin/control/sessions",
-        "description": "Create a runtime session.",
+        "description": "Create a runtime session with optional bounded resourceLimits, including an absolute workdir.",
         "auth": "admin",
         "mutation": "control",
         "stability": "stable",

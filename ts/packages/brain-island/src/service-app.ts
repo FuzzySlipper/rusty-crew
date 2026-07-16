@@ -12,6 +12,7 @@ import type {
   EngineStorageConfig,
   McpBindingRecord,
   ProfileId,
+  ResourceLimits,
   ScheduledRunSummary,
   SessionId,
   SessionKind,
@@ -3421,11 +3422,19 @@ function createServiceControlExecutor(
       if (kind !== "full" && kind !== "worker" && kind !== "delegated") {
         throw new Error("session kind must be full, worker, or delegated");
       }
+      const profileSession = (await state.bridge.listSessions()).find(
+        (candidate) =>
+          candidate.profileId === profileId && candidate.status !== "archived",
+      );
       const session = await state.bridge.createSession({
         sessionId,
         agentId,
         profileId,
         kind,
+        resourceLimits: createSessionResourceLimits(command),
+        ...(profileSession === undefined
+          ? {}
+          : { toolProfile: profileSession.toolProfile }),
       });
       return {
         status: "completed",
@@ -4348,6 +4357,44 @@ function optionalBodyBoolean(
 ): boolean | undefined {
   const value = command.body[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+function createSessionResourceLimits(
+  command: AdminControlCommand,
+): ResourceLimits | undefined {
+  const value = command.body.resourceLimits;
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error("control body field resourceLimits must be an object");
+  }
+  const workdir = value.workdir;
+  if (workdir !== undefined && typeof workdir !== "string") {
+    throw new Error("resourceLimits.workdir must be a string");
+  }
+  const maxDurationMs = resourceLimitInteger(value, "maxDurationMs");
+  const maxDelegationDepth = resourceLimitInteger(value, "maxDelegationDepth");
+  return {
+    ...(workdir === undefined ? {} : { workdir }),
+    ...(maxDurationMs === undefined ? {} : { maxDurationMs }),
+    ...(maxDelegationDepth === undefined ? {} : { maxDelegationDepth }),
+  };
+}
+
+function resourceLimitInteger(
+  value: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const candidate = value[key];
+  if (candidate === undefined) return undefined;
+  if (
+    typeof candidate !== "number" ||
+    !Number.isInteger(candidate) ||
+    candidate < 0 ||
+    candidate > 0xffff_ffff
+  ) {
+    throw new Error(`resourceLimits.${key} must be an unsigned 32-bit integer`);
+  }
+  return candidate;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

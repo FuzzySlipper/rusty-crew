@@ -14,6 +14,20 @@ const session = {
   profileId: "profile-1",
   kind: "delegated",
   status: "active",
+  resourceLimits: {
+    workdir: "/home/dev/rusty-crew",
+    maxDurationMs: 120_000,
+    maxDelegationDepth: 0,
+  },
+  toolProfile: {
+    tools: [
+      {
+        name: "shell",
+        description: "Run a shell command.",
+        inputSchema: 1,
+      },
+    ],
+  },
 };
 const validBinding = withDirectBridgeOutputValidation(
   {

@@ -745,6 +745,8 @@ export interface JsSessionState {
   profileId: string
   kind: string
   status: string
+  resourceLimits: JsResourceLimits
+  toolProfile: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
 }
 

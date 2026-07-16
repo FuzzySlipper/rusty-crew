@@ -73,6 +73,7 @@
     "smoke:wake-timeout": "tsx smokes/smoke-wake-timeout.ts",
     "smoke:wake-timeout-config-patch": "tsx ../../smokes/brain-island/smoke-wake-timeout-config-patch.ts",
     "smoke:wake-timeout-live-debug-service": "tsx smokes/smoke-wake-timeout-live-debug-service.ts",
+    "smoke:session-resource-limits-live-debug-service": "tsx smokes/session-resource-limits-live-debug-service.ts",
     "smoke:session-defaults": "tsx smokes/smoke-session-defaults.ts",
     "smoke:session-history-window": "tsx smokes/smoke-session-history-window.ts",
     "smoke:post-turn-maintenance": "tsx smokes/smoke-post-turn-maintenance.ts",

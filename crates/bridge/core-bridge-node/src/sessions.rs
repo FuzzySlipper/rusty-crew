@@ -50,6 +50,23 @@ pub(crate) fn to_js_session_state(
         profile_id: state.profile_id.0,
         kind: format!("{:?}", state.kind).to_ascii_lowercase(),
         status: format!("{:?}", state.status).to_ascii_lowercase(),
+        resource_limits: JsResourceLimits {
+            workdir: state.resource_limits.workdir,
+            max_duration_ms: state.resource_limits.max_duration_ms,
+            max_delegation_depth: state.resource_limits.max_delegation_depth,
+        },
+        tool_profile: JsToolProfile {
+            tools: state
+                .tool_profile
+                .tools
+                .into_iter()
+                .map(|tool| JsToolDescriptor {
+                    name: tool.name,
+                    description: tool.description,
+                    input_schema: tool.input_schema.map(|handle| handle.get() as u32),
+                })
+                .collect(),
+        },
         history_window: state.history_window.map(|window| JsSessionHistoryWindow {
             max_messages: window.max_messages,
         }),

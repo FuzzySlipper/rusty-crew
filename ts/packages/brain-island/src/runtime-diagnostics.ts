@@ -207,6 +207,7 @@ export interface RuntimeSessionDiagnostics {
   brainTurnCount: number;
   lastActiveAt: string;
   stale: boolean;
+  resourceLimits: SessionState["resourceLimits"];
   effectiveDefaults?: RuntimeSessionEffectiveDefaults;
 }
 
@@ -856,6 +857,7 @@ function sessionDiagnostics(
       session.status !== "archived" &&
       Number.isFinite(ageMs) &&
       ageMs > staleSessionMs,
+    resourceLimits: session.resourceLimits,
     effectiveDefaults,
   };
 }

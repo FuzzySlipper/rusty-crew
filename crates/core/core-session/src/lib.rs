@@ -2,9 +2,11 @@
 
 use rusty_crew_core_protocol::{
     AgentId, CoreError, CoreErrorKind, CoreResult, IsoTimestamp, ProfileId, SessionConfig,
-    SessionHandle, SessionId, SessionState, SessionStatus,
+    SessionHandle, SessionId, SessionState, SessionStatus, MAX_RESOURCE_DELEGATION_DEPTH,
+    MAX_RESOURCE_DURATION_MS,
 };
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -49,6 +51,7 @@ impl SessionRegistry {
         config: SessionConfig,
         now: IsoTimestamp,
     ) -> CoreResult<SessionState> {
+        validate_session_resource_limits(&config)?;
         let mut sessions =
             self.inner.sessions.lock().map_err(|_| {
                 CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
@@ -96,6 +99,7 @@ impl SessionRegistry {
     }
 
     pub fn apply_config(&self, config: &SessionConfig) -> CoreResult<SessionState> {
+        validate_session_resource_limits(config)?;
         let mut sessions =
             self.inner.sessions.lock().map_err(|_| {
                 CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
@@ -274,8 +278,121 @@ impl SessionRegistry {
     }
 }
 
+fn validate_session_resource_limits(config: &SessionConfig) -> CoreResult<()> {
+    if let Some(workdir) = config.resource_limits.workdir.as_deref() {
+        if workdir.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session resourceLimits.workdir must not be blank",
+            ));
+        }
+        if !Path::new(workdir).is_absolute() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session resourceLimits.workdir must be an absolute path",
+            ));
+        }
+    }
+    if config
+        .resource_limits
+        .max_duration_ms
+        .is_some_and(|value| value > MAX_RESOURCE_DURATION_MS)
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("session resourceLimits.maxDurationMs exceeds {MAX_RESOURCE_DURATION_MS}"),
+        ));
+    }
+    if config
+        .resource_limits
+        .max_delegation_depth
+        .is_some_and(|value| value > MAX_RESOURCE_DELEGATION_DEPTH)
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "session resourceLimits.maxDelegationDepth exceeds {MAX_RESOURCE_DELEGATION_DEPTH}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 impl Default for SessionRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusty_crew_core_protocol::{ResourceLimits, SessionKind, ToolProfile};
+
+    fn config(workdir: Option<&str>) -> SessionConfig {
+        SessionConfig {
+            session_id: SessionId::new("resource-limits-session"),
+            agent_id: AgentId::new("resource-limits-agent"),
+            profile_id: ProfileId::new("resource-limits-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: workdir.map(str::to_string),
+                max_duration_ms: Some(60_000),
+                max_delegation_depth: Some(2),
+            },
+            tool_profile: ToolProfile { tools: Vec::new() },
+            history_window: None,
+        }
+    }
+
+    #[test]
+    fn creates_session_with_explicit_absolute_workdir() {
+        let registry = SessionRegistry::new();
+        let state = registry
+            .create_session(
+                config(Some("/home/dev/goblinbench-fixture")),
+                "2026-07-15T00:00:00Z".to_string(),
+            )
+            .expect("absolute workdir should be accepted");
+
+        assert_eq!(
+            state.resource_limits.workdir.as_deref(),
+            Some("/home/dev/goblinbench-fixture")
+        );
+    }
+
+    #[test]
+    fn preserves_omitted_workdir_and_rejects_blank_or_relative_values() {
+        let registry = SessionRegistry::new();
+        let state = registry
+            .create_session(config(None), "2026-07-15T00:00:00Z".to_string())
+            .expect("omitted workdir should preserve default resolution");
+        assert_eq!(state.resource_limits.workdir, None);
+
+        for invalid in ["", "   ", "relative/workdir"] {
+            let error = SessionRegistry::new()
+                .create_session(config(Some(invalid)), "2026-07-15T00:00:00Z".to_string())
+                .expect_err("invalid workdir should be rejected");
+            assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+        }
+    }
+
+    #[test]
+    fn rejects_resource_limits_above_shared_bounds() {
+        let mut invalid_duration = config(Some("/home"));
+        invalid_duration.resource_limits.max_duration_ms = Some(MAX_RESOURCE_DURATION_MS + 1);
+        let duration_error = SessionRegistry::new()
+            .create_session(invalid_duration, "2026-07-15T00:00:00Z".to_string())
+            .expect_err("duration above bound should be rejected");
+        assert_eq!(duration_error.kind, CoreErrorKind::InvalidInput);
+
+        let mut invalid_depth = config(Some("/home"));
+        invalid_depth.resource_limits.max_delegation_depth =
+            Some(MAX_RESOURCE_DELEGATION_DEPTH + 1);
+        let depth_error = SessionRegistry::new()
+            .create_session(invalid_depth, "2026-07-15T00:00:00Z".to_string())
+            .expect_err("delegation depth above bound should be rejected");
+        assert_eq!(depth_error.kind, CoreErrorKind::InvalidInput);
     }
 }
