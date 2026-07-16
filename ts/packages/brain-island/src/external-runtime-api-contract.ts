@@ -5,7 +5,21 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.11.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.12.0";
+
+export const EXTERNAL_CONTROL_API_REASON_CODES = [
+  "external_control_idempotency_conflict",
+  "external_control_binding_not_found",
+  "external_control_binding_revision_conflict",
+  "external_control_binding_inactive",
+  "external_control_native_turn_required",
+  "external_control_thread_unbound",
+  "external_control_thread_busy",
+  "external_control_native_turn_conflict",
+  "external_control_invalid_request",
+  "external_control_rejected",
+  "external_control_submission_failed",
+] as const;
 
 export const EXTERNAL_RUNTIME_API_OPENAPI_PATH =
   "docs/external-runtime-api-v0.openapi.json";
@@ -258,6 +272,7 @@ interface OperationContract {
   readonly requestSchema?: string;
   readonly query?: readonly QueryParameter[];
   readonly sse?: boolean;
+  readonly errorReasonCodes?: readonly string[];
 }
 
 interface QueryParameter {
@@ -455,6 +470,8 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.controls,
     "ExternalControlReceipt",
     "ExternalControlWrite",
+    undefined,
+    EXTERNAL_CONTROL_API_REASON_CODES,
   ),
   operation(
     "external.bindings.commands.list",
@@ -573,6 +590,7 @@ function operation(
   responseSchema?: string,
   requestSchema?: string,
   query?: readonly QueryParameter[],
+  errorReasonCodes?: readonly string[],
 ): OperationContract {
   return {
     capabilityId,
@@ -582,6 +600,7 @@ function operation(
     ...(responseSchema === undefined ? {} : { responseSchema }),
     ...(requestSchema === undefined ? {} : { requestSchema }),
     ...(query === undefined ? {} : { query }),
+    ...(errorReasonCodes === undefined ? {} : { errorReasonCodes }),
   };
 }
 
@@ -644,6 +663,9 @@ function openApiOperation(
     responses,
     "x-rusty-crew-capability-id": operation.capabilityId,
     "x-rusty-crew-contract-detail": "wire",
+    ...(operation.errorReasonCodes === undefined
+      ? {}
+      : { "x-rusty-crew-error-reason-codes": operation.errorReasonCodes }),
   };
 }
 

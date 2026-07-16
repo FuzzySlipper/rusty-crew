@@ -508,35 +508,6 @@ fn transport_probe_failure_is_retryable_without_claiming_incompatibility() {
 }
 
 #[test]
-fn mid_turn_controls_require_exact_native_turn_identity() {
-    let engine = test_engine();
-    engine
-        .create_session(session_config(
-            "codex-session",
-            "codex-agent",
-            "codex-profile",
-            SessionKind::Full,
-        ))
-        .unwrap();
-    engine.register_external_runtime(&runtime(), None).unwrap();
-    engine.bind_external_agent(&binding(), None).unwrap();
-    let request = ExternalControlRequest {
-        control_id: ExternalControlId::new("steer-without-turn"),
-        idempotency_key: "steer-without-turn".into(),
-        binding_id: ExternalBindingId::new("codex-binding"),
-        expected_binding_revision: 1,
-        expected_native_turn_id: None,
-        kind: ExternalControlKind::SteerTurn,
-        payload: json!({}),
-        requested_at: "2026-06-19T00:00:00Z".into(),
-    };
-    assert_eq!(
-        engine.submit_external_control(request).unwrap_err().kind,
-        CoreErrorKind::InvalidInput
-    );
-}
-
-#[test]
 fn external_thread_commands_are_validated_and_replay_by_semantic_idempotency() {
     let engine = test_engine();
     engine

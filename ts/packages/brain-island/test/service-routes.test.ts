@@ -552,6 +552,86 @@ test("external command routes are typed and recognized commands cannot leak to m
   assert.equal(deliveredCommand?.body, "plain operator prompt");
 });
 
+test("external control routes preserve Rust-owned precondition reason codes", async () => {
+  let rejection =
+    "ActionRejected: external_control_native_turn_conflict: expected native turn is not the binding's active turn";
+  let bindingExists = true;
+  const context = {
+    bridge: {
+      async getExternalBinding() {
+        if (!bindingExists) return undefined;
+        return {
+          bindingId: "binding-1",
+          runtimeId: "runtime-1",
+          nativeThreadId: "thread-1",
+          revision: 4,
+        };
+      },
+    },
+    controller: {
+      async executeControl() {
+        throw new Error(rejection);
+      },
+    },
+    now: () => "2026-07-15T00:00:00.000Z",
+    requestId: () => "req-external-control-conflict",
+    readJsonBody: async () => ({
+      kind: "steer_turn",
+      expectedNativeTurnId: "turn-completed",
+      payload: {
+        threadId: "thread-1",
+        turnId: "turn-completed",
+        input: [{ type: "text", text: "follow up" }],
+      },
+    }),
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const staleTurn = (await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/controls"),
+    context,
+  )) as AdminRouteResult;
+  assert.equal(staleTurn.status, 409);
+  assert.equal(errorReason(staleTurn), "external_control_native_turn_conflict");
+  assert.equal(staleTurn.body.ok, false);
+  if (!staleTurn.body.ok) {
+    assert.equal(staleTurn.body.error.code, "conflict");
+    assert.equal(staleTurn.body.error.retryable, false);
+    assert.match(staleTurn.body.error.message, /binding binding-1/);
+    assert.match(staleTurn.body.error.message, /native turn turn-completed/);
+  }
+
+  rejection =
+    "ActionRejected: external_control_binding_revision_conflict: external binding revision mismatch: expected 3, found 4";
+  const staleBinding = (await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/controls"),
+    context,
+  )) as AdminRouteResult;
+  assert.equal(staleBinding.status, 409);
+  assert.equal(
+    errorReason(staleBinding),
+    "external_control_binding_revision_conflict",
+  );
+  assert.equal(staleBinding.body.ok, false);
+  if (!staleBinding.body.ok) {
+    assert.equal(staleBinding.body.error.code, "conflict");
+    assert.equal(staleBinding.body.error.retryable, true);
+  }
+
+  bindingExists = false;
+  const missingBinding = (await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-missing/controls"),
+    context,
+  )) as AdminRouteResult;
+  assert.equal(missingBinding.status, 404);
+  assert.equal(
+    errorReason(missingBinding),
+    "external_control_binding_not_found",
+  );
+});
+
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {
   const calls: string[] = [];
   const context = {

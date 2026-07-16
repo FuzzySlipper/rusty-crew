@@ -26,6 +26,7 @@ import {
   ExternalThreadLifecycleError,
   type ServiceExternalRuntimeController,
 } from "./service-external-runtime.js";
+import { EXTERNAL_CONTROL_API_REASON_CODES } from "./external-runtime-api-contract.js";
 import {
   ExternalRuntimeCommandInputError,
   isRecognizedExternalRuntimeCommandInput,
@@ -394,36 +395,47 @@ export async function handleExternalRuntimeRequest(
     parts[3] === "controls"
   ) {
     if (method !== "POST") return methodNotAllowed(requestId);
-    const body = requireRecord(await context.readJsonBody(request));
     const bindingId = parts[2] ?? "";
-    const binding = await context.bridge.getExternalBinding(bindingId);
-    if (binding === undefined) {
-      return notFound(
+    let controlKind: string | undefined;
+    let expectedNativeTurnId: string | undefined;
+    try {
+      const body = requireRecord(await context.readJsonBody(request));
+      const binding = await context.bridge.getExternalBinding(bindingId);
+      if (binding === undefined) {
+        return notFound(
+          requestId,
+          "external_control_binding_not_found",
+          "external binding",
+        );
+      }
+      const controlId =
+        optionalString(body.controlId) ?? `control:${crypto.randomUUID()}`;
+      controlKind = requiredString(body.kind);
+      expectedNativeTurnId = optionalString(body.expectedNativeTurnId);
+      const control: ExternalControlRequest = {
+        controlId,
+        idempotencyKey:
+          optionalString(body.idempotencyKey) ??
+          `external-control:${controlId}`,
+        bindingId,
+        expectedBindingRevision:
+          numberValue(body.expectedBindingRevision) ?? binding.revision,
+        ...(expectedNativeTurnId === undefined ? {} : { expectedNativeTurnId }),
+        kind: controlKind as ExternalControlRequest["kind"],
+        payload: body.payload ?? {},
+        requestedAt: context.now(),
+      };
+      return successRoute(
         requestId,
-        "external_binding_not_found",
-        "external binding",
+        await context.controller.executeControl(control),
       );
+    } catch (error) {
+      return externalControlFailure(requestId, error, {
+        bindingId,
+        controlKind,
+        expectedNativeTurnId,
+      });
     }
-    const controlId =
-      optionalString(body.controlId) ?? `control:${crypto.randomUUID()}`;
-    const control: ExternalControlRequest = {
-      controlId,
-      idempotencyKey:
-        optionalString(body.idempotencyKey) ?? `external-control:${controlId}`,
-      bindingId,
-      expectedBindingRevision:
-        numberValue(body.expectedBindingRevision) ?? binding.revision,
-      ...(optionalString(body.expectedNativeTurnId) === undefined
-        ? {}
-        : { expectedNativeTurnId: optionalString(body.expectedNativeTurnId) }),
-      kind: requiredString(body.kind) as ExternalControlRequest["kind"],
-      payload: body.payload ?? {},
-      requestedAt: context.now(),
-    };
-    return successRoute(
-      requestId,
-      await context.controller.executeControl(control),
-    );
   }
 
   if (
@@ -634,6 +646,91 @@ function externalCommandFailure(
     reason_code: "external_command_rejected",
     message: error instanceof Error ? error.message : String(error),
     retryable: false,
+  });
+}
+
+function externalControlFailure(
+  requestId: string,
+  error: unknown,
+  context: {
+    bindingId: string;
+    controlKind?: string;
+    expectedNativeTurnId?: string;
+  },
+): ServiceRouteResult {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const reasonCode = EXTERNAL_CONTROL_API_REASON_CODES.find((candidate) =>
+    rawMessage.includes(`${candidate}:`),
+  );
+  const operation = context.controlKind ?? "unknown";
+  const turn =
+    context.expectedNativeTurnId === undefined
+      ? ""
+      : ` for native turn ${context.expectedNativeTurnId}`;
+  const message = `external control ${operation} for binding ${context.bindingId}${turn} failed: ${rawMessage}`;
+
+  if (reasonCode === "external_control_native_turn_required") {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: reasonCode,
+      message,
+      retryable: false,
+    });
+  }
+  if (reasonCode === "external_control_binding_not_found") {
+    return failure(404, requestId, {
+      code: "not_found",
+      reason_code: reasonCode,
+      message,
+      retryable: false,
+    });
+  }
+  if (reasonCode !== undefined) {
+    return failure(409, requestId, {
+      code:
+        reasonCode === "external_control_binding_revision_conflict" ||
+        reasonCode === "external_control_idempotency_conflict" ||
+        reasonCode === "external_control_native_turn_conflict"
+          ? "conflict"
+          : "failed_precondition",
+      reason_code: reasonCode,
+      message,
+      retryable: reasonCode === "external_control_binding_revision_conflict",
+    });
+  }
+
+  if (rawMessage.startsWith("InvalidInput:")) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "external_control_invalid_request",
+      message,
+      retryable: false,
+    });
+  }
+  if (rawMessage.startsWith("NotFound:")) {
+    return failure(404, requestId, {
+      code: "not_found",
+      reason_code: "external_control_binding_not_found",
+      message,
+      retryable: false,
+    });
+  }
+  if (
+    rawMessage.startsWith("AlreadyExists:") ||
+    rawMessage.startsWith("ActionRejected:")
+  ) {
+    return failure(409, requestId, {
+      code: "conflict",
+      reason_code: "external_control_rejected",
+      message,
+      retryable: false,
+    });
+  }
+  return failure(500, requestId, {
+    code: "internal_error",
+    reason_code: "external_control_submission_failed",
+    message,
+    retryable: true,
   });
 }
 

@@ -7,6 +7,59 @@ use rusty_crew_core_protocol::{
 use serde_json::json;
 
 #[test]
+fn mid_turn_controls_require_exact_native_turn_identity() {
+    let engine = test_engine();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .register_external_runtime(&external_runtime::runtime(), None)
+        .unwrap();
+    engine
+        .bind_external_agent(&external_runtime::binding(), None)
+        .unwrap();
+
+    let missing_turn = engine
+        .submit_external_control(ExternalControlRequest {
+            control_id: ExternalControlId::new("steer-without-turn"),
+            idempotency_key: "steer-without-turn".into(),
+            binding_id: ExternalBindingId::new("codex-binding"),
+            expected_binding_revision: 1,
+            expected_native_turn_id: None,
+            kind: ExternalControlKind::SteerTurn,
+            payload: json!({}),
+            requested_at: "2026-06-19T00:00:00Z".into(),
+        })
+        .unwrap_err();
+    assert_eq!(missing_turn.kind, CoreErrorKind::InvalidInput);
+    assert!(missing_turn
+        .message
+        .starts_with("external_control_native_turn_required:"));
+
+    let stale_turn = engine
+        .submit_external_control(ExternalControlRequest {
+            control_id: ExternalControlId::new("steer-stale-turn"),
+            idempotency_key: "steer-stale-turn".into(),
+            binding_id: ExternalBindingId::new("codex-binding"),
+            expected_binding_revision: 1,
+            expected_native_turn_id: Some("native-turn-completed".into()),
+            kind: ExternalControlKind::SteerTurn,
+            payload: json!({}),
+            requested_at: "2026-06-19T00:00:01Z".into(),
+        })
+        .unwrap_err();
+    assert_eq!(stale_turn.kind, CoreErrorKind::ActionRejected);
+    assert!(stale_turn
+        .message
+        .starts_with("external_control_native_turn_conflict:"));
+}
+
+#[test]
 fn interrupt_control_uses_only_rust_validated_turn_identity() {
     let engine = test_engine();
     engine

@@ -1,6 +1,10 @@
 //! Rust-owned lifecycle and activation rules for complete external runtimes.
 
 use super::*;
+use crate::external_controls::{
+    external_thread_command_requires_idle, validate_external_control_payload,
+    validate_external_thread_command,
+};
 use rusty_crew_core_protocol::{
     validate_external_runtime_handshake_observation, AgentActivation, AgentMessageDeliveryStatus,
     AgentRoundStatus, ExternalAgentBinding, ExternalAgentBindingMetadataWrite,
@@ -667,20 +671,23 @@ impl CoreEngine {
             }
             return Err(CoreError::new(
                 CoreErrorKind::AlreadyExists,
-                "external control identity conflicts with a different request",
+                "external_control_idempotency_conflict: external control identity conflicts with a different request",
             ));
         }
         let binding = self
             .store
             .get_external_agent_binding(&request.binding_id)?
             .ok_or_else(|| {
-                CoreError::new(CoreErrorKind::NotFound, "external binding was not found")
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    "external_control_binding_not_found",
+                )
             })?;
         if binding.revision != request.expected_binding_revision {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 format!(
-                    "external binding revision mismatch: expected {}, found {}",
+                    "external_control_binding_revision_conflict: external binding revision mismatch: expected {}, found {}",
                     request.expected_binding_revision, binding.revision
                 ),
             ));
@@ -688,7 +695,7 @@ impl CoreEngine {
         if binding.status != ExternalBindingStatus::Active {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
-                "external control requires an active binding",
+                "external_control_binding_inactive: external control requires an active binding",
             ));
         }
         let active_turn = self
@@ -705,14 +712,14 @@ impl CoreEngine {
         {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
-                "mid-turn external control requires expected_native_turn_id",
+                "external_control_native_turn_required: mid-turn external control requires expected_native_turn_id",
             ));
         }
         if request.kind == ExternalControlKind::ExecuteThreadCommand {
             if binding.native_thread_id.is_none() {
                 return Err(CoreError::new(
                     CoreErrorKind::ActionRejected,
-                    "external thread command requires a bound native thread",
+                    "external_control_thread_unbound: external thread command requires a bound native thread",
                 ));
             }
             validate_external_thread_command(&request.payload)?;
@@ -724,7 +731,7 @@ impl CoreEngine {
         {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
-                "external thread command requires an idle binding",
+                "external_control_thread_busy: external thread command requires an idle binding",
             ));
         }
         if let Some(expected_native_turn_id) = &request.expected_native_turn_id {
@@ -734,7 +741,7 @@ impl CoreEngine {
             if !matches_active_turn {
                 return Err(CoreError::new(
                     CoreErrorKind::ActionRejected,
-                    "expected native turn is not the binding's active turn",
+                    "external_control_native_turn_conflict: expected native turn is not the binding's active turn",
                 ));
             }
         }
@@ -1369,94 +1376,6 @@ fn hash_json(value: &serde_json::Value, action: &str) -> CoreResult<String> {
 
 fn hex_sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
-}
-
-fn external_thread_command_name(payload: &serde_json::Value) -> Option<&str> {
-    payload.get("command")?.as_str()
-}
-
-fn external_thread_command_requires_idle(payload: &serde_json::Value) -> bool {
-    matches!(
-        external_thread_command_name(payload),
-        Some("compact" | "new" | "restart")
-    )
-}
-
-fn validate_external_control_payload(request: &ExternalControlRequest) -> CoreResult<()> {
-    if request.kind != ExternalControlKind::InterruptTurn {
-        return Ok(());
-    }
-    let payload = request.payload.as_object().ok_or_else(|| {
-        CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "external interrupt payload must be an object",
-        )
-    })?;
-    if !payload.is_empty() {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "external interrupt payload must be empty; Rust-owned binding and turn identity determine native interrupt parameters",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_external_thread_command(payload: &serde_json::Value) -> CoreResult<()> {
-    let object = payload.as_object().ok_or_else(|| {
-        CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "external thread command payload must be an object",
-        )
-    })?;
-    if object
-        .keys()
-        .any(|key| key != "command" && key != "argument")
-    {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "external thread command payload contains unsupported fields",
-        ));
-    }
-    let command = object
-        .get("command")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "external thread command requires command",
-            )
-        })?;
-    if !matches!(
-        command,
-        "help" | "commands" | "status" | "new" | "restart" | "model" | "effort" | "compact"
-    ) {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "external thread command is not recognized",
-        ));
-    }
-    let argument = object.get("argument").filter(|value| !value.is_null());
-    if let Some(argument) = argument {
-        let argument = argument.as_str().ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "external thread command argument must be a string or null",
-            )
-        })?;
-        if argument.trim().is_empty() || argument.len() > 256 {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "external thread command argument must contain 1 to 256 characters",
-            ));
-        }
-        if !matches!(command, "model" | "effort") {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "external thread command does not accept an argument",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn normalized_external_agent_cwd(raw: &str) -> CoreResult<String> {

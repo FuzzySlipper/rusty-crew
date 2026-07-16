@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { apiCapabilityRegistry } from "../src/api-command-registry.js";
 import {
+  EXTERNAL_CONTROL_API_REASON_CODES,
   EXTERNAL_RUNTIME_API_CONTRACT_VERSION,
   EXTERNAL_RUNTIME_API_OPENAPI_PATH,
   EXTERNAL_RUNTIME_API_OPERATIONS,
@@ -18,7 +19,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.11.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.12.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -93,6 +94,12 @@ assert.equal(
 assert.equal(
   contract.paths[EXTERNAL_RUNTIME_API_PATHS.bindingMetadata]?.post?.operationId,
   "writeExternalBindingMetadata",
+);
+assert.deepEqual(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.controls]?.post?.[
+    "x-rusty-crew-error-reason-codes"
+  ],
+  EXTERNAL_CONTROL_API_REASON_CODES,
 );
 assert.deepEqual(schema("ExternalBindingMetadataWrite").required, [
   "expectedRevision",
@@ -227,6 +234,7 @@ interface Operation {
   >;
   "x-rusty-crew-capability-id": string;
   "x-rusty-crew-contract-detail": string;
+  "x-rusty-crew-error-reason-codes"?: readonly string[];
 }
 
 interface JsonSchema {

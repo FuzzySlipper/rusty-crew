@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.11.0",
+    "version": "0.12.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -1064,7 +1064,20 @@
           }
         },
         "x-rusty-crew-capability-id": "external.bindings.control",
-        "x-rusty-crew-contract-detail": "wire"
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_control_idempotency_conflict",
+          "external_control_binding_not_found",
+          "external_control_binding_revision_conflict",
+          "external_control_binding_inactive",
+          "external_control_native_turn_required",
+          "external_control_thread_unbound",
+          "external_control_thread_busy",
+          "external_control_native_turn_conflict",
+          "external_control_invalid_request",
+          "external_control_rejected",
+          "external_control_submission_failed"
+        ]
       }
     },
     "/v1/external-bindings/{binding_id}/commands": {
