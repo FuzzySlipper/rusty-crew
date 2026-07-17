@@ -214,6 +214,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn set_session_reasoning_effort(
+        &self,
+        session_id: String,
+        reasoning_effort: Option<String>,
+    ) -> napi::Result<JsSessionState> {
+        let bridge = self.bridge()?;
+        let state = bridge
+            .set_session_reasoning_effort(SessionId::new(session_id), reasoning_effort)
+            .map_err(to_napi_error)?;
+        Ok(to_js_session_state(state))
+    }
+
+    #[napi]
     pub fn list_sessions_json(&self) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let sessions = bridge.list_sessions().map_err(to_napi_error)?;

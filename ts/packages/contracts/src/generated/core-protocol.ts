@@ -1207,6 +1207,10 @@ export type SessionHistoryWindow = {
   maxMessages?: number | null;
 };
 
+export type SessionInferenceOverrides = {
+  reasoningEffort?: string | null;
+};
+
 export type SessionKind = "full" | "worker" | "delegated";
 
 export type SessionState = {
@@ -1216,6 +1220,7 @@ export type SessionState = {
   delegation?: DelegationLineage | null;
   handle: SessionHandle;
   historyWindow?: SessionHistoryWindow | null;
+  inferenceOverrides?: SessionInferenceOverrides;
   kind: SessionKind;
   lastActiveAt: string;
   profileId: ProfileId;

@@ -35,6 +35,9 @@ export interface RawSessionState {
   history_window?: {
     max_messages?: number;
   };
+  inference_overrides?: {
+    reasoning_effort?: string;
+  };
   status: SessionState["status"];
   brain_turn_count: number;
   created_at: string;
@@ -79,6 +82,9 @@ export function toSessionState(state: RawSessionState): SessionState {
           maxMessages: state.history_window.max_messages,
         }
       : undefined,
+    inferenceOverrides: {
+      reasoningEffort: state.inference_overrides?.reasoning_effort,
+    },
     status: state.status,
     brainTurnCount: state.brain_turn_count,
     createdAt: state.created_at,

@@ -86,6 +86,9 @@ export function toNativeSessionState(session: SessionState): unknown {
     history_window: session.historyWindow
       ? { max_messages: session.historyWindow.maxMessages }
       : undefined,
+    inference_overrides: {
+      reasoning_effort: session.inferenceOverrides?.reasoningEffort,
+    },
     status: session.status,
     brain_turn_count: session.brainTurnCount,
     created_at: session.createdAt,

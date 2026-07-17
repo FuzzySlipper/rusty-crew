@@ -11312,6 +11312,18 @@ export const bridgeWireSchemaArtifact = {
                 "null"
               ]
             },
+            "inference_overrides": {
+              "default": {},
+              "properties": {
+                "reasoning_effort": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
             "kind": {
               "enum": [
                 "full",
@@ -11529,6 +11541,18 @@ export const bridgeWireSchemaArtifact = {
                           "object",
                           "null"
                         ]
+                      },
+                      "inference_overrides": {
+                        "default": {},
+                        "properties": {
+                          "reasoning_effort": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": "object"
                       },
                       "kind": {
                         "enum": [

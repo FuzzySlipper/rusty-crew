@@ -12320,6 +12320,10 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, SessionId::new("session-alpha"));
         assert_eq!(sessions[0].tool_profile.tools[0].name, "apply_patch");
+        assert_eq!(
+            sessions[0].inference_overrides.reasoning_effort.as_deref(),
+            Some("high")
+        );
         assert_eq!(configs.len(), 1);
         assert_eq!(
             configs[0].config.resource_limits.max_duration_ms,
@@ -12423,6 +12427,9 @@ mod tests {
             resource_limits: backend_resource_limits(),
             tool_profile: backend_tool_profile(),
             history_window: None,
+            inference_overrides: rusty_crew_core_protocol::SessionInferenceOverrides {
+                reasoning_effort: Some("high".to_string()),
+            },
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-06-20T00:00:00Z".to_string(),
@@ -14982,6 +14989,7 @@ mod tests {
             },
             tool_profile: ToolProfile { tools: Vec::new() },
             history_window: None,
+            inference_overrides: Default::default(),
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-07-10T00:00:00Z".into(),
@@ -15324,6 +15332,7 @@ mod tests {
             },
             tool_profile: ToolProfile { tools: Vec::new() },
             history_window: None,
+            inference_overrides: Default::default(),
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-07-10T00:00:00Z".into(),

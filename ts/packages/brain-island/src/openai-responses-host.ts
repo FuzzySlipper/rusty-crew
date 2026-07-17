@@ -228,9 +228,9 @@ export async function createOpenAiResponsesBrainHost(
           model: context.profile.profile.modelConfig.modelName,
           instructions: responsesInstructions(wake),
           reasoningEffort:
+            wake.state.session.inferenceOverrides?.reasoningEffort ??
             context.profile.profile.modelConfig.reasoningEffort,
-          maxOutputTokens:
-            context.profile.profile.modelConfig.maxOutputTokens,
+          maxOutputTokens: context.profile.profile.modelConfig.maxOutputTokens,
           ...(requestTimeoutMs === undefined
             ? {}
             : { providerRequestTimeoutMs: requestTimeoutMs }),

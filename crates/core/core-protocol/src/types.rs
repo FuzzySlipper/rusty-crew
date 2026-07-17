@@ -428,6 +428,12 @@ pub struct SessionConfig {
     pub history_window: Option<SessionHistoryWindow>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionInferenceOverrides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionState {
     pub handle: SessionHandle,
@@ -439,6 +445,8 @@ pub struct SessionState {
     pub resource_limits: ResourceLimits,
     pub tool_profile: ToolProfile,
     pub history_window: Option<SessionHistoryWindow>,
+    #[serde(default)]
+    pub inference_overrides: SessionInferenceOverrides,
     pub status: SessionStatus,
     pub brain_turn_count: u32,
     pub created_at: IsoTimestamp,

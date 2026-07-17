@@ -19,7 +19,7 @@ export interface SlashCommandResponseContext {
 export function buildReadOnlySlashCommandResponse(
   commandName: Extract<
     SlashCommandName,
-    "help" | "status" | "session" | "model"
+    "help" | "status" | "session" | "model" | "effort"
   >,
   context: SlashCommandResponseContext,
 ): SlashCommandResponse {
@@ -32,6 +32,8 @@ export function buildReadOnlySlashCommandResponse(
       return sessionResponse(context);
     case "model":
       return modelResponse(context);
+    case "effort":
+      return effortResponse(context);
   }
 }
 
@@ -86,6 +88,12 @@ function modelResponse(
       modelId: model.provider.model_id ?? "unknown",
       brainBackend: model.brain.backend,
       brainModule: model.brain.module ?? "unknown",
+      providerReasoningEffort:
+        model.provider.provider_reasoning_effort ?? "provider default",
+      sessionReasoningEffortOverride:
+        model.provider.session_reasoning_effort_override ?? "none",
+      resolvedReasoningEffort:
+        model.provider.reasoning_effort ?? "provider default",
       contextStrategy: model.context_strategy.strategy_id,
       autoCompactionEnabled: model.context_strategy.auto_compaction_enabled,
       contextWindowTokens: model.context.context_window_tokens ?? 0,
@@ -116,6 +124,29 @@ function modelResponse(
         : "",
       ...model.diagnostics.map((diagnostic) => diagnostic.message),
     ]),
+  };
+}
+
+function effortResponse(
+  context: SlashCommandResponseContext,
+): SlashCommandResponse {
+  const model = context.modelContext;
+  const providerEffort = model?.provider.provider_reasoning_effort;
+  const override = context.session.reasoningEffortOverride;
+  const resolved = override ?? providerEffort;
+  return {
+    title: "Reasoning Effort",
+    summary: override
+      ? `This session overrides reasoning effort to ${override}.`
+      : resolved
+        ? `This session uses provider reasoning effort ${resolved}.`
+        : "This session leaves reasoning effort to the provider default.",
+    fields: {
+      sessionId: context.session.sessionId,
+      providerReasoningEffort: providerEffort ?? "provider default",
+      sessionOverride: override ?? "none",
+      resolvedReasoningEffort: resolved ?? "provider default",
+    },
   };
 }
 

@@ -1028,6 +1028,33 @@
         "x-rusty-crew-command-name": "archive_session"
       }
     },
+    "/v1/admin/control/sessions/{session_id}/effort": {
+      "post": {
+        "operationId": "adminControlSessionsEffort",
+        "summary": "Set or clear the reasoning-effort override for one durable session.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.effort",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "set_session_effort"
+      }
+    },
     "/v1/admin/control/sessions/{session_id}/new": {
       "post": {
         "operationId": "adminControlSessionsNew",
@@ -4944,7 +4971,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 196,
+    "capability_count": 197,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

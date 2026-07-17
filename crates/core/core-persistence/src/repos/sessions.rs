@@ -90,7 +90,8 @@ impl CoordinationStore {
                     brain_turn_count,
                     created_at,
                     last_active_at,
-                    history_window_json
+                    history_window_json,
+                    inference_overrides_json
                 FROM sessions
                 ORDER BY handle ASC",
             )
@@ -137,7 +138,8 @@ fn query_sessions(conn: &Connection, query: &SessionQuery) -> CoreResult<Vec<Ses
                 brain_turn_count,
                 created_at,
                 last_active_at,
-                history_window_json
+                history_window_json,
+                inference_overrides_json
              FROM sessions
              WHERE (?1 IS NULL OR agent_id = ?1)
                AND (?2 IS NULL OR profile_id = ?2)
@@ -164,6 +166,7 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
     let tool_profile_json: Option<String> = row.get(7)?;
     let status_json: String = row.get(8)?;
     let history_window_json: Option<String> = row.get(12)?;
+    let inference_overrides_json: Option<String> = row.get(13)?;
     Ok(SessionState {
         session_id: SessionId(row.get(0)?),
         handle: SessionHandle::new(row.get::<_, i64>(1)? as u64),
@@ -196,6 +199,12 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
             .map(from_json_text::<SessionHistoryWindow>)
             .transpose()
             .map_err(to_sql_error)?,
+        inference_overrides: inference_overrides_json
+            .as_deref()
+            .map(from_json_text)
+            .transpose()
+            .map_err(to_sql_error)?
+            .unwrap_or_default(),
         status: from_json_text::<SessionStatus>(&status_json).map_err(to_sql_error)?,
         brain_turn_count: row.get::<_, i64>(9)? as u32,
         created_at: row.get(10)?,
@@ -310,6 +319,7 @@ fn save_session_state_in_tx(
         .as_ref()
         .map(to_json_text)
         .transpose()?;
+    let inference_overrides_json = to_json_text(&state.inference_overrides)?;
     let delegation_json = state.delegation.as_ref().map(to_json_text).transpose()?;
     tx.execute(
         "INSERT INTO sessions (
@@ -325,8 +335,9 @@ fn save_session_state_in_tx(
             brain_turn_count,
             created_at,
             last_active_at,
-            history_window_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            history_window_json,
+            inference_overrides_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(session_id) DO UPDATE SET
             handle = excluded.handle,
             agent_id = excluded.agent_id,
@@ -336,6 +347,7 @@ fn save_session_state_in_tx(
             resource_limits_json = excluded.resource_limits_json,
             tool_profile_json = excluded.tool_profile_json,
             history_window_json = excluded.history_window_json,
+            inference_overrides_json = excluded.inference_overrides_json,
             status_json = excluded.status_json,
             brain_turn_count = excluded.brain_turn_count,
             last_active_at = excluded.last_active_at",
@@ -353,10 +365,17 @@ fn save_session_state_in_tx(
             state.created_at,
             state.last_active_at,
             history_window_json,
+            inference_overrides_json,
         ],
     )
     .map_err(|error| persistence_error("save session", error))?;
     Ok(())
+}
+
+pub(crate) fn migrate_v51_add_session_inference_overrides(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    add_missing_column(tx, "sessions", "inference_overrides_json", "TEXT")
 }
 
 fn save_session_config_in_tx(
@@ -850,6 +869,9 @@ mod tests {
             resource_limits: config.resource_limits.clone(),
             tool_profile: config.tool_profile.clone(),
             history_window: config.history_window.clone(),
+            inference_overrides: rusty_crew_core_protocol::SessionInferenceOverrides {
+                reasoning_effort: Some("high".to_string()),
+            },
             status: SessionStatus::Idle,
             brain_turn_count: 3,
             created_at: "2026-07-02T01:00:00Z".to_string(),
@@ -869,6 +891,10 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, SessionId::new("session-repo-alpha"));
         assert_eq!(sessions[0].brain_turn_count, 3);
+        assert_eq!(
+            sessions[0].inference_overrides.reasoning_effort.as_deref(),
+            Some("high")
+        );
         assert_eq!(configs.len(), 1);
         assert_eq!(
             configs[0].config.session_id,

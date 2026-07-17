@@ -77,6 +77,33 @@
         "requires_control_auth": false
       },
       {
+        "name": "effort",
+        "aliases": ["/effort"],
+        "description": "Show or override reasoning effort for the current session; use default to clear the override.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [
+          {
+            "name": "effort",
+            "description": "Lowercase provider effort token, or default.",
+            "type": "string",
+            "required": false,
+            "placeholder": "default|low|medium|high"
+          }
+        ],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend-control",
+        "read_only": false,
+        "mutating": true,
+        "scope": "session",
+        "allowed_session_kinds": ["full"],
+        "requires_control_auth": true,
+        "backing_control_command": "set_session_effort"
+      },
+      {
         "name": "new",
         "aliases": ["/new"],
         "description": "Archive the current session and create a fresh replacement session.",
@@ -1908,6 +1935,18 @@
         "rust_plan_operation": "plan_new_session_control"
       },
       {
+        "id": "admin.control.sessions.effort",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/effort",
+        "description": "Set or clear the reasoning-effort override for one durable session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true,
+        "command_name": "set_session_effort"
+      },
+      {
         "id": "admin.control.sessions.runtime.pause",
         "method": "POST",
         "path_template": "/v1/admin/control/sessions/{session_id}/runtime/pause",
@@ -3460,6 +3499,13 @@
         "auth_phase": "after_auth"
       },
       {
+        "capability_id": "admin.control.sessions.effort",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/effort",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
         "capability_id": "admin.control.sessions.runtime.pause",
         "method": "POST",
         "path_template": "/v1/admin/control/sessions/{session_id}/runtime/pause",
@@ -3729,6 +3775,7 @@
     "status",
     "session",
     "model",
+    "effort",
     "new",
     "reload-mcp"
   ]

@@ -70,6 +70,20 @@ impl CoreEngine {
         self.sessions.all_sessions()
     }
 
+    pub fn set_session_reasoning_effort(
+        &self,
+        session_id: &SessionId,
+        reasoning_effort: Option<String>,
+    ) -> CoreResult<SessionState> {
+        let state = self.sessions.set_reasoning_effort_override(
+            session_id,
+            reasoning_effort,
+            self.now(),
+        )?;
+        save_engine_session(&self.store, &state)?;
+        Ok(state)
+    }
+
     pub fn archive_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
         let now = self.now();
         self.archive_active_external_bindings_for_session(session_id, &now)?;

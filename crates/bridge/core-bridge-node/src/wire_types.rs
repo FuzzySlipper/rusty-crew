@@ -135,6 +135,7 @@ pub struct JsSessionState {
     pub resource_limits: JsResourceLimits,
     pub tool_profile: JsToolProfile,
     pub history_window: Option<JsSessionHistoryWindow>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[napi_derive::napi(object)]

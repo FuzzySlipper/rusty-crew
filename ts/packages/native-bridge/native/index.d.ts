@@ -253,6 +253,7 @@ export declare class NativeBridgeBinding {
   createSession(config: JsSessionConfig): JsSessionState
   ensureConfiguredSession(config: JsSessionConfig): JsSessionState
   archiveSession(sessionId: string): JsSessionState
+  setSessionReasoningEffort(sessionId: string, reasoningEffort?: string | undefined | null): JsSessionState
   listSessionsJson(): string
   routeAgentMessage(from: string, to: string, body: string, correlationId?: string | undefined | null): JsEventReceipt
   enqueueBodyFollowUpMessage(sessionId: string, from: string, body: string, correlationId?: string | undefined | null): JsQueuedMessageRecord
@@ -748,6 +749,7 @@ export interface JsSessionState {
   resourceLimits: JsResourceLimits
   toolProfile: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
+  reasoningEffort?: string
 }
 
 export interface JsShutdownSummary {

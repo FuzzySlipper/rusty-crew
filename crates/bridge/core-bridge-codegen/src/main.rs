@@ -3497,6 +3497,7 @@ fn sample_session_state() -> SessionState {
         history_window: Some(SessionHistoryWindow {
             max_messages: Some(200),
         }),
+        inference_overrides: Default::default(),
         status: SessionStatus::Idle,
         brain_turn_count: 7,
         created_at: sample_timestamp(),

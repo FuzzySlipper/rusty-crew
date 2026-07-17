@@ -170,6 +170,7 @@ function createRustChatCompletionsBrainHostExecutor(
           temperatureMilli:
             context.profile.profile.modelConfig.temperatureMilli,
           reasoningEffort:
+            wake.state.session.inferenceOverrides?.reasoningEffort ??
             context.profile.profile.modelConfig.reasoningEffort,
           maxOutputTokens:
             context.profile.profile.modelConfig.maxOutputTokens ??

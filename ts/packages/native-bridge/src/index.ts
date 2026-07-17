@@ -653,6 +653,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
     archiveSession: unavailable("archive_session"),
+    setSessionReasoningEffort: unavailable("set_session_reasoning_effort"),
     ensureConfiguredSession: unavailable("ensure_configured_session"),
     registerScheduledWakeJob: unavailable("register_scheduled_wake_job"),
     registerScheduledHostJob: unavailable("register_scheduled_host_job"),
@@ -1554,6 +1555,8 @@ function createNativeBridgeModule(
     ensureConfiguredSession: async (config) =>
       binding.ensureConfiguredSession(nativeSessionConfig(config)),
     archiveSession: async (sessionId) => binding.archiveSession(sessionId),
+    setSessionReasoningEffort: async (sessionId, reasoningEffort) =>
+      binding.setSessionReasoningEffort(sessionId, reasoningEffort),
     ...createNativeBridgeAgentCoordinationMethods(binding),
     ...createNativeBridgeExternalRuntimeMethods(binding),
     ...createNativeBridgeExternalRuntimeCertificationMethods(binding),

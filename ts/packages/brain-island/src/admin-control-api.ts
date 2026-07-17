@@ -21,6 +21,7 @@ export type AdminControlCommandName =
   | "create_session"
   | "archive_session"
   | "new_session"
+  | "set_session_effort"
   | "pause_runtime"
   | "resume_runtime"
   | "plan_runtime_rebuild"
@@ -129,6 +130,9 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   newSession?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  setSessionEffort?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   pauseRuntime?(
@@ -590,6 +594,27 @@ function parseControlCommand(
         command: {
           ...commandBase,
           name: "new_session",
+          target: { sessionId },
+        },
+      };
+    }
+    if (parts[5] === "effort") {
+      const effort = body.value.reasoningEffort;
+      if (
+        !Object.prototype.hasOwnProperty.call(body.value, "reasoningEffort") ||
+        (effort !== null &&
+          (typeof effort !== "string" ||
+            effort.length === 0 ||
+            effort.length > 64 ||
+            !/^[a-z0-9_-]+$/.test(effort)))
+      ) {
+        return invalidTarget(requestId, "invalid_reasoning_effort");
+      }
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "set_session_effort",
           target: { sessionId },
         },
       };
@@ -1064,6 +1089,8 @@ function executorForCommand(
       return executor.archiveSession;
     case "new_session":
       return executor.newSession;
+    case "set_session_effort":
+      return executor.setSessionEffort;
     case "pause_runtime":
       return executor.pauseRuntime;
     case "resume_runtime":

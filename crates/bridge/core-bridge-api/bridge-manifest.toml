@@ -774,6 +774,15 @@ output = "core_protocol::SessionState"
 errors = "core_protocol::CoreError"
 summary = "Create, reuse, or safely reactivate a configured durable service session without minting a replacement session ID."
 
+[[operation]]
+name = "set_session_reasoning_effort"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(session_id: core_protocol::SessionId, reasoning_effort: Option<String>)"
+output = "core_protocol::SessionState"
+errors = "core_protocol::CoreError"
+summary = "Set or clear the Rust-owned reasoning-effort override for one durable session."
+
 # Scheduler operator controls. The scheduler remains Rust-owned; these bridge
 # calls are deliberate host/admin entrypoints for registering wake jobs,
 # triggering ticks, manual runs, and pausing/resuming durable jobs.

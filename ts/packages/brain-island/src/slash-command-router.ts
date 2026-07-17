@@ -14,6 +14,7 @@ export interface SlashCommandSession {
   agentId: string;
   profileId: string;
   kind: "full" | "worker" | "delegated";
+  reasoningEffortOverride?: string;
 }
 
 export interface SlashCommandActor {
@@ -93,6 +94,7 @@ export function routeSlashCommand(
 
   const authorization = authorizeSlashCommand(
     commandName,
+    parsed,
     input.session,
     input.options,
   );
@@ -141,6 +143,49 @@ const SLASH_COMMAND_HANDLERS = {
       summary: "Model and brain diagnostics requested.",
       fields: sessionFields(input.session),
     }),
+  effort: (input, parsed) => {
+    const raw = parsed.args.trim();
+    if (raw.length === 0) {
+      return intercepted("effort", "ok", {
+        title: "Reasoning Effort",
+        summary: "Reasoning effort diagnostics requested.",
+        fields: sessionFields(input.session),
+      });
+    }
+    const effort = raw.toLowerCase();
+    if (
+      effort !== "default" &&
+      (effort.length > 64 || !/^[a-z0-9_-]+$/.test(effort))
+    ) {
+      return intercepted("effort", "invalid", {
+        title: "Invalid reasoning effort",
+        summary:
+          "Reasoning effort must be default or a lowercase provider token of at most 64 characters.",
+      });
+    }
+    return intercepted(
+      "effort",
+      "ok",
+      {
+        title: "Reasoning Effort",
+        summary:
+          effort === "default"
+            ? "Clear the current session reasoning-effort override."
+            : `Set current session reasoning effort to ${effort}.`,
+        fields: sessionFields(input.session),
+      },
+      {
+        commandName: "set_session_effort",
+        target: { sessionId: input.session.sessionId },
+        reason: `slash command /effort ${effort}`,
+        reasonCode: "slash_set_session_effort",
+        body: {
+          reasoningEffort: effort === "default" ? null : effort,
+          ...controlBody(input, parsed.args),
+        },
+      },
+    );
+  },
   new: (input, parsed) =>
     intercepted(
       "new",
@@ -208,10 +253,14 @@ function commandAllowed(
 
 function authorizeSlashCommand(
   commandName: SlashCommandName,
+  parsed: ParsedSlashCommand,
   session: SlashCommandSession,
   options: SlashCommandRouterOptions | undefined,
 ): { allowed: true } | { allowed: false; reason: string } {
-  const isControl = findSlashCommandDescriptor(commandName)?.mutating ?? false;
+  const isControl =
+    commandName === "effort" && parsed.args.length === 0
+      ? false
+      : (findSlashCommandDescriptor(commandName)?.mutating ?? false);
   const isPrime = (options?.primeProfiles ?? ["prime"]).includes(
     session.profileId,
   );

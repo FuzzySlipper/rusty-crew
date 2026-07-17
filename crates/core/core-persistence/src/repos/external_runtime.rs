@@ -2453,6 +2453,7 @@ mod tests {
             },
             tool_profile: ToolProfile { tools: Vec::new() },
             history_window: None,
+            inference_overrides: Default::default(),
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-07-10T00:00:00Z".into(),

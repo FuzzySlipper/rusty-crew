@@ -357,6 +357,8 @@ export interface SessionContextUsageResult {
     max_output_tokens?: number;
     temperature?: number;
     reasoning_effort?: string;
+    provider_reasoning_effort?: string;
+    session_reasoning_effort_override?: string;
     reasoning_format?: string;
     revision?: number;
   };

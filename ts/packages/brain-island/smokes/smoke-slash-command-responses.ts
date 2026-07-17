@@ -22,6 +22,7 @@ const sessionContext: SlashCommandSession = {
   agentId: "agent-alpha",
   profileId: "prime",
   kind: "full",
+  reasoningEffortOverride: "high",
 };
 const counters: RuntimeCounterSummary = {
   brainTurns: 4,
@@ -149,7 +150,9 @@ const model = buildReadOnlySlashCommandResponse("model", {
       context_window_tokens: 128_000,
       max_output_tokens: 4096,
       temperature: 0.5,
-      reasoning_effort: "low",
+      reasoning_effort: "high",
+      provider_reasoning_effort: "low",
+      session_reasoning_effort_override: "high",
       reasoning_format: "none",
       revision: 3,
     },
@@ -198,10 +201,20 @@ assert.equal(model.fields?.providerAlias, "deepseek-flash");
 assert.equal(model.fields?.modelId, "gpt");
 assert.equal(model.fields?.estimatedPromptTokens, 512);
 assert.equal(model.fields?.estimatorId, "test_estimator");
+assert.equal(model.fields?.providerReasoningEffort, "low");
+assert.equal(model.fields?.sessionReasoningEffortOverride, "high");
+assert.equal(model.fields?.resolvedReasoningEffort, "high");
 assert.equal(
   model.items?.some((item) => item.includes("provider endpoint")),
   true,
 );
+
+const effort = buildReadOnlySlashCommandResponse("effort", {
+  diagnostics,
+  session: sessionContext,
+});
+assert.equal(effort.fields?.sessionOverride, "high");
+assert.equal(effort.fields?.resolvedReasoningEffort, "high");
 
 const missingSession = buildReadOnlySlashCommandResponse("session", {
   diagnostics,

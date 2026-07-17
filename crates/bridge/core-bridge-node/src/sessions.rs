@@ -26,6 +26,15 @@ impl NativeBridge {
         self.engine()?.list_sessions()
     }
 
+    pub fn set_session_reasoning_effort(
+        &self,
+        session_id: SessionId,
+        reasoning_effort: Option<String>,
+    ) -> CoreResult<rusty_crew_core_bridge_api::SessionState> {
+        self.engine()?
+            .set_session_reasoning_effort(&session_id, reasoning_effort)
+    }
+
     pub fn project_body_state_json(
         &self,
         session_id: rusty_crew_core_bridge_api::SessionId,
@@ -70,6 +79,7 @@ pub(crate) fn to_js_session_state(
         history_window: state.history_window.map(|window| JsSessionHistoryWindow {
             max_messages: window.max_messages,
         }),
+        reasoning_effort: state.inference_overrides.reasoning_effort,
     }
 }
 

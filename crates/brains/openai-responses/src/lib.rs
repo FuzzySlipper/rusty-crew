@@ -3412,6 +3412,7 @@ mod tests {
             },
             tool_profile: ToolProfile { tools: Vec::new() },
             history_window: None,
+            inference_overrides: Default::default(),
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-06-24T00:00:00Z".to_string(),

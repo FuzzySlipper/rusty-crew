@@ -40,6 +40,30 @@ assert.equal(model.commandName, "model");
 assert.equal(model.status, "ok");
 assert.equal(model.controlRequest, undefined);
 
+const effortRead = intercepted(
+  routeSlashCommand(
+    input("/effort", { ...primeSession, reasoningEffortOverride: "high" }),
+  ),
+);
+assert.equal(effortRead.commandName, "effort");
+assert.equal(effortRead.controlRequest, undefined);
+
+const effortSet = intercepted(
+  routeSlashCommand(input("/effort medium", primeSession)),
+);
+assert.equal(effortSet.controlRequest?.commandName, "set_session_effort");
+assert.equal(effortSet.controlRequest?.body.reasoningEffort, "medium");
+
+const effortClear = intercepted(
+  routeSlashCommand(input("/effort default", primeSession)),
+);
+assert.equal(effortClear.controlRequest?.body.reasoningEffort, null);
+
+const effortInvalid = intercepted(
+  routeSlashCommand(input("/effort not valid", primeSession)),
+);
+assert.equal(effortInvalid.status, "invalid");
+
 const newSession = intercepted(
   routeSlashCommand(input("/new fresh start", primeSession)),
 );

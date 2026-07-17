@@ -74,6 +74,7 @@ impl SessionRegistry {
             resource_limits: config.resource_limits,
             tool_profile: config.tool_profile,
             history_window: config.history_window,
+            inference_overrides: Default::default(),
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: now.clone(),
@@ -113,6 +114,42 @@ impl SessionRegistry {
         state.resource_limits = config.resource_limits.clone();
         state.tool_profile = config.tool_profile.clone();
         state.history_window = config.history_window.clone();
+        Ok(state.clone())
+    }
+
+    pub fn set_reasoning_effort_override(
+        &self,
+        session_id: &SessionId,
+        reasoning_effort: Option<String>,
+        now: IsoTimestamp,
+    ) -> CoreResult<SessionState> {
+        if let Some(value) = reasoning_effort.as_deref() {
+            if value.is_empty()
+                || value.len() > 64
+                || !value.chars().all(|character| {
+                    character.is_ascii_lowercase()
+                        || character.is_ascii_digit()
+                        || matches!(character, '_' | '-')
+                })
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "reasoning effort must be a lowercase token of at most 64 characters",
+                ));
+            }
+        }
+        let mut sessions =
+            self.inner.sessions.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
+            })?;
+        let state = sessions.get_mut(session_id).ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session {session_id} not found"),
+            )
+        })?;
+        state.inference_overrides.reasoning_effort = reasoning_effort;
+        state.last_active_at = now;
         Ok(state.clone())
     }
 
@@ -394,5 +431,50 @@ mod tests {
             .create_session(invalid_depth, "2026-07-15T00:00:00Z".to_string())
             .expect_err("delegation depth above bound should be rejected");
         assert_eq!(depth_error.kind, CoreErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn reasoning_effort_override_is_session_scoped_preserved_by_config_and_clearable() {
+        let registry = SessionRegistry::new();
+        let config = config(Some("/home"));
+        let session_id = config.session_id.clone();
+        registry
+            .create_session(config.clone(), "2026-07-16T00:00:00Z".to_string())
+            .unwrap();
+
+        let updated = registry
+            .set_reasoning_effort_override(
+                &session_id,
+                Some("high".to_string()),
+                "2026-07-16T00:01:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            updated.inference_overrides.reasoning_effort.as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            registry
+                .apply_config(&config)
+                .unwrap()
+                .inference_overrides
+                .reasoning_effort
+                .as_deref(),
+            Some("high")
+        );
+
+        let cleared = registry
+            .set_reasoning_effort_override(&session_id, None, "2026-07-16T00:02:00Z".to_string())
+            .unwrap();
+        assert_eq!(cleared.inference_overrides.reasoning_effort, None);
+
+        let error = registry
+            .set_reasoning_effort_override(
+                &session_id,
+                Some("not valid".to_string()),
+                "2026-07-16T00:03:00Z".to_string(),
+            )
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
     }
 }

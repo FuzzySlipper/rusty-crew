@@ -46,6 +46,12 @@ export const sessionStateSchema = Type.Object(
     ]),
     resourceLimits: unknownRecord,
     toolProfile: toolProfileSchema,
+    inferenceOverrides: Type.Optional(
+      Type.Object(
+        { reasoningEffort: Type.Optional(nullableString) },
+        { additionalProperties: true },
+      ),
+    ),
     status: Type.Union([
       Type.Literal("active"),
       Type.Literal("idle"),
@@ -252,6 +258,12 @@ export const rawSessionStateSchema = Type.Object(
         ),
         Type.Null(),
       ]),
+    ),
+    inference_overrides: Type.Optional(
+      Type.Object(
+        { reasoning_effort: Type.Optional(nullableString) },
+        { additionalProperties: true },
+      ),
     ),
     status: Type.Union([
       Type.Literal("active"),

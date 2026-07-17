@@ -253,6 +253,7 @@ export interface NativeBridgeBinding {
   createSession(config: JsSessionConfig): JsSessionState
   ensureConfiguredSession(config: JsSessionConfig): JsSessionState
   archiveSession(sessionId: string): JsSessionState
+  setSessionReasoningEffort(sessionId: string, reasoningEffort?: string | undefined | null): JsSessionState
   listSessionsJson(): string
   routeAgentMessage(from: string, to: string, body: string, correlationId?: string | undefined | null): JsEventReceipt
   enqueueBodyFollowUpMessage(sessionId: string, from: string, body: string, correlationId?: string | undefined | null): JsQueuedMessageRecord
@@ -746,6 +747,7 @@ export interface JsSessionState {
   resourceLimits: JsResourceLimits
   toolProfile: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
+  reasoningEffort?: string
 }
 
 export interface JsShutdownSummary {
@@ -805,7 +807,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 259,
+  "manifestOperationCount": 260,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2798,6 +2800,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "JsSessionState",
       "returnKind": "object",
       "operationName": "archive_session"
+    },
+    {
+      "name": "setSessionReasoningEffort",
+      "parameterSource": "sessionId: string, reasoningEffort?: string | undefined | null",
+      "parameterCount": 2,
+      "returnType": "JsSessionState",
+      "returnKind": "object",
+      "operationName": "set_session_reasoning_effort"
     },
     {
       "name": "listSessionsJson",

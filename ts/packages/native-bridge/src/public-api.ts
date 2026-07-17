@@ -382,6 +382,7 @@ export interface NativeSessionStateSummary {
   profileId: string;
   kind: string;
   status: string;
+  reasoningEffort?: string;
 }
 
 export interface NativeProfileMemoryCaps {
@@ -2111,6 +2112,10 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
     config: NativeSessionConfigInput,
   ): Promise<NativeSessionStateSummary>;
   archiveSession(sessionId: SessionId): Promise<NativeSessionStateSummary>;
+  setSessionReasoningEffort(
+    sessionId: SessionId,
+    reasoningEffort?: string,
+  ): Promise<NativeSessionStateSummary>;
   /**
    * Internal agent-to-agent routing trigger. This publishes through
    * CoreEngine::route_agent_message and runs scheduler evaluation.

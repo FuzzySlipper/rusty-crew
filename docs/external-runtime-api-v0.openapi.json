@@ -4297,6 +4297,10 @@
         },
         "type": "object"
       },
+      "SessionInferenceOverrides": {
+        "properties": { "reasoning_effort": { "type": ["string", "null"] } },
+        "type": "object"
+      },
       "SessionKind": {
         "enum": ["full", "worker", "delegated"],
         "type": "string"
@@ -4322,6 +4326,10 @@
               { "$ref": "#/components/schemas/SessionHistoryWindow" },
               { "type": "null" }
             ]
+          },
+          "inference_overrides": {
+            "$ref": "#/components/schemas/SessionInferenceOverrides",
+            "default": {}
           },
           "kind": { "$ref": "#/components/schemas/SessionKind" },
           "last_active_at": { "type": "string" },

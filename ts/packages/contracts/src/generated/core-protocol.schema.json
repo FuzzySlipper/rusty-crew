@@ -5037,6 +5037,17 @@
       },
       "type": "object"
     },
+    "SessionInferenceOverrides": {
+      "properties": {
+        "reasoning_effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SessionKind": {
       "enum": [
         "full",
@@ -5082,6 +5093,10 @@
               "type": "null"
             }
           ]
+        },
+        "inference_overrides": {
+          "$ref": "#/$defs/SessionInferenceOverrides",
+          "default": {}
         },
         "kind": {
           "$ref": "#/$defs/SessionKind"

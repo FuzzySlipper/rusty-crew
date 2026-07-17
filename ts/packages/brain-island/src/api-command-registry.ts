@@ -167,6 +167,26 @@ export const SLASH_COMMAND_REGISTRY = [
     readOnly: true,
   }),
   slashCommand({
+    name: "effort",
+    description:
+      "Show or override reasoning effort for the current session; use default to clear the override.",
+    readOnly: false,
+    positionalArgs: [
+      {
+        name: "effort",
+        description: "Lowercase provider effort token, or default.",
+        type: "string",
+        required: false,
+        placeholder: "default|low|medium|high",
+      },
+    ],
+    control: {
+      commandName: "set_session_effort",
+      pathTemplate: "/v1/admin/control/sessions/{session_id}/effort",
+      reasonCode: "slash_set_session_effort",
+    },
+  }),
+  slashCommand({
     name: "new",
     description:
       "Archive the current session and create a fresh replacement session.",
@@ -267,6 +287,14 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     "new_session",
     ["session"],
     { rustPlanOperation: "plan_new_session_control" },
+  ),
+  controlCapability(
+    "admin.control.sessions.effort",
+    "POST",
+    "/v1/admin/control/sessions/{session_id}/effort",
+    "Set or clear the reasoning-effort override for one durable session.",
+    "set_session_effort",
+    ["session"],
   ),
   controlCapability(
     "admin.control.sessions.runtime.pause",

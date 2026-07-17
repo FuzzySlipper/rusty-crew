@@ -157,9 +157,11 @@ assert.ok(
 );
 
 for (const command of SLASH_COMMAND_REGISTRY) {
+  const commandText =
+    command.name === "effort" ? "/effort high" : `/${command.name} smoke args`;
   const routed = intercepted(
     routeSlashCommand({
-      text: `/${command.name} smoke args`,
+      text: commandText,
       session: primeSession,
       actor: { id: "human-alpha" },
     }),

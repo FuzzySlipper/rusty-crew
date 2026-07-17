@@ -141,6 +141,14 @@ const executor: AdminControlExecutor = {
       affectedIds: { sessionId: command.target.sessionId ?? "" },
     };
   },
+  setSessionEffort(command) {
+    return {
+      status: "completed",
+      summary: `Set effort for ${command.target.sessionId}.`,
+      affectedIds: { sessionId: command.target.sessionId ?? "" },
+      result: { reasoningEffort: command.body.reasoningEffort },
+    };
+  },
   pauseRuntime(command) {
     return {
       status: "completed",
@@ -360,6 +368,32 @@ assert.equal(auditSink.events[1]?.phase, "completed");
 assert.equal(observationSink.events.length, 2);
 assert.equal(observationSink.events[0]?.event_type, "admin_command_started");
 assert.equal(observationSink.events[1]?.event_type, "admin_command_completed");
+
+const setEffort = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/sessions/session-alpha/effort",
+    headers: authHeaders(),
+    body: { reasoningEffort: "high" },
+  },
+  context,
+);
+assert.equal(setEffort.status, 200);
+const setEffortData = okData<AdminControlResponse>(setEffort);
+assert.equal(setEffortData.command.name, "set_session_effort");
+assert.deepEqual(setEffortData.outcome.result, { reasoningEffort: "high" });
+
+const invalidEffort = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/sessions/session-alpha/effort",
+    headers: authHeaders(),
+    body: { reasoningEffort: "not valid" },
+  },
+  context,
+);
+assert.equal(invalidEffort.status, 400);
+assert.equal(invalidEffort.body.ok, false);
 
 const pauseSession = await handleAdminControlRequest(
   {

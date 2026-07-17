@@ -633,7 +633,12 @@ export async function rustyViewSessionContextUsage(
         provider?.temperatureMilli === undefined
           ? undefined
           : provider.temperatureMilli / 1_000,
-      reasoning_effort: provider?.reasoningEffort,
+      reasoning_effort:
+        input.session.inferenceOverrides?.reasoningEffort ??
+        provider?.reasoningEffort,
+      provider_reasoning_effort: provider?.reasoningEffort,
+      session_reasoning_effort_override:
+        input.session.inferenceOverrides?.reasoningEffort ?? undefined,
       reasoning_format: provider?.reasoningFormat,
       revision: provider?.revision,
     },

@@ -3283,6 +3283,7 @@ function configuredDebugSessionFallback(state: ServiceState): SessionState[] {
     kind: configured.kind,
     resourceLimits: {},
     toolProfile: { tools: [] },
+    inferenceOverrides: {},
     status: "active",
     brainTurnCount: 0,
     createdAt: now,
@@ -3602,6 +3603,28 @@ function createServiceControlExecutor(
       return (command) =>
         withRuntimeConfigMutation(async () => executor(command));
     })(),
+    setSessionEffort: async (command) => {
+      const raw = command.body.reasoningEffort;
+      if (raw !== null && typeof raw !== "string") {
+        throw new Error(
+          "reasoningEffort must be a lowercase provider token or null",
+        );
+      }
+      const session = await state.bridge.setSessionReasoningEffort(
+        command.target.sessionId as SessionId,
+        raw === null ? undefined : raw,
+      );
+      const resolved = raw ?? "provider default";
+      return {
+        status: "completed",
+        summary:
+          raw === null
+            ? `session ${session.sessionId} now uses provider-default reasoning effort`
+            : `session ${session.sessionId} reasoning effort set to ${resolved}`,
+        affectedIds: { sessionId: session.sessionId },
+        result: session,
+      };
+    },
     pauseRuntime: async (command) => pauseRuntimeTarget(state, command),
     resumeRuntime: async (command) => resumeRuntimeTarget(state, command),
     reloadMcp: createServiceReloadMcpExecutor(state),

@@ -86,11 +86,12 @@ export async function executeRustyViewChatCommand(
     routed.commandName === "help" ||
     routed.commandName === "status" ||
     routed.commandName === "session" ||
-    routed.commandName === "model"
+    routed.commandName === "model" ||
+    (routed.commandName === "effort" && !routed.controlRequest)
   ) {
     const diagnosticsContext = await context.buildDiagnosticsContext();
     const modelContext =
-      routed.commandName === "model"
+      routed.commandName === "model" || routed.commandName === "effort"
         ? await context.sessionContextUsage({
             session: input.session,
             requestId: input.requestId,
@@ -169,6 +170,8 @@ function slashCommandSession(session: SessionState): SlashCommandSession {
     agentId: session.agentId,
     profileId: session.profileId,
     kind: session.kind,
+    reasoningEffortOverride:
+      session.inferenceOverrides?.reasoningEffort ?? undefined,
   };
 }
 
@@ -181,6 +184,9 @@ export function controlUrlForSlashCommand(
   }
   if (commandName === "reload_mcp") {
     return `/v1/admin/control/mcp/${sessionId}/reload`;
+  }
+  if (commandName === "set_session_effort") {
+    return `/v1/admin/control/sessions/${sessionId}/effort`;
   }
   return `/v1/admin/control/unsupported/${commandName}`;
 }

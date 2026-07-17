@@ -85,6 +85,7 @@ export const bridgeOperations = [
   {"name":"github_gate_event_cursor","surface":"stable","direction":"ts_to_rust","input":"unit","output":"u64","errors":"core_protocol::CoreError","summary":"Read the Rust-owned durable Review terminal-event cursor for adapter reconnect."},
   {"name":"archive_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionId","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Archive a Rust-owned runtime session without minting a replacement session."},
   {"name":"ensure_configured_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionConfig","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Create, reuse, or safely reactivate a configured durable service session without minting a replacement session ID."},
+  {"name":"set_session_reasoning_effort","surface":"stable","direction":"ts_to_rust","input":"(session_id: core_protocol::SessionId, reasoning_effort: Option<String>)","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Set or clear the Rust-owned reasoning-effort override for one durable session."},
   {"name":"register_scheduled_wake_job","surface":"stable","direction":"ts_to_rust","input":"(job_id: String, target_session_id: core_protocol::SessionId, interval_ms: Option<u64>, first_due_at: IsoTimestamp)","output":"scheduled_job_summary","errors":"core_protocol::CoreError","summary":"Create or replace a Rust-owned scheduled wake job for an existing wakeable session."},
   {"name":"register_scheduled_host_job","surface":"stable","direction":"ts_to_rust","input":"(job_id: String, job_kind: String, interval_ms: Option<u64>, first_due_at: IsoTimestamp, payload_json: JsonValue)","output":"scheduled_job_summary","errors":"core_protocol::CoreError","summary":"Create or replace a Rust-owned scheduled host-executable job with a typed non-wake job kind."},
   {"name":"list_scheduled_jobs","surface":"stable","direction":"ts_to_rust","input":"(status: Option<scheduled_job_status>, job_kind: Option<String>, limit: Option<u32>, offset: Option<u32>)","output":"Vec<scheduled_job_summary>","errors":"core_protocol::CoreError","summary":"List Rust-owned scheduled jobs for admin diagnostics and operator tooling."},
@@ -271,4 +272,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "359d4fa99a902cab702d62d447894a440d5660091e20929b12c0898c6e2873ac" as const;
+export const bridgeWireShapeFingerprint = "5cc4fecf59754c16ab817884498e2352107a95c9fc7c8ecdaf81c8baf54c0a44" as const;
