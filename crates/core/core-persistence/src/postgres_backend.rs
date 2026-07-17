@@ -9247,7 +9247,7 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     trait SimpleKvConformanceStore {
         fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord>;
@@ -11189,6 +11189,154 @@ mod tests {
 
         let store = std::sync::Arc::try_unwrap(store)
             .unwrap_or_else(|_| panic!("credential concurrency store still has owners"));
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_model_provider_credential_link_and_unlink_are_atomic_across_connections() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!(
+                "skipping PostgreSQL provider credential concurrency test; no database URL env is set"
+            );
+            return;
+        };
+        let schema = unique_schema("rusty_crew_provider_credential_concurrency");
+        let store = std::sync::Arc::new(
+            PostgresBackendStore::connect_with_pool_options(&database_url, &schema, Some(4))
+                .unwrap(),
+        );
+        let provider = store
+            .upsert_model_provider(&model_provider_write(
+                "concurrent-provider",
+                ModelProviderProtocol::ChatCompletions,
+                "openai",
+                "concurrent-model",
+                None,
+            ))
+            .unwrap();
+        let credential = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: "openai:concurrent-link".to_string(),
+                display_name: "Concurrent link".to_string(),
+                provider_kind: "openai".to_string(),
+                credential_kind: ModelProviderCredentialKind::ApiKey,
+                secret: Some("sk-concurrent".to_string()),
+                clear_secret: false,
+                expected_revision: None,
+                now: "2026-07-17T00:00:00Z".to_string(),
+            })
+            .unwrap();
+
+        let participants = 4;
+        let mut blocker = postgres::Client::connect(&database_url, NoTls).unwrap();
+        blocker.batch_execute("BEGIN").unwrap();
+        blocker
+            .query_one(
+                &format!(
+                    "SELECT alias FROM \"{schema}\".model_providers WHERE alias = $1 FOR UPDATE"
+                ),
+                &[&provider.alias],
+            )
+            .unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(participants + 1));
+        let link_threads = (0..participants)
+            .map(|index| {
+                let store = std::sync::Arc::clone(&store);
+                let barrier = std::sync::Arc::clone(&barrier);
+                let provider_alias = provider.alias.clone();
+                let credential_id = credential.credential_id.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.link_model_provider_credential(&ModelProviderCredentialLink {
+                        provider_alias,
+                        credential_id,
+                        expected_provider_revision: Some(provider.revision),
+                        expected_credential_revision: Some(credential.revision),
+                        now: format!("2026-07-17T00:00:{index:02}Z"),
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        barrier.wait();
+        std::thread::sleep(Duration::from_millis(200));
+        blocker.batch_execute("COMMIT").unwrap();
+        let link_results = link_threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            link_results.iter().filter(|result| result.is_ok()).count(),
+            1
+        );
+        assert!(link_results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| error.kind == CoreErrorKind::ActionRejected));
+        let linked = store
+            .get_model_provider("concurrent-provider")
+            .unwrap()
+            .unwrap();
+        assert_eq!(linked.revision, provider.revision + 1);
+        assert_eq!(
+            linked.credential_id.as_deref(),
+            Some("openai:concurrent-link")
+        );
+
+        let mut blocker = postgres::Client::connect(&database_url, NoTls).unwrap();
+        blocker.batch_execute("BEGIN").unwrap();
+        blocker
+            .query_one(
+                &format!(
+                    "SELECT alias FROM \"{schema}\".model_providers WHERE alias = $1 FOR UPDATE"
+                ),
+                &[&linked.alias],
+            )
+            .unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(participants + 1));
+        let unlink_threads = (0..participants)
+            .map(|index| {
+                let store = std::sync::Arc::clone(&store);
+                let barrier = std::sync::Arc::clone(&barrier);
+                let provider_alias = linked.alias.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.unlink_model_provider_credential(&ModelProviderCredentialUnlink {
+                        provider_alias,
+                        expected_provider_revision: Some(linked.revision),
+                        now: format!("2026-07-17T00:01:{index:02}Z"),
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        barrier.wait();
+        std::thread::sleep(Duration::from_millis(200));
+        blocker.batch_execute("COMMIT").unwrap();
+        let unlink_results = unlink_threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            unlink_results
+                .iter()
+                .filter(|result| result.is_ok())
+                .count(),
+            1
+        );
+        assert!(unlink_results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| error.kind == CoreErrorKind::ActionRejected));
+        let unlinked = store
+            .get_model_provider("concurrent-provider")
+            .unwrap()
+            .unwrap();
+        assert_eq!(unlinked.revision, linked.revision + 1);
+        assert!(unlinked.credential_id.is_none());
+
+        drop(blocker);
+        let store = std::sync::Arc::try_unwrap(store)
+            .unwrap_or_else(|_| panic!("provider credential concurrency store still has owners"));
         store.drop_schema_for_test().unwrap();
     }
 

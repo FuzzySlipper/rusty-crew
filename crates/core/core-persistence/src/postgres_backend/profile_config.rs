@@ -1119,23 +1119,35 @@ impl PostgresBackendStore {
         )?;
         provider.credential_id = None;
         provider.credential = empty_model_provider_credential();
+        let previous_revision = provider.revision;
         provider.revision += 1;
         provider.updated_at = unlink.now.clone();
-        tx.execute(
-            &format!(
-                "UPDATE {schema}.model_providers
+        let changed = tx
+            .execute(
+                &format!(
+                    "UPDATE {schema}.model_providers
                     SET credential_id = NULL, provider_json = $2,
                         revision = $3, updated_at = $4
-                  WHERE alias = $1"
-            ),
-            &[
-                &unlink.provider_alias,
-                &to_json_text(&provider)?,
-                &(provider.revision as i64),
-                &unlink.now,
-            ],
-        )
-        .map_err(|error| postgres_error("unlink PostgreSQL model provider credential", error))?;
+                  WHERE alias = $1 AND revision = $5"
+                ),
+                &[
+                    &unlink.provider_alias,
+                    &to_json_text(&provider)?,
+                    &(provider.revision as i64),
+                    &unlink.now,
+                    &(previous_revision as i64),
+                ],
+            )
+            .map_err(|error| {
+                postgres_error("unlink PostgreSQL model provider credential", error)
+            })?;
+        verify_postgres_model_provider_cas(
+            &mut tx,
+            &schema,
+            &unlink.provider_alias,
+            previous_revision,
+            changed,
+        )?;
         let result = get_model_provider_in_client(&mut tx, &schema, &unlink.provider_alias)?
             .ok_or_else(|| {
                 CoreError::new(
@@ -1970,25 +1982,60 @@ fn link_model_provider_credential_in_tx(
     )?;
     provider.credential_id = Some(link.credential_id.clone());
     provider.credential = credential.credential.clone();
+    let previous_revision = provider.revision;
     provider.revision += 1;
     provider.updated_at = link.now.clone();
-    tx.execute(
-        &format!(
-            "UPDATE {schema}.model_providers
+    let changed = tx
+        .execute(
+            &format!(
+                "UPDATE {schema}.model_providers
                 SET credential_id = $2, provider_json = $3,
                     revision = $4, updated_at = $5
-              WHERE alias = $1"
-        ),
-        &[
-            &link.provider_alias,
-            &link.credential_id,
-            &to_json_text(&provider)?,
-            &(provider.revision as i64),
-            &link.now,
-        ],
-    )
-    .map_err(|error| postgres_error("link PostgreSQL model provider credential", error))?;
+              WHERE alias = $1 AND revision = $6"
+            ),
+            &[
+                &link.provider_alias,
+                &link.credential_id,
+                &to_json_text(&provider)?,
+                &(provider.revision as i64),
+                &link.now,
+                &(previous_revision as i64),
+            ],
+        )
+        .map_err(|error| postgres_error("link PostgreSQL model provider credential", error))?;
+    verify_postgres_model_provider_cas(
+        tx,
+        schema,
+        &link.provider_alias,
+        previous_revision,
+        changed,
+    )?;
     Ok(())
+}
+
+fn verify_postgres_model_provider_cas(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    provider_alias: &str,
+    expected_revision: u64,
+    changed: u64,
+) -> CoreResult<()> {
+    if changed == 1 {
+        return Ok(());
+    }
+    let found = get_model_provider_in_client(tx, schema, provider_alias)?.map(|row| row.revision);
+    validate_postgres_expected_revision(
+        "model provider",
+        provider_alias,
+        Some(expected_revision),
+        found,
+    )?;
+    Err(CoreError::new(
+        CoreErrorKind::PersistenceFailure,
+        format!(
+            "model provider {provider_alias} compare-and-swap updated {changed} rows at revision {expected_revision}"
+        ),
+    ))
 }
 
 fn validate_postgres_expected_revision(
