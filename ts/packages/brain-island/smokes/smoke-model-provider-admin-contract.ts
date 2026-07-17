@@ -83,7 +83,7 @@ assert.equal(
 
 const context = modelProviderRouteContext([
   modelProviderRecord({
-    alias: "deepseek-flash",
+    alias: "deepseek-v3.1-flash",
     temperatureMilli: 500,
     revision: 2,
   }),
@@ -112,7 +112,7 @@ assert.equal(listData.items[0]?.temperature, 0.5);
 const conflict = await handleModelProviderAdminRequest(
   {
     method: "PATCH",
-    url: "http://local/v1/admin/model-providers/deepseek-flash",
+    url: "http://local/v1/admin/model-providers/deepseek-v3.1-flash",
     requestId: "req-model-provider-contract",
     body: {
       modelId: "deepseek/deepseek-chat",

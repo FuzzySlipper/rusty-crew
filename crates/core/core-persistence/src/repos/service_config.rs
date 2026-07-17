@@ -1985,7 +1985,26 @@ pub(crate) fn validate_model_provider_write(write: &ModelProviderWrite) -> CoreR
 }
 
 pub(crate) fn validate_model_provider_alias(alias: &str) -> CoreResult<()> {
-    validate_registry_id_text("model provider alias", alias)
+    if alias.is_empty() || alias.len() > 128 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model provider alias must be 1-128 characters",
+        ));
+    }
+    if !alias.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'
+            || character == '_'
+            || character == ':'
+            || character == '.'
+    }) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model provider alias must use lowercase ASCII alias characters",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_profile_registry_id(profile_id: &ProfileId) -> CoreResult<()> {
@@ -2046,6 +2065,16 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn model_provider_alias_accepts_version_periods_without_relaxing_registry_ids() {
+        validate_model_provider_alias("gpt-5.4").unwrap();
+        validate_model_provider_alias("openai:gpt-5.4-mini").unwrap();
+
+        assert!(validate_model_provider_alias("GPT-5.4").is_err());
+        assert!(validate_model_provider_alias("openai/gpt-5.4").is_err());
+        assert!(validate_profile_registry_id(&ProfileId::new("runner.profile")).is_err());
+    }
+
+    #[test]
     fn service_config_repo_preserves_profile_provider_and_binding_contracts() {
         let db_path = std::env::temp_dir().join(format!(
             "rusty-crew-service-config-repo-{}.sqlite3",
@@ -2077,7 +2106,7 @@ mod tests {
 
         let first_provider = store
             .upsert_model_provider(&model_provider_write(
-                "deepseek-flash",
+                "deepseek-v3.1-flash",
                 Some(
                     ModelProviderSecretEnvelope::api_key("secret-one")
                         .to_storage_text()
@@ -2089,7 +2118,7 @@ mod tests {
             .unwrap();
         let preserved_secret = store
             .upsert_model_provider(&model_provider_write(
-                "deepseek-flash",
+                "deepseek-v3.1-flash",
                 None,
                 Some(first_provider.revision),
                 "2026-07-02T00:02:00Z",
@@ -2097,7 +2126,9 @@ mod tests {
             .unwrap();
         assert_eq!(preserved_secret.revision, 2);
         assert_eq!(
-            store.get_model_provider_secret("deepseek-flash").unwrap(),
+            store
+                .get_model_provider_secret("deepseek-v3.1-flash")
+                .unwrap(),
             Some(
                 ModelProviderSecretEnvelope::api_key("secret-one")
                     .to_storage_text()
