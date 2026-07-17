@@ -10,7 +10,6 @@ import type {
 import {
   convertMcpToolsToCandidates,
   createMcpAdapterRegistration,
-  createMcpBrainTool,
   createSimulatedMcpTransportFactory,
   discoverMcpToolCandidates,
   McpSurfaceManager,
@@ -187,29 +186,6 @@ assert.equal(
     ?.toolName,
   "search",
 );
-
-const executorCalls: unknown[] = [];
-const brainTool = createMcpBrainTool(alphaBinding, discovered.candidates[0]!, {
-  callTool(input) {
-    executorCalls.push(input);
-    return {
-      content: `read ${JSON.stringify(input.arguments)}`,
-      details: {
-        bindingId: input.binding.bindingId,
-        sourceToolName: input.toolName,
-      },
-    };
-  },
-});
-
-assert.equal(brainTool.name, "mcp_read_resource");
-assert.equal(brainTool.label, "Read resource");
-const brainToolResult = await brainTool.execute("tool-call-1", {
-  uri: "den://doc/example",
-  includeMetadata: null,
-});
-assert.equal(brainToolResult.content[0]?.type, "text");
-assert.equal(executorCalls.length, 1);
 
 console.log(
   JSON.stringify(

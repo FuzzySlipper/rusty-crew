@@ -179,16 +179,22 @@ export async function executePreparedBrainHostToolRequest(
           prepared.params as never,
           controller.signal,
         );
+    const failure = brainHostToolFailureFromResult(
+      prepared.request.name,
+      result,
+    );
     if (prepared.debugDetailId) {
       toolCallDebugStore?.finish({
         debugDetailId: prepared.debugDetailId,
         finalResult: result,
       });
+      if (failure) {
+        toolCallDebugStore?.fail({
+          debugDetailId: prepared.debugDetailId,
+          error: failure.detail,
+        });
+      }
     }
-    const failure = brainHostToolFailureFromResult(
-      prepared.request.name,
-      result,
-    );
     return {
       output: brainToolResultToHostOutput(result),
       ...(result.terminate === true ? { suspend: true } : {}),
@@ -231,6 +237,9 @@ function brainHostToolFailureFromResult(
     stringField(details, "action") ??
     "tool_reported_unsuccessful_result";
   const operation = stringField(details, "operation");
+  const backend = stringField(details, "backend");
+  const message = stringField(details, "message");
+  const statusCode = numberField(details, "statusCode");
   const action = stringField(details, "action");
   const retryable =
     typeof details.retryable === "boolean" ? details.retryable : true;
@@ -240,14 +249,24 @@ function brainHostToolFailureFromResult(
     retryable,
     ...(action === undefined ? {} : { action }),
     detail: [
-      `${toolName} returned ok=false`,
+      message
+        ? `${toolName} failed: ${message}`
+        : `${toolName} returned ok=false`,
       operation ? `operation=${operation}` : undefined,
+      backend ? `backend=${backend}` : undefined,
       `reason=${reasonCode}`,
+      statusCode === undefined ? undefined : `status=${statusCode}`,
       `retryable=${retryable}`,
     ]
       .filter(Boolean)
       .join(" "),
   };
+}
+
+export function brainToolResultIsUnsuccessful(
+  result: BrainToolResult,
+): boolean {
+  return brainHostToolFailureFromResult("tool", result) !== undefined;
 }
 
 export interface BrainHostToolDebugReferences {
@@ -365,4 +384,14 @@ function stringField(
 ): string | undefined {
   const value = record[field];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberField(
+  record: Record<string, unknown>,
+  field: string,
+): number | undefined {
+  const value = record[field];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }

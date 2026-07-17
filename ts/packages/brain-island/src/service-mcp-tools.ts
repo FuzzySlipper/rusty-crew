@@ -2,6 +2,7 @@ import {
   createMcpBrainTool,
   discoverMcpToolCandidates,
 } from "./mcp-brain-tools.js";
+import { brainToolResultIsUnsuccessful } from "./tool-execution-host.js";
 import type {
   McpDiscoveryReport,
   McpRegistryCandidate,
@@ -281,7 +282,7 @@ export function createServiceMcpToolResolver(input: {
                 toolName: candidate.name,
                 sourceToolName: candidate.source.sourceToolName,
                 catalogRevision: candidate.source.catalogRevision,
-                isError: false,
+                isError: brainToolResultIsUnsuccessful(result),
                 allowed: true,
               }),
             });

@@ -4,14 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   convertMcpToolsToCandidates,
-  createMcpBrainTool,
   createSimulatedMcpTransportFactory,
   McpSurfaceManager,
-  type McpToolExecutor,
 } from "@rusty-crew/adapter-mcp";
 import type {
   AdapterId,
   AgentId,
+  BodyState,
   McpBindingRecord,
   ProfileId,
   SessionId,
@@ -25,6 +24,16 @@ import {
   integrateMcpToolsWithRegistry,
   reloadMcpSurface,
 } from "../../packages/brain-island/src/index.js";
+import type { McpToolExecutor } from "../../packages/brain-island/src/service-adapter-ports.js";
+import type { BrainTool } from "../../packages/brain-island/src/brain-tool.js";
+import type { BrainWakeInput } from "../../packages/brain-island/src/brain-host-runtime.js";
+import { createMcpBrainTool } from "../../packages/brain-island/src/mcp-brain-tools.js";
+import {
+  brainToolResultIsUnsuccessful,
+  executePreparedBrainHostToolRequest,
+  prepareBrainHostToolRequest,
+} from "../../packages/brain-island/src/tool-execution-host.js";
+import { MemoryToolCallDebugStore } from "../../packages/brain-island/src/tool-call-debug-store.js";
 
 const metadataPolicyValidator = createBridgeToolMetadataPolicyValidator(
   await loadNativeBridge(),
@@ -230,17 +239,190 @@ const failingTaskListTool = createMcpBrainTool(
   {
     callTool() {
       return {
-        content: "invalid status: in-progress",
-        details: {},
+        content: JSON.stringify({
+          error: "den_backend_request_failed",
+          retryable: false,
+          backend: "documents",
+          operation: "store_document",
+          message: JSON.stringify({
+            error: {
+              code: "validation_failed",
+              message: "project scope not found: _global",
+            },
+          }),
+          status_code: 400,
+        }),
+        details: {
+          isError: true,
+          structuredContent: {
+            error: "den_backend_request_failed",
+            retryable: false,
+            backend: "documents",
+            operation: "store_document",
+            message: JSON.stringify({
+              error: {
+                code: "validation_failed",
+                message: "project scope not found: _global",
+              },
+            }),
+            status_code: 400,
+          },
+        },
         isError: true,
       };
     },
   },
 );
-await assert.rejects(
-  () => failingTaskListTool.execute("call-task-list-failure", {}),
-  /invalid status: in-progress/,
+const unsuccessfulMcpResult = await failingTaskListTool.execute(
+  "call-task-list-failure",
+  {},
 );
+assert.equal(
+  (unsuccessfulMcpResult.details as Record<string, unknown>).ok,
+  false,
+);
+assert.equal(
+  (unsuccessfulMcpResult.details as Record<string, unknown>).reasonCode,
+  "den_backend_request_failed",
+);
+assert.equal(
+  (unsuccessfulMcpResult.details as Record<string, unknown>).retryable,
+  false,
+);
+assert.equal(
+  (unsuccessfulMcpResult.details as Record<string, unknown>).message,
+  "project scope not found: _global",
+);
+assert.equal(brainToolResultIsUnsuccessful(unsuccessfulMcpResult), true);
+
+const toolCallDebugStore = new MemoryToolCallDebugStore();
+const failureWake = {
+  wakeId: "wake-mcp-structured-failure",
+  sessionId: "session-alpha" as SessionId,
+  systemPrompt: "MCP structured failure smoke",
+  roleAssembly: {},
+  state: {} as BodyState,
+} as BrainWakeInput;
+const preparedFailure = prepareBrainHostToolRequest(
+  failureWake,
+  {
+    wakeId: failureWake.wakeId,
+    callId: "call-mcp-structured-failure",
+    name: failingTaskListTool.name,
+    argumentsJson: "{}",
+  },
+  new Map([[failingTaskListTool.name, failingTaskListTool as BrainTool]]),
+  toolCallDebugStore,
+);
+const structuredFailure = await executePreparedBrainHostToolRequest(
+  failureWake,
+  preparedFailure,
+  toolCallDebugStore,
+);
+assert.equal(
+  structuredFailure.failure?.reasonCode,
+  "den_backend_request_failed",
+);
+assert.equal(structuredFailure.failure?.retryable, false);
+assert.equal(structuredFailure.failure?.action, "failed");
+assert.match(
+  structuredFailure.failure?.detail ?? "",
+  /project scope not found: _global/,
+);
+assert.match(structuredFailure.failure?.detail ?? "", /status=400/);
+assert.match(structuredFailure.output, /den_backend_request_failed/);
+assert.match(structuredFailure.output, /project scope not found: _global/);
+const structuredFailureDebug = toolCallDebugStore.get({
+  sessionId: failureWake.sessionId,
+  debugDetailId: preparedFailure.debugDetailId ?? "missing",
+});
+assert.equal(structuredFailureDebug?.status, "failed");
+assert.equal(
+  (
+    structuredFailureDebug?.final_result?.value as {
+      details?: { retryable?: boolean };
+    }
+  )?.details?.retryable,
+  false,
+);
+assert.match(
+  structuredFailureDebug?.error?.message ?? "",
+  /project scope not found: _global/,
+);
+
+const deniedMcpTool = createMcpBrainTool(
+  alphaBinding,
+  taskListDiscovery.candidates[0]!,
+  {
+    callTool() {
+      return {
+        content: "memory write requires manual review",
+        details: {
+          structuredContent: {
+            action: "denied",
+            reason_code: "memory_manual_review_required",
+            retryable: false,
+            operation: "memory_store",
+            message: "memory write requires manual review",
+          },
+        },
+        isError: true,
+      };
+    },
+  },
+);
+const preparedDenial = prepareBrainHostToolRequest(
+  failureWake,
+  {
+    wakeId: failureWake.wakeId,
+    callId: "call-mcp-structured-denial",
+    name: deniedMcpTool.name,
+    argumentsJson: "{}",
+  },
+  new Map([[deniedMcpTool.name, deniedMcpTool as BrainTool]]),
+  toolCallDebugStore,
+);
+const structuredDenial = await executePreparedBrainHostToolRequest(
+  failureWake,
+  preparedDenial,
+  toolCallDebugStore,
+);
+assert.equal(
+  structuredDenial.failure?.reasonCode,
+  "memory_manual_review_required",
+);
+assert.equal(structuredDenial.failure?.action, "denied");
+assert.equal(structuredDenial.failure?.retryable, false);
+assert.match(structuredDenial.output, /memory write requires manual review/);
+
+const transportFailureTool = createMcpBrainTool(
+  alphaBinding,
+  taskListDiscovery.candidates[0]!,
+  {
+    callTool() {
+      throw new Error("MCP transport unavailable");
+    },
+  },
+);
+const preparedTransportFailure = prepareBrainHostToolRequest(
+  failureWake,
+  {
+    wakeId: failureWake.wakeId,
+    callId: "call-mcp-transport-failure",
+    name: transportFailureTool.name,
+    argumentsJson: "{}",
+  },
+  new Map([[transportFailureTool.name, transportFailureTool as BrainTool]]),
+  toolCallDebugStore,
+);
+const transportFailure = await executePreparedBrainHostToolRequest(
+  failureWake,
+  preparedTransportFailure,
+  toolCallDebugStore,
+);
+assert.equal(transportFailure.failure?.reasonCode, "tool_exception");
+assert.equal(transportFailure.failure?.retryable, true);
+assert.match(transportFailure.output, /MCP transport unavailable/);
 
 const engineDataDir = mkdtempSync(
   join(tmpdir(), "rusty-crew-mcp-surfaces-e2e-engine-"),

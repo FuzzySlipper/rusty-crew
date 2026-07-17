@@ -134,9 +134,6 @@ export function createMcpBrainTool(
         toolCallId,
         signal,
       });
-      if (result.isError === true) {
-        throw new Error(mcpToolExecutionErrorMessage(result));
-      }
       return toBrainToolResult(result);
     },
   };
@@ -284,17 +281,6 @@ function normalizeCommaSeparatedStringValue(
 function schemaAcceptsString(schema: Record<string, unknown>): boolean {
   if (schema.type === "string") return true;
   return Array.isArray(schema.type) && schema.type.includes("string");
-}
-
-function mcpToolExecutionErrorMessage(result: McpToolExecutionResult): string {
-  const content =
-    typeof result.content === "string"
-      ? result.content
-      : result.content
-          .filter((item) => item.type === "text")
-          .map((item) => item.text)
-          .join("\n");
-  return content || "MCP tool returned isError=true";
 }
 
 export function normalizeMcpInputSchema(
@@ -479,8 +465,127 @@ function toBrainToolResult(
                   text: "[image content returned by MCP tool]",
                 },
           ),
-    details: result.details,
+    details:
+      result.isError === true
+        ? normalizeMcpToolFailureDetails(result)
+        : result.details,
   };
+}
+
+function normalizeMcpToolFailureDetails(
+  result: McpToolExecutionResult,
+): Record<string, unknown> {
+  const details = isRecord(result.details) ? result.details : {};
+  const structuredContent = isRecord(details.structuredContent)
+    ? details.structuredContent
+    : details;
+  const contentRecord = firstMcpTextContentRecord(result);
+  const source =
+    Object.keys(structuredContent).length > 0
+      ? structuredContent
+      : (contentRecord ?? {});
+  const nestedError = nestedMcpError(source.message);
+  const action = stringField(source, "action") ?? "failed";
+  const reasonCode =
+    stringField(source, "reasonCode") ??
+    stringField(source, "reason_code") ??
+    stringField(source, "error") ??
+    stringField(source, "code") ??
+    nestedError?.code ??
+    "mcp_tool_unsuccessful_result";
+  const message =
+    nestedError?.message ??
+    stringField(source, "message") ??
+    firstMcpTextContent(result) ??
+    "MCP tool returned isError=true";
+  const retryable =
+    typeof source.retryable === "boolean" ? source.retryable : true;
+  const statusCode =
+    numberField(source, "statusCode") ?? numberField(source, "status_code");
+  const backend = stringField(source, "backend");
+  const operation = stringField(source, "operation");
+  const tool = stringField(source, "tool");
+
+  return {
+    ok: false,
+    action,
+    reasonCode,
+    retryable,
+    message,
+    ...(nestedError?.code === undefined ? {} : { code: nestedError.code }),
+    ...(backend === undefined ? {} : { backend }),
+    ...(operation === undefined ? {} : { operation }),
+    ...(tool === undefined ? {} : { tool }),
+    ...(statusCode === undefined ? {} : { statusCode }),
+    ...(Object.keys(structuredContent).length === 0
+      ? {}
+      : { structuredContent }),
+  };
+}
+
+function firstMcpTextContentRecord(
+  result: McpToolExecutionResult,
+): Record<string, unknown> | undefined {
+  const content = firstMcpTextContent(result);
+  if (!content) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(content);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function firstMcpTextContent(
+  result: McpToolExecutionResult,
+): string | undefined {
+  if (typeof result.content === "string") {
+    return result.content.trim() || undefined;
+  }
+  const content = result.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n");
+  return content || undefined;
+}
+
+function nestedMcpError(
+  value: unknown,
+): { code?: string; message?: string } | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!isRecord(parsed) || !isRecord(parsed.error)) return undefined;
+    const code = stringField(parsed.error, "code");
+    const message = stringField(parsed.error, "message");
+    return {
+      ...(code === undefined ? {} : { code }),
+      ...(message === undefined ? {} : { message }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function stringField(
+  record: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = record[field];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function numberField(
+  record: Record<string, unknown>,
+  field: string,
+): number | undefined {
+  const value = record[field];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

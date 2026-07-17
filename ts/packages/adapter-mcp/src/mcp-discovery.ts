@@ -1,29 +1,6 @@
 import type { McpBindingRecord } from "@rusty-crew/contracts";
 import { Type, type TSchema } from "typebox";
 
-export interface BrainCompatibleToolResult<TDetails = unknown> {
-  content: Array<{ type: "text"; text: string }>;
-  details: TDetails;
-  terminate?: boolean;
-}
-
-export interface BrainCompatibleTool<
-  TParameters extends TSchema = TSchema,
-  TDetails = unknown,
-> {
-  name: string;
-  description: string;
-  label: string;
-  parameters: TParameters;
-  prepareArguments?: (args: unknown) => unknown;
-  execute(
-    toolCallId: string,
-    params: unknown,
-    signal?: AbortSignal,
-  ): Promise<BrainCompatibleToolResult<TDetails>>;
-  executionMode?: "sequential" | "parallel";
-}
-
 export type JsonSchemaValue =
   | boolean
   | {
@@ -61,24 +38,6 @@ export interface McpDiscoveredTool {
 
 export interface McpToolDiscoveryClient {
   listTools(): Promise<McpDiscoveredTool[]> | McpDiscoveredTool[];
-}
-
-export interface McpToolExecutor {
-  callTool(input: {
-    binding: McpBindingRecord;
-    toolName: string;
-    arguments: unknown;
-    toolCallId: string;
-    signal?: AbortSignal;
-  }): Promise<McpToolExecutionResult> | McpToolExecutionResult;
-}
-
-export interface McpToolExecutionResult {
-  content:
-    | string
-    | Array<{ type: "text"; text: string } | { type: "image"; image: unknown }>;
-  details?: unknown;
-  isError?: boolean;
 }
 
 export interface McpToolSourceIdentity {
@@ -199,195 +158,6 @@ export function convertMcpToolsToCandidates(
     candidates,
     issues,
   };
-}
-
-export function createMcpBrainTool(
-  binding: McpBindingRecord,
-  candidate: McpRegistryCandidate,
-  executor: McpToolExecutor,
-): BrainCompatibleTool<TSchema, McpToolExecutionResult["details"]> {
-  return {
-    name: candidate.name,
-    description: candidate.description,
-    label: candidate.annotations.title
-      ? String(candidate.annotations.title)
-      : candidate.source.sourceToolName,
-    parameters: candidate.parameters,
-    prepareArguments: (args) =>
-      normalizeMcpToolArguments(args, candidate.parameters as JsonSchemaValue, {
-        binding,
-        sourceToolName: candidate.source.sourceToolName,
-      }),
-    executionMode: "sequential",
-    execute: async (toolCallId, params, signal) => {
-      const result = await executor.callTool({
-        binding,
-        toolName: candidate.source.sourceToolName,
-        arguments: params,
-        toolCallId,
-        signal,
-      });
-      if (result.isError === true) {
-        throw new Error(mcpToolExecutionErrorMessage(result));
-      }
-      return toBrainToolResult(result);
-    },
-  };
-}
-
-function normalizeMcpToolArguments(
-  args: unknown,
-  schema: JsonSchemaValue | undefined,
-  policyContext?: {
-    binding: McpBindingRecord;
-    sourceToolName: string;
-  },
-): unknown {
-  if (!isRecord(args) || !isRecord(schema) || !isRecord(schema.properties)) {
-    return args;
-  }
-  const normalized: Record<string, unknown> = { ...args };
-  const requiredProperties = new Set(
-    Array.isArray(schema.required)
-      ? schema.required.filter(
-          (value): value is string => typeof value === "string",
-        )
-      : [],
-  );
-  for (const [propertyName, propertySchema] of Object.entries(
-    schema.properties,
-  )) {
-    if (!Object.hasOwn(normalized, propertyName)) continue;
-    if (
-      isRecord(propertySchema) &&
-      !requiredProperties.has(propertyName) &&
-      shouldPruneOptionalMcpArgument(
-        propertyName,
-        normalized[propertyName],
-        propertySchema,
-        policyContext,
-      )
-    ) {
-      delete normalized[propertyName];
-      continue;
-    }
-    const value = normalized[propertyName];
-    if (!Array.isArray(value) || !isRecord(propertySchema)) continue;
-    if (!schemaAcceptsString(propertySchema)) continue;
-
-    const description = String(propertySchema.description ?? "").toLowerCase();
-    if (description.includes("comma-separated")) {
-      normalized[propertyName] = value
-        .map((item) => normalizeCommaSeparatedStringValue(item, description))
-        .join(",");
-      continue;
-    }
-    if (
-      description.includes("json array") ||
-      description.includes("json-encoded")
-    ) {
-      normalized[propertyName] = JSON.stringify(value);
-    }
-  }
-  return normalized;
-}
-
-function shouldPruneOptionalMcpArgument(
-  propertyName: string,
-  value: unknown,
-  schema: Record<string, unknown>,
-  policyContext:
-    | {
-        binding: McpBindingRecord;
-        sourceToolName: string;
-      }
-    | undefined,
-): boolean {
-  if (value === undefined || value === null) return true;
-  if (typeof value === "string" && value.trim() === "") return true;
-  if (typeof value === "string" && isOmitPlaceholder(value)) return true;
-  if (Array.isArray(value) && value.length === 0) return true;
-  if (value === false) return true;
-  if (
-    policyContext?.sourceToolName === "list_tasks" &&
-    value === 0 &&
-    (propertyName === "priority" || propertyName === "parent_id")
-  ) {
-    return true;
-  }
-  if (value === 0 && !schemaAcceptsZero(schema)) return true;
-  if (
-    policyContext?.sourceToolName === "list_tasks" &&
-    propertyName === "assigned_to" &&
-    typeof value === "string" &&
-    [
-      String(policyContext.binding.agentId),
-      String(policyContext.binding.profileId),
-    ].includes(value)
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function isOmitPlaceholder(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return (
-    /^\{\{\s*omit\s*\}\}$/i.test(normalized) ||
-    normalized === "null" ||
-    normalized === "undefined" ||
-    normalized === "none"
-  );
-}
-
-function schemaAcceptsZero(schema: Record<string, unknown>): boolean {
-  if (!schemaAcceptsNumber(schema)) return false;
-  const minimum = numericConstraint(schema.minimum);
-  const exclusiveMinimum = numericConstraint(schema.exclusiveMinimum);
-  if (minimum !== undefined && minimum > 0) return false;
-  if (exclusiveMinimum !== undefined && exclusiveMinimum >= 0) return false;
-  return true;
-}
-
-function schemaAcceptsNumber(schema: Record<string, unknown>): boolean {
-  if (schema.type === "number" || schema.type === "integer") return true;
-  return (
-    Array.isArray(schema.type) &&
-    (schema.type.includes("number") || schema.type.includes("integer"))
-  );
-}
-
-function numericConstraint(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function normalizeCommaSeparatedStringValue(
-  value: unknown,
-  description: string,
-): string {
-  const text = String(value).trim();
-  if (description.includes("in_progress")) {
-    return text.replace(/\bin[- ]progress\b/gi, "in_progress");
-  }
-  return text;
-}
-
-function schemaAcceptsString(schema: Record<string, unknown>): boolean {
-  if (schema.type === "string") return true;
-  return Array.isArray(schema.type) && schema.type.includes("string");
-}
-
-function mcpToolExecutionErrorMessage(result: McpToolExecutionResult): string {
-  const content =
-    typeof result.content === "string"
-      ? result.content
-      : result.content
-          .filter((item) => item.type === "text")
-          .map((item) => item.text)
-          .join("\n");
-  return content || "MCP tool returned isError=true";
 }
 
 export function normalizeMcpInputSchema(
@@ -555,25 +325,6 @@ function outputShapeForTool(
       ? binding.serverNames[0]!.replace(/[^A-Za-z0-9]+/g, "_").toLowerCase()
       : "multi_server";
   return `mcp.${server}.${tool.name.replace(/[^A-Za-z0-9]+/g, "_").toLowerCase()}.result.v1`;
-}
-
-function toBrainToolResult(
-  result: McpToolExecutionResult,
-): BrainCompatibleToolResult<McpToolExecutionResult["details"]> {
-  return {
-    content:
-      typeof result.content === "string"
-        ? [{ type: "text", text: result.content }]
-        : result.content.map((item) =>
-            item.type === "text"
-              ? item
-              : {
-                  type: "text",
-                  text: "[image content returned by MCP tool]",
-                },
-          ),
-    details: result.details,
-  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
