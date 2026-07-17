@@ -166,7 +166,6 @@
     "smoke:wake-timeout": "npm run smoke:wake-timeout -w @rusty-crew/brain-island",
     "smoke:session-defaults": "npm run smoke:session-defaults -w @rusty-crew/brain-island",
     "smoke:session-history-window": "npm run smoke:session-history-window -w @rusty-crew/brain-island",
-    "smoke:session-inference-overrides": "npm run smoke:session-inference-overrides -w @rusty-crew/brain-island",
     "smoke:post-turn-maintenance": "npm run smoke:post-turn-maintenance -w @rusty-crew/brain-island",
     "smoke:rusty-view-chat-contract": "npm run smoke:rusty-view-chat-contract -w @rusty-crew/brain-island",
     "smoke:rusty-view-chat-authority-boundary": "npm run smoke:rusty-view-chat-authority-boundary -w @rusty-crew/brain-island",
