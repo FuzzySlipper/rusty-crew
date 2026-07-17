@@ -123,6 +123,7 @@ try {
   assert.equal(postgresReadyPreflight.ready, true);
   assert.equal(postgresReadyPreflight.backend, "postgres");
   assert.equal(postgresReadyPreflight.postgres.databaseUrlPresent, true);
+  writeEmptyRuntimeConfig(blockedPostgresRoot);
   await assert.rejects(
     () =>
       startRustyCrewServiceHost({
@@ -145,11 +146,14 @@ try {
   rmSync(blockedPostgresRoot, { recursive: true, force: true });
 }
 
+const chatCompletionsProvider = await startFakeChatCompletionsServer();
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-host-"));
 const port = await openPort();
 const token = "local-field-test-token";
 await assertSystemdNotifierSmoke();
-writeRuntimeConfig(root);
+writeRuntimeConfig(root, {
+  providerBaseUrl: chatCompletionsProvider.baseUrl,
+});
 writeStaticSite(root);
 let host = await startHost(root, port, token);
 checkpoint("host started");
@@ -430,6 +434,8 @@ try {
   const completionPacketsBeforeDirectTurn =
     beforeDirectTurn.body.data.overview.persistence.tableCounts
       .completion_packets;
+  const providerRequestsBeforeDirectTurn =
+    chatCompletionsProvider.requests().length;
 
   const directTurn = await client.requestDirectDebugTurn({
     sessionId: "field-session",
@@ -437,7 +443,15 @@ try {
     body: "Exercise direct debug over the service host.",
   });
   assert.equal(directTurn.status, "accepted");
-  assert.match(directTurn.summary, /local service brain wake completed/);
+  assert.equal(
+    chatCompletionsProvider.requests().length,
+    providerRequestsBeforeDirectTurn + 1,
+  );
+  assert.equal(
+    chatCompletionsProvider.requests().at(-1)?.model,
+    "service-host-smoke-model",
+  );
+  assert.equal(directTurn.summary, "LLM wake completed.");
   assert.match(directTurn.wakeId ?? "", /^service-field-session-/);
 
   const afterDirectTurn = await get("/v1/admin/diagnostics", token);
@@ -620,13 +634,19 @@ try {
   assert.equal(restartedContext.session.sessionId, "field-session");
   assert.equal(restartedContext.session.status, "idle");
   const beforeRestartDirectTurn = await get("/v1/admin/diagnostics", token);
+  const providerRequestsBeforeRestartDirectTurn =
+    chatCompletionsProvider.requests().length;
   const restartDirectTurn = await client.requestDirectDebugTurn({
     sessionId: "field-session",
     actorId: "local-operator",
     body: "Exercise direct debug after service restart.",
   });
   assert.equal(restartDirectTurn.status, "accepted");
-  assert.match(restartDirectTurn.summary, /local service brain wake completed/);
+  assert.equal(
+    chatCompletionsProvider.requests().length,
+    providerRequestsBeforeRestartDirectTurn + 1,
+  );
+  assert.equal(restartDirectTurn.summary, "LLM wake completed.");
   const afterRestartDirectTurn = await get("/v1/admin/diagnostics", token);
   assert.equal(
     afterRestartDirectTurn.body.data.overview.persistence.tableCounts
@@ -654,7 +674,10 @@ try {
     "binding_session_mismatch",
   );
 
-  writeRuntimeConfig(root, { includeExtraMcpBinding: true });
+  writeRuntimeConfig(root, {
+    includeExtraMcpBinding: true,
+    providerBaseUrl: chatCompletionsProvider.baseUrl,
+  });
   const reloadConfig = await post("/v1/admin/control/config/reload", token, {
     reason: "smoke config reload",
   });
@@ -678,7 +701,9 @@ try {
     join(tmpdir(), "rusty-crew-service-stale-lock-"),
   );
   const staleLockPort = await openPort();
-  writeRuntimeConfig(staleLockRoot);
+  writeRuntimeConfig(staleLockRoot, {
+    providerBaseUrl: chatCompletionsProvider.baseUrl,
+  });
   mkdirSync(join(staleLockRoot, "run"), { recursive: true });
   writeFileSync(
     join(staleLockRoot, "run", "service.lock"),
@@ -709,7 +734,9 @@ try {
 
   const noAuthRoot = mkdtempSync(join(tmpdir(), "rusty-crew-service-noauth-"));
   const noAuthPort = await openPort();
-  writeRuntimeConfig(noAuthRoot);
+  writeRuntimeConfig(noAuthRoot, {
+    providerBaseUrl: chatCompletionsProvider.baseUrl,
+  });
   const noAuthHost = await startNoAuthHost(noAuthRoot, noAuthPort);
   try {
     const noStaticRoot = await getText("/", noAuthPort);
@@ -733,7 +760,8 @@ try {
         displayName: "Default Local",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic",
+        modelId: "service-host-smoke-model",
+        baseUrl: chatCompletionsProvider.baseUrl,
         contextWindowTokens: 8192,
         maxOutputTokens: 512,
         temperature: 0.5,
@@ -758,7 +786,8 @@ try {
         displayName: "Alternate Local",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic",
+        modelId: "service-host-smoke-model",
+        baseUrl: chatCompletionsProvider.baseUrl,
         temperatureMilli: 0.5,
         apiKey: "alternate-secret-smoke",
       },
@@ -995,7 +1024,8 @@ try {
         displayName: "Alternate Local Updated",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic",
+        modelId: "service-host-smoke-model",
+        baseUrl: chatCompletionsProvider.baseUrl,
         temperature: 0.75,
         expectedRevision: alternateRevision,
       },
@@ -1020,7 +1050,8 @@ try {
         displayName: "Custom Chat",
         protocol: "chat_completions",
         providerKind: "custom",
-        modelId: "deterministic",
+        modelId: "service-host-smoke-model",
+        baseUrl: chatCompletionsProvider.baseUrl,
       },
       noAuthPort,
     );
@@ -1034,7 +1065,8 @@ try {
         displayName: "Alternate Local Stale",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic",
+        modelId: "service-host-smoke-model",
+        baseUrl: chatCompletionsProvider.baseUrl,
         temperature: 0.9,
         expectedRevision: alternateRevision,
       },
@@ -1218,6 +1250,11 @@ try {
     assert.equal(createdProfile.status, 200);
     assert.equal(createdProfile.body.ok, true);
     assert.equal(
+      createdProfile.body.data.outcome.status,
+      "completed",
+      JSON.stringify(createdProfile.body),
+    );
+    assert.equal(
       createdProfile.body.data.outcome.result.profileId,
       "field-created-profile",
     );
@@ -1273,7 +1310,7 @@ try {
     assert.equal(createdProfileConfig.displayName, "Field Created Profile");
     assert.equal(createdProfileConfig.providerAlias, "alternate");
     assert.equal(createdProfileConfig.modelConfig, undefined);
-    assert.equal(createdProfileConfig.brain?.module, "local");
+    assert.equal(createdProfileConfig.brain?.module, "chat-completions");
     assert.equal(createdProfileConfig.mcpConfig, undefined);
     assert.equal(createdProfileConfig.localToolProfileId, "code_read");
     assert.deepEqual(createdProfileConfig.toolPolicy?.requestedToolsets, [
@@ -1452,12 +1489,15 @@ try {
       "local_code_read",
     ]);
     assert.deepEqual(
-      createdRegistry.body.data.mcpBindings.map(
-        (binding: { serverId: string; toolProfileKey?: string }) => [
-          binding.serverId,
-          binding.toolProfileKey,
-        ],
-      ),
+      createdRegistry.body.data.mcpBindings
+        .map(
+          (binding: { serverId: string; toolProfileKey?: string }) =>
+            [binding.serverId, binding.toolProfileKey] as [
+              string,
+              string | undefined,
+            ],
+        )
+        .sort((left, right) => left[0].localeCompare(right[0])),
       [
         ["field", "field-created-profile"],
         ["field-extra", "field-created-profile-extra"],
@@ -1717,7 +1757,7 @@ try {
       contextPolicy?: { strategyId?: string; compactAtPercent?: number };
     };
     assert.equal(updatedCreatedProfileConfig.providerAlias, "default");
-    assert.equal(updatedCreatedProfileConfig.brain?.module, "local");
+    assert.equal(updatedCreatedProfileConfig.brain?.module, "chat-completions");
     assert.equal(updatedCreatedProfileConfig.localToolProfileId, "full_agent");
     assert(
       updatedCreatedProfileConfig.toolPolicy?.requestedToolsets?.includes(
@@ -1907,15 +1947,15 @@ try {
       1,
     );
     assert.deepEqual(
-      noAuthAfterProfile.body.data.overview.runtime.brainModules.map(
-        (module: { profileId: string; moduleId: string }) => [
-          module.profileId,
-          module.moduleId,
-        ],
-      ),
+      noAuthAfterProfile.body.data.overview.runtime.brainModules
+        .map(
+          (module: { profileId: string; moduleId: string }) =>
+            [module.profileId, module.moduleId] as [string, string],
+        )
+        .sort((left, right) => left[0].localeCompare(right[0])),
       [
-        ["field-profile", "local"],
-        ["field-created-profile", "local"],
+        ["field-created-profile", "chat-completions"],
+        ["field-profile", "chat-completions"],
       ],
     );
     assert.equal(
@@ -1923,14 +1963,14 @@ try {
         (module: { profileId: string }) =>
           module.profileId === "field-created-profile",
       )?.providerAlias,
-      "default",
+      "alternate",
     );
     assert.equal(
       noAuthAfterProfile.body.data.overview.runtime.brainModules.find(
         (module: { profileId: string }) =>
           module.profileId === "field-created-profile",
       )?.modelProvider.modelId,
-      "deterministic",
+      "service-host-smoke-model",
     );
     assert.equal(
       process.env.RUSTY_CREW_MODEL_PROVIDER_SECRET_ALTERNATE,
@@ -1949,7 +1989,8 @@ try {
         displayName: "Alternate Local Updated",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic-updated",
+        modelId: "service-host-smoke-model-updated",
+        baseUrl: chatCompletionsProvider.baseUrl,
       },
       noAuthPort,
     );
@@ -1971,7 +2012,8 @@ try {
         displayName: "Alternate Local Disabled",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic-updated",
+        modelId: "service-host-smoke-model-updated",
+        baseUrl: chatCompletionsProvider.baseUrl,
       },
       noAuthPort,
     );
@@ -1987,7 +2029,8 @@ try {
         displayName: "Alternate Local Reenabled",
         protocol: "chat_completions",
         providerKind: "local",
-        modelId: "deterministic-updated",
+        modelId: "service-host-smoke-model-updated",
+        baseUrl: chatCompletionsProvider.baseUrl,
       },
       noAuthPort,
     );
@@ -2118,7 +2161,7 @@ try {
           module.moduleId,
         ],
       ),
-      [["field-profile", "local"]],
+      [["field-profile", "chat-completions"]],
     );
     assert.equal(
       noAuthAfterDecommission.body.data.overview.adapters.mcp.totalSurfaces,
@@ -2166,6 +2209,7 @@ try {
   }
 } finally {
   await host.stop();
+  await chatCompletionsProvider.stop();
   assert.equal(existsSync(join(root, "run", "service.lock")), false);
   rmSync(root, { recursive: true, force: true });
 }
@@ -2257,6 +2301,73 @@ interface FakeOpenAiOauthRequest {
   method: string;
   url: string;
   body: string;
+}
+
+interface FakeChatCompletionsRequest {
+  model?: string;
+}
+
+async function startFakeChatCompletionsServer(): Promise<{
+  baseUrl: string;
+  requests: () => FakeChatCompletionsRequest[];
+  stop: () => Promise<void>;
+}> {
+  const requests: FakeChatCompletionsRequest[] = [];
+  const server = createHttpServer(
+    async (request: IncomingMessage, response: ServerResponse) => {
+      const body = await readIncomingBody(request);
+      if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+        writeJson(response, 404, { error: "not_found" });
+        return;
+      }
+      const parsed = JSON.parse(body) as FakeChatCompletionsRequest;
+      requests.push(parsed);
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-service-host-smoke",
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                content: "service host provider completion",
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-service-host-smoke",
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
+    },
+  );
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests: () => [...requests],
+    stop: () =>
+      new Promise<void>((resolveStop, rejectStop) => {
+        server.close((error?: Error) => {
+          if (error) rejectStop(error);
+          else resolveStop();
+        });
+      }),
+  };
 }
 
 async function startFakeOpenAiOauthServer(): Promise<{
@@ -2508,7 +2619,10 @@ async function waitUntil(
 
 function writeRuntimeConfig(
   root: string,
-  options: { includeExtraMcpBinding?: boolean } = {},
+  options: {
+    includeExtraMcpBinding?: boolean;
+    providerBaseUrl: string;
+  },
 ): void {
   const configDir = join(root, "config");
   const profilesDir = join(configDir, "profiles");
@@ -2583,7 +2697,9 @@ function writeRuntimeConfig(
         profileId: "field-profile",
         modelConfig: {
           provider: "local",
-          modelName: "deterministic",
+          modelName: "service-host-smoke-model",
+          baseUrl: options.providerBaseUrl,
+          api: "openai-completions",
         },
         runtime: {
           defaultResourceLimits: {
@@ -2635,6 +2751,25 @@ tags:
 
 TODO: move temporary project progress out of skills.
 `,
+  );
+}
+
+function writeEmptyRuntimeConfig(root: string): void {
+  const configDir = join(root, "config");
+  const profilesDir = join(configDir, "profiles");
+  mkdirSync(profilesDir, { recursive: true });
+  writeFileSync(
+    join(configDir, "service.json"),
+    JSON.stringify(
+      {
+        profilesDir,
+        wakeTimeout: { mode: "disabled" },
+        brains: [],
+        sessions: [],
+      },
+      null,
+      2,
+    ),
   );
 }
 

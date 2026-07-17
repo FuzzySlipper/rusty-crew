@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildCatalog,
   classifySmoke,
   matchesFilters,
   parseArgs,
@@ -65,6 +66,17 @@ test("classifies offline, native, service, live, and Rusty View smoke lanes", ()
       tags: ["fixtures"],
     },
   );
+});
+
+test("keeps the full service-host smoke in the local-service lane", () => {
+  const entry = buildCatalog().find(
+    (candidate) => candidate.name === "service-host:service-host",
+  );
+
+  assert.ok(entry, "service-host package smoke is missing from the catalog");
+  assert.equal(entry.category, "service-host");
+  assert.equal(entry.lane, "local-service");
+  assert.deepEqual(entry.requirements, ["service-startup"]);
 });
 
 test("parses and applies lane filters", () => {
