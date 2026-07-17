@@ -50,7 +50,6 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "query_chat_events",
   "save_context_compaction_artifact",
   "save_session_activity_digest",
-  "set_session_reasoning_effort",
   "start_brain_run",
   "submit_brain_host_result",
   "cancel_brain_run",

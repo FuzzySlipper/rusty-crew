@@ -38,38 +38,40 @@ const buffers: BridgeBufferClient = {
 };
 
 const sessionId = "bridge-wake-session" as SessionId;
+const localBrain = createLocalBrain();
 const request: BrainWakeRequest = {
   brain: 1 as BrainImplementationHandle,
   sessionId,
   bodyState: insertJson({
     session: {
       handle: 1 as SessionHandle,
-      sessionId,
-      agentId: "bridge-agent" as AgentId,
-      profileId: "bridge-profile" as ProfileId,
+      session_id: sessionId,
+      agent_id: "bridge-agent" as AgentId,
+      profile_id: "bridge-profile" as ProfileId,
       kind: "worker",
-      resourceLimits: {},
-      toolProfile: { tools: [] },
+      resource_limits: {},
+      tool_profile: { tools: [] },
+      inference_overrides: { reasoning_effort: "high" },
       status: "idle",
-      brainTurnCount: 0,
-      createdAt: "2026-06-19T00:00:00Z",
-      lastActiveAt: "2026-06-19T00:00:00Z",
+      brain_turn_count: 0,
+      created_at: "2026-06-19T00:00:00Z",
+      last_active_at: "2026-06-19T00:00:00Z",
     },
-    pendingMessages: [
+    pending_messages: [
       {
         from: "planner" as AgentId,
         to: "bridge-agent" as AgentId,
         body: "large body state ".repeat(4096),
       },
     ],
-    recentEvents: [],
-    childCompletions: [],
-    fanOutGroups: [],
-    deltaPolicy: {
+    recent_events: [],
+    child_completions: [],
+    fan_out_groups: [],
+    delta_policy: {
       mode: "frozen_snapshot_next_wake",
-      queueOwner: "body",
-      queuedMessageTtlMs: 5_000,
-      maxQueuedMessages: 32,
+      queue_owner: "body",
+      queued_message_ttl_ms: 5_000,
+      max_queued_messages: 32,
     },
   }),
   systemPrompt: insertText("system prompt ".repeat(4096)),
@@ -82,7 +84,15 @@ const request: BrainWakeRequest = {
 
 const result = await wakeBrainFromBridgeRequest(
   buffers,
-  createLocalBrain(),
+  {
+    async wake(wake, options) {
+      assert.equal(
+        wake.state.session.inferenceOverrides?.reasoningEffort,
+        "high",
+      );
+      return localBrain.wake(wake, options);
+    },
+  },
   request,
 );
 

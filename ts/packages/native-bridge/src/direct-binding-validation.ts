@@ -90,6 +90,10 @@ const directOutputByMethod = {
     "ensure_configured_session",
     nativeSessionStateSummarySchema,
   ),
+  setSessionReasoningEffort: value(
+    "set_session_reasoning_effort",
+    nativeSessionStateSummarySchema,
+  ),
   cancelDelegatedSession: value(
     "cancel_delegated_session",
     nativeSessionStateSummarySchema,

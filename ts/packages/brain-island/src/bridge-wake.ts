@@ -114,6 +114,9 @@ function toBodyState(value: unknown): BodyState {
             maxMessages: state.session.history_window.max_messages,
           }
         : undefined,
+      inferenceOverrides: {
+        reasoningEffort: state.session.inference_overrides?.reasoning_effort,
+      },
       status: state.session.status,
       brainTurnCount: state.session.brain_turn_count,
       createdAt: state.session.created_at,
@@ -378,6 +381,9 @@ interface RustSessionStateJson {
   };
   history_window?: {
     max_messages?: number;
+  };
+  inference_overrides?: {
+    reasoning_effort?: string;
   };
   status: BodyState["session"]["status"];
   brain_turn_count: number;

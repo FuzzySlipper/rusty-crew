@@ -71,6 +71,7 @@ export const nativeSessionStateSummarySchema = Type.Object(
     resourceLimits: nativeSessionResourceLimitsSchema,
     toolProfile: nativeSessionToolProfileSchema,
     historyWindow: Type.Optional(nativeSessionHistoryWindowSchema),
+    reasoningEffort: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );

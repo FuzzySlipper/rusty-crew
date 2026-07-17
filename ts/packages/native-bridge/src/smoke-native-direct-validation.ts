@@ -57,7 +57,14 @@ const validBinding = withDirectBridgeOutputValidation(
       state: "pending",
     }),
     archiveSession: () => ({ ...session, status: "archived" }),
-    ensureConfiguredSession: () => session,
+    ensureConfiguredSession: () => ({
+      ...session,
+      reasoningEffort: "high",
+    }),
+    setSessionReasoningEffort: () => ({
+      ...session,
+      reasoningEffort: "high",
+    }),
     cancelDelegatedSession: () => ({ ...session, status: "archived" }),
     requestDelegatedCheckpoint: () => ({ accepted: true, sequence: 8 }),
     drainDelegatedSessions: () => ["session-1"],
@@ -200,7 +207,7 @@ const invalidBuffer = withDirectBridgeOutputValidation(
 );
 assert.throws(() => invalidBuffer.getBuffer(), /does not match bytes length/);
 
-assert.equal(new Set(directBridgeValidatedOperations).size, 27);
+assert.equal(new Set(directBridgeValidatedOperations).size, 28);
 console.log(
   JSON.stringify({
     directOperationsValidated: directBridgeValidatedOperations.length,
