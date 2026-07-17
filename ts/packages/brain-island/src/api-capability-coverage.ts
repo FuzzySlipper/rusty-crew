@@ -45,6 +45,11 @@ export const SERVICE_ROUTE_CATALOG_EXEMPTIONS = [
     reason:
       "model-provider admin capability metadata remains in its dedicated contract until it joins the shared catalog",
   },
+  {
+    route_id: "admin.service_credentials",
+    reason:
+      "shared-credential admin capability metadata is generated from the model-provider admin OpenAPI contract",
+  },
 ] as const satisfies readonly ServiceRouteCatalogExemption[];
 
 export function apiCapabilityCoverageInventory(): ApiCapabilityCoverageInventory {

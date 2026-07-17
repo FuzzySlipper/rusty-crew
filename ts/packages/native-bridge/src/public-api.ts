@@ -103,6 +103,7 @@ import type {
   NativeModelProviderWrite,
   NativeServiceCredentialQuery,
   NativeServiceCredentialRecord,
+  NativeServiceCredentialDelete,
   NativeServiceCredentialWrite,
 } from "./model-provider-public-api.js";
 
@@ -126,6 +127,7 @@ export type {
   NativeModelProviderWrite,
   NativeServiceCredentialQuery,
   NativeServiceCredentialRecord,
+  NativeServiceCredentialDelete,
   NativeServiceCredentialWrite,
 } from "./model-provider-public-api.js";
 
@@ -2186,6 +2188,9 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
     credentialId: string,
   ): Promise<NativeServiceCredentialRecord | undefined>;
   getServiceCredentialSecret(credentialId: string): Promise<string | undefined>;
+  deleteServiceCredential(
+    deleteRequest: NativeServiceCredentialDelete,
+  ): Promise<NativeServiceCredentialRecord>;
   linkModelProviderCredential(
     link: NativeModelProviderCredentialLink,
   ): Promise<NativeModelProviderCredentialLinkResult>;

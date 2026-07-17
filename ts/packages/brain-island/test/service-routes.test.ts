@@ -13,6 +13,7 @@ import type {
   NativeModelProviderRecord,
   NativeProfileRegistryRecord,
   NativeProfileRegistryWrite,
+  NativeServiceCredentialRecord,
 } from "@rusty-crew/native-bridge";
 import {
   handleExternalRuntimeRequest,
@@ -49,6 +50,10 @@ import {
   handleModelProviderAdminRequest,
   type ModelProviderAdminRouteContext,
 } from "../src/service-model-provider-routes.js";
+import {
+  handleServiceCredentialAdminRequest,
+  type ServiceCredentialAdminRouteContext,
+} from "../src/service-credential-admin-routes.js";
 import {
   handleRustyViewChatStreamRequest,
   isChatRoute,
@@ -776,15 +781,19 @@ test("model provider admin routes list, project records, and report revision con
 });
 
 test("model provider OpenAI OAuth routes expose status and start without leaking verifier", async () => {
-  const context = modelProviderRouteContext([
-    modelProviderRecord({
-      alias: "gpt",
-      protocol: "responses",
-      providerKind: "openai",
-      modelId: "gpt-5",
-      credential: { hasSecret: true, kind: "openai_oauth" },
-    }),
-  ]);
+  const context = modelProviderRouteContext(
+    [
+      modelProviderRecord({
+        alias: "gpt",
+        protocol: "responses",
+        providerKind: "openai",
+        modelId: "gpt-5",
+        credentialId: "openai:primary",
+        credential: { hasSecret: true, kind: "openai_oauth", revision: 1 },
+      }),
+    ],
+    [serviceCredentialRecord({ credentialId: "openai:primary" })],
+  );
 
   const status = await handleModelProviderAdminRequest(
     {
@@ -831,7 +840,10 @@ test("model provider OpenAI OAuth routes expose status and start without leaking
   }>(start);
   assert.equal(startData.pendingLogin.providerAlias, "gpt");
   assert.equal(startData.pendingLogin.codeVerifier, undefined);
-  assert.match(startData.pendingLogin.pendingLoginId, /^openai-oauth:gpt:/);
+  assert.match(
+    startData.pendingLogin.pendingLoginId,
+    /^openai-oauth:openai:primary:/,
+  );
   assert.match(
     startData.pendingLogin.authorizationUrl,
     /id_token_add_organizations=true/,
@@ -841,6 +853,157 @@ test("model provider OpenAI OAuth routes expose status and start without leaking
     /codex_cli_simplified_flow=true/,
   );
   assert.equal(context.pendingLogins.size, 1);
+});
+
+test("shared credential routes complete OAuth once and guard linked clear and delete", async () => {
+  const context = modelProviderRouteContext([
+    modelProviderRecord({
+      alias: "gpt-main",
+      protocol: "responses",
+      providerKind: "openai",
+      modelId: "gpt-5",
+    }),
+    modelProviderRecord({
+      alias: "gpt-fast",
+      protocol: "responses",
+      providerKind: "openai",
+      modelId: "gpt-5-mini",
+    }),
+  ]);
+
+  const created = await handleServiceCredentialAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/service-credentials",
+      requestId: "req-shared-credential",
+      body: {
+        credentialId: "openai:shared",
+        displayName: "Shared OpenAI login",
+        providerKind: "openai",
+        credentialKind: "openai_oauth",
+      },
+    },
+    context,
+  );
+  assert.equal(created.status, 200);
+
+  for (const alias of ["gpt-main", "gpt-fast"]) {
+    const linked = await handleServiceCredentialAdminRequest(
+      {
+        method: "POST",
+        url: `http://local/v1/admin/service-credentials/openai%3Ashared/providers/${alias}/link`,
+        requestId: "req-shared-credential",
+      },
+      context,
+    );
+    assert.equal(linked.status, 200);
+  }
+
+  const started = await handleServiceCredentialAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/service-credentials/openai%3Ashared/oauth/openai/start",
+      requestId: "req-shared-credential",
+    },
+    context,
+  );
+  const pending = okData<{
+    pendingLogin: { pendingLoginId: string; credentialId: string };
+  }>(started).pendingLogin;
+  const privatePending = context.pendingLogins.get(pending.pendingLoginId);
+  assert.ok(privatePending);
+  assert.equal(pending.credentialId, "openai:shared");
+
+  const completed = await handleServiceCredentialAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/service-credentials/openai%3Ashared/oauth/openai/complete",
+      requestId: "req-shared-credential",
+      body: {
+        pendingLoginId: pending.pendingLoginId,
+        state: privatePending.state,
+        testMode: true,
+        fakeTokenResponse: {
+          idToken: "id-token-must-stay-private",
+          accessToken: "access-token-must-stay-private",
+          refreshToken: "refresh-token-must-stay-private",
+        },
+      },
+    },
+    context,
+  );
+  assert.equal(completed.status, 200);
+  const completedJson = JSON.stringify(completed.body);
+  assert.doesNotMatch(completedJson, /token-must-stay-private/u);
+  const completedCredential = okData<{
+    credential: NativeServiceCredentialRecord;
+  }>(completed).credential;
+  assert.equal(completedCredential.credential.hasSecret, true);
+  assert.deepEqual(completedCredential.linkedProviderAliases.sort(), [
+    "gpt-fast",
+    "gpt-main",
+  ]);
+
+  const impact = await handleServiceCredentialAdminRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/service-credentials/openai%3Ashared/impact",
+      requestId: "req-shared-credential",
+    },
+    context,
+  );
+  const impactData = okData<{
+    linkedProviderAliases: string[];
+    canClear: boolean;
+    canDelete: boolean;
+  }>(impact);
+  assert.equal(impactData.linkedProviderAliases.length, 2);
+  assert.equal(impactData.canClear, false);
+  assert.equal(impactData.canDelete, false);
+
+  const linkedClear = await handleServiceCredentialAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/service-credentials/openai%3Ashared/clear",
+      requestId: "req-shared-credential",
+    },
+    context,
+  );
+  assert.equal(linkedClear.status, 409);
+  assert.equal(errorReason(linkedClear), "service_credential_linked");
+  const linkedDelete = await handleServiceCredentialAdminRequest(
+    {
+      method: "DELETE",
+      url: `http://local/v1/admin/service-credentials/openai%3Ashared?expectedRevision=${completedCredential.revision}`,
+      requestId: "req-shared-credential",
+    },
+    context,
+  );
+  assert.equal(linkedDelete.status, 409);
+
+  for (const alias of ["gpt-main", "gpt-fast"]) {
+    const unlinked = await handleServiceCredentialAdminRequest(
+      {
+        method: "POST",
+        url: `http://local/v1/admin/service-credentials/openai%3Ashared/providers/${alias}/unlink`,
+        requestId: "req-shared-credential",
+      },
+      context,
+    );
+    assert.equal(unlinked.status, 200);
+  }
+  const current = await context.getServiceCredential("openai:shared");
+  assert.ok(current);
+  const deleted = await handleServiceCredentialAdminRequest(
+    {
+      method: "DELETE",
+      url: `http://local/v1/admin/service-credentials/openai%3Ashared?expectedRevision=${current.revision}`,
+      requestId: "req-shared-credential",
+    },
+    context,
+  );
+  assert.equal(deleted.status, 200);
+  assert.equal(await context.getServiceCredential("openai:shared"), undefined);
 });
 
 test("profile registry write route wrapper plans, applies, and maps missing records", async () => {
@@ -1608,15 +1771,24 @@ function profileRegistryWrite(
   };
 }
 
-function modelProviderRouteContext(providers: NativeModelProviderRecord[]) {
+function modelProviderRouteContext(
+  providers: NativeModelProviderRecord[],
+  credentials: NativeServiceCredentialRecord[] = [],
+) {
   const items = new Map(
     providers.map((provider) => [provider.alias, provider] as const),
   );
+  const credentialItems = new Map(
+    credentials.map(
+      (credential) => [credential.credentialId, credential] as const,
+    ),
+  );
   const pendingLogins = new Map();
   const observedQueries: unknown[] = [];
-  const context: ModelProviderAdminRouteContext & {
-    observedQueries: unknown[];
-  } = {
+  const context: ModelProviderAdminRouteContext &
+    ServiceCredentialAdminRouteContext & {
+      observedQueries: unknown[];
+    } = {
     observedQueries,
     pendingLogins,
     openAiOauth: {
@@ -1631,7 +1803,9 @@ function modelProviderRouteContext(providers: NativeModelProviderRecord[]) {
       observedQueries.push(query);
       return [...items.values()].filter(
         (provider) =>
-          query.status === undefined || provider.status === query.status,
+          !("status" in query) ||
+          query.status === undefined ||
+          provider.status === query.status,
       );
     },
     async getModelProvider(alias) {
@@ -1663,6 +1837,7 @@ function modelProviderRouteContext(providers: NativeModelProviderRecord[]) {
         temperatureMilli: write.temperatureMilli,
         reasoningEffort: write.reasoningEffort,
         reasoningFormat: write.reasoningFormat,
+        credentialId: current?.credentialId,
         metadataJson: write.metadataJson ?? current?.metadataJson ?? {},
         revision: (current?.revision ?? 0) + 1,
         credential:
@@ -1676,6 +1851,157 @@ function modelProviderRouteContext(providers: NativeModelProviderRecord[]) {
       });
       items.set(provider.alias, provider);
       return provider;
+    },
+    async listServiceCredentials(query) {
+      return [...credentialItems.values()]
+        .filter(
+          (credential) =>
+            query.providerKind === undefined ||
+            credential.providerKind === query.providerKind,
+        )
+        .slice(query.offset ?? 0, (query.offset ?? 0) + (query.limit ?? 100));
+    },
+    async getServiceCredential(credentialId) {
+      return credentialItems.get(credentialId);
+    },
+    async upsertServiceCredential(write) {
+      const current = credentialItems.get(write.credentialId);
+      if (
+        write.expectedRevision !== undefined &&
+        write.expectedRevision !== (current?.revision ?? 0)
+      ) {
+        throw new Error(
+          `service credential ${write.credentialId} revision mismatch: expected ${write.expectedRevision}, found ${current?.revision ?? 0}`,
+        );
+      }
+      if (
+        write.clearSecret &&
+        (current?.linkedProviderAliases.length ?? 0) > 0
+      ) {
+        throw new Error(
+          `cannot clear service credential ${write.credentialId} while linked to model providers: ${current?.linkedProviderAliases.join(", ")}`,
+        );
+      }
+      const hasSecret = write.clearSecret
+        ? false
+        : write.secret !== undefined
+          ? true
+          : (current?.credential.hasSecret ?? false);
+      const credential = serviceCredentialRecord({
+        ...(current ?? {}),
+        credentialId: write.credentialId,
+        displayName: write.displayName,
+        providerKind: write.providerKind,
+        credentialKind: write.credentialKind,
+        credential: {
+          hasSecret,
+          kind: write.credentialKind,
+          revision: (current?.revision ?? 0) + 1,
+        },
+        linkedProviderAliases: current?.linkedProviderAliases ?? [],
+        revision: (current?.revision ?? 0) + 1,
+        createdAt: current?.createdAt ?? write.now,
+        updatedAt: write.now,
+      });
+      credentialItems.set(credential.credentialId, credential);
+      for (const alias of credential.linkedProviderAliases) {
+        const provider = items.get(alias);
+        if (provider) {
+          items.set(alias, {
+            ...provider,
+            credentialId: credential.credentialId,
+            credential: credential.credential,
+          });
+        }
+      }
+      return credential;
+    },
+    async deleteServiceCredential(deleteRequest) {
+      const credential = credentialItems.get(deleteRequest.credentialId);
+      if (!credential) {
+        throw new Error(
+          `service credential ${deleteRequest.credentialId} not found`,
+        );
+      }
+      if (
+        deleteRequest.expectedRevision !== undefined &&
+        deleteRequest.expectedRevision !== credential.revision
+      ) {
+        throw new Error(
+          `service credential ${deleteRequest.credentialId} revision mismatch: expected ${deleteRequest.expectedRevision}, found ${credential.revision}`,
+        );
+      }
+      if (credential.linkedProviderAliases.length > 0) {
+        throw new Error(
+          `cannot delete service credential ${credential.credentialId} while linked to model providers: ${credential.linkedProviderAliases.join(", ")}`,
+        );
+      }
+      credentialItems.delete(credential.credentialId);
+      return credential;
+    },
+    async linkModelProviderCredential(link) {
+      const provider = items.get(link.providerAlias);
+      const credential = credentialItems.get(link.credentialId);
+      if (!provider || !credential)
+        throw new Error("credential link target not found");
+      if (
+        link.expectedProviderRevision !== undefined &&
+        link.expectedProviderRevision !== provider.revision
+      ) {
+        throw new Error("model provider revision mismatch");
+      }
+      if (
+        link.expectedCredentialRevision !== undefined &&
+        link.expectedCredentialRevision !== credential.revision
+      ) {
+        throw new Error("service credential revision mismatch");
+      }
+      const updatedProvider = {
+        ...provider,
+        credentialId: credential.credentialId,
+        credential: credential.credential,
+        revision: provider.revision + 1,
+        updatedAt: link.now,
+      };
+      const updatedCredential = {
+        ...credential,
+        linkedProviderAliases: [
+          ...new Set([...credential.linkedProviderAliases, provider.alias]),
+        ],
+      };
+      items.set(provider.alias, updatedProvider);
+      credentialItems.set(credential.credentialId, updatedCredential);
+      return { provider: updatedProvider, credential: updatedCredential };
+    },
+    async unlinkModelProviderCredential(unlink) {
+      const provider = items.get(unlink.providerAlias);
+      if (!provider) throw new Error("model provider not found");
+      if (
+        unlink.expectedProviderRevision !== undefined &&
+        unlink.expectedProviderRevision !== provider.revision
+      ) {
+        throw new Error("model provider revision mismatch");
+      }
+      if (provider.credentialId) {
+        const credential = credentialItems.get(provider.credentialId);
+        if (credential) {
+          credentialItems.set(credential.credentialId, {
+            ...credential,
+            linkedProviderAliases: credential.linkedProviderAliases.filter(
+              (alias) => alias !== provider.alias,
+            ),
+          });
+        }
+      }
+      const updated = {
+        ...provider,
+        credentialId: undefined,
+        credential: { hasSecret: false },
+        revision: provider.revision + 1,
+        updatedAt: unlink.now,
+      };
+      items.set(provider.alias, updated);
+      return updated;
     },
     async exchangeOpenAiOauthCode() {
       return {
@@ -1718,8 +2044,29 @@ function modelProviderRecord(
     temperatureMilli: overrides.temperatureMilli,
     reasoningEffort: overrides.reasoningEffort,
     reasoningFormat: overrides.reasoningFormat,
+    credentialId: overrides.credentialId,
     credential: overrides.credential ?? { hasSecret: false },
     metadataJson: overrides.metadataJson ?? {},
+    revision: overrides.revision ?? 1,
+    createdAt: overrides.createdAt ?? "2026-07-05T00:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-07-05T00:00:00.000Z",
+  };
+}
+
+function serviceCredentialRecord(
+  overrides: Partial<NativeServiceCredentialRecord> & { credentialId: string },
+): NativeServiceCredentialRecord {
+  return {
+    credentialId: overrides.credentialId,
+    displayName: overrides.displayName ?? overrides.credentialId,
+    providerKind: overrides.providerKind ?? "openai",
+    credentialKind: overrides.credentialKind ?? "openai_oauth",
+    credential: overrides.credential ?? {
+      hasSecret: true,
+      kind: overrides.credentialKind ?? "openai_oauth",
+      revision: overrides.revision ?? 1,
+    },
+    linkedProviderAliases: overrides.linkedProviderAliases ?? [],
     revision: overrides.revision ?? 1,
     createdAt: overrides.createdAt ?? "2026-07-05T00:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-07-05T00:00:00.000Z",

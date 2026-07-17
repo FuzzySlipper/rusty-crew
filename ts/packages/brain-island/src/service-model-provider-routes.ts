@@ -1,12 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
 import type {
   NativeModelProviderProtocol,
   NativeModelProviderQuery,
   NativeModelProviderRecord,
   NativeModelProviderStatus,
   NativeModelProviderWrite,
-  NativeOpenAiOauthCodeExchangeInput,
-  NativeOpenAiOauthCodeExchangeResult,
 } from "@rusty-crew/native-bridge";
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
 import {
@@ -16,23 +13,11 @@ import {
   isModelProviderRefreshModeContractValue,
   isModelProviderStatusContractValue,
 } from "./model-provider-admin-contract.js";
-import type { RustyCrewOpenAiOauthConfig } from "./service-config.js";
+import {
+  handleOpenAiOauthProviderAdminRequest,
+  type OpenAiOauthRouteContext,
+} from "./service-openai-oauth-routes.js";
 import { failure, successRoute } from "./service-route-results.js";
-
-export interface OpenAiOauthPendingLogin {
-  pendingLoginId: string;
-  providerAlias: string;
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  scopes: string[];
-  state: string;
-  codeVerifier: string;
-  codeChallenge: string;
-  authorizationUrl: string;
-  createdAt: string;
-  expiresAt: string;
-}
 
 export type ModelProviderRefreshMode = "none" | "plan" | "apply";
 
@@ -62,7 +47,7 @@ export interface ModelProviderAdminRouteRequest {
   requestId: string;
 }
 
-export interface ModelProviderAdminRouteContext {
+export interface ModelProviderAdminRouteContext extends OpenAiOauthRouteContext {
   listModelProviders(
     query: NativeModelProviderQuery,
   ): Promise<NativeModelProviderRecord[]>;
@@ -72,12 +57,6 @@ export interface ModelProviderAdminRouteContext {
   upsertModelProvider(
     write: NativeModelProviderWrite,
   ): Promise<NativeModelProviderRecord>;
-  exchangeOpenAiOauthCode(
-    input: NativeOpenAiOauthCodeExchangeInput,
-  ): Promise<NativeOpenAiOauthCodeExchangeResult>;
-  openAiOauth: RustyCrewOpenAiOauthConfig;
-  pendingLogins: Map<string, OpenAiOauthPendingLogin>;
-  now(): string;
   refreshAfterWrite(input: {
     requestId: string;
     provider: NativeModelProviderRecord;
@@ -102,16 +81,78 @@ export async function handleModelProviderAdminRequest(
   const alias = segments[0] ?? "";
 
   if (alias && segments[1] === "oauth" && segments[2] === "openai") {
-    return handleOpenAiOauthProviderAdminRequest(
-      {
-        method,
-        alias,
-        action: segments[3] ?? "status",
-        body: request.body,
-        requestId: request.requestId,
-      },
-      context,
-    );
+    try {
+      return await handleOpenAiOauthProviderAdminRequest(
+        {
+          method,
+          alias,
+          action: segments[3] ?? "status",
+          body: request.body,
+          requestId: request.requestId,
+        },
+        context,
+      );
+    } catch (error) {
+      return modelProviderCredentialConflictRoute(request.requestId, error);
+    }
+  }
+
+  if (
+    alias &&
+    segments[1] === "credential" &&
+    (segments[2] === "link" || segments[2] === "unlink") &&
+    method === "POST"
+  ) {
+    const provider = await context.getModelProvider(alias);
+    if (!provider) {
+      return failure(404, request.requestId, {
+        code: "not_found",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.notFound,
+        message: `model provider ${alias} was not found`,
+        retryable: false,
+      });
+    }
+    const body = isRecord(request.body) ? request.body : {};
+    try {
+      if (segments[2] === "link") {
+        const credentialId = optionalString(
+          body.credentialId ?? body.credential_id,
+        );
+        if (credentialId === undefined) {
+          return failure(400, request.requestId, {
+            code: "invalid_input",
+            reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.credentialInvalid,
+            message: "service credential credentialId is required",
+            retryable: false,
+          });
+        }
+        const result = await context.linkModelProviderCredential({
+          providerAlias: alias,
+          credentialId,
+          expectedProviderRevision:
+            optionalNumber(
+              body.expectedProviderRevision ?? body.expected_provider_revision,
+            ) ?? provider.revision,
+          expectedCredentialRevision: optionalNumber(
+            body.expectedCredentialRevision ??
+              body.expected_credential_revision,
+          ),
+          now: context.now(),
+        });
+        return successRoute(request.requestId, result);
+      }
+      const updated = await context.unlinkModelProviderCredential({
+        providerAlias: alias,
+        expectedProviderRevision:
+          optionalNumber(
+            body.expectedProviderRevision ?? body.expected_provider_revision,
+          ) ?? provider.revision,
+        now: context.now(),
+      });
+      return successRoute(request.requestId, { provider: updated });
+    } catch (error) {
+      return modelProviderCredentialConflictRoute(request.requestId, error);
+    }
   }
 
   if (method === "GET" && !alias) {
@@ -206,525 +247,6 @@ export function modelProviderApiRecord(
   };
 }
 
-async function handleOpenAiOauthProviderAdminRequest(
-  request: {
-    method: string;
-    alias: string;
-    action: string;
-    body?: unknown;
-    requestId: string;
-  },
-  context: ModelProviderAdminRouteContext,
-): Promise<AdminRouteResult> {
-  const provider = await context.getModelProvider(request.alias);
-  if (!provider) {
-    return failure(404, request.requestId, {
-      code: "not_found",
-      reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.notFound,
-      message: `model provider ${request.alias} was not found`,
-      retryable: false,
-    });
-  }
-
-  if (request.action === "status" && request.method === "GET") {
-    return successRoute(
-      request.requestId,
-      openAiOauthProviderStatus(provider, context),
-    );
-  }
-
-  if (request.action === "start" && request.method === "POST") {
-    const body = optionalRecord(request.body) ?? {};
-    const requestedRedirectUri = optionalString(
-      body.redirectUri ?? body.redirect_uri,
-    );
-    if (
-      requestedRedirectUri !== undefined &&
-      requestedRedirectUri !== context.openAiOauth.redirectUri &&
-      !context.openAiOauth.allowRedirectUriOverride
-    ) {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code:
-          MODEL_PROVIDER_ADMIN_REASON_CODES.oauthUnregisteredRedirectUri,
-        message:
-          "OpenAI OAuth redirectUri override is disabled; use the configured registered redirectUri from status/start response",
-        retryable: false,
-      });
-    }
-    const pending = startOpenAiOauthLogin(provider, context, body);
-    context.pendingLogins.set(pending.pendingLoginId, pending);
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(provider),
-      loginConfig: openAiOauthLoginConfig(context.openAiOauth),
-      pendingLogin: redactedOpenAiOauthPendingLogin(pending),
-    });
-  }
-
-  if (request.action === "complete" && request.method === "POST") {
-    const body = requiredRecord(
-      request.body,
-      "OpenAI OAuth complete request body",
-    );
-    const callbackUrl = optionalString(
-      body.callbackUrl ??
-        body.callback_url ??
-        body.authorizationResponseUrl ??
-        body.authorization_response_url,
-    );
-    let callback: ReturnType<typeof parseOpenAiOauthCallbackUrl> | undefined;
-    try {
-      callback = callbackUrl
-        ? parseOpenAiOauthCallbackUrl(callbackUrl)
-        : undefined;
-    } catch {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthInvalidCallbackUrl,
-        message:
-          "OpenAI OAuth callbackUrl must be a full callback URL or query string containing code and state",
-        retryable: false,
-      });
-    }
-    if (callback?.error !== undefined) {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthCallbackError,
-        message: `OpenAI OAuth callback returned error ${callback.error}`,
-        retryable: false,
-      });
-    }
-    const stateValue = requiredString(
-      body.state ?? callback?.state,
-      "OpenAI OAuth state",
-    );
-    const pendingLoginId = optionalString(
-      body.pendingLoginId ?? body.pending_login_id,
-    );
-    const pending =
-      pendingLoginId !== undefined
-        ? context.pendingLogins.get(pendingLoginId)
-        : findOpenAiOauthPendingLoginByState(
-            provider.alias,
-            stateValue,
-            context,
-          );
-    if (!pending || pending.providerAlias !== provider.alias) {
-      return failure(404, request.requestId, {
-        code: "not_found",
-        reason_code:
-          MODEL_PROVIDER_ADMIN_REASON_CODES.oauthPendingLoginNotFound,
-        message: "OpenAI OAuth pending login was not found",
-        retryable: false,
-      });
-    }
-    if (stateValue !== pending.state) {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthStateMismatch,
-        message: "OpenAI OAuth callback state did not match the pending login",
-        retryable: false,
-      });
-    }
-    const fakeTokenResponse =
-      body.fakeTokenResponse ?? body.fake_token_response;
-    let completionMode: "real" | "test";
-    let credentialSecret: Record<string, unknown> | string;
-    let oauthSummary: unknown;
-    if (fakeTokenResponse !== undefined) {
-      if (
-        optionalBoolean(body.testMode ?? body.test_mode) !== true &&
-        optionalBoolean(body.allowFakeTokenResponse) !== true
-      ) {
-        return failure(400, request.requestId, {
-          code: "invalid_input",
-          reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthTestModeRequired,
-          message:
-            "OpenAI OAuth fakeTokenResponse completion requires explicit testMode=true",
-          retryable: false,
-        });
-      }
-      completionMode = "test";
-      credentialSecret = openAiOauthCredentialSecretFromFakeCompletion(
-        pending,
-        body,
-        context.now(),
-      );
-    } else {
-      completionMode = "real";
-      const code = requiredString(
-        body.code ?? callback?.code,
-        "OpenAI OAuth code",
-      );
-      const exchange = await context.exchangeOpenAiOauthCode({
-        issuer: pending.issuer,
-        clientId: pending.clientId,
-        redirectUri: pending.redirectUri,
-        code,
-        codeVerifier: pending.codeVerifier,
-        now: context.now(),
-      });
-      if (!exchange.ok) {
-        return failure(
-          exchange.error.retryable ? 502 : 400,
-          request.requestId,
-          {
-            code: exchange.error.retryable ? "internal_error" : "invalid_input",
-            reason_code: exchange.error.reasonCode,
-            message: exchange.error.message,
-            retryable: exchange.error.retryable,
-          },
-        );
-      }
-      credentialSecret = exchange.secret;
-      oauthSummary = exchange.summary;
-    }
-    const updated = await upsertModelProviderCredentialSecret({
-      context,
-      provider,
-      credentialSecret,
-      expectedRevision: optionalNumber(
-        body.expectedRevision ?? body.expected_revision,
-      ),
-      now: context.now(),
-    });
-    context.pendingLogins.delete(pending.pendingLoginId);
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(updated),
-      credential: updated.credential,
-      completionMode,
-      oauthSummary,
-      pendingLoginId: pending.pendingLoginId,
-    });
-  }
-
-  if (request.action === "clear" && request.method === "POST") {
-    const body = optionalRecord(request.body) ?? {};
-    const updated = await clearModelProviderCredential({
-      context,
-      provider,
-      expectedRevision: optionalNumber(
-        body.expectedRevision ?? body.expected_revision,
-      ),
-      now: context.now(),
-    });
-    for (const [pendingLoginId, pending] of context.pendingLogins) {
-      if (pending.providerAlias === provider.alias) {
-        context.pendingLogins.delete(pendingLoginId);
-      }
-    }
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(updated),
-      credential: updated.credential,
-    });
-  }
-
-  return failure(405, request.requestId, {
-    code: "method_not_allowed",
-    reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthMethodNotAllowed,
-    message:
-      "OpenAI OAuth provider routes support GET status and POST start/complete/clear",
-    retryable: false,
-  });
-}
-
-function openAiOauthProviderStatus(
-  provider: NativeModelProviderRecord,
-  context: ModelProviderAdminRouteContext,
-): {
-  provider: NativeModelProviderRecord & { temperature?: number };
-  credential: NativeModelProviderRecord["credential"];
-  pendingLogins: Array<ReturnType<typeof redactedOpenAiOauthPendingLogin>>;
-  loginConfig: ReturnType<typeof openAiOauthLoginConfig>;
-} {
-  return {
-    provider: modelProviderApiRecord(provider),
-    credential: provider.credential,
-    loginConfig: openAiOauthLoginConfig(context.openAiOauth),
-    pendingLogins: [...context.pendingLogins.values()]
-      .filter((pending) => pending.providerAlias === provider.alias)
-      .map(redactedOpenAiOauthPendingLogin),
-  };
-}
-
-function startOpenAiOauthLogin(
-  provider: NativeModelProviderRecord,
-  context: ModelProviderAdminRouteContext,
-  body: Record<string, unknown>,
-): OpenAiOauthPendingLogin {
-  const issuer = optionalString(body.issuer) ?? context.openAiOauth.issuer;
-  const clientId =
-    optionalString(body.clientId ?? body.client_id) ??
-    context.openAiOauth.clientId;
-  const redirectUri =
-    optionalString(body.redirectUri ?? body.redirect_uri) ??
-    context.openAiOauth.redirectUri;
-  const scopes = optionalStringArray(
-    body.scopes,
-    [
-      "openid",
-      "profile",
-      "email",
-      "offline_access",
-      "api.connectors.read",
-      "api.connectors.invoke",
-    ],
-    "OpenAI OAuth scopes",
-  );
-  const stateValue = randomBase64Url(32);
-  const codeVerifier = randomBase64Url(64);
-  const codeChallenge = base64Url(
-    createHash("sha256").update(codeVerifier).digest(),
-  );
-  const createdAt = context.now();
-  const expiresAt = addMilliseconds(createdAt, 10 * 60 * 1000);
-  const pendingLoginId = `openai-oauth:${provider.alias}:${randomBase64Url(18)}`;
-  const authorizationUrl = openAiOauthAuthorizationUrl({
-    issuer,
-    clientId,
-    redirectUri,
-    scopes,
-    state: stateValue,
-    codeChallenge,
-    allowedWorkspaceIds: optionalStringArray(
-      body.allowedWorkspaceIds ?? body.allowed_workspace_ids,
-      [],
-      "OpenAI OAuth allowedWorkspaceIds",
-    ),
-    originator:
-      optionalString(body.originator) ?? context.openAiOauth.originator,
-  });
-  return {
-    pendingLoginId,
-    providerAlias: provider.alias,
-    issuer,
-    clientId,
-    redirectUri,
-    scopes,
-    state: stateValue,
-    codeVerifier,
-    codeChallenge,
-    authorizationUrl,
-    createdAt,
-    expiresAt,
-  };
-}
-
-function openAiOauthLoginConfig(config: RustyCrewOpenAiOauthConfig): {
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  redirectUriOverrideAllowed: boolean;
-  redirectUriMode: "fixed_registered" | "operator_configured";
-  callbackUrlCompletionAccepted: boolean;
-  callbackUrlCompletionField: "callbackUrl";
-  pendingLoginIdRequiredForCallbackUrl: boolean;
-  remoteOperatorFlow: "paste_callback_url";
-} {
-  return {
-    issuer: config.issuer,
-    clientId: config.clientId,
-    redirectUri: config.redirectUri,
-    redirectUriOverrideAllowed: config.allowRedirectUriOverride,
-    redirectUriMode: config.allowRedirectUriOverride
-      ? "operator_configured"
-      : "fixed_registered",
-    callbackUrlCompletionAccepted: true,
-    callbackUrlCompletionField: "callbackUrl",
-    pendingLoginIdRequiredForCallbackUrl: false,
-    remoteOperatorFlow: "paste_callback_url",
-  };
-}
-
-function findOpenAiOauthPendingLoginByState(
-  providerAlias: string,
-  stateValue: string,
-  context: ModelProviderAdminRouteContext,
-): OpenAiOauthPendingLogin | undefined {
-  for (const pending of context.pendingLogins.values()) {
-    if (
-      pending.providerAlias === providerAlias &&
-      pending.state === stateValue
-    ) {
-      return pending;
-    }
-  }
-  return undefined;
-}
-
-function parseOpenAiOauthCallbackUrl(value: string): {
-  code?: string;
-  state?: string;
-  error?: string;
-  errorDescription?: string;
-} {
-  const trimmed = value.trim();
-  const url = new URL(
-    trimmed.startsWith("?")
-      ? `http://localhost:1455/auth/callback${trimmed}`
-      : trimmed,
-  );
-  return {
-    code: optionalString(url.searchParams.get("code")),
-    state: optionalString(url.searchParams.get("state")),
-    error: optionalString(url.searchParams.get("error")),
-    errorDescription: optionalString(url.searchParams.get("error_description")),
-  };
-}
-
-function redactedOpenAiOauthPendingLogin(pending: OpenAiOauthPendingLogin): {
-  pendingLoginId: string;
-  providerAlias: string;
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  scopes: string[];
-  codeChallenge: string;
-  authorizationUrl: string;
-  createdAt: string;
-  expiresAt: string;
-} {
-  return {
-    pendingLoginId: pending.pendingLoginId,
-    providerAlias: pending.providerAlias,
-    issuer: pending.issuer,
-    clientId: pending.clientId,
-    redirectUri: pending.redirectUri,
-    scopes: pending.scopes,
-    codeChallenge: pending.codeChallenge,
-    authorizationUrl: pending.authorizationUrl,
-    createdAt: pending.createdAt,
-    expiresAt: pending.expiresAt,
-  };
-}
-
-function openAiOauthAuthorizationUrl(input: {
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  scopes: string[];
-  state: string;
-  codeChallenge: string;
-  allowedWorkspaceIds: string[];
-  originator: string;
-}): string {
-  const url = new URL("/oauth/authorize", input.issuer);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", input.clientId);
-  url.searchParams.set("redirect_uri", input.redirectUri);
-  url.searchParams.set("scope", input.scopes.join(" "));
-  url.searchParams.set("code_challenge", input.codeChallenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("id_token_add_organizations", "true");
-  url.searchParams.set("codex_cli_simplified_flow", "true");
-  url.searchParams.set("state", input.state);
-  url.searchParams.set("originator", input.originator);
-  if (input.allowedWorkspaceIds.length > 0) {
-    url.searchParams.set(
-      "allowed_workspace_id",
-      input.allowedWorkspaceIds.join(","),
-    );
-  }
-  return url.toString();
-}
-
-function openAiOauthCredentialSecretFromFakeCompletion(
-  pending: OpenAiOauthPendingLogin,
-  body: Record<string, unknown>,
-  now: string,
-): Record<string, unknown> {
-  const fake = requiredRecord(
-    body.fakeTokenResponse ?? body.fake_token_response,
-    "OpenAI OAuth fakeTokenResponse",
-  );
-  return {
-    kind: "openai_oauth",
-    version: 1,
-    issuer: pending.issuer,
-    client_id: pending.clientId,
-    id_token: requiredString(fake.idToken ?? fake.id_token, "fake idToken"),
-    access_token: requiredString(
-      fake.accessToken ?? fake.access_token,
-      "fake accessToken",
-    ),
-    refresh_token: requiredString(
-      fake.refreshToken ?? fake.refresh_token,
-      "fake refreshToken",
-    ),
-    exchanged_api_token: optionalString(
-      fake.exchangedApiToken ?? fake.exchanged_api_token,
-    ),
-    last_refresh_at:
-      optionalString(fake.lastRefreshAt ?? fake.last_refresh_at) ?? now,
-    account_id: optionalString(fake.accountId ?? fake.account_id),
-    email: optionalString(fake.email),
-    plan_type: optionalString(fake.planType ?? fake.plan_type),
-    is_fedramp_account:
-      optionalBoolean(fake.isFedrampAccount ?? fake.is_fedramp_account) ??
-      false,
-    access_token_expires_at: optionalString(
-      fake.accessTokenExpiresAt ?? fake.access_token_expires_at,
-    ),
-  };
-}
-
-async function upsertModelProviderCredentialSecret(input: {
-  context: ModelProviderAdminRouteContext;
-  provider: NativeModelProviderRecord;
-  credentialSecret: Record<string, unknown> | string;
-  expectedRevision: number | undefined;
-  now: string;
-}): Promise<NativeModelProviderRecord> {
-  return input.context.upsertModelProvider({
-    ...modelProviderWriteFromRecord(input.provider, input.now),
-    secret:
-      typeof input.credentialSecret === "string"
-        ? input.credentialSecret
-        : JSON.stringify(input.credentialSecret),
-    expectedRevision: input.expectedRevision ?? input.provider.revision,
-    expectedCredentialRevision: input.provider.credential.revision,
-  });
-}
-
-async function clearModelProviderCredential(input: {
-  context: ModelProviderAdminRouteContext;
-  provider: NativeModelProviderRecord;
-  expectedRevision: number | undefined;
-  now: string;
-}): Promise<NativeModelProviderRecord> {
-  return input.context.upsertModelProvider({
-    ...modelProviderWriteFromRecord(input.provider, input.now),
-    clearSecret: true,
-    expectedRevision: input.expectedRevision ?? input.provider.revision,
-    expectedCredentialRevision: input.provider.credential.revision,
-  });
-}
-
-function modelProviderWriteFromRecord(
-  provider: NativeModelProviderRecord,
-  now: string,
-): NativeModelProviderWrite {
-  return {
-    alias: provider.alias,
-    status: provider.status,
-    protocol: provider.protocol,
-    providerKind: provider.providerKind,
-    displayName: provider.displayName,
-    description: provider.description,
-    baseUrl: provider.baseUrl,
-    modelId: provider.modelId,
-    contextWindowTokens: provider.contextWindowTokens,
-    maxOutputTokens: provider.maxOutputTokens,
-    temperatureMilli: provider.temperatureMilli,
-    reasoningEffort: provider.reasoningEffort,
-    reasoningFormat: provider.reasoningFormat,
-    clearSecret: false,
-    expectedCredentialRevision: provider.credential.revision,
-    metadataJson: provider.metadataJson,
-    now,
-  };
-}
-
 interface ModelProviderRevisionMismatch {
   alias: string;
   expected: number;
@@ -776,6 +298,44 @@ function modelProviderRevisionConflictRoute(
       meta: { request_id: requestIdValue, schema_version: 1 },
     } as AdminRouteResult["body"],
   };
+}
+
+function modelProviderCredentialConflictRoute(
+  requestId: string,
+  error: unknown,
+): AdminRouteResult {
+  const message = errorMessage(error, "model provider credential write failed");
+  const providerMismatch = modelProviderRevisionMismatch(error);
+  if (providerMismatch !== undefined) {
+    return failure(409, requestId, {
+      code: "conflict",
+      reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.revisionMismatch,
+      message,
+      retryable: false,
+    });
+  }
+  if (/service credential .* revision mismatch:/u.test(message)) {
+    return failure(409, requestId, {
+      code: "conflict",
+      reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.credentialRevisionMismatch,
+      message,
+      retryable: false,
+    });
+  }
+  if (/not found/u.test(message)) {
+    return failure(404, requestId, {
+      code: "not_found",
+      reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.credentialNotFound,
+      message,
+      retryable: false,
+    });
+  }
+  return failure(400, requestId, {
+    code: "invalid_input",
+    reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.credentialInvalid,
+    message,
+    retryable: false,
+  });
 }
 
 function modelProviderRefreshMode(
@@ -925,6 +485,9 @@ function modelProviderWriteFromBody(
     reasoningFormat: optionalString(body.reasoningFormat),
     secret: modelProviderSecretFromBody(body),
     clearSecret: optionalBoolean(body.clearSecret),
+    expectedCredentialRevision: optionalNumber(
+      body.expectedCredentialRevision ?? body.expected_credential_revision,
+    ),
     metadataJson: isRecord(body.metadataJson) ? body.metadataJson : {},
     expectedRevision: optionalNumber(body.expectedRevision),
     now,
@@ -943,48 +506,10 @@ function numberParam(url: URL, key: string): number | undefined {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-function stringArray(value: unknown, fieldName: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${fieldName} must be an array`);
-  }
-  return value.map((item, index) => {
-    const text = optionalString(item);
-    if (text === undefined) {
-      throw new Error(`${fieldName}[${index}] must be a non-empty string`);
-    }
-    return text;
-  });
-}
-
-function optionalStringArray(
-  value: unknown,
-  fallback: string[],
-  fieldName: string,
-): string[] {
-  return value === undefined ? fallback : stringArray(value, fieldName);
-}
-
 function requiredString(value: unknown, fieldName: string): string {
   const text = optionalString(value);
   if (!text) throw new Error(`${fieldName} is required`);
   return text;
-}
-
-function optionalRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function requiredRecord(
-  value: unknown,
-  fieldName: string,
-): Record<string, unknown> {
-  const record = optionalRecord(value);
-  if (record === undefined) {
-    throw new Error(`${fieldName} must be an object`);
-  }
-  return record;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1031,24 +556,6 @@ function optionalTemperatureMilli(
     throw new Error("model provider temperature must be non-negative");
   }
   return Math.round(temperature * MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE);
-}
-
-function randomBase64Url(byteLength: number): string {
-  return base64Url(randomBytes(byteLength));
-}
-
-function base64Url(bytes: Buffer): string {
-  return bytes
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function addMilliseconds(isoTimestamp: string, milliseconds: number): string {
-  const parsed = Date.parse(isoTimestamp);
-  const base = Number.isFinite(parsed) ? parsed : Date.now();
-  return new Date(base + milliseconds).toISOString();
 }
 
 function errorMessage(error: unknown, fallback: string): string {

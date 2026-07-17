@@ -5,6 +5,7 @@ import type {
   NativeModelProviderCredentialUnlink,
   NativeServiceCredentialQuery,
   NativeServiceCredentialRecord,
+  NativeServiceCredentialDelete,
   NativeServiceCredentialWrite,
 } from "./public-api.js";
 import {
@@ -40,6 +41,11 @@ export interface RawServiceCredentialQuery {
   provider_kind?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface RawServiceCredentialDelete {
+  credential_id: string;
+  expected_revision?: number;
 }
 
 export interface RawModelProviderCredentialLink {
@@ -102,6 +108,15 @@ export const serviceCredentialWire = {
       provider_kind: query.providerKind,
       limit: query.limit,
       offset: query.offset,
+    };
+  },
+
+  toRawDelete(
+    deleteRequest: NativeServiceCredentialDelete,
+  ): RawServiceCredentialDelete {
+    return {
+      credential_id: deleteRequest.credentialId,
+      expected_revision: deleteRequest.expectedRevision,
     };
   },
 

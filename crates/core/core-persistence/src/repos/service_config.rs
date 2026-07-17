@@ -226,6 +226,48 @@ impl CoordinationStore {
         get_service_credential_secret(&conn, credential_id)
     }
 
+    pub fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        validate_service_credential_id(&delete.credential_id)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start delete service credential", error))?;
+        let existing = get_service_credential(&tx, &delete.credential_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("service credential {} not found", delete.credential_id),
+            )
+        })?;
+        validate_expected_revision(
+            "service credential",
+            &delete.credential_id,
+            delete.expected_revision,
+            existing.revision,
+        )?;
+        reject_linked_service_credential_mutation(&existing, "delete")?;
+        let changed = tx
+            .execute(
+                "DELETE FROM service_credentials WHERE credential_id = ?1 AND revision = ?2",
+                params![delete.credential_id, existing.revision as i64],
+            )
+            .map_err(|error| persistence_error("delete service credential", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "service credential {} changed concurrently",
+                    delete.credential_id
+                ),
+            ));
+        }
+        tx.commit()
+            .map_err(|error| persistence_error("commit delete service credential", error))?;
+        Ok(existing)
+    }
+
     pub fn list_service_credentials(
         &self,
         query: &ServiceCredentialQuery,
@@ -1657,6 +1699,9 @@ fn upsert_service_credential_in_tx(
         ));
     }
     if let Some(existing) = existing {
+        if write.clear_secret {
+            reject_linked_service_credential_mutation(existing, "clear")?;
+        }
         for alias in &existing.linked_provider_aliases {
             let provider = get_model_provider(tx, alias)?.ok_or_else(|| {
                 CoreError::new(
@@ -1757,6 +1802,23 @@ fn upsert_service_credential_in_tx(
         ));
     }
     Ok(())
+}
+
+fn reject_linked_service_credential_mutation(
+    credential: &ServiceCredentialRecord,
+    action: &str,
+) -> CoreResult<()> {
+    if credential.linked_provider_aliases.is_empty() {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::ActionRejected,
+        format!(
+            "cannot {action} service credential {} while linked to model providers: {}",
+            credential.credential_id,
+            credential.linked_provider_aliases.join(", ")
+        ),
+    ))
 }
 
 fn get_service_credential(

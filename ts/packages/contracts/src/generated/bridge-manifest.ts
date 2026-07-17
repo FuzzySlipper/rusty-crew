@@ -219,6 +219,7 @@ export const bridgeOperations = [
   {"name":"list_service_credentials","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ServiceCredentialQuery","output":"Vec<core_protocol::ServiceCredentialRecord>","errors":"core_protocol::CoreError","summary":"List redacted service-scoped credentials and linked provider aliases."},
   {"name":"get_service_credential","surface":"stable","direction":"ts_to_rust","input":"credential_id: String","output":"Option<core_protocol::ServiceCredentialRecord>","errors":"core_protocol::CoreError","summary":"Read one redacted service-scoped credential by id."},
   {"name":"get_service_credential_secret","surface":"stable","direction":"ts_to_rust","input":"credential_id: String","output":"Option<String>","errors":"core_protocol::CoreError","summary":"Read a service credential secret for provider execution only."},
+  {"name":"delete_service_credential","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ServiceCredentialDelete","output":"core_protocol::ServiceCredentialRecord","errors":"core_protocol::CoreError","summary":"Delete one unlinked service credential with revision protection and return its redacted record."},
   {"name":"link_model_provider_credential","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ModelProviderCredentialLink","output":"core_protocol::ModelProviderCredentialLinkResult","errors":"core_protocol::CoreError","summary":"Atomically link a provider alias to a compatible service credential."},
   {"name":"unlink_model_provider_credential","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ModelProviderCredentialUnlink","output":"core_protocol::ModelProviderRecord","errors":"core_protocol::CoreError","summary":"Unlink a provider alias without deleting or clearing the shared credential."},
   {"name":"model_provider_refresh_impact","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ModelProviderRefreshImpactRequest","output":"core_protocol::ModelProviderRefreshImpact","errors":"core_protocol::CoreError","summary":"Plan profiles and sessions affected by a model-provider alias update from Rust-owned profile registry and session state."},
@@ -278,4 +279,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "7ec1ce9100982163b6c9af2a4f07dfa8eea43dcd6a8edb4b0d2e39bfb10b88b3" as const;
+export const bridgeWireShapeFingerprint = "c1ce89b9cd7a9ebf25c0f5cd94e9d7aac50aef8ee210ad258949596946b0b6da" as const;

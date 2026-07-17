@@ -93,6 +93,13 @@ impl CoreEngine {
         RuntimeServiceDataStore::get_service_credential_secret(&self.store, credential_id)
     }
 
+    pub fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        RuntimeServiceDataStore::delete_service_credential(&self.store, delete)
+    }
+
     pub fn list_service_credentials(
         &self,
         query: &ServiceCredentialQuery,

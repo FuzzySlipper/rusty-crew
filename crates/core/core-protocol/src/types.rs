@@ -1434,6 +1434,12 @@ pub struct ServiceCredentialQuery {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceCredentialDelete {
+    pub credential_id: String,
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelProviderCredentialLink {
     pub provider_alias: String,
     pub credential_id: String,

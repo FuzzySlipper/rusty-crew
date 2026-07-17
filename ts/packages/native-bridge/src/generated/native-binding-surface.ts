@@ -43,6 +43,7 @@ export interface NativeBridgeBinding {
   listServiceCredentialsJson(queryJson: string): string
   getServiceCredentialJson(credentialId: string): string
   getServiceCredentialSecretJson(credentialId: string): string
+  deleteServiceCredentialJson(deleteJson: string): string
   linkModelProviderCredentialJson(linkJson: string): string
   unlinkModelProviderCredentialJson(unlinkJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
@@ -813,7 +814,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 266,
+  "manifestOperationCount": 267,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1150,6 +1151,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_service_credential_secret"
+    },
+    {
+      "name": "deleteServiceCredentialJson",
+      "parameterSource": "deleteJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "delete_service_credential"
     },
     {
       "name": "linkModelProviderCredentialJson",

@@ -3,7 +3,8 @@ use rusty_crew_core_protocol::{
     CoreResult, IsoTimestamp, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
     ModelProviderCredentialUnlink, ModelProviderQuery, ModelProviderRecord, ModelProviderWrite,
     ProfileId, ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryUpdate,
-    ProfileRegistryWrite, ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite,
+    ProfileRegistryWrite, ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
+    ServiceCredentialWrite,
 };
 
 pub(crate) trait RuntimeStorageAdminStore {
@@ -58,6 +59,10 @@ pub(crate) trait RuntimeServiceDataStore {
         credential_id: &str,
     ) -> CoreResult<Option<ServiceCredentialRecord>>;
     fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>>;
+    fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord>;
     fn list_service_credentials(
         &self,
         query: &ServiceCredentialQuery,
@@ -192,6 +197,13 @@ impl RuntimeServiceDataStore for CoreCoordinationStore {
     fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
         self.service_data()
             .get_service_credential_secret(credential_id)
+    }
+
+    fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        self.service_data().delete_service_credential(delete)
     }
 
     fn list_service_credentials(

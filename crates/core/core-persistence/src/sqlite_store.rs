@@ -1019,6 +1019,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        match self {
+            Self::Sqlite(store) => store.delete_service_credential(delete),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.delete_service_credential(delete),
+        }
+    }
+
     pub fn list_service_credentials(
         &self,
         query: &ServiceCredentialQuery,
@@ -2860,6 +2871,13 @@ impl ServiceDataRepositorySet<'_> {
 
     pub fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
         self.store.get_service_credential_secret(credential_id)
+    }
+
+    pub fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        self.store.delete_service_credential(delete)
     }
 
     pub fn list_service_credentials(

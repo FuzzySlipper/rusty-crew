@@ -1,4 +1,4 @@
-export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.1.0";
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.2.0";
 
 export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
   "docs/model-provider-admin-api-v0.openapi.json";
@@ -31,6 +31,24 @@ export const MODEL_PROVIDER_CREDENTIAL_KIND_VALUES = [
 export const MODEL_PROVIDER_ADMIN_PATHS = {
   listCreate: "/v1/admin/model-providers",
   getUpdate: "/v1/admin/model-providers/{alias}",
+  credentialLink: "/v1/admin/model-providers/{alias}/credential/link",
+  credentialUnlink: "/v1/admin/model-providers/{alias}/credential/unlink",
+  credentialListCreate: "/v1/admin/service-credentials",
+  credentialGetUpdateDelete: "/v1/admin/service-credentials/{credentialId}",
+  credentialImpact: "/v1/admin/service-credentials/{credentialId}/impact",
+  credentialClear: "/v1/admin/service-credentials/{credentialId}/clear",
+  credentialProviderLink:
+    "/v1/admin/service-credentials/{credentialId}/providers/{alias}/link",
+  credentialProviderUnlink:
+    "/v1/admin/service-credentials/{credentialId}/providers/{alias}/unlink",
+  credentialOpenAiOauthStatus:
+    "/v1/admin/service-credentials/{credentialId}/oauth/openai/status",
+  credentialOpenAiOauthStart:
+    "/v1/admin/service-credentials/{credentialId}/oauth/openai/start",
+  credentialOpenAiOauthComplete:
+    "/v1/admin/service-credentials/{credentialId}/oauth/openai/complete",
+  credentialOpenAiOauthClear:
+    "/v1/admin/service-credentials/{credentialId}/oauth/openai/clear",
   openAiOauthStatus: "/v1/admin/model-providers/{alias}/oauth/openai/status",
   openAiOauthStart: "/v1/admin/model-providers/{alias}/oauth/openai/start",
   openAiOauthComplete:
@@ -43,7 +61,14 @@ export const MODEL_PROVIDER_ADMIN_REASON_CODES = {
   notFound: "model_provider_not_found",
   revisionMismatch: "model_provider_revision_mismatch",
   methodNotAllowed: "model_provider_method_not_allowed",
+  credentialNotFound: "service_credential_not_found",
+  credentialInvalid: "invalid_service_credential",
+  credentialRevisionMismatch: "service_credential_revision_mismatch",
+  credentialLinked: "service_credential_linked",
+  credentialLinkMismatch: "service_credential_link_mismatch",
+  credentialMethodNotAllowed: "service_credential_method_not_allowed",
   oauthMethodNotAllowed: "openai_oauth_provider_method_not_allowed",
+  oauthIncompatibleTarget: "openai_oauth_incompatible_target",
   oauthUnregisteredRedirectUri: "openai_oauth_unregistered_redirect_uri",
   oauthInvalidCallbackUrl: "openai_oauth_invalid_callback_url",
   oauthCallbackError: "openai_oauth_callback_error",
@@ -85,7 +110,7 @@ export const OPENAI_OAUTH_LOGIN_CONFIG_REQUIRED_FIELDS = [
 
 export const OPENAI_OAUTH_PENDING_LOGIN_PUBLIC_FIELDS = [
   "pendingLoginId",
-  "providerAlias",
+  "credentialId",
   "issuer",
   "clientId",
   "redirectUri",

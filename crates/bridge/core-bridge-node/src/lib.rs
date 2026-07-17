@@ -110,8 +110,9 @@ use rusty_crew_core_protocol::{
     ModelProviderCredentialLink, ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink,
     ModelProviderQuery, ModelProviderRecord, ModelProviderRefreshImpactRequest,
     ModelProviderRefreshPlanRequest, ModelProviderWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryUpdate, ProfileRegistryWrite, ServiceCredentialQuery, ServiceCredentialRecord,
-    ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    ProfileRegistryUpdate, ProfileRegistryWrite, ServiceCredentialDelete, ServiceCredentialQuery,
+    ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
+    SessionActivityDigestQuery,
 };
 use rusty_crew_core_tool_registry::{
     plan_local_code_resource_policy, plan_tool_availability, plan_web_browser_resource_policy,

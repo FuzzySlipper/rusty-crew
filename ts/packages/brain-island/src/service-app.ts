@@ -110,8 +110,9 @@ import {
   handleModelProviderAdminRequest,
   type ModelProviderRefreshMode,
   type ModelProviderWriteRefreshResult,
-  type OpenAiOauthPendingLogin,
 } from "./service-model-provider-routes.js";
+import { handleServiceCredentialAdminRequest } from "./service-credential-admin-routes.js";
+import type { OpenAiOauthPendingLogin } from "./service-openai-oauth-routes.js";
 import {
   handleProfileRegistryWriteRequest,
   isProfileRegistryWriteRoute,
@@ -1484,6 +1485,14 @@ async function handleHttpRequest(
         listModelProviders: (query) => state.bridge.listModelProviders(query),
         getModelProvider: (alias) => state.bridge.getModelProvider(alias),
         upsertModelProvider: (write) => state.bridge.upsertModelProvider(write),
+        getServiceCredential: (credentialId) =>
+          state.bridge.getServiceCredential(credentialId),
+        upsertServiceCredential: (write) =>
+          state.bridge.upsertServiceCredential(write),
+        linkModelProviderCredential: (link) =>
+          state.bridge.linkModelProviderCredential(link),
+        unlinkModelProviderCredential: (unlink) =>
+          state.bridge.unlinkModelProviderCredential(unlink),
         exchangeOpenAiOauthCode: (input) =>
           state.bridge.exchangeOpenAiOauthCode(input),
         openAiOauth: state.config.openAiOauth,
@@ -1496,6 +1505,43 @@ async function handleHttpRequest(
             provider: input.provider,
             refreshMode: input.refreshMode,
           }),
+      },
+    );
+  }
+
+  if (route?.id === "admin.service_credentials") {
+    const method = (request.method ?? "GET").toUpperCase();
+    const body =
+      method === "POST" || method === "PATCH"
+        ? await readJsonBody(request)
+        : undefined;
+    return handleServiceCredentialAdminRequest(
+      {
+        method,
+        url: url.toString(),
+        body,
+        requestId: requestId(request),
+      },
+      {
+        listServiceCredentials: (query) =>
+          state.bridge.listServiceCredentials(query),
+        getServiceCredential: (credentialId) =>
+          state.bridge.getServiceCredential(credentialId),
+        upsertServiceCredential: (write) =>
+          state.bridge.upsertServiceCredential(write),
+        deleteServiceCredential: (deleteRequest) =>
+          state.bridge.deleteServiceCredential(deleteRequest),
+        listModelProviders: (query) => state.bridge.listModelProviders(query),
+        getModelProvider: (alias) => state.bridge.getModelProvider(alias),
+        linkModelProviderCredential: (link) =>
+          state.bridge.linkModelProviderCredential(link),
+        unlinkModelProviderCredential: (unlink) =>
+          state.bridge.unlinkModelProviderCredential(unlink),
+        exchangeOpenAiOauthCode: (input) =>
+          state.bridge.exchangeOpenAiOauthCode(input),
+        openAiOauth: state.config.openAiOauth,
+        pendingLogins: state.openAiOauthPendingLogins,
+        now: state.now,
       },
     );
   }

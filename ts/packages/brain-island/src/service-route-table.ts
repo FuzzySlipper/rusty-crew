@@ -22,6 +22,7 @@ export type ServiceApiRouteId =
   | "roleplay"
   | "admin.storage"
   | "admin.model_providers"
+  | "admin.service_credentials"
   | "admin.profile_registry.write"
   | "admin.memory"
   | "admin.diagnostics";
@@ -150,6 +151,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     "after_auth",
     "Model provider admin routes",
     (path) => path.startsWith("/v1/admin/model-providers"),
+  ),
+  route(
+    "admin.service_credentials",
+    215,
+    "after_auth",
+    "Shared service credential admin routes",
+    (path) => path.startsWith("/v1/admin/service-credentials"),
   ),
   route(
     "admin.profile_registry.write",

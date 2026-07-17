@@ -172,6 +172,13 @@ impl NativeBridge {
         self.engine()?.get_service_credential_secret(credential_id)
     }
 
+    pub fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        self.engine()?.delete_service_credential(delete)
+    }
+
     pub fn list_service_credentials(
         &self,
         query: &ServiceCredentialQuery,

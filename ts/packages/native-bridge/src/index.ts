@@ -764,6 +764,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listServiceCredentials: unavailable("initialize_engine"),
     getServiceCredential: unavailable("initialize_engine"),
     getServiceCredentialSecret: unavailable("initialize_engine"),
+    deleteServiceCredential: unavailable("initialize_engine"),
     linkModelProviderCredential: unavailable("initialize_engine"),
     unlinkModelProviderCredential: unavailable("initialize_engine"),
     modelProviderRefreshImpact: unavailable("initialize_engine"),

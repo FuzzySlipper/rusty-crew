@@ -43,6 +43,7 @@ export declare class NativeBridgeBinding {
   listServiceCredentialsJson(queryJson: string): string
   getServiceCredentialJson(credentialId: string): string
   getServiceCredentialSecretJson(credentialId: string): string
+  deleteServiceCredentialJson(deleteJson: string): string
   linkModelProviderCredentialJson(linkJson: string): string
   unlinkModelProviderCredentialJson(unlinkJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string

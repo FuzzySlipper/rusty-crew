@@ -1983,6 +1983,15 @@ errors = "core_protocol::CoreError"
 summary = "Read a service credential secret for provider execution only."
 
 [[operation]]
+name = "delete_service_credential"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ServiceCredentialDelete"
+output = "core_protocol::ServiceCredentialRecord"
+errors = "core_protocol::CoreError"
+summary = "Delete one unlinked service credential with revision protection and return its redacted record."
+
+[[operation]]
 name = "link_model_provider_credential"
 surface = "stable"
 direction = "ts_to_rust"

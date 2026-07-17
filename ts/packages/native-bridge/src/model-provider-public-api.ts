@@ -42,6 +42,11 @@ export interface NativeServiceCredentialQuery {
   offset?: number;
 }
 
+export interface NativeServiceCredentialDelete {
+  credentialId: string;
+  expectedRevision?: number;
+}
+
 export interface NativeModelProviderCredentialLink {
   providerAlias: string;
   credentialId: string;

@@ -3,7 +3,7 @@
 Status: implemented green-path note for task #3972/#3978
 Date: 2026-07-02
 
-Rusty Crew supports a direct OpenAI OAuth-backed Responses provider so the
+Rusty Crew supports direct OpenAI OAuth-backed Responses providers so the
 Responses brain does not need to route through den-router for the ChatGPT/Codex
 auth path. This is the green path for `openai-responses` live profiles.
 
@@ -220,7 +220,7 @@ fields:
 - `context_size`, `max_output_tokens`, `temperature_milli`,
   `reasoning_effort`, and `reasoning_format`
 
-Direct OpenAI OAuth should be a first-class provider auth kind, not an implicit
+Direct OpenAI OAuth is a first-class service credential kind, not an implicit
 meaning of `base_url` or `provider_kind`.
 
 ## Provider Secret JSON
@@ -343,10 +343,14 @@ den-router proxy path after certification:
 
 Direct OAuth status is visible through Rusty Crew admin APIs:
 
-- `GET /v1/admin/model-providers/:alias/oauth/openai/status` reports the
-  configured redirect URI, whether LAN redirect overrides are allowed, pending
-  login summaries, redacted credential presence, and redacted OAuth summary
-  fields such as account id/email when available.
+- `GET /v1/admin/service-credentials/:credentialId/oauth/openai/status` reports
+  the canonical credential-scoped login state. Create/authenticate the
+  credential once, then link compatible OpenAI Responses aliases through
+  `/v1/admin/service-credentials/:credentialId/providers/:alias/link`. Status
+  includes the configured redirect URI, whether LAN redirect overrides are
+  allowed, pending login summaries, and redacted credential presence.
+- `GET /v1/admin/model-providers/:alias/oauth/openai/status` remains a
+  compatibility facade and reports the credential linked to that alias.
 - `GET /v1/chat/sessions/:sessionId/context` reports the selected model
   provider, brain module, protocol, provider kind, and redacted credential
   status for a session.

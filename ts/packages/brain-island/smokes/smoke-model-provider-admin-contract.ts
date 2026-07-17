@@ -7,6 +7,7 @@ import type {
   NativeModelProviderWrite,
   NativeOpenAiOauthCodeExchangeInput,
   NativeOpenAiOauthCodeExchangeResult,
+  NativeServiceCredentialRecord,
 } from "@rusty-crew/native-bridge";
 import {
   MODEL_PROVIDER_ADMIN_OPENAPI_PATH,
@@ -100,7 +101,8 @@ const context = modelProviderRouteContext([
     providerKind: "openai",
     protocol: "responses",
     modelId: "gpt-5",
-    credential: { hasSecret: true, kind: "openai_oauth" },
+    credentialId: "provider:gpt",
+    credential: { hasSecret: true, kind: "openai_oauth", revision: 1 },
   }),
 ]);
 
@@ -218,6 +220,22 @@ function modelProviderRouteContext(
   records: NativeModelProviderRecord[],
 ): ModelProviderAdminRouteContext {
   const providers = new Map(records.map((record) => [record.alias, record]));
+  const credentials = new Map<string, NativeServiceCredentialRecord>([
+    [
+      "provider:gpt",
+      {
+        credentialId: "provider:gpt",
+        displayName: "gpt",
+        providerKind: "openai",
+        credentialKind: "openai_oauth",
+        credential: { hasSecret: true, kind: "openai_oauth", revision: 1 },
+        linkedProviderAliases: ["gpt"],
+        revision: 1,
+        createdAt: "2026-07-06T00:00:00.000Z",
+        updatedAt: "2026-07-06T00:00:00.000Z",
+      },
+    ],
+  ]);
   return {
     async listModelProviders(query: NativeModelProviderQuery) {
       return [...providers.values()]
@@ -252,6 +270,26 @@ function modelProviderRouteContext(
       });
       providers.set(write.alias, record);
       return record;
+    },
+    async getServiceCredential(credentialId) {
+      return credentials.get(credentialId);
+    },
+    async upsertServiceCredential(write) {
+      const record = credentials.get(write.credentialId);
+      if (!record) throw new Error("contract smoke credential missing");
+      return record;
+    },
+    async linkModelProviderCredential(link) {
+      const provider = providers.get(link.providerAlias);
+      const credential = credentials.get(link.credentialId);
+      if (!provider || !credential)
+        throw new Error("contract smoke link missing");
+      return { provider, credential };
+    },
+    async unlinkModelProviderCredential(unlink) {
+      const provider = providers.get(unlink.providerAlias);
+      if (!provider) throw new Error("contract smoke provider missing");
+      return provider;
     },
     async exchangeOpenAiOauthCode(
       _input: NativeOpenAiOauthCodeExchangeInput,
@@ -293,6 +331,7 @@ function modelProviderRecord(
     temperatureMilli: overrides.temperatureMilli,
     reasoningEffort: overrides.reasoningEffort,
     reasoningFormat: overrides.reasoningFormat,
+    credentialId: overrides.credentialId,
     credential: overrides.credential ?? { hasSecret: false },
     metadataJson: overrides.metadataJson ?? {},
     revision: overrides.revision ?? 1,

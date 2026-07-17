@@ -98,10 +98,11 @@ use rusty_crew_core_protocol::{
     ParentConsumptionPolicy, ProfileId, ProfilePurgeReport, ProfilePurgeTableCount,
     ProfileRegistryLifecycleStatus, ProfileRegistryLifecycleUpdate, ProfileRegistryRecord,
     ProfileRegistryUpdate, ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason,
-    ResourceLimits, RunId, ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite,
-    SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionHandle,
-    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    ResourceLimits, RunId, ServiceCredentialDelete, ServiceCredentialQuery,
+    ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
+    SessionActivityDigestQuery, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId,
+    SessionIdentityRecord, SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId,
+    ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;

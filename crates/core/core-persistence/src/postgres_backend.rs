@@ -99,11 +99,12 @@ use crate::{
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
     ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
-    ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite, SessionConfig,
-    SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
-    SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
-    SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
-    SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
+    ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
+    ServiceCredentialWrite, SessionConfig, SessionConfigRecord, SessionId, SessionIdentityRecord,
+    SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport, SessionMemoryPromptContext,
+    SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
+    SessionMemoryPromptExcludedCounts, SessionMemoryQuery, SessionMemoryRecord,
+    SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionMessageVariantPageQuery,
     SessionState, SessionStatus, SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery,
     SimpleKvRecord, SimpleKvScope, SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord,
@@ -9418,6 +9419,10 @@ mod tests {
             credential_id: &str,
         ) -> CoreResult<Option<ServiceCredentialRecord>>;
         fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>>;
+        fn delete_service_credential(
+            &self,
+            delete: &ServiceCredentialDelete,
+        ) -> CoreResult<ServiceCredentialRecord>;
         fn list_service_credentials(
             &self,
             query: &ServiceCredentialQuery,
@@ -9895,6 +9900,13 @@ mod tests {
 
         fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
             CoordinationStore::get_service_credential_secret(self, credential_id)
+        }
+
+        fn delete_service_credential(
+            &self,
+            delete: &ServiceCredentialDelete,
+        ) -> CoreResult<ServiceCredentialRecord> {
+            CoordinationStore::delete_service_credential(self, delete)
         }
 
         fn list_service_credentials(
@@ -10477,6 +10489,13 @@ mod tests {
 
         fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
             PostgresBackendStore::get_service_credential_secret(self, credential_id)
+        }
+
+        fn delete_service_credential(
+            &self,
+            delete: &ServiceCredentialDelete,
+        ) -> CoreResult<ServiceCredentialRecord> {
+            PostgresBackendStore::delete_service_credential(self, delete)
         }
 
         fn list_service_credentials(
@@ -14834,6 +14853,59 @@ mod tests {
             .unwrap();
         assert_eq!(retained.linked_provider_aliases, vec!["gpt-oauth-mini"]);
         assert!(retained.credential.has_secret);
+
+        let linked_clear = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: retained.credential_id.clone(),
+                display_name: retained.display_name.clone(),
+                provider_kind: retained.provider_kind.clone(),
+                credential_kind: retained.credential_kind,
+                secret: None,
+                clear_secret: true,
+                expected_revision: Some(retained.revision),
+                now: "2026-07-02T00:09:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(linked_clear.kind, CoreErrorKind::ActionRejected);
+        let linked_delete = store
+            .delete_service_credential(&ServiceCredentialDelete {
+                credential_id: retained.credential_id.clone(),
+                expected_revision: Some(retained.revision),
+            })
+            .unwrap_err();
+        assert_eq!(linked_delete.kind, CoreErrorKind::ActionRejected);
+
+        store
+            .unlink_model_provider_credential(&ModelProviderCredentialUnlink {
+                provider_alias: second_link.provider.alias,
+                expected_provider_revision: Some(second_link.provider.revision),
+                now: "2026-07-02T00:10:00Z".to_string(),
+            })
+            .unwrap();
+        let cleared = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: retained.credential_id.clone(),
+                display_name: retained.display_name.clone(),
+                provider_kind: retained.provider_kind.clone(),
+                credential_kind: retained.credential_kind,
+                secret: None,
+                clear_secret: true,
+                expected_revision: Some(retained.revision),
+                now: "2026-07-02T00:11:00Z".to_string(),
+            })
+            .unwrap();
+        assert!(!cleared.credential.has_secret);
+        let deleted = store
+            .delete_service_credential(&ServiceCredentialDelete {
+                credential_id: cleared.credential_id.clone(),
+                expected_revision: Some(cleared.revision),
+            })
+            .unwrap();
+        assert_eq!(deleted.credential_id, "openai:primary");
+        assert!(store
+            .get_service_credential("openai:primary")
+            .unwrap()
+            .is_none());
     }
 
     fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {

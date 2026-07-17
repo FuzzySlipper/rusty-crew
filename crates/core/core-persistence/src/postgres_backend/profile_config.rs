@@ -988,6 +988,54 @@ impl PostgresBackendStore {
         get_service_credential_secret_in_client(&mut *self.client()?, &schema, credential_id)
     }
 
+    pub fn delete_service_credential(
+        &self,
+        delete: &ServiceCredentialDelete,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        crate::validate_service_credential_id(&delete.credential_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL service credential delete", error))?;
+        let existing = get_service_credential_in_client(&mut tx, &schema, &delete.credential_id)?
+            .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("service credential {} not found", delete.credential_id),
+            )
+        })?;
+        validate_postgres_expected_revision(
+            "service credential",
+            &delete.credential_id,
+            delete.expected_revision,
+            Some(existing.revision),
+        )?;
+        reject_linked_postgres_service_credential_mutation(&existing, "delete")?;
+        let changed = tx
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.service_credentials
+                      WHERE credential_id = $1 AND revision = $2"
+                ),
+                &[&delete.credential_id, &(existing.revision as i64)],
+            )
+            .map_err(|error| postgres_error("delete PostgreSQL service credential", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "service credential {} changed concurrently",
+                    delete.credential_id
+                ),
+            ));
+        }
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL service credential delete", error)
+        })?;
+        Ok(existing)
+    }
+
     pub fn list_service_credentials(
         &self,
         query: &ServiceCredentialQuery,
@@ -1758,6 +1806,9 @@ fn upsert_service_credential_in_tx(
         ));
     }
     if let Some(existing) = existing {
+        if write.clear_secret {
+            reject_linked_postgres_service_credential_mutation(existing, "clear")?;
+        }
         for alias in &existing.linked_provider_aliases {
             let provider = get_model_provider_in_client(tx, schema, alias)?.ok_or_else(|| {
                 CoreError::new(
@@ -1862,6 +1913,23 @@ fn upsert_service_credential_in_tx(
         ));
     }
     Ok(())
+}
+
+fn reject_linked_postgres_service_credential_mutation(
+    credential: &ServiceCredentialRecord,
+    action: &str,
+) -> CoreResult<()> {
+    if credential.linked_provider_aliases.is_empty() {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::ActionRejected,
+        format!(
+            "cannot {action} service credential {} while linked to model providers: {}",
+            credential.credential_id,
+            credential.linked_provider_aliases.join(", ")
+        ),
+    ))
 }
 
 fn link_model_provider_credential_in_tx(

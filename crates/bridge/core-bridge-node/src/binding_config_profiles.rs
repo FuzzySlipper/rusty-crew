@@ -350,6 +350,17 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn delete_service_credential_json(&self, delete_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let delete =
+            parse_json::<ServiceCredentialDelete>(&delete_json, "service credential delete")?;
+        let record = bridge
+            .delete_service_credential(&delete)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "service credential record")
+    }
+
+    #[napi]
     pub fn link_model_provider_credential_json(&self, link_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let link = parse_json::<ModelProviderCredentialLink>(

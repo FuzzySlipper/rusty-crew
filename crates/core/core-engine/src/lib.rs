@@ -141,8 +141,8 @@ use rusty_crew_core_protocol::{
     ModelProviderRefreshMode, ModelProviderRefreshPlan, ModelProviderRefreshPlanRequest,
     ModelProviderRefreshProfileAction, ModelProviderWrite, ParentConsumptionPolicy, ProfileId,
     ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, ServiceCredentialQuery,
-    ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, ServiceCredentialDelete,
+    ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
     SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
     ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };

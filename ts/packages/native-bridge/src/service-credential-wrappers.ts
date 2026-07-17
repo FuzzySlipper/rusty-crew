@@ -22,6 +22,7 @@ type ServiceCredentialMethodName =
   | "listServiceCredentials"
   | "getServiceCredential"
   | "getServiceCredentialSecret"
+  | "deleteServiceCredential"
   | "linkModelProviderCredential"
   | "unlinkModelProviderCredential";
 
@@ -72,6 +73,19 @@ export function createNativeBridgeServiceCredentialMethods(
       (JSON.parse(binding.getServiceCredentialSecretJson(credentialId)) as
         | string
         | null) ?? undefined,
+    deleteServiceCredential: async (deleteRequest) =>
+      serviceCredentialWire.toNativeRecord(
+        validateBridgeValue<RawServiceCredentialRecord>({
+          operation: "delete_service_credential",
+          direction: "rust_to_ts",
+          schema: rawServiceCredentialRecordSchema,
+          value: JSON.parse(
+            binding.deleteServiceCredentialJson(
+              JSON.stringify(serviceCredentialWire.toRawDelete(deleteRequest)),
+            ),
+          ),
+        }),
+      ),
     linkModelProviderCredential: async (link) =>
       serviceCredentialWire.toNativeLinkResult(
         validateBridgeValue<RawModelProviderCredentialLinkResult>({
