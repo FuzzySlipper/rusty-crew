@@ -233,7 +233,7 @@ async function seedDefaultLocalToolProfiles(
     (await listProfiles(bridge)).map((item) => [item.id, item]),
   );
   const timestamp = now();
-  for (const profile of defaultLocalToolProfiles(timestamp)) {
+  for (const profile of defaultLocalToolProfiles(timestamp, catalog)) {
     const current = existing.get(profile.id);
     const seedProfile =
       current === undefined
@@ -273,7 +273,10 @@ function arraysMatch(left: string[], right: string[]): boolean {
   return left.every((value, index) => value === right[index]);
 }
 
-function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
+function defaultLocalToolProfiles(
+  now: string,
+  catalog: BuiltInToolCatalog,
+): LocalToolProfile[] {
   return [
     defaultProfile(now, {
       id: "basic_chat",
@@ -335,32 +338,24 @@ function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
       id: "full_agent",
       displayName: "Full Agent",
       description:
-        "Broad built-in local tools for full agents and integration testing. MCP tools remain configured separately.",
-      toolsets: [
-        "local_code_read",
-        "local_code_write",
-        "web_research",
-        "browser",
-        "browser_vision",
-        "memory_den_read",
-        "memory_den_write",
-        "memory_profile",
-        "skills_read",
-        "skills_manage",
-        "planning_session",
-        "runtime_search",
-        "storage_read",
-        "diagnostics_read",
-        "agent_coordination",
-        "delegation_basic",
-        "roleplay_lore_read",
-        "roleplay_lore_write",
-        "roleplay_lore_manage",
-        "roleplay_scene_state",
-      ],
+        "All built-in local tools for full agents and integration testing except explicitly workdir-scoped worker tools. MCP tools remain configured separately.",
+      toolsets: fullAgentToolsets(catalog),
       tools: [],
     }),
   ];
+}
+
+function fullAgentToolsets(catalog: BuiltInToolCatalog): string[] {
+  const fullAgentTools = new Set(
+    catalog.tools
+      .filter((tool) => !tool.safety.includes("workdir_scoped"))
+      .map((tool) => tool.name),
+  );
+  return catalog.toolsets
+    .filter((toolset) =>
+      toolset.tools.some((toolName) => fullAgentTools.has(toolName)),
+    )
+    .map((toolset) => toolset.id);
 }
 
 function defaultProfile(

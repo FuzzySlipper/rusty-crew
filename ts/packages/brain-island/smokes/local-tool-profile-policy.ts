@@ -13,6 +13,7 @@ import {
   createLocalToolProfileStore,
   LocalToolProfileError,
 } from "../src/local-tool-profiles.js";
+import { defaultToolRegistry } from "../src/tool-registry.js";
 
 const nativeBridge = await loadNativeBridge();
 const bridge = inMemoryLocalToolProfileBridge(nativeBridge);
@@ -22,8 +23,11 @@ const store = createLocalToolProfileStore({
 });
 
 const seededProfiles = await store.list();
+const fullAgentProfile = seededProfiles.items.find(
+  (profile) => profile.id === "full_agent",
+);
 assert.ok(
-  seededProfiles.items.some((profile) => profile.id === "full_agent"),
+  fullAgentProfile,
   "seeded system profiles must validate through the native policy path",
 );
 assert.ok(
@@ -31,6 +35,27 @@ assert.ok(
     (input) => input.profile.id === "full_agent" && input.profile.system,
   ),
   "native policy validator was not used while seeding system profiles",
+);
+
+const fullAgentInventory = defaultToolRegistry.buildInventory({
+  requestedToolsets: fullAgentProfile.toolsets,
+  requestedTools: fullAgentProfile.tools,
+});
+const selectedFullAgentTools = new Set(
+  fullAgentInventory.selectedTools.map((tool) => tool.name),
+);
+const expectedWorkerOnlyTools = defaultToolRegistry.entries
+  .filter((tool) => tool.safety.includes("workdir_scoped"))
+  .map((tool) => tool.name)
+  .sort();
+const omittedFullAgentTools = defaultToolRegistry.entries
+  .filter((tool) => !selectedFullAgentTools.has(tool.name))
+  .map((tool) => tool.name)
+  .sort();
+assert.deepEqual(
+  omittedFullAgentTools,
+  expectedWorkerOnlyTools,
+  "full_agent must include every built-in tool except explicitly workdir-scoped worker tools",
 );
 
 await assert.rejects(
@@ -96,6 +121,8 @@ console.log(
   JSON.stringify(
     {
       seededProfiles: seededProfiles.total,
+      fullAgentTools: selectedFullAgentTools.size,
+      fullAgentExcludedTools: omittedFullAgentTools,
       validationCalls: bridge.validations.length,
       createdProfile: customProfile.id,
     },
