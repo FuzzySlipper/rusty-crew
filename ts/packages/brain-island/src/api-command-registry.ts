@@ -1,5 +1,6 @@
 import type { AdminControlCommandName } from "./admin-control-api.js";
 import { PROFILE_REGISTRY_ADMIN_PATHS } from "./profile-registry-admin-contract.js";
+import { nativeReasoningEffortList } from "./reasoning-effort-policy.js";
 import { RUSTY_VIEW_CHAT_PATHS } from "./rusty-view-chat-contract.js";
 
 export type ApiCapabilityAuth = "none" | "chat" | "admin";
@@ -174,10 +175,10 @@ export const SLASH_COMMAND_REGISTRY = [
     positionalArgs: [
       {
         name: "effort",
-        description: "Lowercase provider effort token, or default.",
+        description: `One of ${nativeReasoningEffortList()}, or default.`,
         type: "string",
         required: false,
-        placeholder: "default|low|medium|high",
+        placeholder: "default|none|minimal|low|medium|high|xhigh",
       },
     ],
     control: {

@@ -87,10 +87,10 @@
         "positional_args": [
           {
             "name": "effort",
-            "description": "Lowercase provider effort token, or default.",
+            "description": "One of none, minimal, low, medium, high, xhigh, or default.",
             "type": "string",
             "required": false,
-            "placeholder": "default|low|medium|high"
+            "placeholder": "default|none|minimal|low|medium|high|xhigh"
           }
         ],
         "named_args": [],

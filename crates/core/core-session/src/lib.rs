@@ -10,6 +10,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+const SUPPORTED_REASONING_EFFORTS: [&str; 6] =
+    ["none", "minimal", "low", "medium", "high", "xhigh"];
+
 #[derive(Debug, Clone)]
 pub struct SessionRegistry {
     inner: Arc<Inner>,
@@ -124,17 +127,10 @@ impl SessionRegistry {
         now: IsoTimestamp,
     ) -> CoreResult<SessionState> {
         if let Some(value) = reasoning_effort.as_deref() {
-            if value.is_empty()
-                || value.len() > 64
-                || !value.chars().all(|character| {
-                    character.is_ascii_lowercase()
-                        || character.is_ascii_digit()
-                        || matches!(character, '_' | '-')
-                })
-            {
+            if !SUPPORTED_REASONING_EFFORTS.contains(&value) {
                 return Err(CoreError::new(
                     CoreErrorKind::InvalidInput,
-                    "reasoning effort must be a lowercase token of at most 64 characters",
+                    "unsupported reasoning effort; expected one of none, minimal, low, medium, high, xhigh",
                 ));
             }
         }
@@ -471,10 +467,18 @@ mod tests {
         let error = registry
             .set_reasoning_effort_override(
                 &session_id,
-                Some("not valid".to_string()),
+                Some("banana".to_string()),
                 "2026-07-16T00:03:00Z".to_string(),
             )
             .unwrap_err();
         assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+        assert_eq!(
+            registry
+                .get_session(&session_id)
+                .unwrap()
+                .inference_overrides
+                .reasoning_effort,
+            None
+        );
     }
 }

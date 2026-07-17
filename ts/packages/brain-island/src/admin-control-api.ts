@@ -10,6 +10,7 @@ import type {
   AdminErrorCode,
   AdminRouteResult,
 } from "./admin-diagnostics-api.js";
+import { isNativeReasoningEffort } from "./reasoning-effort-policy.js";
 
 export type AdminControlCommandName =
   | "create_profile"
@@ -602,11 +603,7 @@ function parseControlCommand(
       const effort = body.value.reasoningEffort;
       if (
         !Object.prototype.hasOwnProperty.call(body.value, "reasoningEffort") ||
-        (effort !== null &&
-          (typeof effort !== "string" ||
-            effort.length === 0 ||
-            effort.length > 64 ||
-            !/^[a-z0-9_-]+$/.test(effort)))
+        (effort !== null && !isNativeReasoningEffort(effort))
       ) {
         return invalidTarget(requestId, "invalid_reasoning_effort");
       }

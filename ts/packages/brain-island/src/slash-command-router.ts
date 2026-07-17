@@ -4,6 +4,10 @@ import {
   slashCommandNames,
   type SlashCommandName,
 } from "./api-command-registry.js";
+import {
+  isNativeReasoningEffort,
+  nativeReasoningEffortList,
+} from "./reasoning-effort-policy.js";
 
 export type { SlashCommandName } from "./api-command-registry.js";
 
@@ -153,14 +157,11 @@ const SLASH_COMMAND_HANDLERS = {
       });
     }
     const effort = raw.toLowerCase();
-    if (
-      effort !== "default" &&
-      (effort.length > 64 || !/^[a-z0-9_-]+$/.test(effort))
-    ) {
+    if (effort !== "default" && !isNativeReasoningEffort(effort)) {
       return intercepted("effort", "invalid", {
         title: "Invalid reasoning effort",
-        summary:
-          "Reasoning effort must be default or a lowercase provider token of at most 64 characters.",
+        summary: `Reasoning effort must be default or one of: ${nativeReasoningEffortList()}.`,
+        fields: { reasonCode: "invalid_reasoning_effort" },
       });
     }
     return intercepted(

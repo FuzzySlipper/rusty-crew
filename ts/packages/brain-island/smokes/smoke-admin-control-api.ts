@@ -395,6 +395,24 @@ const invalidEffort = await handleAdminControlRequest(
 assert.equal(invalidEffort.status, 400);
 assert.equal(invalidEffort.body.ok, false);
 
+const unsupportedEffort = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/sessions/session-alpha/effort",
+    headers: authHeaders(),
+    body: { reasoningEffort: "banana" },
+  },
+  context,
+);
+assert.equal(unsupportedEffort.status, 400);
+assert.equal(unsupportedEffort.body.ok, false);
+if (!unsupportedEffort.body.ok) {
+  assert.equal(
+    unsupportedEffort.body.error.reason_code,
+    "invalid_reasoning_effort",
+  );
+}
+
 const pauseSession = await handleAdminControlRequest(
   {
     method: "POST",

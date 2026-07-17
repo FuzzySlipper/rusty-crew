@@ -63,6 +63,21 @@ const effortInvalid = intercepted(
   routeSlashCommand(input("/effort not valid", primeSession)),
 );
 assert.equal(effortInvalid.status, "invalid");
+assert.equal(
+  effortInvalid.response.fields?.reasonCode,
+  "invalid_reasoning_effort",
+);
+assert.equal(effortInvalid.controlRequest, undefined);
+
+const effortUnsupported = intercepted(
+  routeSlashCommand(input("/effort banana", primeSession)),
+);
+assert.equal(effortUnsupported.status, "invalid");
+assert.equal(
+  effortUnsupported.response.fields?.reasonCode,
+  "invalid_reasoning_effort",
+);
+assert.equal(effortUnsupported.controlRequest, undefined);
 
 const newSession = intercepted(
   routeSlashCommand(input("/new fresh start", primeSession)),
