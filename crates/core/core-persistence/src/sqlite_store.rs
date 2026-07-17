@@ -989,6 +989,69 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        match self {
+            Self::Sqlite(store) => store.upsert_service_credential(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.upsert_service_credential(write),
+        }
+    }
+
+    pub fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_service_credential(credential_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_service_credential(credential_id),
+        }
+    }
+
+    pub fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+        match self {
+            Self::Sqlite(store) => store.get_service_credential_secret(credential_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_service_credential_secret(credential_id),
+        }
+    }
+
+    pub fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_service_credentials(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_service_credentials(query),
+        }
+    }
+
+    pub fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult> {
+        match self {
+            Self::Sqlite(store) => store.link_model_provider_credential(link),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.link_model_provider_credential(link),
+        }
+    }
+
+    pub fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord> {
+        match self {
+            Self::Sqlite(store) => store.unlink_model_provider_credential(unlink),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.unlink_model_provider_credential(unlink),
+        }
+    }
+
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,
@@ -2779,6 +2842,45 @@ impl ServiceDataRepositorySet<'_> {
 
     pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
         self.store.get_model_provider_secret(alias)
+    }
+
+    pub fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        self.store.upsert_service_credential(write)
+    }
+
+    pub fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>> {
+        self.store.get_service_credential(credential_id)
+    }
+
+    pub fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+        self.store.get_service_credential_secret(credential_id)
+    }
+
+    pub fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+        self.store.list_service_credentials(query)
+    }
+
+    pub fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult> {
+        self.store.link_model_provider_credential(link)
+    }
+
+    pub fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord> {
+        self.store.unlink_model_provider_credential(unlink)
     }
 
     pub fn list_model_providers(

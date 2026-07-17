@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "manifest_version": 1,
-  "operation_count": 260,
+  "operation_count": 266,
   "schema_source": "rusty-crew-core-protocol serde wire fixtures",
   "fixtures": [
     {
@@ -223,9 +223,11 @@
         "credential": {
           "has_secret": true,
           "kind": "api_key",
-          "secret_ref": "db://model_providers/validation-provider/secret",
+          "revision": 1,
+          "secret_ref": "db://service_credentials/provider:validation-provider/secret",
           "updated_at": "2026-07-02T00:00:00.000Z"
         },
+        "credential_id": "provider:validation-provider",
         "description": "Fixture model provider record.",
         "display_name": "Validation Provider",
         "max_output_tokens": 4096,

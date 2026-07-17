@@ -1397,6 +1397,62 @@ pub struct ModelProviderCredential {
     pub updated_at: Option<IsoTimestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ModelProviderCredentialKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceCredentialRecord {
+    pub credential_id: String,
+    pub display_name: String,
+    pub provider_kind: String,
+    pub credential_kind: ModelProviderCredentialKind,
+    pub credential: ModelProviderCredential,
+    pub linked_provider_aliases: Vec<String>,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceCredentialWrite {
+    pub credential_id: String,
+    pub display_name: String,
+    pub provider_kind: String,
+    pub credential_kind: ModelProviderCredentialKind,
+    pub secret: Option<String>,
+    pub clear_secret: bool,
+    pub expected_revision: Option<u64>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceCredentialQuery {
+    pub provider_kind: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelProviderCredentialLink {
+    pub provider_alias: String,
+    pub credential_id: String,
+    pub expected_provider_revision: Option<u64>,
+    pub expected_credential_revision: Option<u64>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelProviderCredentialUnlink {
+    pub provider_alias: String,
+    pub expected_provider_revision: Option<u64>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelProviderCredentialLinkResult {
+    pub provider: ModelProviderRecord,
+    pub credential: ServiceCredentialRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1414,6 +1470,8 @@ pub struct ModelProviderRecord {
     pub temperature_milli: Option<u32>,
     pub reasoning_effort: Option<String>,
     pub reasoning_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id: Option<String>,
     pub credential: ModelProviderCredential,
     pub metadata_json: serde_json::Value,
     pub revision: u64,
@@ -1438,6 +1496,8 @@ pub struct ModelProviderWrite {
     pub reasoning_format: Option<String>,
     pub secret: Option<String>,
     pub clear_secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_credential_revision: Option<u64>,
     pub metadata_json: serde_json::Value,
     pub expected_revision: Option<u64>,
     pub now: IsoTimestamp,

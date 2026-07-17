@@ -107,9 +107,11 @@ use rusty_crew_core_protocol::{
     GitHubGateSuspendRequest, GitHubGateTerminalEvent, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ModelProviderQuery, ModelProviderRefreshImpactRequest, ModelProviderRefreshPlanRequest,
-    ModelProviderWrite, ProfileRegistryLifecycleStatus, ProfileRegistryUpdate,
-    ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    ModelProviderCredentialLink, ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderRefreshImpactRequest,
+    ModelProviderRefreshPlanRequest, ModelProviderWrite, ProfileRegistryLifecycleStatus,
+    ProfileRegistryUpdate, ProfileRegistryWrite, ServiceCredentialQuery, ServiceCredentialRecord,
+    ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_core_tool_registry::{
     plan_local_code_resource_policy, plan_tool_availability, plan_web_browser_resource_policy,

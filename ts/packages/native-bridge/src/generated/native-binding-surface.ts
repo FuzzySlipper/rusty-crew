@@ -39,6 +39,12 @@ export interface NativeBridgeBinding {
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string
   getModelProviderSecretJson(alias: string): string
+  upsertServiceCredentialJson(writeJson: string): string
+  listServiceCredentialsJson(queryJson: string): string
+  getServiceCredentialJson(credentialId: string): string
+  getServiceCredentialSecretJson(credentialId: string): string
+  linkModelProviderCredentialJson(linkJson: string): string
+  unlinkModelProviderCredentialJson(unlinkJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void
@@ -807,7 +813,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 260,
+  "manifestOperationCount": 266,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1112,6 +1118,54 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_model_provider_secret"
+    },
+    {
+      "name": "upsertServiceCredentialJson",
+      "parameterSource": "writeJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "upsert_service_credential"
+    },
+    {
+      "name": "listServiceCredentialsJson",
+      "parameterSource": "queryJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_service_credentials"
+    },
+    {
+      "name": "getServiceCredentialJson",
+      "parameterSource": "credentialId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_service_credential"
+    },
+    {
+      "name": "getServiceCredentialSecretJson",
+      "parameterSource": "credentialId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_service_credential_secret"
+    },
+    {
+      "name": "linkModelProviderCredentialJson",
+      "parameterSource": "linkJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "link_model_provider_credential"
+    },
+    {
+      "name": "unlinkModelProviderCredentialJson",
+      "parameterSource": "unlinkJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "unlink_model_provider_credential"
     },
     {
       "name": "modelProviderRefreshImpactJson",

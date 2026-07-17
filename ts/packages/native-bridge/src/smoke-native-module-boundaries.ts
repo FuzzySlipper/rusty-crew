@@ -14,6 +14,7 @@ const moduleNames = [
   "external-runtime-wrappers.ts",
   "index.ts",
   "memory-wrappers.ts",
+  "model-provider-public-api.ts",
   "profile-provider-wire.ts",
   "profile-provider-wrappers.ts",
   "public-api.ts",
@@ -23,6 +24,8 @@ const moduleNames = [
   "runtime-config-wire.ts",
   "runtime-config-wrappers.ts",
   "scheduler-wrappers.ts",
+  "service-credential-wire.ts",
+  "service-credential-wrappers.ts",
   "session-wire.ts",
 ] as const;
 
@@ -45,6 +48,7 @@ const lineCeilings: Record<string, number> = {
   "external-runtime-wrappers.ts": 180,
   "index.ts": 1_900,
   "memory-wrappers.ts": 250,
+  "model-provider-public-api.ts": 170,
   "profile-provider-wire.ts": 650,
   "profile-provider-wrappers.ts": 210,
   "public-api.ts": 2_550,
@@ -54,6 +58,8 @@ const lineCeilings: Record<string, number> = {
   "runtime-config-wire.ts": 900,
   "runtime-config-wrappers.ts": 220,
   "scheduler-wrappers.ts": 250,
+  "service-credential-wire.ts": 160,
+  "service-credential-wrappers.ts": 130,
   "session-wire.ts": 100,
 };
 const HANDWRITTEN_CONVERTER_CEILING = 91;

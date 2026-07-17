@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 35;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 36;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -190,7 +190,61 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "repair agent message input kind event discriminator",
         apply: Some(apply_postgres_agent_message_event_input_kind),
     },
+    PostgresSchemaMigration {
+        version: 36,
+        description: "add service-scoped provider credentials",
+        apply: Some(apply_postgres_service_credentials),
+    },
 ];
+
+fn apply_postgres_service_credentials(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE {schema}.service_credentials (
+            credential_id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            provider_kind TEXT NOT NULL,
+            credential_kind TEXT NOT NULL,
+            secret_ciphertext TEXT,
+            secret_updated_at TEXT,
+            revision BIGINT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX service_credentials_provider_kind_idx
+            ON {schema}.service_credentials(provider_kind, updated_at DESC, credential_id);
+         ALTER TABLE {schema}.model_providers
+            ADD COLUMN credential_id TEXT REFERENCES {schema}.service_credentials(credential_id);
+         CREATE INDEX model_providers_credential_idx
+            ON {schema}.model_providers(credential_id, alias);
+         INSERT INTO {schema}.service_credentials (
+            credential_id, display_name, provider_kind, credential_kind,
+            secret_ciphertext, secret_updated_at, revision, created_at, updated_at
+         )
+         SELECT
+            'provider:' || alias,
+            COALESCE(NULLIF(provider_json::jsonb ->> 'display_name', ''), alias),
+            provider_json::jsonb ->> 'provider_kind',
+            CASE
+                WHEN secret_ciphertext LIKE '{{%'
+                 AND secret_ciphertext::jsonb ->> 'kind' = 'openai_oauth'
+                THEN 'openai_oauth'
+                ELSE 'api_key'
+            END,
+            secret_ciphertext,
+            secret_updated_at,
+            1,
+            created_at,
+            COALESCE(secret_updated_at, updated_at)
+         FROM {schema}.model_providers
+         WHERE secret_ciphertext IS NOT NULL;
+         UPDATE {schema}.model_providers
+            SET credential_id = 'provider:' || alias,
+                secret_ciphertext = NULL,
+                secret_updated_at = NULL
+          WHERE secret_ciphertext IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL service credentials", error))
+}
 
 fn apply_postgres_agent_message_event_input_kind(
     tx: &mut Transaction<'_>,
@@ -1847,6 +1901,7 @@ fn load_postgres_schema_migration_records<C: GenericClient>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use postgres::NoTls;
 
     #[test]
     fn postgres_migration_catalog_is_ordered_and_current() {
@@ -1881,6 +1936,96 @@ mod tests {
         let error = validate_postgres_migration_catalog(&migrations).unwrap_err();
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
         assert!(error.message.contains("expected version 2"));
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_service_credential_migration_imports_inline_provider_secrets_once() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_service_credential_migration_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut client = Client::connect(&database_url, NoTls).unwrap();
+        prepare_postgres_migration_metadata(&mut client, &schema).unwrap();
+        for migration in &POSTGRES_SCHEMA_MIGRATIONS[..35] {
+            let mut tx = client.transaction().unwrap();
+            if let Some(apply) = migration.apply {
+                apply(&mut tx, &schema).unwrap();
+            }
+            insert_postgres_schema_migration(&mut tx, &schema, migration).unwrap();
+            tx.commit().unwrap();
+        }
+        let oauth_secret = ModelProviderSecretEnvelope::OpenAiOauth {
+            version: rusty_crew_core_protocol::MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+            issuer: "https://auth.openai.com".to_string(),
+            client_id: "app-client".to_string(),
+            id_token: "id-token".to_string(),
+            access_token: "access-token".to_string(),
+            refresh_token: "refresh-token".to_string(),
+            exchanged_api_token: None,
+            last_refresh_at: None,
+            account_id: None,
+            email: None,
+            plan_type: None,
+            is_fedramp_account: false,
+            access_token_expires_at: None,
+        }
+        .to_storage_text()
+        .unwrap();
+        client
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.model_providers (
+                        alias, status, protocol, provider_json, secret_ciphertext,
+                        secret_updated_at, revision, created_at, updated_at
+                     ) VALUES ($1, 'active', 'responses', $2, $3, $4, 4, $4, $4)"
+                ),
+                &[
+                    &"imported-oauth",
+                    &r#"{"display_name":"Imported OAuth","provider_kind":"openai"}"#,
+                    &oauth_secret,
+                    &"2026-07-16T00:00:00Z",
+                ],
+            )
+            .unwrap();
+
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+        let imported = client
+            .query_one(
+                &format!(
+                    "SELECT credential_id, credential_kind, secret_ciphertext, revision
+                       FROM {schema}.service_credentials
+                      WHERE credential_id = 'provider:imported-oauth'"
+                ),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(imported.get::<_, String>(0), "provider:imported-oauth");
+        assert_eq!(imported.get::<_, String>(1), "openai_oauth");
+        assert_eq!(imported.get::<_, Option<String>>(2), Some(oauth_secret));
+        assert_eq!(imported.get::<_, i64>(3), 1);
+        let inline_secret: Option<String> = client
+            .query_one(
+                &format!(
+                    "SELECT secret_ciphertext FROM {schema}.model_providers
+                      WHERE alias = 'imported-oauth'"
+                ),
+                &[],
+            )
+            .unwrap()
+            .get(0);
+        assert!(inline_secret.is_none());
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
     }
 
     #[test]

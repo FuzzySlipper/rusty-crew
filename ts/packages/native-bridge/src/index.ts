@@ -96,6 +96,7 @@ import {
 } from "./brain-run-wire.js";
 import { createNativeBridgeRuntimeConfigMethods } from "./runtime-config-wrappers.js";
 import { createNativeBridgeProfileProviderMethods } from "./profile-provider-wrappers.js";
+import { createNativeBridgeServiceCredentialMethods } from "./service-credential-wrappers.js";
 import {
   toNativeModelProviderRecord,
   toNativeModelProviderRefreshImpact,
@@ -759,6 +760,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listModelProviders: unavailable("initialize_engine"),
     getModelProvider: unavailable("initialize_engine"),
     getModelProviderSecret: unavailable("initialize_engine"),
+    upsertServiceCredential: unavailable("initialize_engine"),
+    listServiceCredentials: unavailable("initialize_engine"),
+    getServiceCredential: unavailable("initialize_engine"),
+    getServiceCredentialSecret: unavailable("initialize_engine"),
+    linkModelProviderCredential: unavailable("initialize_engine"),
+    unlinkModelProviderCredential: unavailable("initialize_engine"),
     modelProviderRefreshImpact: unavailable("initialize_engine"),
     planModelProviderRefresh: unavailable("initialize_engine"),
     putRoleplayCharacter: unavailable("initialize_engine"),
@@ -1698,6 +1705,7 @@ function createNativeBridgeModule(
     },
     gitHubGateEventCursor: async () => binding.githubGateEventCursor(),
     ...createNativeBridgeProfileProviderMethods(binding),
+    ...createNativeBridgeServiceCredentialMethods(binding),
     ...createNativeBridgeRoleplayMethods(binding),
     ...createNativeBridgeRoleplayProposalMethods(binding),
     ...createNativeBridgeRoleplayMechanicMethods(binding),

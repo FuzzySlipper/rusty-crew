@@ -89,6 +89,45 @@ import type {
 } from "@rusty-crew/contracts";
 
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
+import type {
+  NativeModelProviderCredentialKind,
+  NativeModelProviderCredentialLink,
+  NativeModelProviderCredentialLinkResult,
+  NativeModelProviderCredentialUnlink,
+  NativeModelProviderQuery,
+  NativeModelProviderRecord,
+  NativeModelProviderRefreshImpact,
+  NativeModelProviderRefreshImpactRequest,
+  NativeModelProviderRefreshPlan,
+  NativeModelProviderRefreshPlanRequest,
+  NativeModelProviderWrite,
+  NativeServiceCredentialQuery,
+  NativeServiceCredentialRecord,
+  NativeServiceCredentialWrite,
+} from "./model-provider-public-api.js";
+
+export type {
+  NativeModelProviderAffectedProfile,
+  NativeModelProviderCredential,
+  NativeModelProviderCredentialKind,
+  NativeModelProviderCredentialLink,
+  NativeModelProviderCredentialLinkResult,
+  NativeModelProviderCredentialUnlink,
+  NativeModelProviderProtocol,
+  NativeModelProviderQuery,
+  NativeModelProviderRecord,
+  NativeModelProviderRefreshImpact,
+  NativeModelProviderRefreshImpactRequest,
+  NativeModelProviderRefreshMode,
+  NativeModelProviderRefreshPlan,
+  NativeModelProviderRefreshPlanRequest,
+  NativeModelProviderRefreshProfileAction,
+  NativeModelProviderStatus,
+  NativeModelProviderWrite,
+  NativeServiceCredentialQuery,
+  NativeServiceCredentialRecord,
+  NativeServiceCredentialWrite,
+} from "./model-provider-public-api.js";
 
 export interface NativeSessionConfigInput {
   sessionId: string;
@@ -534,109 +573,6 @@ export interface NativeProfilePurgeReport {
   agentIds: string[];
   tableCounts: NativeProfilePurgeTableCount[];
   rowsDeleted: number;
-}
-
-export type NativeModelProviderStatus = "active" | "disabled" | "archived";
-export type NativeModelProviderProtocol = "responses" | "chat_completions";
-export type NativeModelProviderCredentialKind =
-  | "api_key"
-  | "openai_oauth"
-  | "legacy_raw_api_key";
-
-export interface NativeModelProviderCredential {
-  hasSecret: boolean;
-  secretRef?: string;
-  updatedAt?: string;
-  kind?: NativeModelProviderCredentialKind;
-}
-
-export interface NativeModelProviderRecord {
-  alias: string;
-  status: NativeModelProviderStatus;
-  protocol: NativeModelProviderProtocol;
-  providerKind: string;
-  displayName?: string;
-  description?: string;
-  baseUrl?: string;
-  modelId: string;
-  contextWindowTokens?: number;
-  maxOutputTokens?: number;
-  temperatureMilli?: number;
-  reasoningEffort?: string;
-  reasoningFormat?: string;
-  credential: NativeModelProviderCredential;
-  metadataJson: unknown;
-  revision: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface NativeModelProviderWrite {
-  alias: string;
-  status: NativeModelProviderStatus;
-  protocol: NativeModelProviderProtocol;
-  providerKind: string;
-  displayName?: string;
-  description?: string;
-  baseUrl?: string;
-  modelId: string;
-  contextWindowTokens?: number;
-  maxOutputTokens?: number;
-  temperatureMilli?: number;
-  reasoningEffort?: string;
-  reasoningFormat?: string;
-  secret?: string;
-  clearSecret?: boolean;
-  metadataJson?: unknown;
-  expectedRevision?: number;
-  now: string;
-}
-
-export interface NativeModelProviderQuery {
-  status?: NativeModelProviderStatus;
-  aliasPrefix?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface NativeModelProviderAffectedProfile {
-  profileId: string;
-  sessionIds: string[];
-  configuredSessionIds: string[];
-  activeSessionIds: string[];
-}
-
-export interface NativeModelProviderRefreshImpact {
-  providerAlias: string;
-  affectedProfiles: NativeModelProviderAffectedProfile[];
-}
-
-export interface NativeModelProviderRefreshImpactRequest {
-  providerAlias: string;
-}
-
-export type NativeModelProviderRefreshMode = "none" | "plan" | "apply";
-
-export interface NativeModelProviderRefreshPlanRequest {
-  providerAlias: string;
-  mode: NativeModelProviderRefreshMode;
-}
-
-export interface NativeModelProviderRefreshProfileAction {
-  profileId: string;
-  commandName: string;
-  reason: string;
-  plannedSummary: string;
-  appliedSummary: string;
-  blockedSummary: string;
-  failureReasonCode: string;
-}
-
-export interface NativeModelProviderRefreshPlan {
-  providerAlias: string;
-  mode: NativeModelProviderRefreshMode;
-  affectedProfiles: NativeModelProviderAffectedProfile[];
-  actions: NativeModelProviderRefreshProfileAction[];
 }
 
 export type NativeRoleplayLoreRecord = Record<string, unknown>;
@@ -2240,6 +2176,22 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
     alias: string,
   ): Promise<NativeModelProviderRecord | undefined>;
   getModelProviderSecret(alias: string): Promise<string | undefined>;
+  upsertServiceCredential(
+    write: NativeServiceCredentialWrite,
+  ): Promise<NativeServiceCredentialRecord>;
+  listServiceCredentials(
+    query?: NativeServiceCredentialQuery,
+  ): Promise<NativeServiceCredentialRecord[]>;
+  getServiceCredential(
+    credentialId: string,
+  ): Promise<NativeServiceCredentialRecord | undefined>;
+  getServiceCredentialSecret(credentialId: string): Promise<string | undefined>;
+  linkModelProviderCredential(
+    link: NativeModelProviderCredentialLink,
+  ): Promise<NativeModelProviderCredentialLinkResult>;
+  unlinkModelProviderCredential(
+    unlink: NativeModelProviderCredentialUnlink,
+  ): Promise<NativeModelProviderRecord>;
   modelProviderRefreshImpact(
     request: NativeModelProviderRefreshImpactRequest,
   ): Promise<NativeModelProviderRefreshImpact>;

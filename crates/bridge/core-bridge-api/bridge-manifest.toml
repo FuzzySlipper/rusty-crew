@@ -1947,6 +1947,60 @@ errors = "core_protocol::CoreError"
 summary = "Read the stored provider secret payload for provider execution only."
 
 [[operation]]
+name = "upsert_service_credential"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ServiceCredentialWrite"
+output = "core_protocol::ServiceCredentialRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or update one service-scoped typed credential with redacted output."
+
+[[operation]]
+name = "list_service_credentials"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ServiceCredentialQuery"
+output = "Vec<core_protocol::ServiceCredentialRecord>"
+errors = "core_protocol::CoreError"
+summary = "List redacted service-scoped credentials and linked provider aliases."
+
+[[operation]]
+name = "get_service_credential"
+surface = "stable"
+direction = "ts_to_rust"
+input = "credential_id: String"
+output = "Option<core_protocol::ServiceCredentialRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one redacted service-scoped credential by id."
+
+[[operation]]
+name = "get_service_credential_secret"
+surface = "stable"
+direction = "ts_to_rust"
+input = "credential_id: String"
+output = "Option<String>"
+errors = "core_protocol::CoreError"
+summary = "Read a service credential secret for provider execution only."
+
+[[operation]]
+name = "link_model_provider_credential"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelProviderCredentialLink"
+output = "core_protocol::ModelProviderCredentialLinkResult"
+errors = "core_protocol::CoreError"
+summary = "Atomically link a provider alias to a compatible service credential."
+
+[[operation]]
+name = "unlink_model_provider_credential"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelProviderCredentialUnlink"
+output = "core_protocol::ModelProviderRecord"
+errors = "core_protocol::CoreError"
+summary = "Unlink a provider alias without deleting or clearing the shared credential."
+
+[[operation]]
 name = "model_provider_refresh_impact"
 surface = "stable"
 direction = "ts_to_rust"

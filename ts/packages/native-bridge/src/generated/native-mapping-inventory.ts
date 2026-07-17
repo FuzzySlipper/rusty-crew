@@ -1035,6 +1035,7 @@ export const nativeMappingInventory = {
         "RawModelProviderCredential": [
           "has_secret",
           "kind",
+          "revision",
           "secret_ref",
           "updated_at"
         ],
@@ -1044,6 +1045,7 @@ export const nativeMappingInventory = {
           "context_window_tokens",
           "created_at",
           "credential",
+          "credential_id",
           "description",
           "display_name",
           "max_output_tokens",

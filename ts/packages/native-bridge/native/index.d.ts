@@ -39,6 +39,12 @@ export declare class NativeBridgeBinding {
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string
   getModelProviderSecretJson(alias: string): string
+  upsertServiceCredentialJson(writeJson: string): string
+  listServiceCredentialsJson(queryJson: string): string
+  getServiceCredentialJson(credentialId: string): string
+  getServiceCredentialSecretJson(credentialId: string): string
+  linkModelProviderCredentialJson(linkJson: string): string
+  unlinkModelProviderCredentialJson(unlinkJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void

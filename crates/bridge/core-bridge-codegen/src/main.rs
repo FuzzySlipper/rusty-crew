@@ -5295,11 +5295,15 @@ fn sample_model_provider_record() -> ModelProviderRecord {
         temperature_milli: Some(500),
         reasoning_effort: Some("medium".to_owned()),
         reasoning_format: Some("summary".to_owned()),
+        credential_id: Some("provider:validation-provider".to_owned()),
         credential: ModelProviderCredential {
             has_secret: true,
-            secret_ref: Some("db://model_providers/validation-provider/secret".to_owned()),
+            secret_ref: Some(
+                "db://service_credentials/provider:validation-provider/secret".to_owned(),
+            ),
             updated_at: Some(sample_timestamp()),
             kind: Some(ModelProviderCredentialKind::ApiKey),
+            revision: Some(1),
         },
         metadata_json: json!({"fixture": true}),
         revision: 5,

@@ -7168,6 +7168,7 @@ fn model_provider_write(
         reasoning_format: None,
         secret: secret.map(ToString::to_string),
         clear_secret: false,
+        expected_credential_revision: None,
         metadata_json: json!({"fixture": "model_provider_secret_envelope"}),
         expected_revision: None,
         now: "2026-07-02T00:00:00Z".to_string(),

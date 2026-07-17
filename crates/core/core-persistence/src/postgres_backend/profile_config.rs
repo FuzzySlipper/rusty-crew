@@ -942,6 +942,165 @@ impl PostgresBackendStore {
         get_model_provider_secret_in_client(&mut *client, &schema, alias)
     }
 
+    pub fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        crate::validate_service_credential_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL service credential upsert", error))?;
+        let existing = get_service_credential_in_client(&mut tx, &schema, &write.credential_id)?;
+        validate_postgres_expected_revision(
+            "service credential",
+            &write.credential_id,
+            write.expected_revision,
+            existing.as_ref().map(|record| record.revision),
+        )?;
+        upsert_service_credential_in_tx(&mut tx, &schema, write, existing.as_ref())?;
+        let record = get_service_credential_in_client(&mut tx, &schema, &write.credential_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "upserted PostgreSQL service credential was not readable",
+                )
+            })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL service credential upsert", error)
+        })?;
+        Ok(record)
+    }
+
+    pub fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>> {
+        crate::validate_service_credential_id(credential_id)?;
+        let schema = self.quoted_schema();
+        get_service_credential_in_client(&mut *self.client()?, &schema, credential_id)
+    }
+
+    pub fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+        crate::validate_service_credential_id(credential_id)?;
+        let schema = self.quoted_schema();
+        get_service_credential_secret_in_client(&mut *self.client()?, &schema, credential_id)
+    }
+
+    pub fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+        let schema = self.quoted_schema();
+        let limit = query.limit.unwrap_or(100).clamp(1, 1_000) as i64;
+        let offset = query.offset.unwrap_or(0) as i64;
+        let rows = self
+            .client()?
+            .query(
+                &service_credential_select_sql(
+                    &schema,
+                    "WHERE ($1::TEXT IS NULL OR sc.provider_kind = $1)
+                     GROUP BY sc.credential_id
+                     ORDER BY sc.updated_at DESC, sc.credential_id ASC
+                     LIMIT $2 OFFSET $3",
+                ),
+                &[&query.provider_kind, &limit, &offset],
+            )
+            .map_err(|error| postgres_error("list PostgreSQL service credentials", error))?;
+        rows.iter().map(row_to_service_credential).collect()
+    }
+
+    pub fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult> {
+        crate::validate_model_provider_alias(&link.provider_alias)?;
+        crate::validate_service_credential_id(&link.credential_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL model provider credential link", error)
+        })?;
+        link_model_provider_credential_in_tx(&mut tx, &schema, link)?;
+        let provider = get_model_provider_in_client(&mut tx, &schema, &link.provider_alias)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "linked PostgreSQL provider was not readable",
+                )
+            })?;
+        let credential = get_service_credential_in_client(&mut tx, &schema, &link.credential_id)?
+            .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "linked PostgreSQL credential was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL model provider credential link", error)
+        })?;
+        Ok(ModelProviderCredentialLinkResult {
+            provider,
+            credential,
+        })
+    }
+
+    pub fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord> {
+        crate::validate_model_provider_alias(&unlink.provider_alias)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL model provider credential unlink", error)
+        })?;
+        let mut provider = get_model_provider_in_client(&mut tx, &schema, &unlink.provider_alias)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("model provider {} not found", unlink.provider_alias),
+                )
+            })?;
+        validate_postgres_expected_revision(
+            "model provider",
+            &unlink.provider_alias,
+            unlink.expected_provider_revision,
+            Some(provider.revision),
+        )?;
+        provider.credential_id = None;
+        provider.credential = empty_model_provider_credential();
+        provider.revision += 1;
+        provider.updated_at = unlink.now.clone();
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.model_providers
+                    SET credential_id = NULL, provider_json = $2,
+                        revision = $3, updated_at = $4
+                  WHERE alias = $1"
+            ),
+            &[
+                &unlink.provider_alias,
+                &to_json_text(&provider)?,
+                &(provider.revision as i64),
+                &unlink.now,
+            ],
+        )
+        .map_err(|error| postgres_error("unlink PostgreSQL model provider credential", error))?;
+        let result = get_model_provider_in_client(&mut tx, &schema, &unlink.provider_alias)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "unlinked PostgreSQL provider was not readable",
+                )
+            })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL model provider credential unlink", error)
+        })?;
+        Ok(result)
+    }
+
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,
@@ -961,11 +1120,14 @@ impl PostgresBackendStore {
             .client()?
             .query(
                 &format!(
-                    "SELECT provider_json, secret_ciphertext, secret_updated_at
-                     FROM {schema}.model_providers
-                     WHERE ($1::TEXT IS NULL OR status = $1)
-                       AND ($2::TEXT IS NULL OR alias LIKE $2)
-                     ORDER BY updated_at DESC, alias ASC
+                    "SELECT mp.provider_json, mp.credential_id, sc.secret_ciphertext,
+                            sc.secret_updated_at, sc.credential_kind, sc.revision
+                     FROM {schema}.model_providers mp
+                     LEFT JOIN {schema}.service_credentials sc
+                       ON sc.credential_id = mp.credential_id
+                     WHERE ($1::TEXT IS NULL OR mp.status = $1)
+                       AND ($2::TEXT IS NULL OR mp.alias LIKE $2)
+                     ORDER BY mp.updated_at DESC, mp.alias ASC
                      LIMIT $3 OFFSET $4"
                 ),
                 &[&status, &alias_prefix, &limit, &offset],
@@ -1282,9 +1444,12 @@ fn get_model_provider_in_client<C: GenericClient>(
     let row = client
         .query_opt(
             &format!(
-                "SELECT provider_json, secret_ciphertext, secret_updated_at
-                 FROM {schema}.model_providers
-                 WHERE alias = $1"
+                "SELECT mp.provider_json, mp.credential_id, sc.secret_ciphertext,
+                        sc.secret_updated_at, sc.credential_kind, sc.revision
+                 FROM {schema}.model_providers mp
+                 LEFT JOIN {schema}.service_credentials sc
+                   ON sc.credential_id = mp.credential_id
+                 WHERE mp.alias = $1"
             ),
             &[&alias],
         )
@@ -1300,9 +1465,11 @@ fn get_model_provider_secret_in_client<C: GenericClient>(
     client
         .query_opt(
             &format!(
-                "SELECT secret_ciphertext
-                 FROM {schema}.model_providers
-                 WHERE alias = $1"
+                "SELECT sc.secret_ciphertext
+                 FROM {schema}.model_providers mp
+                 LEFT JOIN {schema}.service_credentials sc
+                   ON sc.credential_id = mp.credential_id
+                 WHERE mp.alias = $1"
             ),
             &[&alias],
         )
@@ -1325,32 +1492,64 @@ fn upsert_model_provider_in_tx(
     let created_at = existing
         .map(|record| record.created_at.clone())
         .unwrap_or_else(|| write.now.clone());
-    let current_secret: Option<String> = if write.clear_secret || write.secret.is_some() {
+    let mut credential_id = if write.clear_secret {
         None
     } else {
-        tx.query_opt(
-            &format!(
-                "SELECT secret_ciphertext
-                 FROM {schema}.model_providers
-                 WHERE alias = $1"
+        existing.and_then(|record| record.credential_id.clone())
+    };
+    if let Some(secret) = incoming_secret {
+        let envelope = ModelProviderSecretEnvelope::from_storage_text(&secret)?;
+        let id = credential_id
+            .clone()
+            .unwrap_or_else(|| format!("provider:{}", write.alias));
+        let current = get_service_credential_in_client(tx, schema, &id)?;
+        validate_postgres_expected_revision(
+            "service credential",
+            &id,
+            write.expected_credential_revision,
+            current.as_ref().map(|record| record.revision),
+        )?;
+        let credential_write = ServiceCredentialWrite {
+            credential_id: id.clone(),
+            display_name: current.as_ref().map_or_else(
+                || {
+                    write
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| write.alias.clone())
+                },
+                |record| record.display_name.clone(),
             ),
-            &[&write.alias],
-        )
-        .map_err(|error| postgres_error("load preserved PostgreSQL model provider secret", error))?
-        .and_then(|row| row.get(0))
-    };
-    let secret_ciphertext = if write.clear_secret {
-        None
-    } else {
-        incoming_secret.or(current_secret)
-    };
-    let secret_updated_at = if write.clear_secret {
-        None
-    } else if write.secret.is_some() {
-        Some(write.now.clone())
-    } else {
-        existing.and_then(|record| record.credential.updated_at.clone())
-    };
+            provider_kind: current.as_ref().map_or_else(
+                || write.provider_kind.clone(),
+                |record| record.provider_kind.clone(),
+            ),
+            credential_kind: envelope.kind(),
+            secret: Some(secret),
+            clear_secret: false,
+            expected_revision: current.as_ref().map(|record| record.revision),
+            now: write.now.clone(),
+        };
+        upsert_service_credential_in_tx(tx, schema, &credential_write, current.as_ref())?;
+        credential_id = Some(id);
+    } else if let Some(id) = credential_id.as_deref() {
+        let credential = get_service_credential_in_client(tx, schema, id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("service credential {id} not found"),
+            )
+        })?;
+        validate_postgres_provider_credential_compatibility(
+            &write.provider_kind,
+            write.protocol,
+            &credential,
+        )?;
+    }
+    let credential = credential_id
+        .as_deref()
+        .map(|id| get_service_credential_in_client(tx, schema, id))
+        .transpose()?
+        .flatten();
     let record = ModelProviderRecord {
         alias: write.alias.clone(),
         status: write.status,
@@ -1365,16 +1564,12 @@ fn upsert_model_provider_in_tx(
         temperature_milli: write.temperature_milli,
         reasoning_effort: write.reasoning_effort.clone(),
         reasoning_format: write.reasoning_format.clone(),
-        credential: ModelProviderCredential {
-            has_secret: secret_ciphertext.is_some(),
-            secret_ref: secret_ciphertext
-                .as_ref()
-                .map(|_| format!("db://model_providers/{}/secret", write.alias)),
-            updated_at: secret_updated_at.clone(),
-            kind: secret_ciphertext
-                .as_deref()
-                .and_then(model_provider_secret_kind_from_storage),
-        },
+        credential_id: credential_id.clone(),
+        credential: credential
+            .as_ref()
+            .map_or_else(empty_model_provider_credential, |record| {
+                record.credential.clone()
+            }),
         metadata_json: write.metadata_json.clone(),
         revision,
         created_at,
@@ -1392,27 +1587,28 @@ fn upsert_model_provider_in_tx(
                 secret_updated_at,
                 revision,
                 created_at,
-                updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                updated_at,
+                credential_id
+             ) VALUES ($1, $2, $3, $4, NULL, NULL, $5, $6, $7, $8)
              ON CONFLICT(alias) DO UPDATE SET
                 status = excluded.status,
                 protocol = excluded.protocol,
                 provider_json = excluded.provider_json,
-                secret_ciphertext = excluded.secret_ciphertext,
-                secret_updated_at = excluded.secret_updated_at,
+                secret_ciphertext = NULL,
+                secret_updated_at = NULL,
                 revision = excluded.revision,
-                updated_at = excluded.updated_at"
+                updated_at = excluded.updated_at,
+                credential_id = excluded.credential_id"
         ),
         &[
             &record.alias,
             &model_provider_status_as_str(record.status).to_string(),
             &model_provider_protocol_as_str(record.protocol).to_string(),
             &provider_json,
-            &secret_ciphertext,
-            &secret_updated_at,
             &(record.revision as i64),
             &record.created_at,
             &record.updated_at,
+            &credential_id,
         ],
     )
     .map_err(|error| postgres_error("upsert PostgreSQL model provider", error))?;
@@ -1421,29 +1617,392 @@ fn upsert_model_provider_in_tx(
 
 fn row_to_model_provider(row: &Row) -> CoreResult<ModelProviderRecord> {
     let provider_json: String = row.get(0);
-    let secret_ciphertext: Option<String> = row.get(1);
-    let secret_updated_at: Option<String> = row.get(2);
+    let credential_id: Option<String> = row.get(1);
+    let secret_ciphertext: Option<String> = row.get(2);
+    let secret_updated_at: Option<String> = row.get(3);
+    let credential_kind: Option<String> = row.get(4);
+    let credential_revision: Option<i64> = row.get(5);
     let mut record: ModelProviderRecord =
         parse_postgres_json(&provider_json, "model provider provider_json")?;
+    record.credential_id = credential_id.clone();
     record.credential = ModelProviderCredential {
         has_secret: secret_ciphertext.is_some(),
         secret_ref: secret_ciphertext
             .as_ref()
-            .map(|_| format!("db://model_providers/{}/secret", record.alias)),
+            .and(credential_id.as_ref())
+            .map(|id| format!("db://service_credentials/{id}/secret")),
         updated_at: secret_updated_at,
-        kind: secret_ciphertext
+        kind: credential_kind
             .as_deref()
-            .and_then(model_provider_secret_kind_from_storage),
+            .map(model_provider_credential_kind_from_storage)
+            .transpose()?,
+        revision: credential_revision.map(|value| value as u64),
     };
     Ok(record)
 }
 
-fn model_provider_secret_kind_from_storage(
+fn empty_model_provider_credential() -> ModelProviderCredential {
+    ModelProviderCredential {
+        has_secret: false,
+        secret_ref: None,
+        updated_at: None,
+        kind: None,
+        revision: None,
+    }
+}
+
+fn service_credential_select_sql(schema: &str, suffix: &str) -> String {
+    format!(
+        "SELECT sc.credential_id, sc.display_name, sc.provider_kind,
+                sc.credential_kind, sc.secret_ciphertext, sc.secret_updated_at,
+                sc.revision, sc.created_at, sc.updated_at,
+                COALESCE(string_agg(mp.alias, chr(31) ORDER BY mp.alias), '')
+           FROM {schema}.service_credentials sc
+           LEFT JOIN {schema}.model_providers mp ON mp.credential_id = sc.credential_id
+           {suffix}"
+    )
+}
+
+fn get_service_credential_in_client<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    credential_id: &str,
+) -> CoreResult<Option<ServiceCredentialRecord>> {
+    client
+        .query_opt(
+            &service_credential_select_sql(
+                schema,
+                "WHERE sc.credential_id = $1 GROUP BY sc.credential_id",
+            ),
+            &[&credential_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL service credential", error))?
+        .as_ref()
+        .map(row_to_service_credential)
+        .transpose()
+}
+
+fn get_service_credential_secret_in_client<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    credential_id: &str,
+) -> CoreResult<Option<String>> {
+    client
+        .query_opt(
+            &format!(
+                "SELECT secret_ciphertext FROM {schema}.service_credentials WHERE credential_id = $1"
+            ),
+            &[&credential_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL service credential secret", error))
+        .map(|row| row.and_then(|row| row.get(0)))
+}
+
+fn row_to_service_credential(row: &Row) -> CoreResult<ServiceCredentialRecord> {
+    let credential_id: String = row.get(0);
+    let credential_kind = model_provider_credential_kind_from_storage(&row.get::<_, String>(3))?;
+    let secret: Option<String> = row.get(4);
+    let revision = row.get::<_, i64>(6) as u64;
+    let aliases: String = row.get(9);
+    Ok(ServiceCredentialRecord {
+        credential_id: credential_id.clone(),
+        display_name: row.get(1),
+        provider_kind: row.get(2),
+        credential_kind,
+        credential: ModelProviderCredential {
+            has_secret: secret.is_some(),
+            secret_ref: secret
+                .as_ref()
+                .map(|_| format!("db://service_credentials/{credential_id}/secret")),
+            updated_at: row.get(5),
+            kind: Some(credential_kind),
+            revision: Some(revision),
+        },
+        linked_provider_aliases: aliases
+            .split('\u{1f}')
+            .filter(|alias| !alias.is_empty())
+            .map(str::to_string)
+            .collect(),
+        revision,
+        created_at: row.get(7),
+        updated_at: row.get(8),
+    })
+}
+
+fn upsert_service_credential_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    write: &ServiceCredentialWrite,
+    existing: Option<&ServiceCredentialRecord>,
+) -> CoreResult<()> {
+    let incoming_secret = write
+        .secret
+        .as_deref()
+        .map(ModelProviderSecretEnvelope::normalize_storage_text)
+        .transpose()?;
+    if let Some(secret) = incoming_secret.as_deref() {
+        let actual = ModelProviderSecretEnvelope::from_storage_text(secret)?.kind();
+        if actual != write.credential_kind {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "service credential kind does not match secret envelope",
+            ));
+        }
+    }
+    if write.credential_kind == ModelProviderCredentialKind::OpenAiOauth
+        && write.provider_kind != "openai"
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "OpenAI OAuth credentials require provider_kind openai",
+        ));
+    }
+    if let Some(existing) = existing {
+        for alias in &existing.linked_provider_aliases {
+            let provider = get_model_provider_in_client(tx, schema, alias)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!("linked PostgreSQL model provider {alias} was not readable"),
+                )
+            })?;
+            validate_postgres_provider_credential_fields(
+                &provider.provider_kind,
+                provider.protocol,
+                &write.provider_kind,
+                write.credential_kind,
+                &write.credential_id,
+            )?;
+        }
+    }
+    let preserved_secret = if write.clear_secret || incoming_secret.is_some() {
+        None
+    } else {
+        get_service_credential_secret_in_client(tx, schema, &write.credential_id)?
+    };
+    let secret = if write.clear_secret {
+        None
+    } else {
+        incoming_secret.or(preserved_secret)
+    };
+    if let Some(secret) = secret.as_deref() {
+        let actual = ModelProviderSecretEnvelope::from_storage_text(secret)?.kind();
+        if actual != write.credential_kind {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "service credential kind does not match stored secret envelope",
+            ));
+        }
+    }
+    let secret_updated_at = if write.clear_secret {
+        None
+    } else if write.secret.is_some() {
+        Some(write.now.clone())
+    } else {
+        existing.and_then(|record| record.credential.updated_at.clone())
+    };
+    let revision = existing.map_or(1, |record| record.revision + 1);
+    let created_at = existing
+        .map(|record| record.created_at.clone())
+        .unwrap_or_else(|| write.now.clone());
+    let changed = if let Some(existing) = existing {
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.service_credentials
+                    SET display_name = $2,
+                        provider_kind = $3,
+                        credential_kind = $4,
+                        secret_ciphertext = $5,
+                        secret_updated_at = $6,
+                        revision = $7,
+                        updated_at = $8
+                  WHERE credential_id = $1 AND revision = $9"
+            ),
+            &[
+                &write.credential_id,
+                &write.display_name,
+                &write.provider_kind,
+                &model_provider_credential_kind_as_storage(write.credential_kind),
+                &secret,
+                &secret_updated_at,
+                &(revision as i64),
+                &write.now,
+                &(existing.revision as i64),
+            ],
+        )
+    } else {
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.service_credentials (
+                    credential_id, display_name, provider_kind, credential_kind,
+                    secret_ciphertext, secret_updated_at, revision, created_at, updated_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 ON CONFLICT(credential_id) DO NOTHING"
+            ),
+            &[
+                &write.credential_id,
+                &write.display_name,
+                &write.provider_kind,
+                &model_provider_credential_kind_as_storage(write.credential_kind),
+                &secret,
+                &secret_updated_at,
+                &(revision as i64),
+                &created_at,
+                &write.now,
+            ],
+        )
+    }
+    .map_err(|error| postgres_error("upsert PostgreSQL service credential", error))?;
+    if changed != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "service credential {} changed concurrently",
+                write.credential_id
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn link_model_provider_credential_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    link: &ModelProviderCredentialLink,
+) -> CoreResult<()> {
+    let mut provider =
+        get_model_provider_in_client(tx, schema, &link.provider_alias)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("model provider {} not found", link.provider_alias),
+            )
+        })?;
+    let credential = get_service_credential_in_client(tx, schema, &link.credential_id)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("service credential {} not found", link.credential_id),
+            )
+        })?;
+    validate_postgres_expected_revision(
+        "model provider",
+        &link.provider_alias,
+        link.expected_provider_revision,
+        Some(provider.revision),
+    )?;
+    validate_postgres_expected_revision(
+        "service credential",
+        &link.credential_id,
+        link.expected_credential_revision,
+        Some(credential.revision),
+    )?;
+    validate_postgres_provider_credential_compatibility(
+        &provider.provider_kind,
+        provider.protocol,
+        &credential,
+    )?;
+    provider.credential_id = Some(link.credential_id.clone());
+    provider.credential = credential.credential.clone();
+    provider.revision += 1;
+    provider.updated_at = link.now.clone();
+    tx.execute(
+        &format!(
+            "UPDATE {schema}.model_providers
+                SET credential_id = $2, provider_json = $3,
+                    revision = $4, updated_at = $5
+              WHERE alias = $1"
+        ),
+        &[
+            &link.provider_alias,
+            &link.credential_id,
+            &to_json_text(&provider)?,
+            &(provider.revision as i64),
+            &link.now,
+        ],
+    )
+    .map_err(|error| postgres_error("link PostgreSQL model provider credential", error))?;
+    Ok(())
+}
+
+fn validate_postgres_expected_revision(
+    label: &str,
+    id: &str,
+    expected: Option<u64>,
+    found: Option<u64>,
+) -> CoreResult<()> {
+    if expected.is_none() || expected == found {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::ActionRejected,
+        format!(
+            "{label} {id} revision mismatch: expected {}, found {}",
+            expected.unwrap_or_default(),
+            found.unwrap_or_default()
+        ),
+    ))
+}
+
+fn validate_postgres_provider_credential_compatibility(
+    provider_kind: &str,
+    protocol: ModelProviderProtocol,
+    credential: &ServiceCredentialRecord,
+) -> CoreResult<()> {
+    validate_postgres_provider_credential_fields(
+        provider_kind,
+        protocol,
+        &credential.provider_kind,
+        credential.credential_kind,
+        &credential.credential_id,
+    )
+}
+
+fn validate_postgres_provider_credential_fields(
+    provider_kind: &str,
+    protocol: ModelProviderProtocol,
+    credential_provider_kind: &str,
+    credential_kind: ModelProviderCredentialKind,
+    credential_id: &str,
+) -> CoreResult<()> {
+    if provider_kind != credential_provider_kind {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "model provider kind {provider_kind} cannot use {} credential {}",
+                credential_provider_kind, credential_id
+            ),
+        ));
+    }
+    if credential_kind == ModelProviderCredentialKind::OpenAiOauth
+        && protocol != ModelProviderProtocol::Responses
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "OpenAI OAuth credentials require the responses protocol",
+        ));
+    }
+    Ok(())
+}
+
+fn model_provider_credential_kind_as_storage(kind: ModelProviderCredentialKind) -> &'static str {
+    match kind {
+        ModelProviderCredentialKind::ApiKey | ModelProviderCredentialKind::LegacyRawApiKey => {
+            "api_key"
+        }
+        ModelProviderCredentialKind::OpenAiOauth => "openai_oauth",
+    }
+}
+
+fn model_provider_credential_kind_from_storage(
     raw: &str,
-) -> Option<rusty_crew_core_protocol::ModelProviderCredentialKind> {
-    ModelProviderSecretEnvelope::from_storage_text(raw)
-        .ok()
-        .map(|secret| secret.kind())
+) -> CoreResult<ModelProviderCredentialKind> {
+    match raw {
+        "api_key" => Ok(ModelProviderCredentialKind::ApiKey),
+        "openai_oauth" => Ok(ModelProviderCredentialKind::OpenAiOauth),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL service credential kind {other}"),
+        )),
+    }
 }
 
 fn model_provider_status_as_str(status: ModelProviderStatus) -> &'static str {

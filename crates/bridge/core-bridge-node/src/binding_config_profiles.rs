@@ -309,6 +309,76 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn upsert_service_credential_json(&self, write_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let write = parse_json::<ServiceCredentialWrite>(&write_json, "service credential write")?;
+        let record = bridge
+            .upsert_service_credential(&write)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "service credential record")
+    }
+
+    #[napi]
+    pub fn list_service_credentials_json(&self, query_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<ServiceCredentialQuery>(&query_json, "service credential query")?;
+        let records = bridge
+            .list_service_credentials(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "service credential records")
+    }
+
+    #[napi]
+    pub fn get_service_credential_json(&self, credential_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .get_service_credential(&credential_id)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "service credential record")
+    }
+
+    #[napi]
+    pub fn get_service_credential_secret_json(
+        &self,
+        credential_id: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let secret = bridge
+            .get_service_credential_secret(&credential_id)
+            .map_err(to_napi_error)?;
+        serialize_json(&secret, "service credential secret")
+    }
+
+    #[napi]
+    pub fn link_model_provider_credential_json(&self, link_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let link = parse_json::<ModelProviderCredentialLink>(
+            &link_json,
+            "model provider credential link",
+        )?;
+        let result = bridge
+            .link_model_provider_credential(&link)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "model provider credential link result")
+    }
+
+    #[napi]
+    pub fn unlink_model_provider_credential_json(
+        &self,
+        unlink_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let unlink = parse_json::<ModelProviderCredentialUnlink>(
+            &unlink_json,
+            "model provider credential unlink",
+        )?;
+        let provider = bridge
+            .unlink_model_provider_credential(&unlink)
+            .map_err(to_napi_error)?;
+        serialize_json(&provider, "model provider record")
+    }
+
+    #[napi]
     pub fn model_provider_refresh_impact_json(&self, request_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let request = parse_json::<ModelProviderRefreshImpactRequest>(

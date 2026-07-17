@@ -227,6 +227,7 @@ export function toRawModelProviderWrite(
     reasoning_format: write.reasoningFormat,
     secret: write.secret,
     clear_secret: write.clearSecret ?? false,
+    expected_credential_revision: write.expectedCredentialRevision,
     metadata_json: write.metadataJson ?? {},
     expected_revision: write.expectedRevision,
     now: write.now,
@@ -302,11 +303,13 @@ export function toNativeModelProviderRecord(
     temperatureMilli: record.temperature_milli ?? undefined,
     reasoningEffort: record.reasoning_effort ?? undefined,
     reasoningFormat: record.reasoning_format ?? undefined,
+    credentialId: record.credential_id ?? undefined,
     credential: {
       hasSecret: record.credential.has_secret,
       secretRef: record.credential.secret_ref ?? undefined,
       updatedAt: record.credential.updated_at ?? undefined,
       kind: record.credential.kind ?? undefined,
+      revision: record.credential.revision ?? undefined,
     },
     metadataJson: record.metadata_json,
     revision: record.revision,
@@ -332,11 +335,13 @@ export function toRawModelProviderRecord(
     temperature_milli: record.temperatureMilli,
     reasoning_effort: record.reasoningEffort,
     reasoning_format: record.reasoningFormat,
+    credential_id: record.credentialId,
     credential: {
       has_secret: record.credential.hasSecret,
       secret_ref: record.credential.secretRef,
       updated_at: record.credential.updatedAt,
       kind: record.credential.kind,
+      revision: record.credential.revision,
     },
     metadata_json: record.metadataJson,
     revision: record.revision,
@@ -537,6 +542,7 @@ export interface RawModelProviderCredential {
   secret_ref?: string | null;
   updated_at?: string | null;
   kind?: NativeModelProviderCredentialKind | null;
+  revision?: number | null;
 }
 
 export interface RawModelProviderRecord {
@@ -553,6 +559,7 @@ export interface RawModelProviderRecord {
   temperature_milli?: number | null;
   reasoning_effort?: string | null;
   reasoning_format?: string | null;
+  credential_id?: string | null;
   credential: RawModelProviderCredential;
   metadata_json: unknown;
   revision: number;
@@ -576,6 +583,7 @@ export interface RawModelProviderWrite {
   reasoning_format?: string;
   secret?: string;
   clear_secret: boolean;
+  expected_credential_revision?: number;
   metadata_json: unknown;
   expected_revision?: number;
   now: string;

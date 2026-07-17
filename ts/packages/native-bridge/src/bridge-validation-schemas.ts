@@ -705,6 +705,7 @@ const rawModelProviderCredentialSchema = Type.Object(
     kind: Type.Optional(
       Type.Union([modelProviderCredentialKindSchema, Type.Null()]),
     ),
+    revision: Type.Optional(nullableNumber),
   },
   { additionalProperties: true },
 );
@@ -724,6 +725,7 @@ export const rawModelProviderRecordSchema = Type.Object(
     temperature_milli: Type.Optional(nullableNumber),
     reasoning_effort: Type.Optional(nullableString),
     reasoning_format: Type.Optional(nullableString),
+    credential_id: Type.Optional(nullableString),
     credential: rawModelProviderCredentialSchema,
     metadata_json: Type.Unknown(),
     revision: Type.Number(),
@@ -735,6 +737,33 @@ export const rawModelProviderRecordSchema = Type.Object(
 
 export const rawModelProviderRecordArraySchema = Type.Array(
   rawModelProviderRecordSchema,
+);
+
+export const rawServiceCredentialRecordSchema = Type.Object(
+  {
+    credential_id: Type.String(),
+    display_name: Type.String(),
+    provider_kind: Type.String(),
+    credential_kind: modelProviderCredentialKindSchema,
+    credential: rawModelProviderCredentialSchema,
+    linked_provider_aliases: Type.Array(Type.String()),
+    revision: Type.Number(),
+    created_at: Type.String(),
+    updated_at: Type.String(),
+  },
+  { additionalProperties: true },
+);
+
+export const rawServiceCredentialRecordArraySchema = Type.Array(
+  rawServiceCredentialRecordSchema,
+);
+
+export const rawModelProviderCredentialLinkResultSchema = Type.Object(
+  {
+    provider: rawModelProviderRecordSchema,
+    credential: rawServiceCredentialRecordSchema,
+  },
+  { additionalProperties: true },
 );
 
 const rawModelProviderAffectedProfileSchema = Type.Object(

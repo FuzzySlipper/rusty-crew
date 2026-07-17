@@ -682,6 +682,7 @@ async function upsertModelProviderCredentialSecret(input: {
         ? input.credentialSecret
         : JSON.stringify(input.credentialSecret),
     expectedRevision: input.expectedRevision ?? input.provider.revision,
+    expectedCredentialRevision: input.provider.credential.revision,
   });
 }
 
@@ -695,6 +696,7 @@ async function clearModelProviderCredential(input: {
     ...modelProviderWriteFromRecord(input.provider, input.now),
     clearSecret: true,
     expectedRevision: input.expectedRevision ?? input.provider.revision,
+    expectedCredentialRevision: input.provider.credential.revision,
   });
 }
 
@@ -717,6 +719,7 @@ function modelProviderWriteFromRecord(
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
     clearSecret: false,
+    expectedCredentialRevision: provider.credential.revision,
     metadataJson: provider.metadataJson,
     now,
   };

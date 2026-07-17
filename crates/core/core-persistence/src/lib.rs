@@ -91,12 +91,14 @@ use rusty_crew_core_protocol::{
     MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
     MemoryRetrievalStrategy, MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
     MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, MessageBlockId, MessageId,
-    MessageSlotId, MessageVariantId, ModelProviderCredential, ModelProviderProtocol,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
-    ModelProviderWrite, NormalizedExternalRuntimeEvent, ParentConsumptionPolicy, ProfileId,
-    ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
-    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryUpdate,
-    ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
+    MessageSlotId, MessageVariantId, ModelProviderCredential, ModelProviderCredentialKind,
+    ModelProviderCredentialLink, ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink,
+    ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope,
+    ModelProviderStatus, ModelProviderWrite, NormalizedExternalRuntimeEvent,
+    ParentConsumptionPolicy, ProfileId, ProfilePurgeReport, ProfilePurgeTableCount,
+    ProfileRegistryLifecycleStatus, ProfileRegistryLifecycleUpdate, ProfileRegistryRecord,
+    ProfileRegistryUpdate, ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason,
+    ResourceLimits, RunId, ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite,
     SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionHandle,
     SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
     SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
@@ -149,7 +151,8 @@ pub(crate) use repos::runtime_counters::{
 #[cfg(feature = "postgres")]
 pub(crate) use repos::service_config::{
     validate_model_provider_alias, validate_model_provider_write, validate_profile_registry_id,
-    validate_profile_registry_write,
+    validate_profile_registry_write, validate_service_credential_id,
+    validate_service_credential_write,
 };
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";

@@ -93,6 +93,7 @@ async function persistOpenAiResponsesCredentialSecretUpdate(
     ...modelProviderWriteFromRecord(provider),
     secret: update.secret,
     expectedRevision: provider.revision,
+    expectedCredentialRevision: provider.credential.revision,
     now: new Date().toISOString(),
   });
   if (
@@ -124,6 +125,7 @@ function modelProviderWriteFromRecord(provider: NativeModelProviderRecord) {
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
     clearSecret: false,
+    expectedCredentialRevision: provider.credential.revision,
     metadataJson: provider.metadataJson,
   };
 }

@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 51;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 52;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -274,7 +274,61 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add durable session inference overrides",
         apply: repos::sessions::migrate_v51_add_session_inference_overrides,
     },
+    SchemaMigration {
+        version: 52,
+        description: "add service-scoped provider credentials",
+        apply: migrate_v52_add_service_credentials,
+    },
 ];
+
+fn migrate_v52_add_service_credentials(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE service_credentials (
+            credential_id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            provider_kind TEXT NOT NULL,
+            credential_kind TEXT NOT NULL,
+            secret_ciphertext TEXT,
+            secret_updated_at TEXT,
+            revision INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE INDEX idx_service_credentials_provider_kind
+            ON service_credentials(provider_kind, updated_at DESC, credential_id);
+         ALTER TABLE model_providers
+            ADD COLUMN credential_id TEXT REFERENCES service_credentials(credential_id);
+         CREATE INDEX idx_model_providers_credential
+            ON model_providers(credential_id, alias);
+         INSERT INTO service_credentials (
+            credential_id, display_name, provider_kind, credential_kind,
+            secret_ciphertext, secret_updated_at, revision, created_at, updated_at
+         )
+         SELECT
+            'provider:' || alias,
+            COALESCE(display_name, alias),
+            provider_kind,
+            CASE
+                WHEN json_valid(secret_ciphertext)
+                 AND json_extract(secret_ciphertext, '$.kind') = 'openai_oauth'
+                THEN 'openai_oauth'
+                ELSE 'api_key'
+            END,
+            secret_ciphertext,
+            secret_updated_at,
+            1,
+            created_at,
+            COALESCE(secret_updated_at, updated_at)
+         FROM model_providers
+         WHERE secret_ciphertext IS NOT NULL;
+         UPDATE model_providers
+            SET credential_id = 'provider:' || alias,
+                secret_ciphertext = NULL,
+                secret_updated_at = NULL
+          WHERE secret_ciphertext IS NOT NULL;",
+    )
+    .map_err(|error| persistence_error("apply schema migration 52", error))
+}
 
 fn migrate_v46_rename_chat_completions_brain(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(
@@ -2480,6 +2534,7 @@ mod tests {
         assert!(table_exists(&db_path, "module_curator_candidates"));
         assert!(table_exists(&db_path, "module_curator_audit_receipts"));
         assert!(table_exists(&db_path, "chat_message_ingest_receipts"));
+        assert!(table_exists(&db_path, "service_credentials"));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_scope_key"
@@ -2583,6 +2638,7 @@ mod tests {
             "module_roleplay_lore_records_fts",
             "module_simple_kv_entries",
             "chat_message_ingest_receipts",
+            "service_credentials",
         ] {
             assert!(table_exists(&db_path, table), "missing table {table}");
         }
@@ -2599,6 +2655,8 @@ mod tests {
             "idx_message_slots_session_ingest_key",
             "idx_chat_message_ingest_receipts_expiry",
             "idx_chat_message_ingest_receipts_slot",
+            "idx_service_credentials_provider_kind",
+            "idx_model_providers_credential",
             "idx_memory_proposals_dedupe",
             "idx_memory_governance_decisions_proposal",
             "idx_profile_registry_lifecycle",
@@ -2609,6 +2667,73 @@ mod tests {
         ] {
             assert!(index_exists(&db_path, index), "missing index {index}");
         }
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn service_credential_migration_imports_inline_provider_secrets_once() {
+        let db_path = temp_db_path("service-credential-import");
+        let oauth_secret = ModelProviderSecretEnvelope::OpenAiOauth {
+            version: rusty_crew_core_protocol::MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+            issuer: "https://auth.openai.com".to_string(),
+            client_id: "app-client".to_string(),
+            id_token: "id-token".to_string(),
+            access_token: "access-token".to_string(),
+            refresh_token: "refresh-token".to_string(),
+            exchanged_api_token: None,
+            last_refresh_at: None,
+            account_id: None,
+            email: None,
+            plan_type: None,
+            is_fedramp_account: false,
+            access_token_expires_at: None,
+        }
+        .to_storage_text()
+        .unwrap();
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            prepare_migration_metadata(&conn).unwrap();
+            apply_schema_migrations(&mut conn, &SCHEMA_MIGRATIONS[..51]).unwrap();
+            conn.execute(
+                "INSERT INTO model_providers (
+                    alias, status, protocol, provider_kind, display_name, description,
+                    base_url, model_id, context_window_tokens, max_output_tokens,
+                    temperature_milli, reasoning_effort, reasoning_format, secret_ciphertext,
+                    secret_updated_at, metadata_json, revision, created_at, updated_at
+                 ) VALUES (?1, 'active', 'responses', 'openai', 'Imported OAuth', NULL,
+                           'https://api.openai.com', 'gpt-5', 128000, 4096,
+                           NULL, NULL, NULL, ?2, ?3, '{}', 4, ?3, ?3)",
+                params!["imported-oauth", oauth_secret, "2026-07-16T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let provider = store.get_model_provider("imported-oauth").unwrap().unwrap();
+        assert_eq!(
+            provider.credential_id.as_deref(),
+            Some("provider:imported-oauth")
+        );
+        assert_eq!(
+            provider.credential.kind,
+            Some(ModelProviderCredentialKind::OpenAiOauth)
+        );
+        let credential = store
+            .get_service_credential("provider:imported-oauth")
+            .unwrap()
+            .unwrap();
+        assert_eq!(credential.linked_provider_aliases, vec!["imported-oauth"]);
+        assert_eq!(credential.revision, 1);
+        let conn = Connection::open(&db_path).unwrap();
+        let inline_secret: Option<String> = conn
+            .query_row(
+                "SELECT secret_ciphertext FROM model_providers WHERE alias = 'imported-oauth'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(inline_secret.is_none());
 
         remove_temp_db(&db_path);
     }

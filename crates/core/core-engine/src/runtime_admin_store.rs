@@ -1,8 +1,9 @@
 use rusty_crew_core_persistence::*;
 use rusty_crew_core_protocol::{
-    CoreResult, IsoTimestamp, ModelProviderQuery, ModelProviderRecord, ModelProviderWrite,
+    CoreResult, IsoTimestamp, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
+    ModelProviderCredentialUnlink, ModelProviderQuery, ModelProviderRecord, ModelProviderWrite,
     ProfileId, ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryUpdate,
-    ProfileRegistryWrite,
+    ProfileRegistryWrite, ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite,
 };
 
 pub(crate) trait RuntimeStorageAdminStore {
@@ -48,6 +49,27 @@ pub(crate) trait RuntimeServiceDataStore {
     fn upsert_model_provider(&self, write: &ModelProviderWrite) -> CoreResult<ModelProviderRecord>;
     fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>>;
     fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>>;
+    fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord>;
+    fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>>;
+    fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>>;
+    fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>>;
+    fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult>;
+    fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord>;
     fn list_model_providers(
         &self,
         query: &ModelProviderQuery,
@@ -151,6 +173,46 @@ impl RuntimeServiceDataStore for CoreCoordinationStore {
 
     fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
         self.service_data().get_model_provider_secret(alias)
+    }
+
+    fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        self.service_data().upsert_service_credential(write)
+    }
+
+    fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>> {
+        self.service_data().get_service_credential(credential_id)
+    }
+
+    fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+        self.service_data()
+            .get_service_credential_secret(credential_id)
+    }
+
+    fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+        self.service_data().list_service_credentials(query)
+    }
+
+    fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult> {
+        self.service_data().link_model_provider_credential(link)
+    }
+
+    fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord> {
+        self.service_data().unlink_model_provider_credential(unlink)
     }
 
     fn list_model_providers(

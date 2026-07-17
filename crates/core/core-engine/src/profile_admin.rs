@@ -75,6 +75,45 @@ impl CoreEngine {
         RuntimeServiceDataStore::get_model_provider_secret(&self.store, alias)
     }
 
+    pub fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        RuntimeServiceDataStore::upsert_service_credential(&self.store, write)
+    }
+
+    pub fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>> {
+        RuntimeServiceDataStore::get_service_credential(&self.store, credential_id)
+    }
+
+    pub fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+        RuntimeServiceDataStore::get_service_credential_secret(&self.store, credential_id)
+    }
+
+    pub fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+        RuntimeServiceDataStore::list_service_credentials(&self.store, query)
+    }
+
+    pub fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult> {
+        RuntimeServiceDataStore::link_model_provider_credential(&self.store, link)
+    }
+
+    pub fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord> {
+        RuntimeServiceDataStore::unlink_model_provider_credential(&self.store, unlink)
+    }
+
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,

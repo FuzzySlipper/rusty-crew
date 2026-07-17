@@ -72,31 +72,34 @@ use crate::{
     LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord,
     MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
     MessageVariantId, MessageVariantQuery, MessageVariantRecord, MessageVariantSource,
-    MessageVariantStatus, MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
-    ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
-    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
-    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
-    QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
-    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
-    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
-    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
-    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
-    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy,
-    RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus,
-    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    MessageVariantStatus, MessageVariantWrite, ModelProviderCredential,
+    ModelProviderCredentialKind, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
+    ModelProviderCredentialUnlink, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
+    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
+    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
+    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest,
+    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
+    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
     RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
     RuntimeStorageConnectionHealth, RuntimeStorageTableCount, ScheduledJobQuery,
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
     ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SessionConfig,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
+    ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite, SessionConfig,
     SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
     SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
     SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
@@ -9406,6 +9409,27 @@ mod tests {
             write: &ModelProviderWrite,
         ) -> CoreResult<ModelProviderRecord>;
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>>;
+        fn upsert_service_credential(
+            &self,
+            write: &ServiceCredentialWrite,
+        ) -> CoreResult<ServiceCredentialRecord>;
+        fn get_service_credential(
+            &self,
+            credential_id: &str,
+        ) -> CoreResult<Option<ServiceCredentialRecord>>;
+        fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>>;
+        fn list_service_credentials(
+            &self,
+            query: &ServiceCredentialQuery,
+        ) -> CoreResult<Vec<ServiceCredentialRecord>>;
+        fn link_model_provider_credential(
+            &self,
+            link: &ModelProviderCredentialLink,
+        ) -> CoreResult<ModelProviderCredentialLinkResult>;
+        fn unlink_model_provider_credential(
+            &self,
+            unlink: &ModelProviderCredentialUnlink,
+        ) -> CoreResult<ModelProviderRecord>;
     }
 
     trait ConversationConformanceStore {
@@ -9853,6 +9877,45 @@ mod tests {
 
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
             CoordinationStore::get_model_provider_secret(self, alias)
+        }
+
+        fn upsert_service_credential(
+            &self,
+            write: &ServiceCredentialWrite,
+        ) -> CoreResult<ServiceCredentialRecord> {
+            CoordinationStore::upsert_service_credential(self, write)
+        }
+
+        fn get_service_credential(
+            &self,
+            credential_id: &str,
+        ) -> CoreResult<Option<ServiceCredentialRecord>> {
+            CoordinationStore::get_service_credential(self, credential_id)
+        }
+
+        fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+            CoordinationStore::get_service_credential_secret(self, credential_id)
+        }
+
+        fn list_service_credentials(
+            &self,
+            query: &ServiceCredentialQuery,
+        ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+            CoordinationStore::list_service_credentials(self, query)
+        }
+
+        fn link_model_provider_credential(
+            &self,
+            link: &ModelProviderCredentialLink,
+        ) -> CoreResult<ModelProviderCredentialLinkResult> {
+            CoordinationStore::link_model_provider_credential(self, link)
+        }
+
+        fn unlink_model_provider_credential(
+            &self,
+            unlink: &ModelProviderCredentialUnlink,
+        ) -> CoreResult<ModelProviderRecord> {
+            CoordinationStore::unlink_model_provider_credential(self, unlink)
         }
     }
 
@@ -10396,6 +10459,45 @@ mod tests {
 
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
             PostgresBackendStore::get_model_provider_secret(self, alias)
+        }
+
+        fn upsert_service_credential(
+            &self,
+            write: &ServiceCredentialWrite,
+        ) -> CoreResult<ServiceCredentialRecord> {
+            PostgresBackendStore::upsert_service_credential(self, write)
+        }
+
+        fn get_service_credential(
+            &self,
+            credential_id: &str,
+        ) -> CoreResult<Option<ServiceCredentialRecord>> {
+            PostgresBackendStore::get_service_credential(self, credential_id)
+        }
+
+        fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+            PostgresBackendStore::get_service_credential_secret(self, credential_id)
+        }
+
+        fn list_service_credentials(
+            &self,
+            query: &ServiceCredentialQuery,
+        ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+            PostgresBackendStore::list_service_credentials(self, query)
+        }
+
+        fn link_model_provider_credential(
+            &self,
+            link: &ModelProviderCredentialLink,
+        ) -> CoreResult<ModelProviderCredentialLinkResult> {
+            PostgresBackendStore::link_model_provider_credential(self, link)
+        }
+
+        fn unlink_model_provider_credential(
+            &self,
+            unlink: &ModelProviderCredentialUnlink,
+        ) -> CoreResult<ModelProviderRecord> {
+            PostgresBackendStore::unlink_model_provider_credential(self, unlink)
         }
     }
 
@@ -11000,6 +11102,74 @@ mod tests {
         let schema = unique_schema("rusty_crew_model_provider_secret_backend");
         let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         model_provider_secret_envelope_conformance(&store);
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_service_credential_refresh_is_atomic_across_connections() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!(
+                "skipping PostgreSQL credential concurrency test; no database URL env is set"
+            );
+            return;
+        };
+        let schema = unique_schema("rusty_crew_service_credential_concurrency");
+        let store =
+            std::sync::Arc::new(PostgresBackendStore::connect(&database_url, &schema).unwrap());
+        let created = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: "openai:concurrent".to_string(),
+                display_name: "Concurrent refresh".to_string(),
+                provider_kind: "openai".to_string(),
+                credential_kind: ModelProviderCredentialKind::ApiKey,
+                secret: Some("sk-initial".to_string()),
+                clear_secret: false,
+                expected_revision: None,
+                now: "2026-07-16T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        let participants = 4;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(participants));
+        let threads = (0..participants)
+            .map(|index| {
+                let store = std::sync::Arc::clone(&store);
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.upsert_service_credential(&ServiceCredentialWrite {
+                        credential_id: "openai:concurrent".to_string(),
+                        display_name: "Concurrent refresh".to_string(),
+                        provider_kind: "openai".to_string(),
+                        credential_kind: ModelProviderCredentialKind::ApiKey,
+                        secret: Some(format!("sk-refresh-{index}")),
+                        clear_secret: false,
+                        expected_revision: Some(created.revision),
+                        now: format!("2026-07-16T00:00:{index:02}Z"),
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert!(results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| error.kind == CoreErrorKind::ActionRejected));
+        assert_eq!(
+            store
+                .get_service_credential("openai:concurrent")
+                .unwrap()
+                .unwrap()
+                .revision,
+            2
+        );
+
+        let store = std::sync::Arc::try_unwrap(store)
+            .unwrap_or_else(|_| panic!("credential concurrency store still has owners"));
         store.drop_schema_for_test().unwrap();
     }
 
@@ -14403,6 +14573,26 @@ mod tests {
     }
 
     fn model_provider_secret_envelope_conformance(store: &dyn ModelProviderConformanceStore) {
+        let oauth_secret = |access_token: &str, refresh_token: &str, refreshed_at: &str| {
+            ModelProviderSecretEnvelope::OpenAiOauth {
+                version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+                issuer: "https://auth.openai.com".to_string(),
+                client_id: "app-client".to_string(),
+                id_token: "id.jwt.token".to_string(),
+                access_token: access_token.to_string(),
+                refresh_token: refresh_token.to_string(),
+                exchanged_api_token: Some("exchanged-token".to_string()),
+                last_refresh_at: Some(refreshed_at.to_string()),
+                account_id: Some("account-1".to_string()),
+                email: Some("agent@example.test".to_string()),
+                plan_type: Some("pro".to_string()),
+                is_fedramp_account: false,
+                access_token_expires_at: Some("2026-07-02T01:00:00Z".to_string()),
+            }
+            .to_storage_text()
+            .unwrap()
+        };
+
         let api_key = store
             .upsert_model_provider(&model_provider_write(
                 "deepseek-flash",
@@ -14416,6 +14606,11 @@ mod tests {
             api_key.credential.kind,
             Some(ModelProviderCredentialKind::ApiKey)
         );
+        assert_eq!(
+            api_key.credential_id.as_deref(),
+            Some("provider:deepseek-flash")
+        );
+        assert_eq!(api_key.credential.revision, Some(1));
         let stored_api_key = store
             .get_model_provider_secret("deepseek-flash")
             .unwrap()
@@ -14425,30 +14620,18 @@ mod tests {
             ModelProviderSecretEnvelope::from_storage_text(&stored_api_key).unwrap();
         assert_eq!(api_key_envelope.api_key_value(), Some("sk-legacy-api-key"));
 
-        let oauth_secret = ModelProviderSecretEnvelope::OpenAiOauth {
-            version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
-            issuer: "https://auth.openai.com".to_string(),
-            client_id: "app-client".to_string(),
-            id_token: "id.jwt.token".to_string(),
-            access_token: "access.jwt.token".to_string(),
-            refresh_token: "refresh-token".to_string(),
-            exchanged_api_token: Some("exchanged-token".to_string()),
-            last_refresh_at: Some("2026-07-02T00:00:00Z".to_string()),
-            account_id: Some("account-1".to_string()),
-            email: Some("agent@example.test".to_string()),
-            plan_type: Some("pro".to_string()),
-            is_fedramp_account: false,
-            access_token_expires_at: Some("2026-07-02T01:00:00Z".to_string()),
-        }
-        .to_storage_text()
-        .unwrap();
+        let oauth_secret_v1 = oauth_secret(
+            "access.jwt.token.v1",
+            "refresh-token-v1",
+            "2026-07-02T00:00:00Z",
+        );
         let oauth = store
             .upsert_model_provider(&model_provider_write(
                 "gpt-oauth",
                 ModelProviderProtocol::Responses,
                 "openai",
                 "gpt-5",
-                Some(&oauth_secret),
+                Some(&oauth_secret_v1),
             ))
             .unwrap();
         assert_eq!(
@@ -14466,7 +14649,191 @@ mod tests {
         );
         assert!(!serde_json::to_string(&oauth.credential)
             .unwrap()
-            .contains("refresh-token"));
+            .contains("refresh-token-v1"));
+
+        let second = store
+            .upsert_model_provider(&model_provider_write(
+                "gpt-oauth-mini",
+                ModelProviderProtocol::Responses,
+                "openai",
+                "gpt-5-mini",
+                None,
+            ))
+            .unwrap();
+        let shared = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: "openai:primary".to_string(),
+                display_name: "Primary OpenAI account".to_string(),
+                provider_kind: "openai".to_string(),
+                credential_kind: ModelProviderCredentialKind::OpenAiOauth,
+                secret: Some(oauth_secret_v1.clone()),
+                clear_secret: false,
+                expected_revision: None,
+                now: "2026-07-02T00:01:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(shared.revision, 1);
+        assert!(shared.linked_provider_aliases.is_empty());
+        assert!(!serde_json::to_string(&shared)
+            .unwrap()
+            .contains("refresh-token-v1"));
+        let wrong_declared_kind = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: "openai:wrong-kind".to_string(),
+                display_name: "Wrong kind".to_string(),
+                provider_kind: "openai".to_string(),
+                credential_kind: ModelProviderCredentialKind::ApiKey,
+                secret: Some(oauth_secret_v1.clone()),
+                clear_secret: false,
+                expected_revision: None,
+                now: "2026-07-02T00:01:30Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(wrong_declared_kind.kind, CoreErrorKind::InvalidInput);
+        let missing_credential = store
+            .link_model_provider_credential(&ModelProviderCredentialLink {
+                provider_alias: second.alias.clone(),
+                credential_id: "openai:not-found".to_string(),
+                expected_provider_revision: Some(second.revision),
+                expected_credential_revision: None,
+                now: "2026-07-02T00:01:30Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(missing_credential.kind, CoreErrorKind::NotFound);
+
+        let first_link = store
+            .link_model_provider_credential(&ModelProviderCredentialLink {
+                provider_alias: oauth.alias.clone(),
+                credential_id: shared.credential_id.clone(),
+                expected_provider_revision: Some(oauth.revision),
+                expected_credential_revision: Some(shared.revision),
+                now: "2026-07-02T00:02:00Z".to_string(),
+            })
+            .unwrap();
+        let second_link = store
+            .link_model_provider_credential(&ModelProviderCredentialLink {
+                provider_alias: second.alias.clone(),
+                credential_id: shared.credential_id.clone(),
+                expected_provider_revision: Some(second.revision),
+                expected_credential_revision: Some(shared.revision),
+                now: "2026-07-02T00:03:00Z".to_string(),
+            })
+            .unwrap();
+        let mut linked_aliases = second_link.credential.linked_provider_aliases.clone();
+        linked_aliases.sort();
+        assert_eq!(linked_aliases, vec!["gpt-oauth", "gpt-oauth-mini"]);
+        assert_eq!(
+            first_link.provider.credential_id.as_deref(),
+            Some("openai:primary")
+        );
+        assert_eq!(
+            second_link.provider.credential.secret_ref.as_deref(),
+            Some("db://service_credentials/openai:primary/secret")
+        );
+        assert!(store
+            .list_service_credentials(&ServiceCredentialQuery {
+                provider_kind: Some("openai".to_string()),
+                limit: None,
+                offset: None,
+            })
+            .unwrap()
+            .iter()
+            .any(|record| record.credential_id == "openai:primary"));
+
+        let oauth_secret_v2 = oauth_secret(
+            "access.jwt.token.v2",
+            "refresh-token-v2",
+            "2026-07-02T00:04:00Z",
+        );
+        let refresh = ServiceCredentialWrite {
+            credential_id: shared.credential_id.clone(),
+            display_name: shared.display_name.clone(),
+            provider_kind: shared.provider_kind.clone(),
+            credential_kind: shared.credential_kind,
+            secret: Some(oauth_secret_v2.clone()),
+            clear_secret: false,
+            expected_revision: Some(shared.revision),
+            now: "2026-07-02T00:04:00Z".to_string(),
+        };
+        let refreshed = store.upsert_service_credential(&refresh).unwrap();
+        assert_eq!(refreshed.revision, 2);
+        assert_eq!(refreshed.credential.revision, Some(2));
+        assert_eq!(
+            store.get_model_provider_secret("gpt-oauth").unwrap(),
+            Some(oauth_secret_v2.clone())
+        );
+        assert_eq!(
+            store.get_model_provider_secret("gpt-oauth-mini").unwrap(),
+            Some(oauth_secret_v2.clone())
+        );
+        assert_eq!(
+            store
+                .get_service_credential_secret("openai:primary")
+                .unwrap(),
+            Some(oauth_secret_v2)
+        );
+
+        let stale_refresh = store.upsert_service_credential(&refresh).unwrap_err();
+        assert_eq!(stale_refresh.kind, CoreErrorKind::ActionRejected);
+        let missing_with_revision = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: "openai:missing".to_string(),
+                display_name: "Missing".to_string(),
+                provider_kind: "openai".to_string(),
+                credential_kind: ModelProviderCredentialKind::ApiKey,
+                secret: Some("sk-missing".to_string()),
+                clear_secret: false,
+                expected_revision: Some(1),
+                now: "2026-07-02T00:05:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(missing_with_revision.kind, CoreErrorKind::ActionRejected);
+
+        let wrong_provider_kind = store
+            .link_model_provider_credential(&ModelProviderCredentialLink {
+                provider_alias: api_key.alias.clone(),
+                credential_id: shared.credential_id.clone(),
+                expected_provider_revision: Some(api_key.revision),
+                expected_credential_revision: Some(refreshed.revision),
+                now: "2026-07-02T00:06:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(wrong_provider_kind.kind, CoreErrorKind::ActionRejected);
+        let openai_chat = store
+            .upsert_model_provider(&model_provider_write(
+                "openai-chat",
+                ModelProviderProtocol::ChatCompletions,
+                "openai",
+                "gpt-chat",
+                None,
+            ))
+            .unwrap();
+        let wrong_protocol = store
+            .link_model_provider_credential(&ModelProviderCredentialLink {
+                provider_alias: openai_chat.alias,
+                credential_id: shared.credential_id.clone(),
+                expected_provider_revision: Some(openai_chat.revision),
+                expected_credential_revision: Some(refreshed.revision),
+                now: "2026-07-02T00:07:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(wrong_protocol.kind, CoreErrorKind::ActionRejected);
+
+        let unlinked = store
+            .unlink_model_provider_credential(&ModelProviderCredentialUnlink {
+                provider_alias: first_link.provider.alias,
+                expected_provider_revision: Some(first_link.provider.revision),
+                now: "2026-07-02T00:08:00Z".to_string(),
+            })
+            .unwrap();
+        assert!(unlinked.credential_id.is_none());
+        assert_eq!(store.get_model_provider_secret("gpt-oauth").unwrap(), None);
+        let retained = store
+            .get_service_credential("openai:primary")
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.linked_provider_aliases, vec!["gpt-oauth-mini"]);
+        assert!(retained.credential.has_secret);
     }
 
     fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {
@@ -14866,6 +15233,7 @@ mod tests {
             reasoning_format: None,
             secret: secret.map(ToString::to_string),
             clear_secret: false,
+            expected_credential_revision: None,
             metadata_json: json!({"fixture": "model_provider_secret_envelope"}),
             expected_revision: None,
             now: "2026-07-02T00:00:00Z".to_string(),

@@ -154,6 +154,45 @@ impl NativeBridge {
         self.engine()?.get_model_provider_secret(alias)
     }
 
+    pub fn upsert_service_credential(
+        &self,
+        write: &ServiceCredentialWrite,
+    ) -> CoreResult<ServiceCredentialRecord> {
+        self.engine()?.upsert_service_credential(write)
+    }
+
+    pub fn get_service_credential(
+        &self,
+        credential_id: &str,
+    ) -> CoreResult<Option<ServiceCredentialRecord>> {
+        self.engine()?.get_service_credential(credential_id)
+    }
+
+    pub fn get_service_credential_secret(&self, credential_id: &str) -> CoreResult<Option<String>> {
+        self.engine()?.get_service_credential_secret(credential_id)
+    }
+
+    pub fn list_service_credentials(
+        &self,
+        query: &ServiceCredentialQuery,
+    ) -> CoreResult<Vec<ServiceCredentialRecord>> {
+        self.engine()?.list_service_credentials(query)
+    }
+
+    pub fn link_model_provider_credential(
+        &self,
+        link: &ModelProviderCredentialLink,
+    ) -> CoreResult<ModelProviderCredentialLinkResult> {
+        self.engine()?.link_model_provider_credential(link)
+    }
+
+    pub fn unlink_model_provider_credential(
+        &self,
+        unlink: &ModelProviderCredentialUnlink,
+    ) -> CoreResult<ModelProviderRecord> {
+        self.engine()?.unlink_model_provider_credential(unlink)
+    }
+
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,
