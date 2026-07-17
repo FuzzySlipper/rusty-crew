@@ -335,6 +335,31 @@ function defaultLocalToolProfiles(
       tools: [],
     }),
     defaultProfile(now, {
+      id: "full_coding_agent",
+      displayName: "Full Coding Agent",
+      description:
+        "Unrestricted code, research, memory, skills, planning, diagnostics, coordination, and delegation tools for normal coding work. Excludes roleplay, channels, curator controls, and worker-scoped tools.",
+      toolsets: [
+        "local_code_read",
+        "local_code_write",
+        "web_research",
+        "browser",
+        "browser_vision",
+        "memory_den_read",
+        "memory_den_write",
+        "memory_profile",
+        "skills_read",
+        "skills_manage",
+        "planning_session",
+        "runtime_search",
+        "storage_read",
+        "diagnostics_read",
+        "agent_coordination",
+        "delegation_basic",
+      ],
+      tools: [],
+    }),
+    defaultProfile(now, {
       id: "full_agent",
       displayName: "Full Agent",
       description:

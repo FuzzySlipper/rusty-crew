@@ -58,6 +58,65 @@ assert.deepEqual(
   "full_agent must include every built-in tool except explicitly workdir-scoped worker tools",
 );
 
+const fullCodingAgentProfile = seededProfiles.items.find(
+  (profile) => profile.id === "full_coding_agent",
+);
+assert.ok(fullCodingAgentProfile, "full_coding_agent must be seeded");
+const fullCodingAgentInventory = defaultToolRegistry.buildInventory({
+  requestedToolsets: fullCodingAgentProfile.toolsets,
+  requestedTools: fullCodingAgentProfile.tools,
+});
+const selectedFullCodingAgentTools = fullCodingAgentInventory.selectedTools
+  .map((tool) => tool.name)
+  .sort();
+assert.deepEqual(selectedFullCodingAgentTools, [
+  "agent_round",
+  "browser_back",
+  "browser_click",
+  "browser_console",
+  "browser_navigate",
+  "browser_press",
+  "browser_scroll",
+  "browser_snapshot",
+  "browser_type",
+  "browser_vision",
+  "deliver_completion_md",
+  "dense_profile_memory",
+  "fan_out_subagents",
+  "fan_out_subagents_md",
+  "find_relevant_paths",
+  "git_diff",
+  "git_status",
+  "list_agents",
+  "memory_propose",
+  "memory_read",
+  "memory_recall",
+  "memory_search",
+  "memory_space_catalog",
+  "memory_space_read",
+  "memory_store",
+  "patch",
+  "read_file",
+  "reply_agent_message",
+  "scout_codebase",
+  "search_files",
+  "send_agent_message",
+  "session_search",
+  "skill_manage",
+  "skill_view",
+  "skills_list",
+  "spawn_subagent",
+  "spawn_subagent_md",
+  "storage_query_catalog",
+  "storage_query_execute",
+  "summarize_files",
+  "terminal",
+  "todo",
+  "web_extract",
+  "web_search",
+  "write_file",
+]);
+
 await assert.rejects(
   () =>
     store.create({
@@ -123,6 +182,7 @@ console.log(
       seededProfiles: seededProfiles.total,
       fullAgentTools: selectedFullAgentTools.size,
       fullAgentExcludedTools: omittedFullAgentTools,
+      fullCodingAgentTools: selectedFullCodingAgentTools.length,
       validationCalls: bridge.validations.length,
       createdProfile: customProfile.id,
     },
