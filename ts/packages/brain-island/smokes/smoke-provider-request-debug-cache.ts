@@ -16,6 +16,25 @@ const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
   maxRecords: 10,
 });
 
+const omittedSecretFields = providerRequestDebugStore.record({
+  sessionId: "session-provider-debug",
+  wakeId: "wake-provider-debug-omitted-secrets",
+  brainModule: "openai-responses",
+  providerAlias: "debug-provider",
+  request: {
+    apiKey: undefined,
+    oauthCredentialSecret: undefined,
+    maxOutputTokens: undefined,
+  },
+});
+assert.equal(omittedSecretFields.request.redacted, true);
+assert.equal(omittedSecretFields.request.truncated, false);
+assert.equal(
+  typeof (omittedSecretFields.request.value as { apiKey?: { sha256?: string } })
+    .apiKey?.sha256,
+  "string",
+);
+
 let capturedOptions: ChatCompletionsOptions | undefined;
 let eventSink:
   | ((event: ChatCompletionsEvent, signal: AbortSignal) => Promise<void> | void)

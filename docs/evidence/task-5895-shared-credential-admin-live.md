@@ -31,6 +31,36 @@ without reauthentication or secret readback.
 The temporary link was removed at the end. The credential remained linked only
 to its original `gpt-5.6-sol` alias.
 
+## Two-Alias Execution Extension
+
+The rereview certificate extended the scenario from administrative linkage to
+real provider execution. The existing OAuth credential was linked to
+`gpt-5.6-terra` again without starting or completing another OAuth flow. Two
+disposable profiles were then created, one for each provider alias.
+
+The ChatGPT Codex endpoint does not accept the optional `max_output_tokens`
+field, so that optional setting was omitted from both provider records before
+the turns. The provider aliases, model IDs, endpoint, and shared credential
+identity were otherwise unchanged.
+
+Both profiles executed a real OpenAI Responses turn through the debug service:
+
+| Provider alias | Wake ID | Model output | Terminal result |
+| --- | --- | --- | --- |
+| `gpt-5.6-sol` | `service-task5895-6-sol-1784277957-session-1784278324941-1` | `SHARED_CREDENTIAL_SOL_OK` | `assistant_message_completed`, `status=completed` |
+| `gpt-5.6-terra` | `service-task5895-6-terra-1784277957-session-1784278326455-2` | `SHARED_CREDENTIAL_TERRA_OK` | `assistant_message_completed`, `status=completed` |
+
+Each wake emitted a provider-request debug reference before streaming its exact
+marker. Redacted credential readback during the executions reported credential
+revision `1`, `hasSecret: true`, and both linked aliases. The serialized API
+response contained none of `accessToken`, `refreshToken`, `idToken`, or
+`exchangedApiToken`.
+
+After the proof, both disposable profiles and their sessions were hard-deleted.
+The temporary Terra link was removed at provider revision `9`; credential
+readback again showed only `gpt-5.6-sol` linked, and both disposable profile
+registry reads returned HTTP 404.
+
 ## Result
 
 ```text
@@ -42,6 +72,10 @@ clearGuard=409
 deleteGuard=409
 oauthStatusRedacted=true
 restoredAliasUnlinked=true
+solExecution=completed:SHARED_CREDENTIAL_SOL_OK
+terraExecution=completed:SHARED_CREDENTIAL_TERRA_OK
+sharedCredentialRevision=1
+tokenMaterialReturned=false
 ```
 
 The alias compatibility facade also returned:

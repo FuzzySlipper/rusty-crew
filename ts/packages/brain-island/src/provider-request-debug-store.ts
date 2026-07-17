@@ -265,7 +265,7 @@ function redactValue(value: unknown): { value: unknown; redacted: boolean } {
 
 function safeJson(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? JSON.stringify(String(value));
   } catch {
     return JSON.stringify(String(value));
   }
