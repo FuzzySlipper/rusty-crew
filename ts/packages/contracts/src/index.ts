@@ -584,6 +584,8 @@ export interface BrainModelConfig {
   credentialKind?: "api_key" | "openai_oauth" | "legacy_raw_api_key";
   temperatureMilli?: number;
   maxOutputTokens?: number;
+  reasoningEffort?: string;
+  reasoningFormat?: string;
 }
 
 export interface BrainImplementationRegistration {

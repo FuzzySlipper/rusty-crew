@@ -1025,6 +1025,8 @@ function modelProviderToBrainModelConfig(
     credentialKind,
     temperatureMilli: provider.temperatureMilli,
     maxOutputTokens: provider.maxOutputTokens,
+    reasoningEffort: provider.reasoningEffort,
+    reasoningFormat: provider.reasoningFormat,
   };
 }
 

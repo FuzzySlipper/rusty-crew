@@ -72,6 +72,8 @@ export function providerStateFingerprintMaterial(
       modelSettings: {
         temperatureMilli: profile.modelConfig.temperatureMilli,
         maxOutputTokens: profile.modelConfig.maxOutputTokens,
+        reasoningEffort: profile.modelConfig.reasoningEffort,
+        reasoningFormat: profile.modelConfig.reasoningFormat,
       },
       moduleOptions: moduleFingerprints?.providerOptions,
     },

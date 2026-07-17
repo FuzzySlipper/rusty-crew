@@ -49,6 +49,8 @@ struct JsChatCompletionsBrainConfig {
     #[serde(default)]
     temperature_milli: Option<u32>,
     #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
     max_output_tokens: Option<u32>,
     #[serde(default)]
     max_tool_rounds: Option<usize>,
@@ -426,6 +428,7 @@ fn chat_completions_chat_config(
     ChatCompletionsChatConfig {
         model: config.model.clone(),
         temperature_milli: config.temperature_milli,
+        reasoning_effort: config.reasoning_effort.clone(),
         max_output_tokens: config.max_output_tokens,
         provider_request_timeout_ms: config.provider_request_timeout_ms,
     }

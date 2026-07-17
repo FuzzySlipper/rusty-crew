@@ -293,6 +293,7 @@ fn den_router_routes_from_value(value: Value) -> Result<DenRouterRoutes, DenRout
 pub struct ChatCompletionsChatConfig {
     pub model: String,
     pub temperature_milli: Option<u32>,
+    pub reasoning_effort: Option<String>,
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
 }
@@ -302,6 +303,7 @@ impl ChatCompletionsChatConfig {
         Self {
             model: model.into(),
             temperature_milli: None,
+            reasoning_effort: None,
             max_output_tokens: Some(128),
             provider_request_timeout_ms: None,
         }
@@ -311,6 +313,7 @@ impl ChatCompletionsChatConfig {
         Self {
             model: provider.model_id.clone(),
             temperature_milli: provider.temperature_milli,
+            reasoning_effort: provider.reasoning_effort.clone(),
             max_output_tokens: provider.max_output_tokens,
             provider_request_timeout_ms: None,
         }
@@ -436,6 +439,7 @@ pub struct ChatCompletionsRequest {
     pub stream: bool,
     pub stream_options: Option<ChatCompletionsStreamOptions>,
     pub temperature: Option<f64>,
+    pub reasoning_effort: Option<String>,
     pub max_tokens: Option<u32>,
 }
 
@@ -448,6 +452,7 @@ impl Serialize for ChatCompletionsRequest {
         fields += (!self.tools.is_empty()) as usize;
         fields += self.stream_options.is_some() as usize;
         fields += self.temperature.is_some() as usize;
+        fields += self.reasoning_effort.is_some() as usize;
         fields += self.max_tokens.is_some() as usize;
 
         let mut map = serializer.serialize_struct("ChatCompletionsRequest", fields)?;
@@ -463,6 +468,9 @@ impl Serialize for ChatCompletionsRequest {
         }
         if let Some(temperature) = self.temperature {
             map.serialize_field("temperature", &temperature)?;
+        }
+        if let Some(reasoning_effort) = &self.reasoning_effort {
+            map.serialize_field("reasoning_effort", reasoning_effort)?;
         }
         if let Some(max_tokens) = self.max_tokens {
             map.serialize_field("max_tokens", &max_tokens)?;
@@ -522,6 +530,7 @@ impl ChatCompletionsRequestBuilder {
                 .config
                 .temperature_milli
                 .map(|milli| f64::from(milli) / 1000.0),
+            reasoning_effort: self.config.reasoning_effort.clone(),
             max_tokens: self.config.max_output_tokens,
         }
     }
@@ -1833,6 +1842,7 @@ mod tests {
         let request = ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig {
             model: "deepseek-flash".to_string(),
             temperature_milli: Some(500),
+            reasoning_effort: Some("high".to_string()),
             max_output_tokens: Some(256),
             provider_request_timeout_ms: Some(45_000),
         })
@@ -1855,9 +1865,22 @@ mod tests {
         assert_eq!(value["stream"], true);
         assert_eq!(value["stream_options"]["include_usage"], true);
         assert_eq!(value["temperature"], 0.5);
+        assert_eq!(value["reasoning_effort"], "high");
         assert_eq!(value["max_tokens"], 256);
         assert_eq!(value["tools"][0]["type"], "function");
         assert_eq!(value["tools"][0]["function"]["name"], "lookup");
+    }
+
+    #[test]
+    fn omits_optional_generation_settings_for_provider_defaults() {
+        let request = ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig::new(
+            "provider-default-model",
+        ))
+        .build(vec![ChatCompletionMessage::user("hello")]);
+        let value = serde_json::to_value(&request).expect("request json");
+
+        assert!(value.get("temperature").is_none());
+        assert!(value.get("reasoning_effort").is_none());
     }
 
     #[test]

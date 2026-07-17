@@ -578,6 +578,25 @@ export async function rustyViewSessionContextUsage(
       message: "model provider does not declare contextWindowTokens",
     });
   }
+  if (provider?.reasoningFormat !== undefined) {
+    diagnostics.push({
+      severity: "warning",
+      code: "provider_reasoning_format_not_applied",
+      message:
+        "reasoningFormat is stored for provider diagnostics but is not mapped by the selected native brain protocol",
+    });
+  }
+  if (
+    provider?.protocol === "responses" &&
+    provider.temperatureMilli !== undefined
+  ) {
+    diagnostics.push({
+      severity: "warning",
+      code: "provider_temperature_not_applied",
+      message:
+        "temperature is not supported by the native Responses request contract and is omitted",
+    });
+  }
   const latestCompactionArtifact = await context.bridge
     .listContextCompactionArtifacts({
       session_id: input.session.sessionId,

@@ -40,6 +40,10 @@ struct JsOpenAiResponsesBrainConfig {
     #[serde(default)]
     instructions: Option<String>,
     #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
+    max_output_tokens: Option<u32>,
+    #[serde(default)]
     provider_request_timeout_ms: Option<u64>,
     #[serde(default)]
     wake_timeout_ms: Option<u64>,
@@ -694,6 +698,13 @@ where
         })?;
     let mut config = ResponsesBrainConfig::replay(input.config.model);
     config.instructions = input.config.instructions;
+    config.reasoning = input.config.reasoning_effort.map(|effort| {
+        rusty_crew_openai_responses_brain::ResponsesReasoningConfig {
+            effort: Some(effort),
+            summary: None,
+        }
+    });
+    config.max_output_tokens = input.config.max_output_tokens;
     config.provider_request_timeout_ms = input.config.provider_request_timeout_ms;
     let descriptors = if input.tools.is_empty() {
         input

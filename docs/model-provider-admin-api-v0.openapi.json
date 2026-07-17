@@ -493,12 +493,12 @@
           "contextWindowTokens": { "type": "number" },
           "maxOutputTokens": { "type": "number" },
           "temperatureMilli": {
-            "type": "number",
-            "description": "Integer millivalue. Decimal values in the 0..10 range are accepted as compatibility input and normalized."
+            "type": ["number", "null"],
+            "description": "Integer millivalue. Decimal values in the 0..10 range are accepted as compatibility input and normalized. Null clears the override."
           },
           "temperature": {
-            "type": "number",
-            "description": "Decimal temperature normalized to temperatureMilli by multiplying by 1000."
+            "type": ["number", "null"],
+            "description": "Decimal temperature normalized to temperatureMilli by multiplying by 1000. Null clears the override."
           },
           "reasoningEffort": { "type": "string" },
           "reasoningFormat": { "type": "string" },

@@ -52,6 +52,7 @@ pub struct ResponsesBrainConfig {
     pub include: Vec<String>,
     pub service_tier: Option<String>,
     pub prompt_cache_key: Option<String>,
+    pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
 }
 
@@ -68,6 +69,7 @@ impl ResponsesBrainConfig {
             include: Vec::new(),
             service_tier: None,
             prompt_cache_key: None,
+            max_output_tokens: None,
             provider_request_timeout_ms: None,
         }
     }
@@ -106,7 +108,6 @@ pub enum ResponsesToolChoice {
 pub struct ResponsesReasoningConfig {
     pub effort: Option<String>,
     pub summary: Option<String>,
-    pub include_encrypted_content: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,12 +132,15 @@ pub struct ResponsesRequest {
     pub tools: Vec<ResponsesToolDescriptor>,
     pub tool_choice: Value,
     pub parallel_tool_calls: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<Value>,
     pub store: bool,
     pub stream: bool,
     pub include: Vec<String>,
     pub service_tier: Option<String>,
     pub prompt_cache_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
     pub text: Option<Value>,
 }
 
@@ -314,13 +318,11 @@ impl ResponsesRequestBuilder {
                 }
             },
             parallel_tool_calls: self.config.parallel_tool_calls,
-            reasoning: self.config.reasoning.as_ref().map(|reasoning| {
-                json!({
-                    "effort": reasoning.effort,
-                    "summary": reasoning.summary,
-                    "include_encrypted_content": reasoning.include_encrypted_content
-                })
-            }),
+            reasoning: self
+                .config
+                .reasoning
+                .as_ref()
+                .and_then(responses_reasoning_value),
             store: matches!(
                 self.config.strategy,
                 ResponsesBrainStrategy::PreviousResponseChain
@@ -329,6 +331,7 @@ impl ResponsesRequestBuilder {
             include: self.config.include.clone(),
             service_tier: self.config.service_tier.clone(),
             prompt_cache_key: self.config.prompt_cache_key.clone(),
+            max_output_tokens: self.config.max_output_tokens,
             text: self
                 .config
                 .text
@@ -394,6 +397,17 @@ impl ResponsesRequestBuilder {
             fallback_reason,
         }
     }
+}
+
+fn responses_reasoning_value(reasoning: &ResponsesReasoningConfig) -> Option<Value> {
+    let mut value = serde_json::Map::new();
+    if let Some(effort) = reasoning.effort.as_ref() {
+        value.insert("effort".to_string(), json!(effort));
+    }
+    if let Some(summary) = reasoning.summary.as_ref() {
+        value.insert("summary".to_string(), json!(summary));
+    }
+    (!value.is_empty()).then_some(Value::Object(value))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -663,6 +677,7 @@ fn request_fingerprint(request: &ResponsesRequest) -> String {
         "include": request.include,
         "serviceTier": request.service_tier,
         "promptCacheKey": request.prompt_cache_key,
+        "maxOutputTokens": request.max_output_tokens,
         "text": request.text,
     }))
     .unwrap_or_else(|_| "fingerprint-unavailable".to_string())
@@ -2306,6 +2321,7 @@ mod tests {
             include: Vec::new(),
             service_tier: None,
             prompt_cache_key: None,
+            max_output_tokens: None,
             text: None,
         }
     }
@@ -2369,7 +2385,6 @@ mod tests {
             reasoning: Some(ResponsesReasoningConfig {
                 effort: Some("medium".to_string()),
                 summary: Some("auto".to_string()),
-                include_encrypted_content: true,
             }),
             text: Some(ResponsesTextConfig {
                 verbosity: Some("low".to_string()),
@@ -2377,6 +2392,7 @@ mod tests {
             include: vec!["reasoning.encrypted_content".to_string()],
             service_tier: Some("default".to_string()),
             prompt_cache_key: Some("profile-cache".to_string()),
+            max_output_tokens: Some(2048),
             ..ResponsesBrainConfig::replay("gpt-5")
         };
         let builder = ResponsesRequestBuilder::new(config).tools(vec![NeutralBrainTool {
@@ -2401,8 +2417,41 @@ mod tests {
         assert_eq!(request.tools[0].name, "lookup");
         assert_eq!(request.input.len(), 2);
         assert_eq!(request.reasoning.as_ref().unwrap()["effort"], "medium");
+        assert_eq!(request.max_output_tokens, Some(2048));
         assert_eq!(request.text.as_ref().unwrap()["verbosity"], "low");
         assert!(request.stream);
+    }
+
+    #[test]
+    fn request_builder_distinguishes_efforts_and_omits_provider_default() {
+        fn request_value(effort: Option<&str>) -> Value {
+            let mut config = ResponsesBrainConfig::replay("gpt-5");
+            config.reasoning = effort.map(|effort| ResponsesReasoningConfig {
+                effort: Some(effort.to_string()),
+                summary: None,
+            });
+            let request = ResponsesRequestBuilder::new(config).build(
+                &wake_request(None, None),
+                None,
+                ResponsesReplayProjection {
+                    input_items: vec![ResponsesInputItem::UserMessage {
+                        content: "compare effort".to_string(),
+                    }],
+                    replay_hints: Vec::new(),
+                },
+                Vec::new(),
+            );
+            serde_json::to_value(request).expect("request json")
+        }
+
+        let provider_default = request_value(None);
+        let low = request_value(Some("low"));
+        let high = request_value(Some("high"));
+
+        assert!(provider_default.get("reasoning").is_none());
+        assert_eq!(low["reasoning"]["effort"], "low");
+        assert_eq!(high["reasoning"]["effort"], "high");
+        assert_ne!(low, high);
     }
 
     #[test]
@@ -3115,6 +3164,7 @@ mod tests {
             include: Vec::new(),
             service_tier: None,
             prompt_cache_key: None,
+            max_output_tokens: None,
             text: None,
         };
         assert!(matches!(

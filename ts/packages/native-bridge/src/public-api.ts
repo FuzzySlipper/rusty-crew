@@ -224,6 +224,8 @@ export interface OpenAiResponsesBrainRunInput {
   config: {
     model: string;
     instructions?: string;
+    reasoningEffort?: string;
+    maxOutputTokens?: number;
     providerRequestTimeoutMs?: number;
     wakeTimeoutMs?: number;
   };
@@ -269,6 +271,7 @@ export interface ChatCompletionsBrainRunInput {
     providerRequestTimeoutMs?: number;
     wakeTimeoutMs?: number;
     temperatureMilli?: number;
+    reasoningEffort?: string;
     maxOutputTokens?: number;
     maxToolRounds?: number;
     repeatedToolCallLimit?: number;

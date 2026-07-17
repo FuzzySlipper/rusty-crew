@@ -64,6 +64,14 @@ assert.ok(schema("ModelProviderRecord").properties?.temperature);
 assert.ok(schema("ModelProviderRecord").properties?.temperatureMilli);
 assert.ok(schema("ModelProviderWrite").properties?.temperature);
 assert.ok(schema("ModelProviderWrite").properties?.temperatureMilli);
+assert.deepEqual(schema("ModelProviderWrite").properties?.temperature?.type, [
+  "number",
+  "null",
+]);
+assert.deepEqual(
+  schema("ModelProviderWrite").properties?.temperatureMilli?.type,
+  ["number", "null"],
+);
 assert.deepEqual(
   Object.keys(schema("ModelProviderRevisionConflict").properties ?? {}),
   MODEL_PROVIDER_REVISION_CONFLICT_DATA_FIELDS,
@@ -308,7 +316,7 @@ interface OpenApiDoc {
 }
 
 interface JsonSchema {
-  type?: string;
+  type?: string | string[];
   enum?: string[];
   const?: string | number | boolean;
   required?: string[] | readonly string[];

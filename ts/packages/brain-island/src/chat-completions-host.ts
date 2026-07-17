@@ -169,6 +169,8 @@ function createRustChatCompletionsBrainHostExecutor(
           wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
           temperatureMilli:
             context.profile.profile.modelConfig.temperatureMilli,
+          reasoningEffort:
+            context.profile.profile.modelConfig.reasoningEffort,
           maxOutputTokens:
             context.profile.profile.modelConfig.maxOutputTokens ??
             context.maxTokens,

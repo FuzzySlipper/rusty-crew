@@ -1185,6 +1185,8 @@ function modelConfigFromProfileObject(
       | BrainModelConfig["credentialKind"]
       | undefined,
     temperatureMilli,
+    reasoningEffort: optionalString(modelConfig.reasoningEffort),
+    reasoningFormat: optionalString(modelConfig.reasoningFormat),
     maxOutputTokens:
       optionalNumber(modelConfig.maxOutputTokens) ??
       optionalNumber(modelConfig.maxTokens),

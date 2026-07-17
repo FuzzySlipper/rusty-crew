@@ -62,12 +62,20 @@ chat completions or vice versa.
 | `expectedRevision` | Optimistic concurrency revision for updates |
 
 The API accepts decimal `temperature`, including values below `1`, and
-normalizes it to `temperatureMilli`. Readback includes both forms when set. Do
-not send a decimal value in `temperatureMilli`.
+normalizes it to `temperatureMilli`. Readback includes both forms when set. An
+omitted or `null` temperature clears the override so the upstream provider
+chooses its default. Do not use a negative sentinel and do not send a decimal
+value in `temperatureMilli`.
 
 Reasoning values are deliberately strings because provider vocabularies differ.
 They are passed only where the selected brain/provider path supports them; they
 do not convert a chat-completions endpoint into a Responses endpoint.
+
+The native Responses path maps `reasoningEffort` to `reasoning.effort` and
+`maxOutputTokens` to `max_output_tokens`. The native Chat Completions path maps
+`reasoningEffort` to `reasoning_effort`. `reasoningFormat` remains diagnostic
+metadata until a protocol-specific mapping is configured; `/model` reports a
+warning instead of claiming it was applied.
 
 ## Admin API
 
