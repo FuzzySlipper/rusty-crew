@@ -129,6 +129,44 @@ await brain.wake(wake);
 
 assert.deepEqual(capturedToolNames, ["git_status", "read_file"]);
 
+const zeroDelegationWake = {
+  ...wake,
+  state: {
+    ...wake.state,
+    session: {
+      ...wake.state.session,
+      resourceLimits: { maxDelegationDepth: 0 },
+      toolProfile: {
+        tools: [
+          { name: "read_file", description: "Read files" },
+          { name: "patch", description: "Apply patches" },
+          { name: "scout_codebase", description: "Delegate scouting" },
+          { name: "fan_out_subagents", description: "Delegate fan-out" },
+        ],
+      },
+    },
+  },
+};
+const zeroDelegationSelection = resolveToolSession({
+  wake: zeroDelegationWake,
+  resolveTools: () => [
+    fakeTool("read_file"),
+    fakeTool("patch"),
+    fakeTool("scout_codebase"),
+    fakeTool("fan_out_subagents"),
+  ],
+});
+assert.deepEqual(
+  zeroDelegationSelection.tools.map((tool) => tool.name),
+  ["read_file", "patch"],
+);
+assert.deepEqual(
+  zeroDelegationSelection.items
+    .filter((item) => item.status === "resource_denied")
+    .map((item) => item.name),
+  ["scout_codebase", "fan_out_subagents"],
+);
+
 console.log(
   JSON.stringify(
     {

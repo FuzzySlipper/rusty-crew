@@ -28,6 +28,7 @@ import { buildToolContextDiagnosticsReport } from "./tool-context-diagnostics.js
 import { buildToolRegistryDiagnostics } from "./tool-registry-diagnostics.js";
 import type { AdapterDiagnosticsProjection } from "./adapter-diagnostics.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
+import { effectiveToolSelectionForResourceLimits } from "./tool-profile-selection.js";
 
 export interface ServiceBackgroundReviewEvent {
   source: string;
@@ -240,10 +241,14 @@ function backgroundToolDiagnostics(input: {
   role: ProfileRoleAssemblyResult;
   denseProfileMemoryCount: number;
 }) {
+  const effectiveToolSelection = effectiveToolSelectionForResourceLimits(
+    input.profileContext.toolSelection,
+    input.session.resourceLimits,
+  );
   const toolDiagnostics = buildToolRegistryDiagnostics({
-    catalogId: input.profileContext.toolSelection.catalogId,
+    catalogId: effectiveToolSelection.catalogId,
     inventoryRequest: {
-      requestedTools: input.profileContext.toolSelection.toolProfile.tools.map(
+      requestedTools: effectiveToolSelection.toolProfile.tools.map(
         (tool) => tool.name,
       ),
     },
@@ -257,7 +262,7 @@ function backgroundToolDiagnostics(input: {
       kind: input.session.kind,
     },
     toolDiagnostics,
-    toolSelection: input.profileContext.toolSelection,
+    toolSelection: effectiveToolSelection,
     profileContext: input.profileContext,
     toolPolicy: input.profileContext.profile.toolPolicy,
     roleAssembly: input.role.roleAssembly,

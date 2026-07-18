@@ -5,6 +5,7 @@ import type {
 } from "@rusty-crew/contracts";
 import type { BrainTool } from "./brain-tool.js";
 import type { BrainWakeInput } from "./index.js";
+import { resourceDeniedToolsForLimits } from "./tool-profile-selection.js";
 
 export interface BrainActionCollector {
   add(action: BrainAction): void;
@@ -22,6 +23,7 @@ export type ToolSessionSelectionStatus =
   | "callable"
   | "implementation_missing"
   | "duplicate_implementation"
+  | "resource_denied"
   | "not_requested";
 
 export interface ToolSessionSelectionItem {
@@ -57,12 +59,20 @@ export function combineResolvers(
 export function resolveToolSession(
   input: ToolSessionSelectionInput,
 ): ToolSessionSelection {
-  const descriptors =
+  const configuredDescriptors =
     input.toolProfile?.tools ?? input.wake.state.session.toolProfile.tools;
+  const resourceDenied = resourceDeniedToolsForLimits(
+    input.wake.state.session.resourceLimits,
+  );
+  const descriptors = configuredDescriptors.filter(
+    (descriptor) => !resourceDenied.has(descriptor.name),
+  );
   const descriptorsByName = new Map(
     descriptors.map((descriptor) => [descriptor.name, descriptor]),
   );
-  const requestedNames = new Set(descriptorsByName.keys());
+  const requestedNames = new Set(
+    configuredDescriptors.map((descriptor) => descriptor.name),
+  );
   const implementationsByName = groupToolsByName(
     input.resolveTools?.({
       wake: input.wake,
@@ -105,6 +115,15 @@ export function resolveToolSession(
     },
   );
 
+  const resourceDeniedItems = configuredDescriptors
+    .filter((descriptor) => resourceDenied.has(descriptor.name))
+    .map<ToolSessionSelectionItem>((descriptor) => ({
+      name: descriptor.name,
+      descriptor,
+      status: "resource_denied",
+      reasons: [resourceDenied.get(descriptor.name)!],
+    }));
+
   const unexpectedItems = [...implementationsByName.entries()]
     .filter(([name]) => !requestedNames.has(name))
     .sort(([left], [right]) => left.localeCompare(right))
@@ -121,7 +140,7 @@ export function resolveToolSession(
     tools: descriptorItems.flatMap((item) =>
       item.status === "callable" && item.tool ? [item.tool] : [],
     ),
-    items: [...descriptorItems, ...unexpectedItems],
+    items: [...descriptorItems, ...resourceDeniedItems, ...unexpectedItems],
   };
 }
 

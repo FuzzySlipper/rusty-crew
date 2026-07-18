@@ -23,6 +23,7 @@ import {
   type BuildProfileRoleAssemblyOptions,
 } from "./profile-role-assembly.js";
 import type { loadProfileContext } from "./profile-loading.js";
+import { effectiveToolSelectionForResourceLimits } from "./tool-profile-selection.js";
 import {
   effectiveWakeTimeoutMs,
   type RustyCrewConfiguredSession,
@@ -240,7 +241,14 @@ export async function dispatchWake(
         ...(roleplayContext === undefined ? [] : [roleplayContext]),
       ],
     };
-    const role = buildProfileRoleAssembly(profileContext, roleInput);
+    const effectiveProfileContext = {
+      ...profileContext,
+      toolSelection: effectiveToolSelectionForResourceLimits(
+        profileContext.toolSelection,
+        session.resourceLimits,
+      ),
+    };
+    const role = buildProfileRoleAssembly(effectiveProfileContext, roleInput);
     const turnTimeoutMs = effectiveTurnTimeoutMs(
       effectiveWakeTimeoutMs({
         session: configured,

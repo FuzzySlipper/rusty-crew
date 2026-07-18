@@ -43,6 +43,66 @@ export interface ToolProfileSelection {
   toolProfile: ToolProfile;
 }
 
+const DELEGATION_DEPTH_EXHAUSTED_REASON =
+  "delegation_depth_exhausted: session max delegation depth is zero";
+
+export function resourceDeniedToolsForLimits(
+  limits: { maxDelegationDepth?: number | null } | undefined,
+  registry: ToolRegistry = defaultToolRegistry,
+): ReadonlyMap<string, string> {
+  if (limits?.maxDelegationDepth !== 0) {
+    return new Map();
+  }
+  return new Map(
+    registry.entries
+      .filter((entry) => entry.category === "delegation")
+      .map((entry) => [entry.name, DELEGATION_DEPTH_EXHAUSTED_REASON]),
+  );
+}
+
+export function effectiveToolSelectionForResourceLimits(
+  selection: ToolProfileSelection,
+  limits: { maxDelegationDepth?: number | null } | undefined,
+  registry: ToolRegistry = defaultToolRegistry,
+): ToolProfileSelection {
+  const denied = resourceDeniedToolsForLimits(limits, registry);
+  if (denied.size === 0) {
+    return selection;
+  }
+  const selectedTools = selection.inventory.selectedTools.filter(
+    (entry) => !denied.has(entry.name),
+  );
+  const selectedNames = new Set(selectedTools.map((entry) => entry.name));
+  return {
+    ...selection,
+    inventory: {
+      selectedTools,
+      selectedBindings: selection.inventory.selectedBindings.filter((binding) =>
+        selectedNames.has(binding.name),
+      ),
+      selectedDescriptors: selection.inventory.selectedDescriptors.filter(
+        (descriptor) => selectedNames.has(descriptor.name),
+      ),
+      items: selection.inventory.items.map((item) => {
+        const reason = denied.get(item.canonicalName ?? item.name);
+        if (item.status !== "selected" || reason === undefined) {
+          return item;
+        }
+        return {
+          ...item,
+          status: "resource_denied" as const,
+          reasons: [reason],
+        };
+      }),
+    },
+    toolProfile: {
+      tools: selection.toolProfile.tools.filter((tool) =>
+        selectedNames.has(tool.name),
+      ),
+    },
+  };
+}
+
 export interface BrainRegistrationFromToolProfileInput extends ToolProfileSelectionInput {
   implementationId: BrainImplementationId;
   modelConfig: BrainModelConfig;

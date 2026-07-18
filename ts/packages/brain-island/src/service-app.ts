@@ -157,6 +157,7 @@ import {
 } from "./service-runtime-rebuild.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
+import { effectiveToolSelectionForResourceLimits } from "./tool-profile-selection.js";
 import {
   buildAdapterDiagnosticsProjection,
   type ChannelAdapterBindingDiagnostics,
@@ -3252,7 +3253,10 @@ async function buildDirectDebugContext(
                   : profileContext.toolSelection.toolProfile,
             },
             profileContext,
-            toolSelection: profileContext.toolSelection,
+            toolSelection: effectiveToolSelectionForResourceLimits(
+              profileContext.toolSelection,
+              session.resourceLimits,
+            ),
             systemPrompt: profileContext.profile.prompt?.system,
             roleAssembly: {
               instructions:

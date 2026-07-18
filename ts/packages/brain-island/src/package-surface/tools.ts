@@ -167,6 +167,8 @@ export type {
 export {
   buildBrainRegistrationFromToolProfile,
   createToolCatalogChangedPayload,
+  effectiveToolSelectionForResourceLimits,
+  resourceDeniedToolsForLimits,
   selectToolProfile,
 } from "../tool-profile-selection.js";
 export type {

@@ -14,6 +14,7 @@ import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildBrainRegistrationFromToolProfile,
   createToolCatalogChangedPayload,
+  effectiveToolSelectionForResourceLimits,
   registerBrainHostRuntime,
   selectToolProfile,
 } from "../src/index.js";
@@ -57,6 +58,38 @@ try {
   assert.equal(
     readonlySelection.inventory.items.find((item) => item.name === "terminal")
       ?.status,
+    "resource_denied",
+  );
+
+  const zeroDelegationSelection = effectiveToolSelectionForResourceLimits(
+    selectToolProfile({
+      profileId: delegatedProfileId,
+      policy: {
+        requestedToolsets: [
+          "local_code_read",
+          "local_code_write",
+          "delegation_basic",
+        ],
+      },
+    }),
+    { maxDelegationDepth: 0 },
+  );
+  assert.equal(
+    zeroDelegationSelection.toolProfile.tools.some(
+      (tool) => tool.name === "scout_codebase",
+    ),
+    false,
+  );
+  assert.equal(
+    zeroDelegationSelection.toolProfile.tools.some(
+      (tool) => tool.name === "patch",
+    ),
+    true,
+  );
+  assert.equal(
+    zeroDelegationSelection.inventory.items.find(
+      (item) => item.name === "scout_codebase",
+    )?.status,
     "resource_denied",
   );
 

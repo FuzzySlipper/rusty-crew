@@ -210,7 +210,9 @@ export function inspectDirectDebugSession(
       source: "direct_debug",
       session: sessionSummary(source.session, context),
       diagnostics: runtimeSummary(source.session.sessionId, context),
-      selectedTools: source.session.toolProfile.tools,
+      selectedTools:
+        source.toolSelection?.toolProfile.tools ??
+        source.session.toolProfile.tools,
       toolContext,
       context: contextView(source, toolContext, request, context),
       pendingMessages: pendingMessages(source, request, context),

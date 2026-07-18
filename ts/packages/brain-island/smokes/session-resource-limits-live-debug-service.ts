@@ -121,8 +121,10 @@ try {
   }
 
   assertSessionLimits(await readSessionDiagnostics(), workdir);
+  assertZeroDelegationToolContext(await readToolContext());
   await restartDebugService();
   assertSessionLimits(await readSessionDiagnostics(), workdir);
+  assertZeroDelegationToolContext(await readToolContext());
 
   const messageId = `resource-limits-message-${suffix}`;
   const sent = await request(
@@ -163,6 +165,7 @@ try {
   evidence.sessionId = sessionId;
   evidence.workdir = workdir;
   evidence.persistedAcrossRestart = true;
+  evidence.zeroDelegationCatalogEnforced = true;
   evidence.omissionPreserved = true;
   evidence.invalidWorkdirsRejected = ["blank", "relative"];
   evidence.terminalToolCompleted = true;
@@ -218,6 +221,43 @@ async function readSessionDiagnostics(): Promise<Record<string, unknown>> {
   );
   assert.ok(session && typeof session === "object" && !Array.isArray(session));
   return session as Record<string, unknown>;
+}
+
+async function readToolContext(): Promise<Record<string, unknown>> {
+  const response = await request(
+    "GET",
+    `/v1/debug/sessions/${encodeURIComponent(sessionId)}/context`,
+  );
+  assert.equal(response.status, 200, response.text);
+  return response.json;
+}
+
+function assertZeroDelegationToolContext(
+  response: Record<string, unknown>,
+): void {
+  const selectedTools = nested(response, ["data", "selectedTools"]);
+  assert.ok(Array.isArray(selectedTools), "debug context must report tools");
+  const selectedNames = selectedTools.map((tool) =>
+    String(nested(tool, ["name"])),
+  );
+  for (const expected of ["read_file", "patch", "terminal"]) {
+    assert.equal(
+      selectedNames.includes(expected),
+      true,
+      `zero-delegation context must retain ${expected}`,
+    );
+  }
+  for (const denied of [
+    "spawn_subagent",
+    "fan_out_subagents",
+    "scout_codebase",
+  ]) {
+    assert.equal(
+      selectedNames.includes(denied),
+      false,
+      `zero-delegation context must omit ${denied}`,
+    );
+  }
 }
 
 function assertSessionLimits(
