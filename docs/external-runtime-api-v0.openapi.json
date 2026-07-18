@@ -2226,6 +2226,7 @@
         "properties": {
           "kind": { "$ref": "#/components/schemas/CoreErrorKind" },
           "message": { "type": "string" },
+          "reason_code": { "type": ["string", "null"] },
           "session_id": { "type": "string" },
           "wake_id": { "type": "string" }
         },
