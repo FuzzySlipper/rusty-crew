@@ -171,6 +171,7 @@ export interface NativeBufferedBrainRunDrain {
     argumentsJson: string;
   }>;
   terminal: boolean;
+  terminalReasonCode?: string;
   providerState?: BrainWakeProviderStateOutput;
   transportMetrics?:
     | OpenAiResponsesTransportMetrics
@@ -205,6 +206,8 @@ export interface OpenAiResponsesTransportMetrics {
   providerEventCounts: Record<string, number>;
   firstTextDeltaLatencyMs?: number | null;
   totalTurnDurationMs: number;
+  terminalFailureReasonCode?: string | null;
+  terminalFailureSource?: string | null;
 }
 
 export interface OpenAiResponsesCredentialSecretUpdate {
@@ -268,6 +271,7 @@ export interface OpenAiResponsesBrainRunInput {
     reasoningEffort?: string;
     maxOutputTokens?: number;
     providerRequestTimeoutMs?: number;
+    maxContinuationRounds?: number;
     wakeTimeoutMs?: number;
   };
   client?:

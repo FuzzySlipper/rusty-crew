@@ -39,6 +39,7 @@ pub const REPLAY_STRATEGY_ID: &str = "replay";
 pub const PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID: &str = "previous-response-chain";
 pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v1";
 pub const MAX_REPEATED_FUNCTION_CALLS: usize = 3;
+pub const DEFAULT_MAX_CONTINUATION_ROUNDS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesBrainConfig {
@@ -54,6 +55,7 @@ pub struct ResponsesBrainConfig {
     pub prompt_cache_key: Option<String>,
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
+    pub max_continuation_rounds: usize,
 }
 
 impl ResponsesBrainConfig {
@@ -71,6 +73,7 @@ impl ResponsesBrainConfig {
             prompt_cache_key: None,
             max_output_tokens: None,
             provider_request_timeout_ms: None,
+            max_continuation_rounds: DEFAULT_MAX_CONTINUATION_ROUNDS,
         }
     }
 
@@ -935,8 +938,40 @@ pub enum ResponsesStreamError {
         arguments_json: String,
         limit: usize,
     },
+    #[error("responses continuation round limit exceeded after {limit} rounds")]
+    ContinuationLimitExceeded { limit: usize },
     #[error("provider transport error: {0}")]
     Transport(String),
+}
+
+impl ResponsesStreamError {
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            Self::RequestTimeout => "provider_request_timeout",
+            Self::Cancelled => "provider_request_cancelled",
+            Self::ResponseFailed(_) => "provider_response_failed",
+            Self::ResponseIncomplete(_) => "provider_response_incomplete",
+            Self::ContinuationLimitExceeded { .. } => "responses_continuation_limit_exceeded",
+            Self::RepeatedFunctionCall { .. } => "responses_repeated_function_call",
+            Self::ClosedBeforeComplete => "provider_stream_closed_before_complete",
+            Self::MissingField(_) | Self::UnknownEvent(_) => "provider_protocol_error",
+            Self::FunctionCallOutputMismatch { .. } => "responses_function_call_output_mismatch",
+            Self::Transport(_) => "provider_transport_error",
+        }
+    }
+
+    pub fn source(&self) -> &'static str {
+        match self {
+            Self::RequestTimeout | Self::Cancelled | Self::Transport(_) => "provider_transport",
+            Self::ResponseFailed(_) | Self::ResponseIncomplete(_) => "provider_response",
+            Self::ContinuationLimitExceeded { .. }
+            | Self::RepeatedFunctionCall { .. }
+            | Self::FunctionCallOutputMismatch { .. } => "responses_loop",
+            Self::ClosedBeforeComplete | Self::MissingField(_) | Self::UnknownEvent(_) => {
+                "provider_protocol"
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -986,6 +1021,8 @@ pub struct ResponsesTransportMetrics {
     pub provider_event_counts: HashMap<String, u64>,
     pub first_text_delta_latency_ms: Option<u64>,
     pub total_turn_duration_ms: u64,
+    pub terminal_failure_reason_code: Option<String>,
+    pub terminal_failure_source: Option<String>,
 }
 
 struct ResponsesTransportMetricsBuilder {
@@ -1068,6 +1105,8 @@ impl ResponsesTransportMetricsBuilder {
             provider_event_counts: self.provider_event_counts.clone(),
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
             total_turn_duration_ms: duration_ms(self.turn_started_at.elapsed()),
+            terminal_failure_reason_code: None,
+            terminal_failure_source: None,
         }
     }
 }
@@ -1522,7 +1561,6 @@ pub struct ResponsesReplayBrain<C, T> {
     client: C,
     tools: T,
     request_builder: ResponsesRequestBuilder,
-    max_continuations: usize,
 }
 
 type BrainWakeItemSink<'a> = Option<&'a mut dyn FnMut(BrainWakeStreamItem)>;
@@ -1572,7 +1610,6 @@ where
             client,
             tools,
             request_builder: ResponsesRequestBuilder::new(config).tools(descriptors),
-            max_continuations: 8,
         }
     }
 
@@ -1646,7 +1683,7 @@ where
         let base_history = history;
         let mut repeated_function_calls = HashMap::new();
 
-        for _ in 0..=self.max_continuations {
+        for _ in 0..=self.request_builder.config.max_continuation_rounds {
             let planned_request = self.request_builder.build_for_strategy(
                 &request,
                 request.provider_state.as_ref(),
@@ -1832,7 +1869,9 @@ where
         Ok(failed_result(
             &request,
             items,
-            ResponsesStreamError::RequestTimeout,
+            ResponsesStreamError::ContinuationLimitExceeded {
+                limit: self.request_builder.config.max_continuation_rounds,
+            },
             metrics.finish(),
             &mut sink,
         ))
@@ -2133,15 +2172,38 @@ fn failed_result(
     request: &BrainWakeRequest,
     mut items: Vec<BrainWakeStreamItem>,
     error: ResponsesStreamError,
-    transport_metrics: ResponsesTransportMetrics,
+    mut transport_metrics: ResponsesTransportMetrics,
     sink: &mut BrainWakeItemSink<'_>,
 ) -> ResponsesBrainWakeResult {
+    transport_metrics.terminal_failure_reason_code = Some(error.reason_code().to_string());
+    transport_metrics.terminal_failure_source = Some(error.source().to_string());
+    push_stream_item(
+        &mut items,
+        event(
+            request,
+            BrainEvent::ProviderStatus {
+                level: BrainProviderStatusLevel::Error,
+                message: error.to_string(),
+                metadata_json: Some(
+                    json!({
+                        "reasonCode": error.reason_code(),
+                        "source": error.source(),
+                        "providerRequestCount": transport_metrics.provider_request_count,
+                        "continuationRoundCount": transport_metrics.continuation_round_count,
+                    })
+                    .to_string(),
+                ),
+            },
+        ),
+        sink,
+    );
     push_stream_item(
         &mut items,
         BrainWakeStreamItem::wake_failed(BrainWakeFailure {
             wake_id: request.wake_id.clone(),
             session_id: request.session_id.clone(),
             kind: CoreErrorKind::BrainUnavailable,
+            reason_code: Some(error.reason_code().to_string()),
             message: error.to_string(),
         }),
         sink,
@@ -3118,6 +3180,135 @@ mod tests {
             "expected repeated-call failure, got {failures:?}",
         );
         assert!(result.provider_state.is_none());
+    }
+
+    #[test]
+    fn long_multi_tool_replay_finishes_with_reasoning_and_output_policy_intact() {
+        const TOOL_CALL_COUNT: usize = 20;
+        let mut scripts = Vec::new();
+        for index in 0..TOOL_CALL_COUNT {
+            scripts.push(Ok(vec![
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: Some(format!("item-{index}")),
+                    call_id: format!("call-{index}"),
+                    name: "lookup".to_string(),
+                    arguments: format!(r#"{{"step":{index}}}"#),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: format!("response-{index}"),
+                    usage: None,
+                },
+            ]));
+        }
+        scripts.push(Ok(vec![
+            ResponsesEvent::TextDelta("long replay complete".to_string()),
+            ResponsesEvent::Completed {
+                response_id: "response-final".to_string(),
+                usage: None,
+            },
+        ]));
+        let mut client = FakeResponsesClient::new(scripts);
+        for _ in 0..TOOL_CALL_COUNT {
+            client = client.expect_function_output("call-0");
+        }
+        let mut config = ResponsesBrainConfig::replay("gpt-5");
+        config.reasoning = Some(ResponsesReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: None,
+        });
+        config.max_output_tokens = Some(8192);
+        let mut brain = brain_with_config(
+            client,
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "evidence".to_string(),
+                    is_error: false,
+                },
+            )]),
+            config,
+        );
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+        let completed_calls = items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item,
+                    BrainWakeStreamItem::Event { event }
+                        if matches!(event.event, BrainEvent::ToolCallFinished { .. })
+                )
+            })
+            .count();
+        assert_eq!(completed_calls, TOOL_CALL_COUNT);
+        assert!(matches!(
+            items.last(),
+            Some(BrainWakeStreamItem::Actions { .. })
+        ));
+        assert_eq!(result.transport_metrics.provider_request_count, 21);
+        assert_eq!(result.transport_metrics.continuation_round_count, 20);
+        assert_eq!(result.transport_metrics.terminal_failure_reason_code, None);
+        assert!(brain.client.requests().iter().all(|request| {
+            request.max_output_tokens == Some(8192)
+                && request.reasoning == Some(json!({"effort": "high"}))
+        }));
+    }
+
+    #[test]
+    fn continuation_limit_has_its_own_typed_failure_provenance() {
+        let tool_call = |index| {
+            Ok(vec![
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: Some(format!("item-{index}")),
+                    call_id: format!("call-{index}"),
+                    name: "lookup".to_string(),
+                    arguments: format!(r#"{{"step":{index}}}"#),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: format!("response-{index}"),
+                    usage: None,
+                },
+            ])
+        };
+        let client = FakeResponsesClient::new(vec![tool_call(0), tool_call(1), tool_call(2)])
+            .expect_function_output("call-0")
+            .expect_function_output("call-0");
+        let mut config = ResponsesBrainConfig::replay("gpt-5");
+        config.max_continuation_rounds = 2;
+        let mut brain = brain_with_config(
+            client,
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "evidence".to_string(),
+                    is_error: false,
+                },
+            )]),
+            config,
+        );
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+        let failure = items.iter().find_map(|item| match item {
+            BrainWakeStreamItem::WakeFailed { failure } => Some(failure),
+            _ => None,
+        });
+        assert_eq!(
+            failure.and_then(|failure| failure.reason_code.as_deref()),
+            Some("responses_continuation_limit_exceeded")
+        );
+        assert_eq!(
+            result
+                .transport_metrics
+                .terminal_failure_reason_code
+                .as_deref(),
+            Some("responses_continuation_limit_exceeded")
+        );
+        assert_eq!(
+            result.transport_metrics.terminal_failure_source.as_deref(),
+            Some("responses_loop")
+        );
     }
 
     #[test]

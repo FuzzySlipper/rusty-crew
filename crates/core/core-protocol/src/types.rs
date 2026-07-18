@@ -1099,6 +1099,8 @@ pub struct BrainWakeFailure {
     pub wake_id: String,
     pub session_id: SessionId,
     pub kind: CoreErrorKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
     pub message: String,
 }
 

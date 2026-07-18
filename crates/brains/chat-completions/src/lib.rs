@@ -1183,6 +1183,7 @@ fn wake_failed_item(
         wake_id: context.wake_id.clone(),
         session_id: context.session_id.clone(),
         kind,
+        reason_code: None,
         message: message.into(),
     })
 }

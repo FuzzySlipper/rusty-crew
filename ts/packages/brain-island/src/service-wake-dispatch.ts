@@ -11,6 +11,7 @@ import type {
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { buildChatWakeFailureSummaryFromEvents } from "./chat-wake-failure-summary.js";
+import { BufferedBrainWakeError } from "./buffered-brain-host.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ChatEvent } from "./rusty-view-chat-api.js";
 import {
@@ -378,6 +379,41 @@ export async function dispatchWake(
         eventType: "brain_wake_timeout",
         severity: "error",
         summary: `${report.summary} (${source}).`,
+      });
+      return report;
+    }
+    if (error instanceof BufferedBrainWakeError) {
+      const report: ServiceWakeDispatchReport = {
+        sessionId,
+        wakeId: activeWake?.wakeId,
+        status: "failed",
+        summary: await buildChatWakeFailureSummary(
+          context,
+          activeWake?.session,
+          activeWake?.wakeId,
+          error.message,
+        ),
+        reasonCode: error.reasonCode,
+      };
+      if (appendChatEvents && activeWake !== undefined) {
+        await ensureChatWakeTerminalEventsFromChatLog(
+          context,
+          activeWake.session,
+          activeWake.wakeId,
+          {
+            status: "failed",
+            summary: report.summary,
+            reasonCode: error.reasonCode,
+            source: error.source,
+            allowWithoutAssistantTurn: true,
+          },
+        );
+      }
+      context.recordEvent({
+        source: "service-host",
+        eventType: "brain_wake_failed",
+        severity: "error",
+        summary: report.summary,
       });
       return report;
     }

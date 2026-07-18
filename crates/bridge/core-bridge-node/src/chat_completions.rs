@@ -180,6 +180,10 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
             let drain = run.coordinator.drain_stream(max_items);
             let tool_requests = run.coordinator.drain_host_tool_requests(128);
             let terminal = drain.terminal && run.payload.provider_finished;
+            let terminal_reason_code = terminal
+                .then(|| run.coordinator.terminal())
+                .flatten()
+                .map(|terminal| terminal.reason_code.clone());
             let error = terminal
                 .then(|| run.coordinator.terminal())
                 .flatten()
@@ -190,6 +194,7 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
                 "items": drain.items.into_iter().map(|item| item.item).collect::<Vec<_>>(),
                 "tool_requests": tool_requests,
                 "terminal": terminal,
+                "terminal_reason_code": terminal_reason_code,
                 "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
                 "error": error,
                 "cancellation": terminal.then(|| run.coordinator.cancellation()).flatten(),

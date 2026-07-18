@@ -54,6 +54,22 @@ export interface BufferedBrainHostRunResult {
   brainStreamItemCounts: Record<string, number>;
 }
 
+export class BufferedBrainWakeError extends Error {
+  constructor(
+    readonly reasonCode: string,
+    readonly source: string,
+    message: string,
+    readonly transportMetrics?:
+      | OpenAiResponsesTransportMetrics
+      | ChatCompletionsTransportMetrics,
+    readonly brainEventCounts?: Record<string, number>,
+    readonly brainStreamItemCounts?: Record<string, number>,
+  ) {
+    super(message);
+    this.name = "BufferedBrainWakeError";
+  }
+}
+
 export async function runBufferedBrainHost(options: {
   bridge: NativeBridgeModule;
   run: BufferedBrainProviderRun;
@@ -120,6 +136,9 @@ export async function runBufferedBrainHost(options: {
   const streamActions: BrainAction[] = [];
   const brainEventCounts: Record<string, number> = {};
   const brainStreamItemCounts: Record<string, number> = {};
+  let streamFailure:
+    | { reasonCode: string; source: string; message: string }
+    | undefined;
   const toolDebugReferences = createBrainHostToolDebugReferences();
   try {
     for (;;) {
@@ -156,13 +175,14 @@ export async function runBufferedBrainHost(options: {
           events.push(debugItem.event);
           continue;
         }
-        await projectStreamItem(
+        const failure = await projectStreamItem(
           options.bridge,
           debugItem,
           streamActions,
           options.moduleLabel,
           options.submitEvent,
         );
+        streamFailure ??= failure;
       }
       for (const request of preparedToolRequests) {
         const output = await executePreparedBrainHostToolRequest(
@@ -204,11 +224,29 @@ export async function runBufferedBrainHost(options: {
         }
       }
       if (drained.error !== undefined) {
-        throw new Error(
-          `${options.moduleLabel} buffered wake ${started.wakeId} failed: ${drained.error}`,
+        throw new BufferedBrainWakeError(
+          streamFailure?.reasonCode ??
+            drained.terminalReasonCode ??
+            "provider_error",
+          streamFailure?.source ?? "native_brain_terminal",
+          streamFailure?.message ??
+            `${options.moduleLabel} buffered wake ${started.wakeId} failed: ${drained.error}`,
+          drained.transportMetrics,
+          brainEventCounts,
+          brainStreamItemCounts,
         );
       }
       if (drained.terminal) {
+        if (streamFailure !== undefined) {
+          throw new BufferedBrainWakeError(
+            streamFailure.reasonCode,
+            streamFailure.source,
+            streamFailure.message,
+            drained.transportMetrics,
+            brainEventCounts,
+            brainStreamItemCounts,
+          );
+        }
         const plannedActions = options.planActions
           ? await options.planActions({
               wake: options.wake,
@@ -260,18 +298,22 @@ async function projectStreamItem(
   submitEvent: (event: BrainEventEnvelope) => Promise<void> = async (event) => {
     await bridge.submitBrainEvent(event);
   },
-): Promise<void> {
+): Promise<
+  { reasonCode: string; source: string; message: string } | undefined
+> {
   switch (item.type) {
     case "event":
       await submitEvent(item.event);
-      return;
+      return undefined;
     case "actions":
       actions.push(...item.batch.actions);
-      return;
+      return undefined;
     case "wake_failed":
-      throw new Error(
-        `${moduleLabel} wake ${item.failure.wakeId} failed: ${item.failure.message}`,
-      );
+      return {
+        reasonCode: item.failure.reasonCode ?? "brain_unavailable",
+        source: "native_brain_stream",
+        message: `${moduleLabel} wake ${item.failure.wakeId} failed: ${item.failure.message}`,
+      };
   }
 }
 

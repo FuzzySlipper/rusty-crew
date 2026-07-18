@@ -1089,6 +1089,12 @@ const openAiResponsesTransportMetricsSchema = Type.Object(
       Type.Union([Type.Number(), Type.Null()]),
     ),
     totalTurnDurationMs: Type.Number(),
+    terminalFailureReasonCode: Type.Optional(
+      Type.Union([Type.String(), Type.Null()]),
+    ),
+    terminalFailureSource: Type.Optional(
+      Type.Union([Type.String(), Type.Null()]),
+    ),
   },
   { additionalProperties: true },
 );
@@ -1126,6 +1132,9 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
         model: Type.String(),
         instructions: Type.Optional(Type.String()),
         providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
+        maxContinuationRounds: Type.Optional(
+          Type.Number({ minimum: 1, maximum: 512 }),
+        ),
       },
       { additionalProperties: true },
     ),
@@ -1353,6 +1362,7 @@ const rawBrainWakeStreamItemSchema = Type.Union([
           wake_id: Type.String(),
           session_id: Type.String(),
           kind: Type.String(),
+          reason_code: Type.Optional(Type.String()),
           message: Type.String(),
         },
         { additionalProperties: true },
@@ -1483,6 +1493,9 @@ export const rawBufferedBrainRunDrainSchema = Type.Object(
       ),
     ),
     terminal: Type.Boolean(),
+    terminal_reason_code: Type.Optional(
+      Type.Union([Type.String(), Type.Null()]),
+    ),
     provider_state: Type.Optional(
       Type.Union([rawProviderStateOutputSchema, Type.Null()]),
     ),

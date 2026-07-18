@@ -372,6 +372,7 @@ export type BrainWakeAccepted = {
 export type BrainWakeFailure = {
   kind: CoreErrorKind;
   message: string;
+  reasonCode?: string | null;
   sessionId: SessionId;
   wakeId: string;
 };

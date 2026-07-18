@@ -1439,6 +1439,12 @@
         "message": {
           "type": "string"
         },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "session_id": {
           "type": "string"
         },

@@ -2492,6 +2492,8 @@ function recordResponsesWakeMetrics(
     brainStreamItemCounts,
     firstTextDeltaLatencyMs: metrics.firstTextDeltaLatencyMs,
     totalTurnDurationMs: metrics.totalTurnDurationMs,
+    terminalFailureReasonCode: metrics.terminalFailureReasonCode,
+    terminalFailureSource: metrics.terminalFailureSource,
   });
   state.responsesWakeMetrics.splice(50);
 }

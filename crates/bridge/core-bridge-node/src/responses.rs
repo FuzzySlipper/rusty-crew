@@ -46,6 +46,8 @@ struct JsOpenAiResponsesBrainConfig {
     #[serde(default)]
     provider_request_timeout_ms: Option<u64>,
     #[serde(default)]
+    max_continuation_rounds: Option<usize>,
+    #[serde(default)]
     wake_timeout_ms: Option<u64>,
 }
 
@@ -268,6 +270,10 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
         let drain = run.coordinator.drain_stream(max_items);
         let tool_requests = run.coordinator.drain_host_tool_requests(128);
         let terminal = drain.terminal && run.payload.provider_finished;
+        let terminal_reason_code = terminal
+            .then(|| run.coordinator.terminal())
+            .flatten()
+            .map(|terminal| terminal.reason_code.clone());
         let error = terminal
             .then(|| run.coordinator.terminal())
             .flatten()
@@ -278,6 +284,7 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
             "items": drain.items.into_iter().map(|item| item.item).collect::<Vec<_>>(),
             "tool_requests": tool_requests,
             "terminal": terminal,
+            "terminal_reason_code": terminal_reason_code,
             "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
             "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
             "credential_secret_update": terminal.then(|| run.payload.credential_secret_update.clone()).flatten(),
@@ -706,6 +713,15 @@ where
     });
     config.max_output_tokens = input.config.max_output_tokens;
     config.provider_request_timeout_ms = input.config.provider_request_timeout_ms;
+    if let Some(max_continuation_rounds) = input.config.max_continuation_rounds {
+        if max_continuation_rounds == 0 || max_continuation_rounds > 512 {
+            return Err(napi::Error::new(
+                napi::Status::InvalidArg,
+                "OpenAI Responses max_continuation_rounds must be between 1 and 512",
+            ));
+        }
+        config.max_continuation_rounds = max_continuation_rounds;
+    }
     let descriptors = if input.tools.is_empty() {
         input
             .body_state

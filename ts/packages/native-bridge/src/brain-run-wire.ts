@@ -219,6 +219,9 @@ export function toBrainWakeStreamItem(
           wakeId: item.failure.wake_id,
           sessionId: item.failure.session_id,
           kind: item.failure.kind as BrainWakeFailure["kind"],
+          ...(item.failure.reason_code === undefined
+            ? {}
+            : { reasonCode: item.failure.reason_code }),
           message: item.failure.message,
         },
       };
@@ -317,6 +320,10 @@ export function toRawBrainWakeStreamItem(
           wake_id: item.failure.wakeId,
           session_id: item.failure.sessionId,
           kind: item.failure.kind,
+          ...(item.failure.reasonCode === undefined ||
+          item.failure.reasonCode === null
+            ? {}
+            : { reason_code: item.failure.reasonCode }),
           message: item.failure.message,
         },
       };
@@ -447,6 +454,9 @@ export function toBufferedBrainRunDrainResult(
       argumentsJson: request.arguments_json,
     })),
     terminal: raw.terminal,
+    ...(raw.terminal_reason_code == null
+      ? {}
+      : { terminalReasonCode: raw.terminal_reason_code }),
     ...(raw.provider_state == null
       ? {}
       : { providerState: toBrainWakeProviderStateOutput(raw.provider_state) }),
@@ -502,6 +512,9 @@ export function toRawBufferedBrainRunDrainResult(
       arguments_json: request.argumentsJson,
     })),
     terminal: result.terminal,
+    ...(result.terminalReasonCode === undefined
+      ? {}
+      : { terminal_reason_code: result.terminalReasonCode }),
     ...(result.providerState === undefined
       ? {}
       : {
@@ -622,6 +635,7 @@ export interface RawBufferedBrainRunDrainResult {
     arguments_json: string;
   }>;
   terminal: boolean;
+  terminal_reason_code?: string | null;
   provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?:
     | OpenAiResponsesTransportMetrics
@@ -669,6 +683,7 @@ export type RawBrainWakeStreamItem =
         wake_id: string;
         session_id: SessionId;
         kind: string;
+        reason_code?: string;
         message: string;
       };
     };

@@ -48,7 +48,9 @@ import {
 } from "./coordination-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
 import { createBuiltInBrainHost } from "./built-in-brain-host.js";
+import { BufferedBrainWakeError } from "./buffered-brain-host.js";
 import { providerRequestTimeoutDiagnostics } from "./provider-request-timeout.js";
+import { responsesContinuationDiagnostics } from "./responses-continuation-policy.js";
 import {
   resolveBrainCatalogSelection,
   type BrainModuleSelection,
@@ -1403,6 +1405,7 @@ function brainModuleDiagnostics(input: {
         ? { clientMode: "live" }
         : {}),
       ...providerRequestTimeoutDiagnostics(input.selection.moduleId),
+      ...responsesContinuationDiagnostics(input.selection.moduleId),
       modelId: input.profile.profile.modelConfig.modelName,
       ...(input.profile.profile.modelConfig.baseUrl === undefined
         ? {}
@@ -1758,12 +1761,35 @@ function toBridgeWakeExecutor(
 ): BrainWakeExecutor {
   return {
     async wake(request, buffers, wakeOptions) {
-      const result = await wakeBrainFromBridgeRequest(
-        buffers,
-        brain,
-        request,
-        wakeOptions,
-      );
+      let result: BrainWakeResult;
+      try {
+        result = await wakeBrainFromBridgeRequest(
+          buffers,
+          brain,
+          request,
+          wakeOptions,
+        );
+      } catch (error) {
+        if (
+          options.profileId !== undefined &&
+          error instanceof BufferedBrainWakeError &&
+          error.transportMetrics !== undefined
+        ) {
+          options.onBrainWakeResult?.({
+            profileId: options.profileId,
+            sessionId: request.sessionId,
+            wakeId: request.wakeId,
+            result: {
+              events: [],
+              actions: [],
+              transportMetrics: error.transportMetrics,
+              brainEventCounts: error.brainEventCounts,
+              brainStreamItemCounts: error.brainStreamItemCounts,
+            },
+          });
+        }
+        throw error;
+      }
       if (
         options.profileId !== undefined &&
         result.transportMetrics !== undefined

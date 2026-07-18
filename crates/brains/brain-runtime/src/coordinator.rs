@@ -402,7 +402,10 @@ impl BufferedBrainTurnCoordinator {
             BrainWakeStreamItem::Actions { .. } => Some(BufferedBrainTurnPhase::Completed),
             BrainWakeStreamItem::WakeFailed { failure } => {
                 self.terminal = Some(BufferedBrainTurnTerminal {
-                    reason_code: failure.kind.reason_code().to_string(),
+                    reason_code: failure
+                        .reason_code
+                        .clone()
+                        .unwrap_or_else(|| failure.kind.reason_code().to_string()),
                     summary: failure.message.clone(),
                     occurred_at: format_rfc3339(now),
                 });
@@ -1141,6 +1144,7 @@ mod tests {
             wake_id: "wake-1".to_string(),
             session_id: SessionId::new("session-1"),
             kind: CoreErrorKind::AdapterUnavailable,
+            reason_code: None,
             message: "adapter offline".to_string(),
         }))
         .expect("enqueue failure");
@@ -1148,6 +1152,25 @@ mod tests {
             turn.terminal()
                 .map(|terminal| terminal.reason_code.as_str()),
             Some("adapter_unavailable")
+        );
+    }
+
+    #[test]
+    fn wake_failed_terminal_preserves_specific_reason_code() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        turn.enqueue_stream_item(BrainWakeStreamItem::wake_failed(BrainWakeFailure {
+            wake_id: "wake-1".to_string(),
+            session_id: SessionId::new("session-1"),
+            kind: CoreErrorKind::BrainUnavailable,
+            reason_code: Some("provider_request_timeout".to_string()),
+            message: "provider request timed out".to_string(),
+        }))
+        .expect("enqueue failure");
+        assert_eq!(
+            turn.terminal()
+                .map(|terminal| terminal.reason_code.as_str()),
+            Some("provider_request_timeout")
         );
     }
 
@@ -1465,6 +1488,7 @@ mod tests {
             wake_id: "wake-1".to_string(),
             session_id: session_id("session-1"),
             kind: CoreErrorKind::AdapterUnavailable,
+            reason_code: None,
             message: "provider unavailable".to_string(),
         }))
         .expect("failure item");

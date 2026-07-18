@@ -3440,6 +3440,7 @@ fn sample_brain_wake_failure() -> BrainWakeFailure {
         wake_id: "validation-wake".to_owned(),
         session_id: sample_session_id(),
         kind: CoreErrorKind::InternalError,
+        reason_code: Some("validation_failure".to_owned()),
         message: "Validation fixture wake failed.".to_owned(),
     }
 }

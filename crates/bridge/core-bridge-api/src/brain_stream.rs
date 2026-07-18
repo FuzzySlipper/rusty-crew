@@ -51,6 +51,7 @@ impl BrainWakeStream {
             wake_id: wake_id.into(),
             session_id,
             kind,
+            reason_code: None,
             message: message.into(),
         })])
     }

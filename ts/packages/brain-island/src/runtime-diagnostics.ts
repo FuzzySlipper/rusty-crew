@@ -224,6 +224,7 @@ export interface RuntimeBrainModuleDiagnostics {
     clientMode?: "fake" | "live" | string;
     providerRequestTimeoutMode?: "disabled" | "configured";
     providerRequestTimeoutMs?: number;
+    maxContinuationRounds?: number;
     modelId: string;
     status?: string;
     baseUrl?: string;
@@ -268,6 +269,8 @@ export interface RuntimeResponsesWakeMetrics {
   brainStreamItemCounts: Record<string, number>;
   firstTextDeltaLatencyMs?: number | null;
   totalTurnDurationMs: number;
+  terminalFailureReasonCode?: string | null;
+  terminalFailureSource?: string | null;
 }
 
 export interface RuntimeBufferedBrainRunModuleDiagnostics {

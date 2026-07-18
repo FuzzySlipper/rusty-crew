@@ -20,6 +20,7 @@ import type { BrainHostContext } from "./brain-host-context.js";
 import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
+import { responsesMaxContinuationRounds } from "./responses-continuation-policy.js";
 
 export type OpenAiResponsesClientConfig = NonNullable<
   OpenAiResponsesBrainRunInput["client"]
@@ -194,8 +195,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   return {
     ...result,
     transportMetrics: result.transportMetrics as
-      | OpenAiResponsesTransportMetrics
-      | undefined,
+      OpenAiResponsesTransportMetrics | undefined,
   };
 }
 
@@ -236,6 +236,7 @@ export async function createOpenAiResponsesBrainHost(
           ...(requestTimeoutMs === undefined
             ? {}
             : { providerRequestTimeoutMs: requestTimeoutMs }),
+          maxContinuationRounds: responsesMaxContinuationRounds(),
           wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
         },
         client: responsesClientConfig,
