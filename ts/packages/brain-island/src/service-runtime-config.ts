@@ -27,7 +27,6 @@ import type {
   ServiceAdapterFactories,
 } from "./service-adapter-ports.js";
 import type {
-  BrainWakeExecutor,
   NativeBridgeModule,
   NativeBrainConfigDraft,
   NativeRuntimeConfigDiagnostic,
@@ -48,7 +47,6 @@ import {
 } from "./coordination-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
 import { createBuiltInBrainHost } from "./built-in-brain-host.js";
-import { BufferedBrainWakeError } from "./buffered-brain-host.js";
 import { providerRequestTimeoutDiagnostics } from "./provider-request-timeout.js";
 import { responsesContinuationDiagnostics } from "./responses-continuation-policy.js";
 import {
@@ -56,7 +54,6 @@ import {
   type BrainModuleSelection,
   type BrainModuleStrategyMetadata,
 } from "./brain-catalog.js";
-import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { nextCronDueAt } from "./cron-expression.js";
 import {
   denseProfileMemoryTool,
@@ -67,7 +64,7 @@ import { resolveDelegationTools } from "./delegation-tools.js";
 import { resolveLoreMemoryTools } from "./lore-memory-tool.js";
 import { resolveSceneStateTools } from "./scene-state-tool.js";
 import { createRoleplayMechanicToolResolver } from "./roleplay-mechanic-tools.js";
-import type { BrainHostExecutor, BrainWakeResult } from "./index.js";
+import type { BrainHostExecutor } from "./index.js";
 import { createLocalCodeToolResolver } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
@@ -103,6 +100,11 @@ import {
   type ServiceMcpToolDiscoveryClientFactory,
   type ServiceMcpToolExecutorFactory,
 } from "./service-mcp-tools.js";
+import {
+  createServiceBrainWakeExecutor,
+  type ServiceBrainWakeResultObservation,
+} from "./service-brain-wake-executor.js";
+export type { ServiceBrainWakeResultObservation } from "./service-brain-wake-executor.js";
 import {
   createServiceBrowserResources,
   type ServiceBrowserResources,
@@ -206,13 +208,6 @@ export interface RustyCrewRuntimeConfigApplyResult {
   brainHandlesByProfileId: Record<string, BrainImplementationHandle>;
   brainModulesByProfileId: Record<string, BrainModuleSelection>;
   brainDiagnosticsByProfileId: Record<string, RuntimeBrainModuleDiagnostics>;
-}
-
-export interface ServiceBrainWakeResultObservation {
-  profileId: ProfileId;
-  sessionId: SessionId;
-  wakeId: string;
-  result: BrainWakeResult;
 }
 
 export interface RustyCrewBrainRuntimeRebuildResult {
@@ -897,7 +892,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           strategy,
           providerStateScope,
         },
-        toBridgeWakeExecutor(
+        createServiceBrainWakeExecutor(
           await createConfiguredBrain(selection, profile, {
             bridge: input.bridge,
             providerStateScope,
@@ -1150,7 +1145,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
       strategy,
       providerStateScope,
     },
-    toBridgeWakeExecutor(
+    createServiceBrainWakeExecutor(
       await createConfiguredBrain(selection, profile, {
         bridge: input.bridge,
         providerStateScope,
@@ -1748,62 +1743,6 @@ function serviceSkillManageMode(
   )
     ? "profile"
     : "off";
-}
-
-function toBridgeWakeExecutor(
-  brain: BrainHostExecutor,
-  options: {
-    profileId?: ProfileId;
-    onBrainWakeResult?: (
-      observation: ServiceBrainWakeResultObservation,
-    ) => void;
-  } = {},
-): BrainWakeExecutor {
-  return {
-    async wake(request, buffers, wakeOptions) {
-      let result: BrainWakeResult;
-      try {
-        result = await wakeBrainFromBridgeRequest(
-          buffers,
-          brain,
-          request,
-          wakeOptions,
-        );
-      } catch (error) {
-        if (
-          options.profileId !== undefined &&
-          error instanceof BufferedBrainWakeError &&
-          error.transportMetrics !== undefined
-        ) {
-          options.onBrainWakeResult?.({
-            profileId: options.profileId,
-            sessionId: request.sessionId,
-            wakeId: request.wakeId,
-            result: {
-              events: [],
-              actions: [],
-              transportMetrics: error.transportMetrics,
-              brainEventCounts: error.brainEventCounts,
-              brainStreamItemCounts: error.brainStreamItemCounts,
-            },
-          });
-        }
-        throw error;
-      }
-      if (
-        options.profileId !== undefined &&
-        result.transportMetrics !== undefined
-      ) {
-        options.onBrainWakeResult?.({
-          profileId: options.profileId,
-          sessionId: request.sessionId,
-          wakeId: request.wakeId,
-          result,
-        });
-      }
-      return result;
-    },
-  };
 }
 
 function completionActionFromEvents(input: {
