@@ -195,7 +195,8 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   return {
     ...result,
     transportMetrics: result.transportMetrics as
-      OpenAiResponsesTransportMetrics | undefined,
+      | OpenAiResponsesTransportMetrics
+      | undefined,
   };
 }
 
