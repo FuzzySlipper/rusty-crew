@@ -49,6 +49,7 @@ import { resolveCompletionTools } from "./completion-tools.js";
 import { createBuiltInBrainHost } from "./built-in-brain-host.js";
 import { providerRequestTimeoutDiagnostics } from "./provider-request-timeout.js";
 import { responsesContinuationDiagnostics } from "./responses-continuation-policy.js";
+import { chatCompletionsContinuationDiagnostics } from "./chat-completions-continuation-policy.js";
 import {
   resolveBrainCatalogSelection,
   type BrainModuleSelection,
@@ -1400,6 +1401,7 @@ function brainModuleDiagnostics(input: {
         ? { clientMode: "live" }
         : {}),
       ...providerRequestTimeoutDiagnostics(input.selection.moduleId),
+      ...chatCompletionsContinuationDiagnostics(input.selection.moduleId),
       ...responsesContinuationDiagnostics(input.selection.moduleId),
       modelId: input.profile.profile.modelConfig.modelName,
       ...(input.profile.profile.modelConfig.baseUrl === undefined

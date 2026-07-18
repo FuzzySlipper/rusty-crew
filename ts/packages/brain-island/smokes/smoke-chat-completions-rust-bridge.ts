@@ -71,6 +71,7 @@ const hostIsolation = await runSameWakeHostIsolationScenario();
 const cleanup = await runExplicitCleanupScenario();
 const singleDeniedContinuation = await runSingleDeniedContinuationScenario();
 const repeatedFailureStop = await runRepeatedFailureStopScenario();
+const longContinuation = await runLongContinuationScenario();
 
 console.log(
   JSON.stringify(
@@ -83,6 +84,7 @@ console.log(
       cleanup,
       singleDeniedContinuation,
       repeatedFailureStop,
+      longContinuation,
     },
     null,
     2,
@@ -119,8 +121,64 @@ function chatCompletionsWakeInput(
       model: "deepseek-flash",
       wakeTimeoutMs: 10_000,
       providerRequestTimeoutMs: 10_000,
+      maxToolRounds: 64,
     },
     client: { mode: "fake" as const },
+  };
+}
+
+async function runLongContinuationScenario(): Promise<{
+  submittedToolRounds: number;
+  providerRequestCount: number;
+  completedNormally: boolean;
+}> {
+  const host = await loadNativeBridge();
+  const wakeId = "chat-completions-long-continuation-wake";
+  await host.startBrainRun({
+    moduleId: "chat-completions",
+    providerInput: chatCompletionsWakeInput(
+      wakeId,
+      "long-continuation",
+      "long_continuation_tool",
+    ),
+  });
+
+  const submittedToolRounds = 12;
+  for (let round = 1; round <= submittedToolRounds; round += 1) {
+    const pending = await waitForToolRequest(host, wakeId);
+    assert.equal(pending.toolRequests.length, 1);
+    assert.equal(pending.toolRequests[0]?.name, "long_continuation_tool");
+    assert.equal(
+      pending.toolRequests[0]?.argumentsJson,
+      JSON.stringify({ round }),
+    );
+    await host.submitBrainHostResult({
+      moduleId: "chat-completions",
+      wakeId,
+      callId: pending.toolRequests[0]!.callId,
+      output: `long continuation result ${round}`,
+      status: "succeeded",
+      retryable: false,
+    });
+  }
+
+  const terminal = await drainTerminalReceipt(host, wakeId);
+  const completedNormally = terminal.stream.at(-1)?.type === "actions";
+  assert.equal(completedNormally, true);
+  assert.equal(terminal.transportMetrics?.toolRoundCount, submittedToolRounds);
+  assert.equal(
+    terminal.transportMetrics?.providerRequestCount,
+    submittedToolRounds + 1,
+  );
+  assert.match(
+    streamText(terminal.stream),
+    /chat-completions long continuation completed/,
+  );
+
+  return {
+    submittedToolRounds,
+    providerRequestCount: terminal.transportMetrics?.providerRequestCount ?? 0,
+    completedNormally,
   };
 }
 
@@ -402,7 +460,13 @@ async function drainTerminalReceipt(
   nativeBridge: NativeBridgeModule,
   wakeId: string,
   options: { allowTerminalError?: boolean } = {},
-): Promise<{ stream: BrainWakeStreamItem[]; error?: string }> {
+): Promise<{
+  stream: BrainWakeStreamItem[];
+  error?: string;
+  transportMetrics?: Awaited<
+    ReturnType<NativeBridgeModule["drainBrainRun"]>
+  >["transportMetrics"];
+}> {
   const stream: BrainWakeStreamItem[] = [];
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const drained = await nativeBridge.drainBrainRun({
@@ -418,6 +482,9 @@ async function drainTerminalReceipt(
       return {
         stream,
         ...(drained.error === undefined ? {} : { error: drained.error }),
+        ...(drained.transportMetrics === undefined
+          ? {}
+          : { transportMetrics: drained.transportMetrics }),
       };
     }
     await delay(25);

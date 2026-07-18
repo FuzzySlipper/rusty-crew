@@ -11,7 +11,7 @@ use rusty_crew_chat_completions_brain::{
     ChatCompletionsFinalMessage, ChatCompletionsNeutralToolExecutor, ChatCompletionsToolOutput,
     FakeChatCompletionsClient, LiveChatCompletionsClient,
     NeutralBrainTool as ChatCompletionsNeutralBrainTool, PendingChatFunctionCall,
-    ProviderCancellation,
+    ProviderCancellation, DEFAULT_MAX_TOOL_ROUNDS,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -356,7 +356,10 @@ fn run_chat_completions_brain_with_buffered_tools(
         .map_err(brain_runtime_error_to_napi)?;
     let chat_config = chat_completions_chat_config(&input.config);
     let loop_config = ChatCompletionsBrainLoopConfig {
-        max_tool_rounds: input.config.max_tool_rounds.unwrap_or(8),
+        max_tool_rounds: input
+            .config
+            .max_tool_rounds
+            .unwrap_or(DEFAULT_MAX_TOOL_ROUNDS),
         repeated_tool_call_limit: input.config.repeated_tool_call_limit.unwrap_or(3),
     };
     let descriptors = input
@@ -467,8 +470,8 @@ fn fake_chat_completions_client(tool_name: Option<&str>) -> FakeChatCompletionsC
     };
     if tool_name == "repeat_failure_tool" {
         return FakeChatCompletionsClient::new([
-            fake_chat_completions_tool_call_script(tool_name, "fake-chat-call-1"),
-            fake_chat_completions_tool_call_script(tool_name, "fake-chat-call-2"),
+            fake_chat_completions_tool_call_script(tool_name, "fake-chat-call-1", "{}"),
+            fake_chat_completions_tool_call_script(tool_name, "fake-chat-call-2", "{}"),
             Ok(vec![
                 ChatCompletionsEvent::ContentDelta(
                     "chat-completions should not reach post-policy completion".to_string(),
@@ -479,8 +482,28 @@ fn fake_chat_completions_client(tool_name: Option<&str>) -> FakeChatCompletionsC
             ]),
         ]);
     }
+    if tool_name == "long_continuation_tool" {
+        let mut scripts = (1..=12)
+            .map(|round| {
+                fake_chat_completions_tool_call_script(
+                    tool_name,
+                    &format!("fake-chat-call-{round}"),
+                    &format!(r#"{{"round":{round}}}"#),
+                )
+            })
+            .collect::<Vec<_>>();
+        scripts.push(Ok(vec![
+            ChatCompletionsEvent::ContentDelta(
+                "chat-completions long continuation completed".to_string(),
+            ),
+            ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ]));
+        return FakeChatCompletionsClient::new(scripts);
+    }
     FakeChatCompletionsClient::new([
-        fake_chat_completions_tool_call_script(tool_name, "fake-chat-call"),
+        fake_chat_completions_tool_call_script(tool_name, "fake-chat-call", "{}"),
         Ok(vec![
             ChatCompletionsEvent::ContentDelta(
                 "<think>chat-completions Rust reasoning</think>chat-completions Rust bridge wake completed"
@@ -496,6 +519,7 @@ fn fake_chat_completions_client(tool_name: Option<&str>) -> FakeChatCompletionsC
 fn fake_chat_completions_tool_call_script(
     tool_name: &str,
     call_id: &str,
+    arguments_json: &str,
 ) -> Result<Vec<ChatCompletionsEvent>, rusty_crew_chat_completions_brain::ChatCompletionsStreamError>
 {
     Ok(vec![
@@ -503,7 +527,7 @@ fn fake_chat_completions_tool_call_script(
             index: 0,
             id: Some(call_id.to_string()),
             name: tool_name.to_string(),
-            arguments_json: "{}".to_string(),
+            arguments_json: arguments_json.to_string(),
         }),
         ChatCompletionsEvent::Finished {
             finish_reason: Some("tool_calls".to_string()),

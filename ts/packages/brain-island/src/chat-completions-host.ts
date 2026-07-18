@@ -25,6 +25,7 @@ import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
+import { chatCompletionsMaxToolRounds } from "./chat-completions-continuation-policy.js";
 
 export function createChatCompletionsBrainHost(
   context: BrainHostContext,
@@ -175,6 +176,7 @@ function createRustChatCompletionsBrainHostExecutor(
           maxOutputTokens:
             context.profile.profile.modelConfig.maxOutputTokens ??
             context.maxTokens,
+          maxToolRounds: chatCompletionsMaxToolRounds(),
         },
         client,
       };

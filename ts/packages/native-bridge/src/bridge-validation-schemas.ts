@@ -1200,7 +1200,9 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
         wakeTimeoutMs: Type.Optional(Type.Number()),
         temperatureMilli: Type.Optional(Type.Number()),
         maxOutputTokens: Type.Optional(Type.Number()),
-        maxToolRounds: Type.Optional(Type.Number()),
+        maxToolRounds: Type.Optional(
+          Type.Integer({ minimum: 1, maximum: 512 }),
+        ),
         repeatedToolCallLimit: Type.Optional(Type.Number()),
         finalMessageFallbackText: Type.Optional(Type.String()),
       },

@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "chat-completions";
+pub const DEFAULT_MAX_TOOL_ROUNDS: usize = 64;
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
 pub const DEFAULT_DEN_ROUTER_MODEL_CANDIDATES: [&str; 4] =
     ["deepseek-flash", "grok", "glm", "local-coder"];
@@ -644,7 +645,7 @@ pub struct ChatCompletionsBrainLoopConfig {
 impl Default for ChatCompletionsBrainLoopConfig {
     fn default() -> Self {
         Self {
-            max_tool_rounds: 8,
+            max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
             repeated_tool_call_limit: 3,
         }
     }
@@ -769,9 +770,10 @@ where
             }
 
             if tool_round_count >= self.config.max_tool_rounds {
-                stream.push(wake_failed_item(
+                stream.push(wake_failed_item_with_reason(
                     &input.context,
                     CoreErrorKind::BrainUnavailable,
+                    "chat_completions_continuation_limit_exceeded",
                     format!(
                         "chat-completions exceeded {} tool continuation rounds",
                         self.config.max_tool_rounds
@@ -1184,6 +1186,21 @@ fn wake_failed_item(
         session_id: context.session_id.clone(),
         kind,
         reason_code: None,
+        message: message.into(),
+    })
+}
+
+fn wake_failed_item_with_reason(
+    context: &BrainEventContext,
+    kind: CoreErrorKind,
+    reason_code: impl Into<String>,
+    message: impl Into<String>,
+) -> BrainWakeStreamItem {
+    BrainWakeStreamItem::wake_failed(BrainWakeFailure {
+        wake_id: context.wake_id.clone(),
+        session_id: context.session_id.clone(),
+        kind,
+        reason_code: Some(reason_code.into()),
         message: message.into(),
     })
 }
@@ -2352,6 +2369,90 @@ mod tests {
                 ..
             } if tool_name == "lookup"
         )));
+    }
+
+    #[test]
+    fn minimal_loop_completes_more_than_eight_distinct_tool_rounds() {
+        let tool_rounds = 12;
+        let mut scripts = (1..=tool_rounds)
+            .map(|round| {
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        &format!(r#"{{"round":{round}}}"#),
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ])
+            })
+            .collect::<Vec<_>>();
+        scripts.push(Ok(vec![
+            ChatCompletionsEvent::ContentDelta("long turn complete".to_string()),
+            ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ]));
+        let outputs = (1..=tool_rounds)
+            .map(|round| ChatCompletionsToolOutput::ok(format!("result {round}")))
+            .collect();
+        let mut brain =
+            loop_with(scripts, outputs).with_loop_config(ChatCompletionsBrainLoopConfig {
+                max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
+                repeated_tool_call_limit: 3,
+            });
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("complete the long tool turn")],
+        );
+
+        assert!(output.completed);
+        assert_eq!(output.tool_round_count, tool_rounds);
+        assert_eq!(output.provider_request_count, tool_rounds + 1);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "long turn complete".to_string()
+        }));
+    }
+
+    #[test]
+    fn minimal_loop_reports_a_stable_continuation_limit_reason() {
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", r#"{"round":1}"#)),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", r#"{"round":2}"#)),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok("first result")],
+        )
+        .with_loop_config(ChatCompletionsBrainLoopConfig {
+            max_tool_rounds: 1,
+            repeated_tool_call_limit: 3,
+        });
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("exceed the tool limit")],
+        );
+
+        assert!(!output.completed);
+        assert_eq!(output.tool_round_count, 1);
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.reason_code.as_deref()
+                    == Some("chat_completions_continuation_limit_exceeded")
+        ));
     }
 
     #[test]

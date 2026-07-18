@@ -118,6 +118,11 @@ try {
       "pi module diagnostics should report selected tools",
     );
     assert.equal(
+      applyResult.brainDiagnosticsByProfileId["chat-profile"]?.modelProvider
+        ?.maxContinuationRounds,
+      64,
+    );
+    assert.equal(
       applyResult.brainDiagnosticsByProfileId["responses-profile"]
         ?.providerStateMode,
       "optional",
