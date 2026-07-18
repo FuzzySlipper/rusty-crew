@@ -47,11 +47,7 @@ export interface ServiceWakeObservationContext {
 }
 
 export type ServiceWakeSource =
-  | "background"
-  | "direct_debug"
-  | "delivery"
-  | "external_runtime"
-  | "chat";
+  "background" | "direct_debug" | "delivery" | "external_runtime" | "chat";
 
 export type WakeProfileContext = Awaited<ReturnType<typeof loadProfileContext>>;
 
@@ -415,7 +411,7 @@ export async function dispatchWake(
   }
 }
 
-async function appendCoreEventsToChatLog(
+export async function appendCoreEventsToChatLog(
   context: ServiceWakeDispatchContext,
   session: SessionState,
   wakeId: string,
@@ -443,6 +439,15 @@ async function appendCoreEventsToChatLog(
           summary: event.packet.summary,
           wake_id: wakeId,
         },
+      });
+      // A `finished` brain event is observed before the completion packet in
+      // the normal wake lifecycle. Keep `assistant_turn_finished` terminal in
+      // the chat log: live transcript consumers can stop reading when it
+      // arrives, so appending it first strands the message in `streaming`
+      // until refresh even though the later completion event is persisted.
+      await context.appendChatEvent(session.sessionId, {
+        kind: "assistant_turn_finished",
+        payload: { wake_id: wakeId },
       });
     } else if (
       event.type === "brain_actions_accepted" &&
@@ -546,10 +551,10 @@ async function appendBrainEventToChatLog(
       });
       return;
     case "finished":
-      await context.appendChatEvent(session.sessionId, {
-        kind: "assistant_turn_finished",
-        payload: { wake_id: wakeId },
-      });
+      // Deferred until `completion_packet_delivered`; see
+      // appendCoreEventsToChatLog. The post-observation terminal fallback
+      // supplies both events in the same order when a completion packet is
+      // absent (timeout/provider failure).
       return;
   }
 }
@@ -596,20 +601,10 @@ async function ensureChatWakeTerminalEvents(
   );
   if (!hasAssistantTurn) return;
 
-  const hasCompletion = wakeEvents.some(
-    (event) => event.type === "completion_packet_delivered",
-  );
-  const hasFinished = wakeEvents.some(
-    (event) =>
-      event.type === "brain_event_observed" && event.event.type === "finished",
-  );
-
   await ensureChatWakeTerminalEventsFromChatLog(context, session, wakeId, {
     status: "completed",
     summary: fallback.summary,
     source: "terminal_fallback",
-    requireCompletion: !hasCompletion,
-    requireFinished: !hasFinished,
   });
 }
 
