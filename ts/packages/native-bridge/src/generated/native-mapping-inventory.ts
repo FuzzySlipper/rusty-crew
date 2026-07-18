@@ -70,6 +70,7 @@ export const nativeMappingInventory = {
         "BrainWakeFailure": [
           "kind",
           "message",
+          "reason_code",
           "session_id",
           "wake_id"
         ],
