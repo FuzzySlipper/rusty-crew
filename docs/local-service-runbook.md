@@ -378,8 +378,9 @@ systemctl --user daemon-reload
 
 ## Runtime Config
 
-`/home/system/rusty-crew/config/service.json` is optional. If absent, the
-service starts with an empty runtime shell.
+`/home/system/rusty-crew/config/service.json` is required by the current
+source-run service. For a new deployment, create the minimal empty runtime
+graph below before the first start.
 
 Minimal shape:
 

@@ -36,7 +36,7 @@ Choose one absolute runtime root per service:
 <root>/
   config/
     service.env
-    service.json             optional runtime graph
+    service.json             required runtime graph; may be empty
     adapter-secrets.env      optional external-adapter secrets
   data/engine/               SQLite file or local engine artifacts
   site/                      optional static frontend build
@@ -196,10 +196,10 @@ operational backups; logical bundles are the backend-portable format.
 
 ## Runtime Graph
 
-`<root>/config/service.json` is optional. If absent, Crew starts with an empty
-runtime shell whose profiles/providers can be created through admin APIs.
-Service-wide runtime policy and configured sessions may be declared here. A
-minimal shape is:
+`<root>/config/service.json` is required by the current source-run service.
+For a new deployment, create the minimal empty runtime graph below; profiles
+and providers can then be created through admin APIs. Service-wide runtime
+policy and configured sessions may also be declared here.
 
 ```json
 {
