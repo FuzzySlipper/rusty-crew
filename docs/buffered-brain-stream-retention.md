@@ -66,11 +66,17 @@ restarting only `rusty-crew-debug.service`:
 - scenario: `coding.asha-authority-door`
 - affected provider alias: `deepseek-flash`
 - harness: `rusty-crew-native` using `chat_completions`
-- result: successful in 147,010 ms
-- scorer: passed the complete Mini ASHA authority-door behavior and governance
-  checks after the agent used local tools and changed the expected Rust and
-  TypeScript fixture surfaces
+- runtime result: completed in 147,010 ms without
+  `stream_items_limit_exceeded`
+- canonical GoblinBench result: failed with score 0.69 and 8 of 9 gates
+  passing
+- distinct model-quality failure: the authority-behavior gate expected
+  `UnknownEntity(999)`, while the generated implementation returned
+  `MissingDoor(999)`
 
-The wake completed normally without `stream_items_limit_exceeded`. GoblinBench
-used its disposable debug profile/session lifecycle and did not contact the live
-service or its PostgreSQL database.
+The stream-retention runtime objective passed: the wake reached a normal
+provider completion after the agent used local tools and changed the expected
+Rust and TypeScript fixture surfaces. The overall scenario did not pass because
+of the separate error-variant mismatch above. GoblinBench used its disposable
+debug profile/session lifecycle and did not contact the live service or its
+PostgreSQL database.
