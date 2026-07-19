@@ -26,6 +26,7 @@ use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 pub const MODULE_ID: &str = "chat-completions";
 pub const DEFAULT_MAX_TOOL_ROUNDS: usize = 64;
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
+pub const OUTPUT_LIMIT_EXCEEDED_REASON_CODE: &str = "chat_completions_output_limit_exceeded";
 pub const DEFAULT_DEN_ROUTER_MODEL_CANDIDATES: [&str; 4] =
     ["deepseek-flash", "grok", "glm", "local-coder"];
 
@@ -722,12 +723,19 @@ where
             let request = self.request_builder.build(messages.clone());
             let mut assistant_text = String::new();
             let mut tool_calls = Vec::new();
+            let mut finish_reason = None;
             let result = self.client.stream_observed(request, &mut |event| {
                 if let ChatCompletionsEvent::ContentDelta(text) = event {
                     assistant_text.push_str(text);
                 }
                 if let ChatCompletionsEvent::ToolCallFinished(call) = event {
                     tool_calls.push(call.clone());
+                }
+                if let ChatCompletionsEvent::Finished {
+                    finish_reason: provider_finish_reason,
+                } = event
+                {
+                    finish_reason = provider_finish_reason.clone();
                 }
                 if matches!(
                     event,
@@ -745,6 +753,21 @@ where
                     &input.context,
                     CoreErrorKind::BrainUnavailable,
                     format!("chat-completions provider stream failed: {error}"),
+                ));
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    provider_request_count,
+                    tool_round_count,
+                };
+            }
+
+            if finish_reason.as_deref() == Some("length") && tool_calls.is_empty() {
+                stream.push(wake_failed_item_with_reason(
+                    &input.context,
+                    CoreErrorKind::BrainUnavailable,
+                    OUTPUT_LIMIT_EXCEEDED_REASON_CODE,
+                    "chat-completions provider reached finish_reason length before completing the turn",
                 ));
                 return ChatCompletionsBrainLoopOutput {
                     stream,
@@ -956,12 +979,14 @@ impl ChatCompletionsEventMapper {
                             BrainEvent::ProviderStatus {
                                 level: BrainProviderStatusLevel::Info,
                                 message: format!("Provider finished with reason: {reason}"),
-                                metadata_json: None,
+                                metadata_json: Some(json!({"finish_reason": reason}).to_string()),
                             },
                         ));
                     }
                 }
-                items.push(brain_event_item(context, BrainEvent::Finished));
+                if finish_reason.as_deref() != Some("length") {
+                    items.push(brain_event_item(context, BrainEvent::Finished));
+                }
                 items
             }
             ChatCompletionsEvent::Usage(_)
@@ -2330,6 +2355,84 @@ mod tests {
     }
 
     #[test]
+    fn minimal_loop_fails_reasoning_only_output_limit_without_false_completion() {
+        let mut brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ReasoningDelta {
+                    text: "still working through the implementation".to_string(),
+                    field: "reasoning_content".to_string(),
+                },
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("length".to_string()),
+                },
+            ])],
+            Vec::new(),
+        );
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("finish the implementation")],
+        );
+
+        assert!(!output.completed);
+        assert_eq!(terminal_kind(&output.stream), "wake_failed");
+        assert!(
+            events(&output.stream).contains(&BrainEvent::ReasoningDelta {
+                text: "still working through the implementation".to_string(),
+                format: Some("chat-completions:reasoning_content".to_string()),
+            })
+        );
+        assert!(!events(&output.stream).contains(&BrainEvent::Finished));
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ProviderStatus {
+                level: BrainProviderStatusLevel::Info,
+                message,
+                metadata_json: Some(metadata),
+            } if message == "Provider finished with reason: length"
+                && metadata == r#"{"finish_reason":"length"}"#
+        )));
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.reason_code.as_deref()
+                    == Some(OUTPUT_LIMIT_EXCEEDED_REASON_CODE)
+                    && failure.message.contains("finish_reason length")
+        ));
+    }
+
+    #[test]
+    fn minimal_loop_preserves_partial_text_when_output_limit_is_reached() {
+        let mut brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta(
+                    "I found the target files and started the patch".to_string(),
+                ),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("length".to_string()),
+                },
+            ])],
+            Vec::new(),
+        );
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("apply the patch")],
+        );
+
+        assert!(!output.completed);
+        assert_eq!(terminal_kind(&output.stream), "wake_failed");
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "I found the target files and started the patch".to_string(),
+        }));
+        assert!(!events(&output.stream).contains(&BrainEvent::Finished));
+        assert!(!output
+            .stream
+            .iter()
+            .any(|item| matches!(item, BrainWakeStreamItem::Actions { .. })));
+    }
+
+    #[test]
     fn minimal_loop_executes_one_tool_round_and_continues_with_tool_output() {
         let context = context();
         let mut brain = loop_with(
@@ -2369,6 +2472,38 @@ mod tests {
                 ..
             } if tool_name == "lookup"
         )));
+    }
+
+    #[test]
+    fn minimal_loop_continues_after_output_limit_with_an_actionable_tool_call() {
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{\"q\":\"den\"}")),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("length".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("tool round completed".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok("tool says yes")],
+        );
+
+        let output =
+            brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
+
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 2);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "tool round completed".to_string(),
+        }));
     }
 
     #[test]
@@ -2823,9 +2958,8 @@ mod tests {
                 BrainEvent::ProviderStatus {
                     level: BrainProviderStatusLevel::Info,
                     message: "Provider finished with reason: length".to_string(),
-                    metadata_json: None,
+                    metadata_json: Some("{\"finish_reason\":\"length\"}".to_string()),
                 },
-                BrainEvent::Finished,
             ]
         );
     }
