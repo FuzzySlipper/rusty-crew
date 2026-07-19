@@ -159,6 +159,18 @@ export interface BrainWakeExecutionResult {
 
 export type NativeBrainRunModuleId = "chat-completions" | "openai-responses";
 
+export interface NativeBufferedBrainStreamRetentionMetrics {
+  rawStreamItemCount: number;
+  rawDeltaItemCount: number;
+  retainedStreamItemCount: number;
+  coalescedDeltaItemCount: number;
+  droppedStreamItemCount: number;
+  retainedDeltaBytes: number;
+  queuedDeltaBytes: number;
+  maxStreamItems: number;
+  maxStreamDeltaBytes: number;
+}
+
 export interface NativeBufferedBrainRunDrain {
   moduleId: NativeBrainRunModuleId;
   wakeId: string;
@@ -170,6 +182,7 @@ export interface NativeBufferedBrainRunDrain {
     name: string;
     argumentsJson: string;
   }>;
+  streamRetentionMetrics: NativeBufferedBrainStreamRetentionMetrics;
   terminal: boolean;
   terminalReasonCode?: string;
   providerState?: BrainWakeProviderStateOutput;
@@ -927,6 +940,17 @@ export interface NativeBufferedBrainRunDiagnostic {
   module_label: string;
   wake_id: string;
   queued_stream_item_count: number;
+  stream_retention_metrics: {
+    raw_stream_item_count: number;
+    raw_delta_item_count: number;
+    retained_stream_item_count: number;
+    coalesced_delta_item_count: number;
+    dropped_stream_item_count: number;
+    retained_delta_bytes: number;
+    queued_delta_bytes: number;
+    max_stream_items: number;
+    max_stream_delta_bytes: number;
+  };
   pending_tool_request_count: number;
   submitted_tool_output_count: number;
   age_ms: number;

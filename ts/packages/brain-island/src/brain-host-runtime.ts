@@ -16,6 +16,7 @@ import type {
   NativeBridgeModule,
   OpenAiResponsesTransportMetrics,
   ChatCompletionsTransportMetrics,
+  NativeBufferedBrainStreamRetentionMetrics,
 } from "@rusty-crew/native-bridge";
 
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
@@ -49,6 +50,7 @@ export interface BrainWakeResult {
     | ChatCompletionsTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;
+  streamRetentionMetrics?: NativeBufferedBrainStreamRetentionMetrics;
 }
 
 export interface BrainHostExecutor {

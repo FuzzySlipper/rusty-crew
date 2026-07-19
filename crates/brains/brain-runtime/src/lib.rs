@@ -95,11 +95,25 @@ pub struct BufferedNeutralCancellation {
     pub cancelled_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+pub struct BufferedBrainStreamRetentionMetrics {
+    pub raw_stream_item_count: usize,
+    pub raw_delta_item_count: usize,
+    pub retained_stream_item_count: usize,
+    pub coalesced_delta_item_count: usize,
+    pub dropped_stream_item_count: usize,
+    pub retained_delta_bytes: usize,
+    pub queued_delta_bytes: usize,
+    pub max_stream_items: usize,
+    pub max_stream_delta_bytes: usize,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BufferedBrainTurnDiagnostic {
     pub module_label: String,
     pub wake_id: String,
     pub queued_stream_item_count: usize,
+    pub stream_retention_metrics: BufferedBrainStreamRetentionMetrics,
     pub pending_tool_request_count: usize,
     pub submitted_tool_output_count: usize,
     pub age_ms: u64,

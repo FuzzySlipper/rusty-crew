@@ -1494,6 +1494,20 @@ export const rawBufferedBrainRunDrainSchema = Type.Object(
         { additionalProperties: true },
       ),
     ),
+    stream_retention_metrics: Type.Object(
+      {
+        raw_stream_item_count: Type.Number({ minimum: 0 }),
+        raw_delta_item_count: Type.Number({ minimum: 0 }),
+        retained_stream_item_count: Type.Number({ minimum: 0 }),
+        coalesced_delta_item_count: Type.Number({ minimum: 0 }),
+        dropped_stream_item_count: Type.Number({ minimum: 0 }),
+        retained_delta_bytes: Type.Number({ minimum: 0 }),
+        queued_delta_bytes: Type.Number({ minimum: 0 }),
+        max_stream_items: Type.Number({ minimum: 1 }),
+        max_stream_delta_bytes: Type.Number({ minimum: 1 }),
+      },
+      { additionalProperties: false },
+    ),
     terminal: Type.Boolean(),
     terminal_reason_code: Type.Optional(
       Type.Union([Type.String(), Type.Null()]),

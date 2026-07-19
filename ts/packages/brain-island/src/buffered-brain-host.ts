@@ -12,6 +12,7 @@ import type {
   OpenAiResponsesTransportMetrics,
   ChatCompletionsBrainRunInput,
   ChatCompletionsTransportMetrics,
+  NativeBufferedBrainStreamRetentionMetrics,
 } from "@rusty-crew/native-bridge";
 import type {
   BrainActionPlanner,
@@ -52,6 +53,7 @@ export interface BufferedBrainHostRunResult {
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
   brainEventCounts: Record<string, number>;
   brainStreamItemCounts: Record<string, number>;
+  streamRetentionMetrics: NativeBufferedBrainStreamRetentionMetrics;
 }
 
 export class BufferedBrainWakeError extends Error {
@@ -64,6 +66,7 @@ export class BufferedBrainWakeError extends Error {
       | ChatCompletionsTransportMetrics,
     readonly brainEventCounts?: Record<string, number>,
     readonly brainStreamItemCounts?: Record<string, number>,
+    readonly streamRetentionMetrics?: NativeBufferedBrainStreamRetentionMetrics,
   ) {
     super(message);
     this.name = "BufferedBrainWakeError";
@@ -136,6 +139,9 @@ export async function runBufferedBrainHost(options: {
   const streamActions: BrainAction[] = [];
   const brainEventCounts: Record<string, number> = {};
   const brainStreamItemCounts: Record<string, number> = {};
+  let streamRetentionMetrics:
+    | NativeBufferedBrainStreamRetentionMetrics
+    | undefined;
   let streamFailure:
     | { reasonCode: string; source: string; message: string }
     | undefined;
@@ -150,6 +156,7 @@ export async function runBufferedBrainHost(options: {
         wakeId: started.wakeId,
         maxItems: 32,
       });
+      streamRetentionMetrics = drained.streamRetentionMetrics;
       const preparedToolRequests = drained.toolRequests.map((request) =>
         prepareBrainHostToolRequest(
           options.wake,
@@ -234,6 +241,7 @@ export async function runBufferedBrainHost(options: {
           drained.transportMetrics,
           brainEventCounts,
           brainStreamItemCounts,
+          streamRetentionMetrics,
         );
       }
       if (drained.terminal) {
@@ -245,6 +253,7 @@ export async function runBufferedBrainHost(options: {
             drained.transportMetrics,
             brainEventCounts,
             brainStreamItemCounts,
+            streamRetentionMetrics,
           );
         }
         const plannedActions = options.planActions
@@ -266,6 +275,7 @@ export async function runBufferedBrainHost(options: {
           credentialSecretUpdate: drained.credentialSecretUpdate,
           brainEventCounts,
           brainStreamItemCounts,
+          streamRetentionMetrics,
         };
       }
       await delay(25);

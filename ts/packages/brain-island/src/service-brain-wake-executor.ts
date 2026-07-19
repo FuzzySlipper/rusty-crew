@@ -46,6 +46,7 @@ export function createServiceBrainWakeExecutor(
               transportMetrics: error.transportMetrics,
               brainEventCounts: error.brainEventCounts,
               brainStreamItemCounts: error.brainStreamItemCounts,
+              streamRetentionMetrics: error.streamRetentionMetrics,
             },
           });
         }

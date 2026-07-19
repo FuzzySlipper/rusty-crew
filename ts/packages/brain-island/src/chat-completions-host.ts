@@ -265,6 +265,7 @@ async function runRustChatCompletionsBrainWithIncrementalDrain(
   transportMetrics?: ChatCompletionsTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;
+  streamRetentionMetrics?: import("@rusty-crew/native-bridge").NativeBufferedBrainStreamRetentionMetrics;
 }> {
   const bridge = context.bridge;
   if (bridge === undefined) {

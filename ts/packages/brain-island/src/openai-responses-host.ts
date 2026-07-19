@@ -173,6 +173,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   transportMetrics?: OpenAiResponsesTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;
+  streamRetentionMetrics?: import("@rusty-crew/native-bridge").NativeBufferedBrainStreamRetentionMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
 }> {
   const bridge = context.bridge;

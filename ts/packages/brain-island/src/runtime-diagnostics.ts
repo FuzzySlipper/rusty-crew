@@ -267,6 +267,7 @@ export interface RuntimeResponsesWakeMetrics {
   providerEventCounts: Record<string, number>;
   brainEventCounts: Record<string, number>;
   brainStreamItemCounts: Record<string, number>;
+  streamRetentionMetrics?: import("@rusty-crew/native-bridge").NativeBufferedBrainStreamRetentionMetrics;
   firstTextDeltaLatencyMs?: number | null;
   totalTurnDurationMs: number;
   terminalFailureReasonCode?: string | null;
@@ -282,6 +283,17 @@ export interface RuntimeBufferedBrainRunDiagnostic {
   module_label: string;
   wake_id: string;
   queued_stream_item_count: number;
+  stream_retention_metrics: {
+    raw_stream_item_count: number;
+    raw_delta_item_count: number;
+    retained_stream_item_count: number;
+    coalesced_delta_item_count: number;
+    dropped_stream_item_count: number;
+    retained_delta_bytes: number;
+    queued_delta_bytes: number;
+    max_stream_items: number;
+    max_stream_delta_bytes: number;
+  };
   pending_tool_request_count: number;
   submitted_tool_output_count: number;
   age_ms: number;

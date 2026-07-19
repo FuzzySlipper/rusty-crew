@@ -139,6 +139,17 @@
           }
         ],
         "module_id": "openai-responses",
+        "stream_retention_metrics": {
+          "coalesced_delta_item_count": 0,
+          "dropped_stream_item_count": 0,
+          "max_stream_delta_bytes": 8388608,
+          "max_stream_items": 4096,
+          "queued_delta_bytes": 0,
+          "raw_delta_item_count": 0,
+          "raw_stream_item_count": 3,
+          "retained_delta_bytes": 0,
+          "retained_stream_item_count": 3
+        },
         "terminal": true,
         "tool_requests": [],
         "transport_metrics": {

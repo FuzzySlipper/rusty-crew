@@ -31,6 +31,7 @@ import {
   type RawBrainEvent,
 } from "./event-body-wire.js";
 import type { RawResourceLimits } from "./runtime-config-wire.js";
+import * as streamRetention from "./brain-stream-retention-wire.js";
 
 export function assertCanonicalBrainRunModule(
   moduleId: string,
@@ -453,6 +454,9 @@ export function toBufferedBrainRunDrainResult(
       name: request.name,
       argumentsJson: request.arguments_json,
     })),
+    streamRetentionMetrics: streamRetention.decodeStreamRetention(
+      raw.stream_retention_metrics,
+    ),
     terminal: raw.terminal,
     ...(raw.terminal_reason_code == null
       ? {}
@@ -511,6 +515,9 @@ export function toRawBufferedBrainRunDrainResult(
       name: request.name,
       arguments_json: request.argumentsJson,
     })),
+    stream_retention_metrics: streamRetention.encodeStreamRetention(
+      result.streamRetentionMetrics,
+    ),
     terminal: result.terminal,
     ...(result.terminalReasonCode === undefined
       ? {}
@@ -634,6 +641,7 @@ export interface RawBufferedBrainRunDrainResult {
     name: string;
     arguments_json: string;
   }>;
+  stream_retention_metrics: streamRetention.RawBufferedBrainStreamRetentionMetrics;
   terminal: boolean;
   terminal_reason_code?: string | null;
   provider_state?: RawBrainWakeProviderStateOutput | null;

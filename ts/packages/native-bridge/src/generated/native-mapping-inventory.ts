@@ -140,6 +140,7 @@ export const nativeMappingInventory = {
           "pending_tool_request_count",
           "queued_stream_item_count",
           "started_at",
+          "stream_retention_metrics",
           "submitted_tool_output_count",
           "terminal",
           "wake_id",

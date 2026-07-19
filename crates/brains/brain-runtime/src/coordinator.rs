@@ -1,10 +1,13 @@
 use crate::{
     BrainRuntimeError, BrainRuntimeResult, BufferedBrainHostToolResult,
-    BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision,
-    BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic, BufferedNeutralCancellation,
-    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput, BufferedNeutralToolOutputPoll,
+    BufferedBrainStreamRetentionMetrics, BufferedBrainToolFailurePolicy,
+    BufferedBrainToolPolicyDecision, BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic,
+    BufferedNeutralCancellation, BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput,
+    BufferedNeutralToolOutputPoll,
 };
-use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId};
+use rusty_crew_core_protocol::{
+    BrainEvent, BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId,
+};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -36,6 +39,7 @@ impl BufferedBrainTurnPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BufferedBrainTurnLimits {
     pub max_stream_items: usize,
+    pub max_stream_delta_bytes: usize,
     pub max_pending_tool_requests: usize,
     pub max_tool_results: usize,
     pub max_tool_output_bytes: usize,
@@ -45,6 +49,7 @@ impl Default for BufferedBrainTurnLimits {
     fn default() -> Self {
         Self {
             max_stream_items: 4_096,
+            max_stream_delta_bytes: 8 * 1_024 * 1_024,
             max_pending_tool_requests: 128,
             max_tool_results: 1_024,
             max_tool_output_bytes: 64 * 1_024,
@@ -56,6 +61,7 @@ impl BufferedBrainTurnLimits {
     fn validate(self) -> Result<Self, BufferedBrainTurnError> {
         for (name, value) in [
             ("max_stream_items", self.max_stream_items),
+            ("max_stream_delta_bytes", self.max_stream_delta_bytes),
             ("max_pending_tool_requests", self.max_pending_tool_requests),
             ("max_tool_results", self.max_tool_results),
             ("max_tool_output_bytes", self.max_tool_output_bytes),
@@ -149,6 +155,56 @@ impl fmt::Display for BufferedBrainTurnError {
 
 impl std::error::Error for BufferedBrainTurnError {}
 
+fn stream_delta_bytes(item: &BrainWakeStreamItem) -> Option<usize> {
+    match item {
+        BrainWakeStreamItem::Event { event } => match &event.event {
+            BrainEvent::TextDelta { text } | BrainEvent::ReasoningDelta { text, .. } => {
+                Some(text.len())
+            }
+            _ => None,
+        },
+        BrainWakeStreamItem::Actions { .. } | BrainWakeStreamItem::WakeFailed { .. } => None,
+    }
+}
+
+fn coalesce_adjacent_delta(
+    stream_items: &mut VecDeque<SequencedBrainWakeStreamItem>,
+    incoming: &BrainWakeStreamItem,
+) -> Option<u64> {
+    let last = stream_items.back_mut()?;
+    let (
+        BrainWakeStreamItem::Event { event: last_event },
+        BrainWakeStreamItem::Event {
+            event: incoming_event,
+        },
+    ) = (&mut last.item, incoming)
+    else {
+        return None;
+    };
+    match (&mut last_event.event, &incoming_event.event) {
+        (
+            BrainEvent::TextDelta { text },
+            BrainEvent::TextDelta {
+                text: incoming_text,
+            },
+        ) => {
+            text.push_str(incoming_text);
+            Some(last.sequence)
+        }
+        (
+            BrainEvent::ReasoningDelta { text, format },
+            BrainEvent::ReasoningDelta {
+                text: incoming_text,
+                format: incoming_format,
+            },
+        ) if format == incoming_format => {
+            text.push_str(incoming_text);
+            Some(last.sequence)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SequencedBrainWakeStreamItem {
     pub sequence: u64,
@@ -197,6 +253,13 @@ pub struct BufferedBrainTurnCoordinator {
     last_transition_at: OffsetDateTime,
     next_stream_sequence: u64,
     stream_items: VecDeque<SequencedBrainWakeStreamItem>,
+    raw_stream_item_count: usize,
+    raw_delta_item_count: usize,
+    retained_stream_item_count: usize,
+    coalesced_delta_item_count: usize,
+    dropped_stream_item_count: usize,
+    retained_delta_bytes: usize,
+    queued_delta_bytes: usize,
     pending_tool_requests: HashMap<String, BufferedNeutralPendingToolRequest>,
     undelivered_tool_request_ids: VecDeque<String>,
     submitted_tool_outputs: HashMap<String, BufferedNeutralToolOutput>,
@@ -246,6 +309,13 @@ impl BufferedBrainTurnCoordinator {
             last_transition_at: now,
             next_stream_sequence: 1,
             stream_items: VecDeque::new(),
+            raw_stream_item_count: 0,
+            raw_delta_item_count: 0,
+            retained_stream_item_count: 0,
+            coalesced_delta_item_count: 0,
+            dropped_stream_item_count: 0,
+            retained_delta_bytes: 0,
+            queued_delta_bytes: 0,
             pending_tool_requests: HashMap::new(),
             undelivered_tool_request_ids: VecDeque::new(),
             submitted_tool_outputs: HashMap::new(),
@@ -341,6 +411,20 @@ impl BufferedBrainTurnCoordinator {
         self.stream_items.len()
     }
 
+    pub fn stream_retention_metrics(&self) -> BufferedBrainStreamRetentionMetrics {
+        BufferedBrainStreamRetentionMetrics {
+            raw_stream_item_count: self.raw_stream_item_count,
+            raw_delta_item_count: self.raw_delta_item_count,
+            retained_stream_item_count: self.retained_stream_item_count,
+            coalesced_delta_item_count: self.coalesced_delta_item_count,
+            dropped_stream_item_count: self.dropped_stream_item_count,
+            retained_delta_bytes: self.retained_delta_bytes,
+            queued_delta_bytes: self.queued_delta_bytes,
+            max_stream_items: self.limits.max_stream_items,
+            max_stream_delta_bytes: self.limits.max_stream_delta_bytes,
+        }
+    }
+
     pub fn start(&mut self) -> Result<(), BufferedBrainTurnError> {
         self.start_at(OffsetDateTime::now_utc())
     }
@@ -385,7 +469,50 @@ impl BufferedBrainTurnCoordinator {
     ) -> Result<u64, BufferedBrainTurnError> {
         self.require_phase(BufferedBrainTurnPhase::Running, "enqueue stream item")?;
         self.validate_stream_identity(&item)?;
-        if self.stream_items.len() >= self.limits.max_stream_items {
+        self.raw_stream_item_count = self.raw_stream_item_count.saturating_add(1);
+        let delta_bytes = stream_delta_bytes(&item);
+        if delta_bytes.is_some() {
+            self.raw_delta_item_count = self.raw_delta_item_count.saturating_add(1);
+        }
+        if let Some(delta_bytes) = delta_bytes {
+            let Some(next_retained_delta_bytes) =
+                self.retained_delta_bytes.checked_add(delta_bytes)
+            else {
+                self.dropped_stream_item_count = self.dropped_stream_item_count.saturating_add(1);
+                self.fail_limit(
+                    "stream_delta_bytes",
+                    self.limits.max_stream_delta_bytes,
+                    now,
+                );
+                return Err(BufferedBrainTurnError::BufferLimitExceeded {
+                    buffer: "stream_delta_bytes",
+                    limit: self.limits.max_stream_delta_bytes,
+                });
+            };
+            if next_retained_delta_bytes > self.limits.max_stream_delta_bytes {
+                self.dropped_stream_item_count = self.dropped_stream_item_count.saturating_add(1);
+                self.fail_limit(
+                    "stream_delta_bytes",
+                    self.limits.max_stream_delta_bytes,
+                    now,
+                );
+                return Err(BufferedBrainTurnError::BufferLimitExceeded {
+                    buffer: "stream_delta_bytes",
+                    limit: self.limits.max_stream_delta_bytes,
+                });
+            }
+            if let Some(sequence) = coalesce_adjacent_delta(&mut self.stream_items, &item) {
+                self.coalesced_delta_item_count = self.coalesced_delta_item_count.saturating_add(1);
+                self.retained_delta_bytes = next_retained_delta_bytes;
+                self.queued_delta_bytes = self.queued_delta_bytes.saturating_add(delta_bytes);
+                self.record_transition_at(now);
+                return Ok(sequence);
+            }
+        }
+
+        let terminal_item = item.is_terminal();
+        if !terminal_item && self.stream_items.len() >= self.limits.max_stream_items {
+            self.dropped_stream_item_count = self.dropped_stream_item_count.saturating_add(1);
             self.fail_limit("stream_items", self.limits.max_stream_items, now);
             return Err(BufferedBrainTurnError::BufferLimitExceeded {
                 buffer: "stream_items",
@@ -415,6 +542,11 @@ impl BufferedBrainTurnCoordinator {
         };
         self.stream_items
             .push_back(SequencedBrainWakeStreamItem { sequence, item });
+        self.retained_stream_item_count = self.retained_stream_item_count.saturating_add(1);
+        if let Some(delta_bytes) = delta_bytes {
+            self.retained_delta_bytes = self.retained_delta_bytes.saturating_add(delta_bytes);
+            self.queued_delta_bytes = self.queued_delta_bytes.saturating_add(delta_bytes);
+        }
         if let Some(phase) = terminal_phase {
             self.phase = phase;
             if phase == BufferedBrainTurnPhase::Completed {
@@ -730,6 +862,9 @@ impl BufferedBrainTurnCoordinator {
             let Some(item) = self.stream_items.pop_front() else {
                 break;
             };
+            if let Some(delta_bytes) = stream_delta_bytes(&item.item) {
+                self.queued_delta_bytes = self.queued_delta_bytes.saturating_sub(delta_bytes);
+            }
             let terminal = item.item.is_terminal();
             items.push(item);
             if terminal {
@@ -911,6 +1046,7 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
                     module_label: self.module_label.to_string(),
                     wake_id: coordinator.wake_id().to_string(),
                     queued_stream_item_count: coordinator.queued_stream_item_count(),
+                    stream_retention_metrics: coordinator.stream_retention_metrics(),
                     pending_tool_request_count: coordinator.pending_tool_request_count(),
                     submitted_tool_output_count: coordinator.submitted_tool_output_count(),
                     age_ms: elapsed_ms(coordinator.created_at(), now),
@@ -1008,6 +1144,14 @@ mod tests {
             wake_id: wake_id.to_string(),
             session_id: session_id(session),
             event: BrainEvent::Started,
+        })
+    }
+
+    fn brain_event_item(event: BrainEvent) -> BrainWakeStreamItem {
+        BrainWakeStreamItem::event(BrainEventEnvelope {
+            wake_id: "wake-1".to_string(),
+            session_id: session_id("session-1"),
+            event,
         })
     }
 
@@ -1397,6 +1541,7 @@ mod tests {
     fn stream_pending_tool_and_output_limits_fail_or_reject() {
         let limits = BufferedBrainTurnLimits {
             max_stream_items: 1,
+            max_stream_delta_bytes: 1_024,
             max_pending_tool_requests: 1,
             max_tool_results: 1,
             max_tool_output_bytes: 3,
@@ -1458,6 +1603,215 @@ mod tests {
             output_turn.submit_tool_output("call-1", tool_output("four")),
             Err(BufferedBrainTurnError::ToolOutputTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn fine_grained_deltas_coalesce_without_crowding_out_tools_or_terminal() {
+        let mut turn = BufferedBrainTurnCoordinator::new(
+            "chat-completions",
+            "wake-1",
+            session_id("session-1"),
+            None,
+            BufferedBrainTurnLimits {
+                max_stream_items: 16,
+                max_stream_delta_bytes: 8 * 1_024,
+                ..BufferedBrainTurnLimits::default()
+            },
+        )
+        .expect("coordinator");
+        turn.start().expect("start");
+
+        for _ in 0..2_500 {
+            turn.enqueue_stream_item(brain_event_item(BrainEvent::ReasoningDelta {
+                text: "r".to_string(),
+                format: Some("provider-reasoning".to_string()),
+            }))
+            .expect("reasoning delta");
+        }
+        turn.enqueue_stream_item(brain_event_item(BrainEvent::ToolCallStarted {
+            tool_name: "read_file".to_string(),
+            metadata: None,
+        }))
+        .expect("tool start");
+        turn.enqueue_stream_item(brain_event_item(BrainEvent::ToolCallFinished {
+            tool_name: "read_file".to_string(),
+            is_error: false,
+            metadata: None,
+        }))
+        .expect("tool finish");
+        for _ in 0..2_500 {
+            turn.enqueue_stream_item(brain_event_item(BrainEvent::TextDelta {
+                text: "t".to_string(),
+            }))
+            .expect("text delta");
+        }
+        turn.enqueue_stream_item(actions_item())
+            .expect("terminal actions");
+
+        let metrics = turn.stream_retention_metrics();
+        assert_eq!(metrics.raw_stream_item_count, 5_003);
+        assert_eq!(metrics.raw_delta_item_count, 5_000);
+        assert_eq!(metrics.retained_stream_item_count, 5);
+        assert_eq!(metrics.coalesced_delta_item_count, 4_998);
+        assert_eq!(metrics.dropped_stream_item_count, 0);
+        assert_eq!(metrics.retained_delta_bytes, 5_000);
+        assert_eq!(metrics.queued_delta_bytes, 5_000);
+
+        let drain = turn.drain_stream(16);
+        assert!(drain.terminal);
+        assert_eq!(drain.items.len(), 5);
+        assert!(matches!(
+            &drain.items[0].item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ReasoningDelta { text, format }
+                    if text.len() == 2_500 && format.as_deref() == Some("provider-reasoning"))
+        ));
+        assert!(matches!(
+            &drain.items[1].item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ToolCallStarted { .. })
+        ));
+        assert!(matches!(
+            &drain.items[2].item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ToolCallFinished { .. })
+        ));
+        assert!(matches!(
+            &drain.items[3].item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::TextDelta { text } if text.len() == 2_500)
+        ));
+        assert!(matches!(
+            &drain.items[4].item,
+            BrainWakeStreamItem::Actions { .. }
+        ));
+        assert_eq!(turn.stream_retention_metrics().queued_delta_bytes, 0);
+    }
+
+    #[test]
+    fn terminal_item_has_reserved_capacity_beyond_nonterminal_limit() {
+        let mut turn = BufferedBrainTurnCoordinator::new(
+            "chat-completions",
+            "wake-1",
+            session_id("session-1"),
+            None,
+            BufferedBrainTurnLimits {
+                max_stream_items: 1,
+                ..BufferedBrainTurnLimits::default()
+            },
+        )
+        .expect("coordinator");
+        turn.start().expect("start");
+        turn.enqueue_stream_item(event_item("wake-1", "session-1"))
+            .expect("nonterminal item");
+        turn.enqueue_stream_item(actions_item())
+            .expect("reserved terminal item");
+
+        assert_eq!(turn.queued_stream_item_count(), 2);
+        assert!(turn.drain_stream(2).terminal);
+
+        let mut failed_turn = BufferedBrainTurnCoordinator::new(
+            "chat-completions",
+            "wake-1",
+            session_id("session-1"),
+            None,
+            BufferedBrainTurnLimits {
+                max_stream_items: 1,
+                ..BufferedBrainTurnLimits::default()
+            },
+        )
+        .expect("coordinator");
+        failed_turn.start().expect("start");
+        failed_turn
+            .enqueue_stream_item(event_item("wake-1", "session-1"))
+            .expect("nonterminal item");
+        failed_turn
+            .enqueue_stream_item(BrainWakeStreamItem::wake_failed(BrainWakeFailure {
+                wake_id: "wake-1".to_string(),
+                session_id: session_id("session-1"),
+                kind: CoreErrorKind::BrainUnavailable,
+                reason_code: Some("provider_failed".to_string()),
+                message: "provider failed".to_string(),
+            }))
+            .expect("reserved failure item");
+        let failed_drain = failed_turn.drain_stream(2);
+        assert!(failed_drain.terminal);
+        assert!(matches!(
+            &failed_drain.items[1].item,
+            BrainWakeStreamItem::WakeFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn reasoning_deltas_with_different_formats_remain_distinct() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        for format in ["summary", "analysis"] {
+            turn.enqueue_stream_item(brain_event_item(BrainEvent::ReasoningDelta {
+                text: format.to_string(),
+                format: Some(format.to_string()),
+            }))
+            .expect("reasoning delta");
+        }
+        turn.enqueue_stream_item(actions_item())
+            .expect("terminal actions");
+
+        let drain = turn.drain_stream(8);
+        assert!(drain.terminal);
+        assert_eq!(drain.items.len(), 3);
+        assert_eq!(
+            turn.stream_retention_metrics().coalesced_delta_item_count,
+            0
+        );
+    }
+
+    #[test]
+    fn delta_byte_exhaustion_is_bounded_and_has_stable_provenance() {
+        let mut turn = BufferedBrainTurnCoordinator::new(
+            "chat-completions",
+            "wake-1",
+            session_id("session-1"),
+            None,
+            BufferedBrainTurnLimits {
+                max_stream_delta_bytes: 4,
+                ..BufferedBrainTurnLimits::default()
+            },
+        )
+        .expect("coordinator");
+        turn.start().expect("start");
+        turn.enqueue_stream_item(brain_event_item(BrainEvent::TextDelta {
+            text: "abc".to_string(),
+        }))
+        .expect("first delta");
+        assert_eq!(
+            turn.enqueue_stream_item(brain_event_item(BrainEvent::TextDelta {
+                text: "de".to_string(),
+            })),
+            Err(BufferedBrainTurnError::BufferLimitExceeded {
+                buffer: "stream_delta_bytes",
+                limit: 4,
+            })
+        );
+
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Failed);
+        assert_eq!(
+            turn.terminal()
+                .map(|terminal| terminal.reason_code.as_str()),
+            Some("stream_delta_bytes_limit_exceeded")
+        );
+        let metrics = turn.stream_retention_metrics();
+        assert_eq!(metrics.raw_stream_item_count, 2);
+        assert_eq!(metrics.raw_delta_item_count, 2);
+        assert_eq!(metrics.retained_stream_item_count, 1);
+        assert_eq!(metrics.coalesced_delta_item_count, 0);
+        assert_eq!(metrics.dropped_stream_item_count, 1);
+        assert_eq!(metrics.retained_delta_bytes, 3);
+        assert_eq!(metrics.queued_delta_bytes, 3);
+
+        let first = turn.drain_stream(8);
+        assert!(first.terminal);
+        assert_eq!(first.items.len(), 1);
+        assert!(turn.drain_stream(8).terminal);
     }
 
     #[test]

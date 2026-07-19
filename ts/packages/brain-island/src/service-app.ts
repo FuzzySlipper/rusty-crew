@@ -2490,6 +2490,7 @@ function recordResponsesWakeMetrics(
     providerEventCounts: metrics.providerEventCounts,
     brainEventCounts,
     brainStreamItemCounts,
+    streamRetentionMetrics: observation.result.streamRetentionMetrics,
     firstTextDeltaLatencyMs: metrics.firstTextDeltaLatencyMs,
     totalTurnDurationMs: metrics.totalTurnDurationMs,
     terminalFailureReasonCode: metrics.terminalFailureReasonCode,

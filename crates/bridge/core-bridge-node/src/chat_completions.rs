@@ -178,6 +178,7 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
                 run.payload.provider_cancellation.cancel();
             }
             let drain = run.coordinator.drain_stream(max_items);
+            let stream_retention_metrics = run.coordinator.stream_retention_metrics();
             let tool_requests = run.coordinator.drain_host_tool_requests(128);
             let terminal = drain.terminal && run.payload.provider_finished;
             let terminal_reason_code = terminal
@@ -193,6 +194,7 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
                 "wake_id": wake_id,
                 "items": drain.items.into_iter().map(|item| item.item).collect::<Vec<_>>(),
                 "tool_requests": tool_requests,
+                "stream_retention_metrics": stream_retention_metrics,
                 "terminal": terminal,
                 "terminal_reason_code": terminal_reason_code,
                 "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),

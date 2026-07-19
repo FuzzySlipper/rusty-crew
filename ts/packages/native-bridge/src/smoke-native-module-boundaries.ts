@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const moduleNames = [
   "admin-wrappers.ts",
   "brain-run-wire.ts",
+  "brain-stream-retention-wire.ts",
   "brain-wrappers.ts",
   "chat-wrappers.ts",
   "curator-wrappers.ts",
@@ -39,6 +40,7 @@ const sources = new Map<string, string>(
 const lineCeilings: Record<string, number> = {
   "admin-wrappers.ts": 120,
   "brain-run-wire.ts": 750,
+  "brain-stream-retention-wire.ts": 60,
   "brain-wrappers.ts": 40,
   "chat-wrappers.ts": 340,
   "curator-wrappers.ts": 100,
