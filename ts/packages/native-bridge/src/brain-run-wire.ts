@@ -56,7 +56,7 @@ export function chatCompletionsTransportMetricsFromRaw(
     providerRequestCount: raw.provider_request_count,
     continuationRoundCount: raw.tool_round_count,
     providerRequestPayloadBytes: 0,
-    providerEventCounts: {},
+    providerEventCounts: raw.provider_event_counts,
     firstTextDeltaLatencyMs: null,
     totalTurnDurationMs: 0,
     toolRoundCount: raw.tool_round_count,
@@ -500,6 +500,9 @@ export function toRawBufferedBrainRunDrainResult(
             tool_round_count: (
               result.transportMetrics as ChatCompletionsTransportMetrics
             ).toolRoundCount,
+            provider_event_counts: (
+              result.transportMetrics as ChatCompletionsTransportMetrics
+            ).providerEventCounts,
           }
         : (result.transportMetrics as OpenAiResponsesTransportMetrics);
   return {
@@ -625,6 +628,7 @@ export interface RawChatCompletionsBufferedDrainResult {
   transport_metrics?: {
     provider_request_count: number;
     tool_round_count: number;
+    provider_event_counts: Record<string, number>;
   };
   error?: string | null;
   cancellation?: RawOpenAiResponsesBufferedCancellation | null;

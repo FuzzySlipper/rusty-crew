@@ -29,6 +29,7 @@ pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
 pub const OUTPUT_LIMIT_EXCEEDED_REASON_CODE: &str = "chat_completions_output_limit_exceeded";
 pub const MALFORMED_PROVIDER_STREAM_REASON_CODE: &str =
     "chat_completions_malformed_provider_stream";
+pub const CANONICAL_REASONING_FORMAT: &str = "chat-completions:reasoning";
 pub const DEFAULT_DEN_ROUTER_MODEL_CANDIDATES: [&str; 4] =
     ["deepseek-flash", "grok", "glm", "local-coder"];
 
@@ -677,6 +678,7 @@ pub struct ChatCompletionsBrainLoopOutput {
     pub completed: bool,
     pub provider_request_count: usize,
     pub tool_round_count: usize,
+    pub provider_event_counts: BTreeMap<String, usize>,
 }
 
 pub struct ChatCompletionsBrainLoop<C, T> {
@@ -729,6 +731,7 @@ where
         let mut repeated_calls: HashMap<(String, String), usize> = HashMap::new();
         let mut provider_request_count = 0;
         let mut tool_round_count = 0;
+        let mut provider_event_counts = BTreeMap::new();
 
         loop {
             provider_request_count += 1;
@@ -738,6 +741,7 @@ where
             let mut malformed_tool_calls = Vec::new();
             let mut finish_reason = None;
             let result = self.client.stream_observed(request, &mut |event| {
+                record_provider_event(&mut provider_event_counts, event);
                 if let ChatCompletionsEvent::ContentDelta(text) = event {
                     assistant_text.push_str(text);
                 }
@@ -775,6 +779,7 @@ where
                     completed: false,
                     provider_request_count,
                     tool_round_count,
+                    provider_event_counts,
                 };
             }
 
@@ -792,6 +797,7 @@ where
                     completed: false,
                     provider_request_count,
                     tool_round_count,
+                    provider_event_counts,
                 };
             }
 
@@ -807,6 +813,7 @@ where
                     completed: false,
                     provider_request_count,
                     tool_round_count,
+                    provider_event_counts,
                 };
             }
 
@@ -822,6 +829,7 @@ where
                     completed: true,
                     provider_request_count,
                     tool_round_count,
+                    provider_event_counts,
                 };
             }
 
@@ -840,6 +848,7 @@ where
                     completed: false,
                     provider_request_count,
                     tool_round_count,
+                    provider_event_counts,
                 };
             }
             tool_round_count += 1;
@@ -863,6 +872,7 @@ where
                         completed: false,
                         provider_request_count,
                         tool_round_count,
+                        provider_event_counts,
                     };
                 }
 
@@ -894,6 +904,7 @@ where
                         completed: false,
                         provider_request_count,
                         tool_round_count,
+                        provider_event_counts,
                     };
                 }
                 messages.push(ChatCompletionMessage::tool(
@@ -987,11 +998,11 @@ impl ChatCompletionsEventMapper {
     ) -> Vec<BrainWakeStreamItem> {
         match provider_event {
             ChatCompletionsEvent::ContentDelta(text) => self.map_text_delta(context, text),
-            ChatCompletionsEvent::ReasoningDelta { text, field } => non_empty_event(
+            ChatCompletionsEvent::ReasoningDelta { text, field: _ } => non_empty_event(
                 context,
                 BrainEvent::ReasoningDelta {
                     text: text.clone(),
-                    format: Some(format!("chat-completions:{field}")),
+                    format: Some(CANONICAL_REASONING_FORMAT.to_string()),
                 },
                 !text.is_empty(),
             ),
@@ -1308,6 +1319,30 @@ fn malformed_tool_call_summary(
         finish_reason.unwrap_or("unknown"),
         calls.len()
     )
+}
+
+fn record_provider_event(counts: &mut BTreeMap<String, usize>, event: &ChatCompletionsEvent) {
+    let keys: &[&str] = match event {
+        ChatCompletionsEvent::ContentDelta(_) => &["content_delta"],
+        ChatCompletionsEvent::ReasoningDelta { field, .. } => {
+            increment_count(counts, &format!("reasoning_delta:{field}"));
+            &["reasoning_delta"]
+        }
+        ChatCompletionsEvent::ToolCallDelta { .. } => &["tool_call_delta"],
+        ChatCompletionsEvent::ToolCallFinished(_) => &["tool_call_finished"],
+        ChatCompletionsEvent::ToolCallMalformed(_) => &["tool_call_malformed"],
+        ChatCompletionsEvent::Usage(_) => &["usage"],
+        ChatCompletionsEvent::Finished { .. } => &["finished"],
+        ChatCompletionsEvent::ProviderError(_) => &["provider_error"],
+    };
+    for key in keys {
+        increment_count(counts, key);
+    }
+}
+
+fn increment_count(counts: &mut BTreeMap<String, usize>, key: &str) {
+    let count = counts.entry(key.to_string()).or_default();
+    *count = count.saturating_add(1);
 }
 
 fn assistant_tool_call_message(
@@ -1905,6 +1940,7 @@ fn token_usage_from_provider_value(value: &Value) -> Option<ChatTokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusty_crew_brain_runtime::{BufferedBrainTurnCoordinator, BufferedBrainTurnLimits};
     use std::io::{Cursor, Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -2562,7 +2598,7 @@ mod tests {
         assert!(
             events(&output.stream).contains(&BrainEvent::ReasoningDelta {
                 text: "still working through the implementation".to_string(),
-                format: Some("chat-completions:reasoning_content".to_string()),
+                format: Some(CANONICAL_REASONING_FORMAT.to_string()),
             })
         );
         assert!(!events(&output.stream).contains(&BrainEvent::Finished));
@@ -2732,7 +2768,7 @@ mod tests {
         assert!(
             events(&output.stream).contains(&BrainEvent::ReasoningDelta {
                 text: "continuing".to_string(),
-                format: Some("chat-completions:reasoning_content".to_string()),
+                format: Some(CANONICAL_REASONING_FORMAT.to_string()),
             })
         );
         assert!(matches!(
@@ -3260,7 +3296,7 @@ mod tests {
             vec![
                 BrainEvent::ReasoningDelta {
                     text: "chain".to_string(),
-                    format: Some("chat-completions:reasoning_content".to_string()),
+                    format: Some(CANONICAL_REASONING_FORMAT.to_string()),
                 },
                 BrainEvent::ProviderStatus {
                     level: BrainProviderStatusLevel::Error,
@@ -3274,5 +3310,107 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn stepfun_like_reasoning_aliases_compact_without_crowding_out_tool_or_terminal_items() {
+        let context = context();
+        let mut mapper = ChatCompletionsEventMapper::new();
+        let mut turn = BufferedBrainTurnCoordinator::new(
+            MODULE_ID,
+            context.wake_id.clone(),
+            context.session_id.clone(),
+            None,
+            BufferedBrainTurnLimits {
+                max_stream_items: 16,
+                max_stream_delta_bytes: 8 * 1_024 * 1_024,
+                ..BufferedBrainTurnLimits::default()
+            },
+        )
+        .expect("coordinator");
+        turn.start().expect("start");
+        let mut provider_event_counts = BTreeMap::new();
+
+        let fields = [
+            "reasoning_content",
+            "reasoning",
+            "reasoning_delta",
+            "thinking",
+        ];
+        for index in 0..5_000 {
+            if index == 2_500 {
+                turn.enqueue_stream_item(brain_event_item(
+                    &context,
+                    BrainEvent::ToolCallStarted {
+                        tool_name: "read_file".to_string(),
+                        metadata: None,
+                    },
+                ))
+                .expect("tool start");
+                turn.enqueue_stream_item(brain_event_item(
+                    &context,
+                    BrainEvent::ToolCallFinished {
+                        tool_name: "read_file".to_string(),
+                        is_error: false,
+                        metadata: None,
+                    },
+                ))
+                .expect("tool finish");
+            }
+            let provider_event = ChatCompletionsEvent::ReasoningDelta {
+                text: "r".to_string(),
+                field: fields[index % fields.len()].to_string(),
+            };
+            record_provider_event(&mut provider_event_counts, &provider_event);
+            let mapped = mapper.map_provider_event(&context, &provider_event);
+            assert_eq!(mapped.len(), 1);
+            turn.enqueue_stream_item(mapped.into_iter().next().expect("mapped item"))
+                .expect("reasoning delta");
+        }
+        turn.enqueue_stream_item(success_actions_item(&context))
+            .expect("terminal actions");
+
+        let metrics = turn.stream_retention_metrics();
+        assert_eq!(metrics.raw_stream_item_count, 5_003);
+        assert_eq!(metrics.raw_delta_item_count, 5_000);
+        assert_eq!(metrics.retained_stream_item_count, 5);
+        assert_eq!(metrics.coalesced_delta_item_count, 4_998);
+        assert_eq!(metrics.dropped_stream_item_count, 0);
+        assert_eq!(metrics.retained_delta_bytes, 5_000);
+        assert_eq!(metrics.max_stream_items, 16);
+        assert_eq!(metrics.max_stream_delta_bytes, 8 * 1_024 * 1_024);
+        assert_eq!(provider_event_counts["reasoning_delta"], 5_000);
+        for field in fields {
+            assert_eq!(
+                provider_event_counts[&format!("reasoning_delta:{field}")],
+                1_250
+            );
+        }
+
+        let drain = turn.drain_stream(16);
+        assert!(drain.terminal);
+        assert_eq!(drain.items.len(), 5);
+        for item in [&drain.items[0], &drain.items[3]] {
+            assert!(matches!(
+                &item.item,
+                BrainWakeStreamItem::Event { event }
+                    if matches!(&event.event, BrainEvent::ReasoningDelta { format, .. }
+                        if format.as_deref() == Some(CANONICAL_REASONING_FORMAT))
+            ));
+        }
+        assert!(matches!(
+            &drain.items[1].item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(event.event, BrainEvent::ToolCallStarted { .. })
+        ));
+        assert!(matches!(
+            &drain.items[2].item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(event.event, BrainEvent::ToolCallFinished { .. })
+        ));
+        assert!(matches!(
+            &drain.items[4].item,
+            BrainWakeStreamItem::Actions { .. }
+        ));
     }
 }

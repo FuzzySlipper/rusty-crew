@@ -170,6 +170,18 @@ async function runLongContinuationScenario(): Promise<{
     terminal.transportMetrics?.providerRequestCount,
     submittedToolRounds + 1,
   );
+  assert.equal(
+    terminal.transportMetrics?.providerEventCounts["tool_call_finished"],
+    submittedToolRounds,
+  );
+  assert.equal(
+    terminal.transportMetrics?.providerEventCounts["finished"],
+    submittedToolRounds + 1,
+  );
+  assert.equal(
+    terminal.transportMetrics?.providerEventCounts["content_delta"],
+    1,
+  );
   assert.match(
     streamText(terminal.stream),
     /chat-completions long continuation completed/,

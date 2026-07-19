@@ -1427,6 +1427,7 @@ const chatCompletionsTransportMetricsSchema = Type.Object(
   {
     provider_request_count: Type.Number(),
     tool_round_count: Type.Number(),
+    provider_event_counts: Type.Record(Type.String(), Type.Number()),
   },
   { additionalProperties: true },
 );

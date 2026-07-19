@@ -102,6 +102,7 @@ struct JsChatCompletionsCancelInput {
 pub(crate) struct ChatCompletionsTransportMetrics {
     provider_request_count: usize,
     tool_round_count: usize,
+    provider_event_counts: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -322,6 +323,7 @@ fn run_chat_completions_brain_buffered(
                     run.payload.transport_metrics = Some(ChatCompletionsTransportMetrics {
                         provider_request_count: output.provider_request_count,
                         tool_round_count: output.tool_round_count,
+                        provider_event_counts: output.provider_event_counts,
                     });
                     if !run.coordinator.phase().is_terminal() {
                         let _ = run.coordinator.fail(
