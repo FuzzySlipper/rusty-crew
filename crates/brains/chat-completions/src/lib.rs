@@ -762,7 +762,8 @@ where
                 };
             }
 
-            if finish_reason.as_deref() == Some("length") && tool_calls.is_empty() {
+            if finish_reason.as_deref() == Some("length") && !tool_calls_are_actionable(&tool_calls)
+            {
                 stream.push(wake_failed_item_with_reason(
                     &input.context,
                     CoreErrorKind::BrainUnavailable,
@@ -1228,6 +1229,16 @@ fn wake_failed_item_with_reason(
         reason_code: Some(reason_code.into()),
         message: message.into(),
     })
+}
+
+fn tool_calls_are_actionable(calls: &[PendingChatFunctionCall]) -> bool {
+    !calls.is_empty()
+        && calls.iter().all(|call| {
+            matches!(
+                serde_json::from_str::<Value>(&call.arguments_json),
+                Ok(Value::Object(_))
+            )
+        })
 }
 
 fn assistant_tool_call_message(
@@ -2430,6 +2441,38 @@ mod tests {
             .stream
             .iter()
             .any(|item| matches!(item, BrainWakeStreamItem::Actions { .. })));
+    }
+
+    #[test]
+    fn minimal_loop_rejects_truncated_tool_arguments_at_output_limit() {
+        let provider_stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"den\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut brain = loop_with(
+            vec![Ok(
+                parse(provider_stream).expect("parse truncated tool stream")
+            )],
+            Vec::new(),
+        );
+
+        let output =
+            brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
+
+        assert!(!output.completed);
+        assert_eq!(output.tool_round_count, 0);
+        assert_eq!(terminal_kind(&output.stream), "wake_failed");
+        assert!(!events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ToolCallStarted { .. } | BrainEvent::ToolCallFinished { .. }
+        )));
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.reason_code.as_deref()
+                    == Some(OUTPUT_LIMIT_EXCEEDED_REASON_CODE)
+        ));
     }
 
     #[test]

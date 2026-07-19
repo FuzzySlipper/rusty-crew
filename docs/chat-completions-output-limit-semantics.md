@@ -9,9 +9,11 @@ success signals. Rust owns their interpretation in the native
 - `length` does not emit `BrainEvent::Finished`. If no fully parsed tool call
   is available, the wake terminates with
   `chat_completions_output_limit_exceeded`.
-- A fully parsed tool call remains actionable even when the provider reports
-  `length`; the bounded tool loop may execute it and request the next provider
-  turn.
+- A tool call remains actionable when the provider reports `length` only when
+  its complete arguments parse as a JSON object. The bounded tool loop may then
+  execute it and request the next provider turn. Truncated, malformed, or
+  non-object arguments terminate as an output-limit failure without invoking
+  the tool.
 
 The output-limit failure preserves all text, reasoning, and completed tool
 events emitted before the terminal provider event. It also emits an info-level
