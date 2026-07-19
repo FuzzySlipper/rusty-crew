@@ -7,7 +7,7 @@ use rusty_crew_core_bridge_api::{
     SessionId, SessionKind, ShutdownRequest, ToolDescriptor, ToolProfile,
 };
 use rusty_crew_core_protocol::{
-    ModelProviderSecretEnvelope, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+    BrainEvent, ModelProviderSecretEnvelope, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -717,6 +717,118 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
 
     let after_shutdown = bridge.buffered_brain_run_diagnostics().unwrap();
     assert_eq!(after_shutdown.active_run_count, 0);
+}
+
+#[test]
+fn chat_completions_reasoning_compacts_past_stream_item_limit_without_losing_boundaries() {
+    use rusty_crew_chat_completions_brain::{
+        BrainEventContext, ChatCompletionsEvent, ChatCompletionsEventMapper,
+        CANONICAL_REASONING_FORMAT,
+    };
+
+    let context = BrainEventContext::new(
+        "stepfun-retention-wake",
+        SessionId::new("stepfun-retention-session"),
+    );
+    let mut mapper = ChatCompletionsEventMapper::new();
+    let mut coordinator = rusty_crew_brain_runtime::BufferedBrainTurnCoordinator::new(
+        "chat-completions",
+        context.wake_id.clone(),
+        context.session_id.clone(),
+        None,
+        rusty_crew_brain_runtime::BufferedBrainTurnLimits {
+            max_stream_items: 16,
+            max_stream_delta_bytes: 8 * 1_024 * 1_024,
+            ..rusty_crew_brain_runtime::BufferedBrainTurnLimits::default()
+        },
+    )
+    .unwrap();
+    coordinator.start().unwrap();
+
+    let fields = [
+        "reasoning_content",
+        "reasoning",
+        "reasoning_delta",
+        "thinking",
+    ];
+    for index in 0..5_000 {
+        if index == 2_500 {
+            coordinator
+                .enqueue_stream_item(BrainWakeStreamItem::event(BrainEventEnvelope {
+                    wake_id: context.wake_id.clone(),
+                    session_id: context.session_id.clone(),
+                    event: BrainEvent::ToolCallStarted {
+                        tool_name: "read_file".to_string(),
+                        metadata: None,
+                    },
+                }))
+                .unwrap();
+            coordinator
+                .enqueue_stream_item(BrainWakeStreamItem::event(BrainEventEnvelope {
+                    wake_id: context.wake_id.clone(),
+                    session_id: context.session_id.clone(),
+                    event: BrainEvent::ToolCallFinished {
+                        tool_name: "read_file".to_string(),
+                        is_error: false,
+                        metadata: None,
+                    },
+                }))
+                .unwrap();
+        }
+        let mapped = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ReasoningDelta {
+                text: "r".to_string(),
+                field: fields[index % fields.len()].to_string(),
+            },
+        );
+        coordinator
+            .enqueue_stream_item(mapped.into_iter().next().unwrap())
+            .unwrap();
+    }
+    coordinator
+        .enqueue_stream_item(BrainWakeStreamItem::actions(BrainActionBatch {
+            wake_id: context.wake_id.clone(),
+            session_id: context.session_id,
+            actions: Vec::new(),
+        }))
+        .unwrap();
+
+    let metrics = coordinator.stream_retention_metrics();
+    assert_eq!(metrics.raw_stream_item_count, 5_003);
+    assert_eq!(metrics.raw_delta_item_count, 5_000);
+    assert_eq!(metrics.retained_stream_item_count, 5);
+    assert_eq!(metrics.coalesced_delta_item_count, 4_998);
+    assert_eq!(metrics.dropped_stream_item_count, 0);
+    assert_eq!(metrics.retained_delta_bytes, 5_000);
+    assert_eq!(metrics.max_stream_items, 16);
+    assert_eq!(metrics.max_stream_delta_bytes, 8 * 1_024 * 1_024);
+
+    let drain = coordinator.drain_stream(16);
+    assert!(drain.terminal);
+    assert_eq!(drain.items.len(), 5);
+    for item in [&drain.items[0], &drain.items[3]] {
+        assert!(matches!(
+            &item.item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ReasoningDelta { format, .. }
+                    if format.as_deref() == Some(CANONICAL_REASONING_FORMAT))
+        ));
+    }
+    assert!(matches!(
+        &drain.items[1].item,
+        BrainWakeStreamItem::Event { event }
+            if matches!(event.event, BrainEvent::ToolCallStarted { .. })
+    ));
+    assert!(matches!(
+        &drain.items[2].item,
+        BrainWakeStreamItem::Event { event }
+            if matches!(event.event, BrainEvent::ToolCallFinished { .. })
+    ));
+    assert!(matches!(
+        &drain.items[4].item,
+        BrainWakeStreamItem::Actions { .. }
+    ));
 }
 
 fn brain_registration(

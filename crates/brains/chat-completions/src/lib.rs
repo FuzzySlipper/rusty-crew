@@ -1940,7 +1940,6 @@ fn token_usage_from_provider_value(value: &Value) -> Option<ChatTokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_crew_brain_runtime::{BufferedBrainTurnCoordinator, BufferedBrainTurnLimits};
     use std::io::{Cursor, Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -3313,22 +3312,9 @@ mod tests {
     }
 
     #[test]
-    fn stepfun_like_reasoning_aliases_compact_without_crowding_out_tool_or_terminal_items() {
+    fn stepfun_like_reasoning_aliases_share_canonical_semantics_and_raw_counts() {
         let context = context();
         let mut mapper = ChatCompletionsEventMapper::new();
-        let mut turn = BufferedBrainTurnCoordinator::new(
-            MODULE_ID,
-            context.wake_id.clone(),
-            context.session_id.clone(),
-            None,
-            BufferedBrainTurnLimits {
-                max_stream_items: 16,
-                max_stream_delta_bytes: 8 * 1_024 * 1_024,
-                ..BufferedBrainTurnLimits::default()
-            },
-        )
-        .expect("coordinator");
-        turn.start().expect("start");
         let mut provider_event_counts = BTreeMap::new();
 
         let fields = [
@@ -3338,25 +3324,6 @@ mod tests {
             "thinking",
         ];
         for index in 0..5_000 {
-            if index == 2_500 {
-                turn.enqueue_stream_item(brain_event_item(
-                    &context,
-                    BrainEvent::ToolCallStarted {
-                        tool_name: "read_file".to_string(),
-                        metadata: None,
-                    },
-                ))
-                .expect("tool start");
-                turn.enqueue_stream_item(brain_event_item(
-                    &context,
-                    BrainEvent::ToolCallFinished {
-                        tool_name: "read_file".to_string(),
-                        is_error: false,
-                        metadata: None,
-                    },
-                ))
-                .expect("tool finish");
-            }
             let provider_event = ChatCompletionsEvent::ReasoningDelta {
                 text: "r".to_string(),
                 field: fields[index % fields.len()].to_string(),
@@ -3364,21 +3331,13 @@ mod tests {
             record_provider_event(&mut provider_event_counts, &provider_event);
             let mapped = mapper.map_provider_event(&context, &provider_event);
             assert_eq!(mapped.len(), 1);
-            turn.enqueue_stream_item(mapped.into_iter().next().expect("mapped item"))
-                .expect("reasoning delta");
+            assert!(matches!(
+                &mapped[0],
+                BrainWakeStreamItem::Event { event }
+                    if matches!(&event.event, BrainEvent::ReasoningDelta { format, .. }
+                        if format.as_deref() == Some(CANONICAL_REASONING_FORMAT))
+            ));
         }
-        turn.enqueue_stream_item(success_actions_item(&context))
-            .expect("terminal actions");
-
-        let metrics = turn.stream_retention_metrics();
-        assert_eq!(metrics.raw_stream_item_count, 5_003);
-        assert_eq!(metrics.raw_delta_item_count, 5_000);
-        assert_eq!(metrics.retained_stream_item_count, 5);
-        assert_eq!(metrics.coalesced_delta_item_count, 4_998);
-        assert_eq!(metrics.dropped_stream_item_count, 0);
-        assert_eq!(metrics.retained_delta_bytes, 5_000);
-        assert_eq!(metrics.max_stream_items, 16);
-        assert_eq!(metrics.max_stream_delta_bytes, 8 * 1_024 * 1_024);
         assert_eq!(provider_event_counts["reasoning_delta"], 5_000);
         for field in fields {
             assert_eq!(
@@ -3386,31 +3345,5 @@ mod tests {
                 1_250
             );
         }
-
-        let drain = turn.drain_stream(16);
-        assert!(drain.terminal);
-        assert_eq!(drain.items.len(), 5);
-        for item in [&drain.items[0], &drain.items[3]] {
-            assert!(matches!(
-                &item.item,
-                BrainWakeStreamItem::Event { event }
-                    if matches!(&event.event, BrainEvent::ReasoningDelta { format, .. }
-                        if format.as_deref() == Some(CANONICAL_REASONING_FORMAT))
-            ));
-        }
-        assert!(matches!(
-            &drain.items[1].item,
-            BrainWakeStreamItem::Event { event }
-                if matches!(event.event, BrainEvent::ToolCallStarted { .. })
-        ));
-        assert!(matches!(
-            &drain.items[2].item,
-            BrainWakeStreamItem::Event { event }
-                if matches!(event.event, BrainEvent::ToolCallFinished { .. })
-        ));
-        assert!(matches!(
-            &drain.items[4].item,
-            BrainWakeStreamItem::Actions { .. }
-        ));
     }
 }

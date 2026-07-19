@@ -489,20 +489,16 @@ export function toBufferedBrainRunDrainResult(
 export function toRawBufferedBrainRunDrainResult(
   result: NativeBufferedBrainRunDrain,
 ): RawBufferedBrainRunDrainResult {
+  const chatMetrics =
+    result.transportMetrics as ChatCompletionsTransportMetrics;
   const transportMetrics =
     result.transportMetrics === undefined
       ? undefined
       : result.moduleId === "chat-completions"
         ? {
-            provider_request_count: (
-              result.transportMetrics as ChatCompletionsTransportMetrics
-            ).providerRequestCount,
-            tool_round_count: (
-              result.transportMetrics as ChatCompletionsTransportMetrics
-            ).toolRoundCount,
-            provider_event_counts: (
-              result.transportMetrics as ChatCompletionsTransportMetrics
-            ).providerEventCounts,
+            provider_request_count: chatMetrics.providerRequestCount,
+            tool_round_count: chatMetrics.toolRoundCount,
+            provider_event_counts: chatMetrics.providerEventCounts,
           }
         : (result.transportMetrics as OpenAiResponsesTransportMetrics);
   return {
