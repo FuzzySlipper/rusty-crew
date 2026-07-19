@@ -14,6 +14,14 @@ success signals. Rust owns their interpretation in the native
   execute it and request the next provider turn. Truncated, malformed, or
   non-object arguments terminate as an output-limit failure without invoking
   the tool.
+- Pending tool-call fragments are classified only after the provider's terminal
+  chunk is read. A missing/empty function name, invalid argument JSON, or
+  non-object argument value is retained as a diagnostic rather than aborting
+  parsing before the finish reason is observed.
+- If malformed fragments accompany a non-`length` finish, the wake fails with
+  `chat_completions_malformed_provider_stream`. The provider-status event names
+  the fragment index and includes field-level diagnostics. No call from that
+  malformed response is executed.
 
 The output-limit failure preserves all text, reasoning, and completed tool
 events emitted before the terminal provider event. It also emits an info-level
@@ -28,8 +36,9 @@ operator's authority, and an incomplete provider result remains visible.
 ## Verification
 
 Focused Rust regressions cover reasoning-only truncation, truncation after
-partial visible text, normal `stop`, normal tool continuation, and the bounded
-actionable-tool exception:
+partial visible text, missing-name and malformed-argument terminal fragments,
+normal multi-chunk tool names, normal `stop`, normal tool continuation, and the
+bounded actionable-tool exception:
 
 ```bash
 cargo test -p rusty-crew-chat-completions-brain
@@ -53,3 +62,13 @@ python3 scripts/gb-run.py \
   --candidate rusty-crew-native-mimo-pro \
   --label task-5982-output-limit-live
 ```
+
+Task 5988 reran the same MiMo Pro candidate after terminal fragment
+classification landed. GoblinBench run `run-20260719-061434-09555fbe` used
+only `rusty-crew-debug.service` on port 9348 and completed the Crew turn after
+386,292 ms with 5 changed files. The earlier missing-name parser crash did not
+recur. The deterministic scorer retained a separate model-quality result of
+0.69 (7 of 9 gates); the runtime itself completed normally. Real-SSE unit
+fixtures retain direct coverage of the typed `length` and malformed non-length
+terminal branches because provider output is nondeterministic between live
+runs.
