@@ -86,7 +86,7 @@ pub(crate) fn validate_chat_event_append(event: &ChatEventLogAppend) -> CoreResu
 }
 
 fn query_chat_events(conn: &Connection, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
-    let after = chat_event_cursor_sequence(query.cursor.as_deref(), &query.session_id);
+    let requested_after = chat_event_cursor_sequence(query.cursor.as_deref(), &query.session_id);
     let (total, latest_sequence, message_count): (i64, i64, i64) = conn
         .query_row(
             "SELECT COUNT(*), COALESCE(MAX(sequence_id), 0),
@@ -99,13 +99,15 @@ fn query_chat_events(conn: &Connection, query: &ChatEventLogQuery) -> CoreResult
     let total = total.max(0) as u64;
     let latest_sequence = latest_sequence.max(0) as u64;
     let message_count = message_count.max(0) as u64;
+    let cursor_ahead = total > 0 && requested_after > latest_sequence;
+    let after = normalize_chat_event_after(requested_after, latest_sequence, total);
     let limit = normalize_chat_event_limit(query.limit);
     if limit == 0 {
         return Ok(ChatEventLogPage {
             items: Vec::new(),
             latest_cursor: chat_event_cursor_for(
                 &query.session_id,
-                if query.cursor.is_none() {
+                if query.cursor.is_none() || cursor_ahead {
                     latest_sequence
                 } else {
                     after
@@ -217,6 +219,23 @@ pub(crate) fn chat_event_cursor_sequence(cursor: Option<&str>, session_id: &Sess
     sequence.parse::<u64>().unwrap_or(0)
 }
 
+pub(crate) fn normalize_chat_event_after(
+    requested_after: u64,
+    latest_sequence: u64,
+    total: u64,
+) -> u64 {
+    // A session can begin with a message-slot projection (for example an
+    // imported roleplay fork) and later acquire its first durable event-log
+    // entries. The slot cursor may be numerically ahead of the new event log.
+    // Rebase that one stale-ahead cursor to the start so the client can cross
+    // projections without waiting forever for an impossible sequence.
+    if total > 0 && requested_after > latest_sequence {
+        0
+    } else {
+        requested_after
+    }
+}
+
 pub(crate) fn normalize_chat_event_limit(limit: Option<u32>) -> u32 {
     limit
         .unwrap_or(DEFAULT_CHAT_EVENT_LIMIT)
@@ -246,4 +265,45 @@ fn row_to_chat_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatEventLogEv
         kind: row.get(4)?,
         payload_json,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_ahead_projection_cursor_replays_new_event_log() {
+        let db_path = std::env::temp_dir().join(format!(
+            "rusty-crew-chat-events-stale-ahead-{}.sqlite3",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&db_path);
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let session_id = SessionId::new("imported-fork");
+        for kind in ["message_created", "assistant_turn_finished"] {
+            store
+                .append_chat_event(&ChatEventLogAppend {
+                    session_id: session_id.clone(),
+                    created_at: "2026-07-20T01:00:00Z".to_string(),
+                    kind: kind.to_string(),
+                    payload_json: serde_json::json!({}),
+                })
+                .unwrap();
+        }
+
+        let page = store
+            .query_chat_events(&ChatEventLogQuery {
+                session_id: session_id.clone(),
+                cursor: Some(chat_event_cursor_for(&session_id, 71)),
+                limit: Some(100),
+            })
+            .unwrap();
+
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.latest_cursor, "imported-fork:2");
+        assert!(!page.has_more_before);
+
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

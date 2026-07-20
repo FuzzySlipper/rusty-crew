@@ -52,7 +52,7 @@ fn query_chat_events(
     schema: &str,
     query: &ChatEventLogQuery,
 ) -> CoreResult<ChatEventLogPage> {
-    let after = crate::repos::chat_events::chat_event_cursor_sequence(
+    let requested_after = crate::repos::chat_events::chat_event_cursor_sequence(
         query.cursor.as_deref(),
         &query.session_id,
     );
@@ -69,13 +69,19 @@ fn query_chat_events(
     let total = stats.get::<_, i64>(0).max(0) as u64;
     let latest_sequence = stats.get::<_, i64>(1).max(0) as u64;
     let message_count = stats.get::<_, i64>(2).max(0) as u64;
+    let cursor_ahead = total > 0 && requested_after > latest_sequence;
+    let after = crate::repos::chat_events::normalize_chat_event_after(
+        requested_after,
+        latest_sequence,
+        total,
+    );
     let limit = crate::repos::chat_events::normalize_chat_event_limit(query.limit);
     if limit == 0 {
         return Ok(ChatEventLogPage {
             items: Vec::new(),
             latest_cursor: crate::repos::chat_events::chat_event_cursor_for(
                 &query.session_id,
-                if query.cursor.is_none() {
+                if query.cursor.is_none() || cursor_ahead {
                     latest_sequence
                 } else {
                     after
