@@ -94,6 +94,17 @@ function modelResponse(
         model.provider.session_reasoning_effort_override ?? "none",
       resolvedReasoningEffort:
         model.provider.reasoning_effort ?? "provider default",
+      chatCompletionsDialect:
+        model.provider.chat_completions_dialect ?? "standard",
+      thinkingMode: model.provider.thinking_mode ?? "provider default",
+      reasoningHistory: model.provider.reasoning_history ?? "provider default",
+      reasoningBudgetTokens: model.provider.reasoning_budget_tokens ?? 0,
+      thinkingSettingsApplied:
+        model.provider.thinking_settings_applied ?? false,
+      thinkingModeApplied: model.provider.thinking_mode_applied ?? false,
+      reasoningHistoryApplied:
+        model.provider.reasoning_history_applied ?? false,
+      reasoningBudgetApplied: model.provider.reasoning_budget_applied ?? false,
       contextStrategy: model.context_strategy.strategy_id,
       autoCompactionEnabled: model.context_strategy.auto_compaction_enabled,
       contextWindowTokens: model.context.context_window_tokens ?? 0,
@@ -119,6 +130,18 @@ function modelResponse(
       model.provider.reasoning_format
         ? `reasoning format ${model.provider.reasoning_format}`
         : "",
+      model.provider.chat_completions_dialect
+        ? `chat completions dialect ${model.provider.chat_completions_dialect}`
+        : "",
+      model.provider.thinking_mode
+        ? `thinking mode ${model.provider.thinking_mode} (${model.provider.thinking_mode_applied ? "applied" : "provider default"})`
+        : "",
+      model.provider.reasoning_history
+        ? `reasoning history ${model.provider.reasoning_history} (${model.provider.reasoning_history_applied ? "applied" : "provider default"})`
+        : "",
+      model.provider.reasoning_budget_tokens === undefined
+        ? ""
+        : `reasoning budget ${model.provider.reasoning_budget_tokens} tokens (${model.provider.reasoning_budget_applied ? "applied" : "not applied"})`,
       model.tools.local_tool_profile_id
         ? `local tool profile ${model.tools.local_tool_profile_id}`
         : "",

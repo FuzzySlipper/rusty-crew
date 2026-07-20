@@ -154,6 +154,14 @@ const model = buildReadOnlySlashCommandResponse("model", {
       provider_reasoning_effort: "low",
       session_reasoning_effort_override: "high",
       reasoning_format: "none",
+      chat_completions_dialect: "qwen",
+      thinking_mode: "enabled",
+      reasoning_history: "preserve_all",
+      reasoning_budget_tokens: 8192,
+      thinking_settings_applied: true,
+      thinking_mode_applied: true,
+      reasoning_history_applied: true,
+      reasoning_budget_applied: true,
       revision: 3,
     },
     brain: {
@@ -204,8 +212,20 @@ assert.equal(model.fields?.estimatorId, "test_estimator");
 assert.equal(model.fields?.providerReasoningEffort, "low");
 assert.equal(model.fields?.sessionReasoningEffortOverride, "high");
 assert.equal(model.fields?.resolvedReasoningEffort, "high");
+assert.equal(model.fields?.chatCompletionsDialect, "qwen");
+assert.equal(model.fields?.thinkingMode, "enabled");
+assert.equal(model.fields?.reasoningHistory, "preserve_all");
+assert.equal(model.fields?.reasoningBudgetTokens, 8192);
+assert.equal(model.fields?.thinkingSettingsApplied, true);
+assert.equal(model.fields?.thinkingModeApplied, true);
+assert.equal(model.fields?.reasoningHistoryApplied, true);
+assert.equal(model.fields?.reasoningBudgetApplied, true);
 assert.equal(
   model.items?.some((item) => item.includes("provider endpoint")),
+  true,
+);
+assert.equal(
+  model.items?.some((item) => item.includes("chat completions dialect qwen")),
   true,
 );
 

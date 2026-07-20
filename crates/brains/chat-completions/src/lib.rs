@@ -9,7 +9,10 @@ use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_protocol::{
     BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure,
-    BrainWakeStreamItem, CoreErrorKind, ModelProviderRecord, SessionId,
+    BrainWakeProviderStateInput, BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate,
+    BrainWakeStreamItem, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
+    ChatCompletionsWireDialect, CoreErrorKind, ModelProviderRecord, ProviderStateClearReason,
+    SessionId,
 };
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -30,6 +33,9 @@ pub const OUTPUT_LIMIT_EXCEEDED_REASON_CODE: &str = "chat_completions_output_lim
 pub const MALFORMED_PROVIDER_STREAM_REASON_CODE: &str =
     "chat_completions_malformed_provider_stream";
 pub const CANONICAL_REASONING_FORMAT: &str = "chat-completions:reasoning";
+pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "chat-completions-history-v1";
+const PROVIDER_STATE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
+const KIMI_THINKING_MIN_OUTPUT_TOKENS: u32 = 16_000;
 pub const DEFAULT_DEN_ROUTER_MODEL_CANDIDATES: [&str; 4] =
     ["deepseek-flash", "grok", "glm", "local-coder"];
 
@@ -299,6 +305,11 @@ pub struct ChatCompletionsChatConfig {
     pub model: String,
     pub temperature_milli: Option<u32>,
     pub reasoning_effort: Option<String>,
+    pub wire_dialect: ChatCompletionsWireDialect,
+    pub thinking_mode: ChatCompletionsThinkingMode,
+    pub reasoning_history: ChatCompletionsReasoningHistory,
+    pub reasoning_budget_tokens: Option<u32>,
+    pub provider_state_strategy_id: String,
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
 }
@@ -309,6 +320,11 @@ impl ChatCompletionsChatConfig {
             model: model.into(),
             temperature_milli: None,
             reasoning_effort: None,
+            wire_dialect: ChatCompletionsWireDialect::Standard,
+            thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
+            reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
+            reasoning_budget_tokens: None,
+            provider_state_strategy_id: "default".to_string(),
             max_output_tokens: Some(128),
             provider_request_timeout_ms: None,
         }
@@ -319,11 +335,81 @@ impl ChatCompletionsChatConfig {
             model: provider.model_id.clone(),
             temperature_milli: provider.temperature_milli,
             reasoning_effort: provider.reasoning_effort.clone(),
+            wire_dialect: provider.chat_completions_dialect,
+            thinking_mode: provider.thinking_mode,
+            reasoning_history: provider.reasoning_history,
+            reasoning_budget_tokens: provider.reasoning_budget_tokens,
+            provider_state_strategy_id: "default".to_string(),
             max_output_tokens: provider.max_output_tokens,
             provider_request_timeout_ms: None,
         }
     }
+
+    pub fn validate(&self) -> Result<(), ChatCompletionsConfigError> {
+        let default_policy = self.thinking_mode == ChatCompletionsThinkingMode::ProviderDefault
+            && self.reasoning_history == ChatCompletionsReasoningHistory::ProviderDefault
+            && self.reasoning_budget_tokens.is_none();
+        if self.wire_dialect == ChatCompletionsWireDialect::Standard && !default_policy {
+            return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                "standard chat completions dialect does not accept vendor thinking settings",
+            ));
+        }
+        if self.thinking_mode == ChatCompletionsThinkingMode::Disabled
+            && self.reasoning_history != ChatCompletionsReasoningHistory::ProviderDefault
+        {
+            return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                "disabled thinking cannot configure reasoning history preservation",
+            ));
+        }
+        if self.wire_dialect == ChatCompletionsWireDialect::Kimi
+            && self.thinking_mode != ChatCompletionsThinkingMode::Disabled
+        {
+            if self.temperature_milli.is_some() {
+                return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                    "kimi thinking models do not accept a temperature override",
+                ));
+            }
+            if !matches!(
+                self.max_output_tokens,
+                Some(tokens) if tokens >= KIMI_THINKING_MIN_OUTPUT_TOKENS
+            ) {
+                return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                    "kimi thinking models require max output tokens of at least 16000",
+                ));
+            }
+        }
+        if let Some(budget) = self.reasoning_budget_tokens {
+            if budget == 0 {
+                return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                    "reasoning budget tokens must be greater than zero",
+                ));
+            }
+            if self.wire_dialect != ChatCompletionsWireDialect::Qwen
+                || self.thinking_mode != ChatCompletionsThinkingMode::Enabled
+            {
+                return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                    "reasoning budget tokens require qwen dialect with thinking enabled",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatCompletionsConfigError {
+    UnsupportedDialectOption(&'static str),
+}
+
+impl std::fmt::Display for ChatCompletionsConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedDialectOption(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ChatCompletionsConfigError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -339,6 +425,8 @@ pub struct ChatCompletionMessage {
     pub role: ChatMessageRole,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -364,6 +452,7 @@ impl ChatCompletionMessage {
         Self {
             role: ChatMessageRole::Tool,
             content: Some(content.into()),
+            reasoning_content: None,
             name: None,
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: Vec::new(),
@@ -374,6 +463,7 @@ impl ChatCompletionMessage {
         Self {
             role,
             content: Some(content.into()),
+            reasoning_content: None,
             name: None,
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -445,6 +535,10 @@ pub struct ChatCompletionsRequest {
     pub stream_options: Option<ChatCompletionsStreamOptions>,
     pub temperature: Option<f64>,
     pub reasoning_effort: Option<String>,
+    pub thinking: Option<Value>,
+    pub enable_thinking: Option<bool>,
+    pub preserve_thinking: Option<bool>,
+    pub thinking_budget: Option<u32>,
     pub max_tokens: Option<u32>,
 }
 
@@ -458,6 +552,10 @@ impl Serialize for ChatCompletionsRequest {
         fields += self.stream_options.is_some() as usize;
         fields += self.temperature.is_some() as usize;
         fields += self.reasoning_effort.is_some() as usize;
+        fields += self.thinking.is_some() as usize;
+        fields += self.enable_thinking.is_some() as usize;
+        fields += self.preserve_thinking.is_some() as usize;
+        fields += self.thinking_budget.is_some() as usize;
         fields += self.max_tokens.is_some() as usize;
 
         let mut map = serializer.serialize_struct("ChatCompletionsRequest", fields)?;
@@ -476,6 +574,18 @@ impl Serialize for ChatCompletionsRequest {
         }
         if let Some(reasoning_effort) = &self.reasoning_effort {
             map.serialize_field("reasoning_effort", reasoning_effort)?;
+        }
+        if let Some(thinking) = &self.thinking {
+            map.serialize_field("thinking", thinking)?;
+        }
+        if let Some(enable_thinking) = self.enable_thinking {
+            map.serialize_field("enable_thinking", &enable_thinking)?;
+        }
+        if let Some(preserve_thinking) = self.preserve_thinking {
+            map.serialize_field("preserve_thinking", &preserve_thinking)?;
+        }
+        if let Some(thinking_budget) = self.thinking_budget {
+            map.serialize_field("thinking_budget", &thinking_budget)?;
         }
         if let Some(max_tokens) = self.max_tokens {
             map.serialize_field("max_tokens", &max_tokens)?;
@@ -522,6 +632,7 @@ impl ChatCompletionsRequestBuilder {
     }
 
     pub fn build(&self, messages: Vec<ChatCompletionMessage>) -> ChatCompletionsRequest {
+        let extensions = chat_completions_dialect_extensions(&self.config);
         ChatCompletionsRequest {
             model: self.config.model.clone(),
             messages,
@@ -536,8 +647,92 @@ impl ChatCompletionsRequestBuilder {
                 .temperature_milli
                 .map(|milli| f64::from(milli) / 1000.0),
             reasoning_effort: self.config.reasoning_effort.clone(),
+            thinking: extensions.thinking,
+            enable_thinking: extensions.enable_thinking,
+            preserve_thinking: extensions.preserve_thinking,
+            thinking_budget: extensions.thinking_budget,
             max_tokens: self.config.max_output_tokens,
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ChatCompletionsDialectExtensions {
+    thinking: Option<Value>,
+    enable_thinking: Option<bool>,
+    preserve_thinking: Option<bool>,
+    thinking_budget: Option<u32>,
+}
+
+fn chat_completions_dialect_extensions(
+    config: &ChatCompletionsChatConfig,
+) -> ChatCompletionsDialectExtensions {
+    match config.wire_dialect {
+        ChatCompletionsWireDialect::Standard => ChatCompletionsDialectExtensions::default(),
+        ChatCompletionsWireDialect::Kimi => {
+            let mut thinking = serde_json::Map::new();
+            match config.thinking_mode {
+                ChatCompletionsThinkingMode::ProviderDefault => {}
+                ChatCompletionsThinkingMode::Enabled => {
+                    thinking.insert("type".to_string(), json!("enabled"));
+                }
+                ChatCompletionsThinkingMode::Disabled => {
+                    thinking.insert("type".to_string(), json!("disabled"));
+                }
+            }
+            match config.reasoning_history {
+                ChatCompletionsReasoningHistory::ProviderDefault => {}
+                ChatCompletionsReasoningHistory::Discard => {
+                    thinking.insert("keep".to_string(), Value::Null);
+                }
+                ChatCompletionsReasoningHistory::PreserveAll => {
+                    thinking.insert("keep".to_string(), json!("all"));
+                }
+            }
+            ChatCompletionsDialectExtensions {
+                thinking: (!thinking.is_empty()).then_some(Value::Object(thinking)),
+                ..ChatCompletionsDialectExtensions::default()
+            }
+        }
+        ChatCompletionsWireDialect::Glm => {
+            let mut thinking = serde_json::Map::new();
+            match config.thinking_mode {
+                ChatCompletionsThinkingMode::ProviderDefault => {}
+                ChatCompletionsThinkingMode::Enabled => {
+                    thinking.insert("type".to_string(), json!("enabled"));
+                }
+                ChatCompletionsThinkingMode::Disabled => {
+                    thinking.insert("type".to_string(), json!("disabled"));
+                }
+            }
+            match config.reasoning_history {
+                ChatCompletionsReasoningHistory::ProviderDefault => {}
+                ChatCompletionsReasoningHistory::Discard => {
+                    thinking.insert("clear_thinking".to_string(), json!(true));
+                }
+                ChatCompletionsReasoningHistory::PreserveAll => {
+                    thinking.insert("clear_thinking".to_string(), json!(false));
+                }
+            }
+            ChatCompletionsDialectExtensions {
+                thinking: (!thinking.is_empty()).then_some(Value::Object(thinking)),
+                ..ChatCompletionsDialectExtensions::default()
+            }
+        }
+        ChatCompletionsWireDialect::Qwen => ChatCompletionsDialectExtensions {
+            enable_thinking: match config.thinking_mode {
+                ChatCompletionsThinkingMode::ProviderDefault => None,
+                ChatCompletionsThinkingMode::Enabled => Some(true),
+                ChatCompletionsThinkingMode::Disabled => Some(false),
+            },
+            preserve_thinking: match config.reasoning_history {
+                ChatCompletionsReasoningHistory::ProviderDefault => None,
+                ChatCompletionsReasoningHistory::Discard => Some(false),
+                ChatCompletionsReasoningHistory::PreserveAll => Some(true),
+            },
+            thinking_budget: config.reasoning_budget_tokens,
+            thinking: None,
+        },
     }
 }
 
@@ -665,20 +860,23 @@ impl Default for ChatCompletionsBrainLoopConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatCompletionsBrainLoopInput {
     pub context: BrainEventContext,
     pub messages: Vec<ChatCompletionMessage>,
+    pub provider_state: Option<BrainWakeProviderStateInput>,
     pub final_message_fallback: Option<ChatCompletionsFinalMessage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatCompletionsBrainLoopOutput {
     pub stream: Vec<BrainWakeStreamItem>,
     pub completed: bool,
     pub provider_request_count: usize,
     pub tool_round_count: usize,
     pub provider_event_counts: BTreeMap<String, usize>,
+    pub provider_request_debug_samples: Vec<Value>,
+    pub provider_state: Option<BrainWakeProviderStateOutput>,
 }
 
 pub struct ChatCompletionsBrainLoop<C, T> {
@@ -720,6 +918,7 @@ where
         self.wake(ChatCompletionsBrainLoopInput {
             context,
             messages,
+            provider_state: None,
             final_message_fallback: None,
         })
     }
@@ -727,16 +926,44 @@ where
     pub fn wake(&mut self, input: ChatCompletionsBrainLoopInput) -> ChatCompletionsBrainLoopOutput {
         let mut mapper = ChatCompletionsEventMapper::new();
         let mut stream = mapper.map_started(&input.context);
-        let mut messages = input.messages;
+        let mut messages = match chat_completions_messages_with_provider_state(
+            &self.request_builder.config,
+            input.provider_state.as_ref(),
+            input.messages,
+        ) {
+            Ok(messages) => messages,
+            Err(message) => {
+                stream.push(wake_failed_item_with_reason(
+                    &input.context,
+                    CoreErrorKind::InvalidInput,
+                    "chat_completions_provider_state_invalid",
+                    message,
+                ));
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    provider_request_count: 0,
+                    tool_round_count: 0,
+                    provider_event_counts: BTreeMap::new(),
+                    provider_request_debug_samples: Vec::new(),
+                    provider_state: None,
+                };
+            }
+        };
         let mut repeated_calls: HashMap<(String, String), usize> = HashMap::new();
         let mut provider_request_count = 0;
         let mut tool_round_count = 0;
         let mut provider_event_counts = BTreeMap::new();
+        let mut provider_request_debug_samples = Vec::new();
 
         loop {
             provider_request_count += 1;
             let request = self.request_builder.build(messages.clone());
+            provider_request_debug_samples.push(
+                serde_json::to_value(&request).unwrap_or_else(|_| json!({"error": "serialize"})),
+            );
             let mut assistant_text = String::new();
+            let mut assistant_reasoning = String::new();
             let mut tool_calls = Vec::new();
             let mut malformed_tool_calls = Vec::new();
             let mut finish_reason = None;
@@ -744,6 +971,9 @@ where
                 record_provider_event(&mut provider_event_counts, event);
                 if let ChatCompletionsEvent::ContentDelta(text) = event {
                     assistant_text.push_str(text);
+                }
+                if let ChatCompletionsEvent::ReasoningDelta { text, .. } = event {
+                    assistant_reasoning.push_str(text);
                 }
                 if let ChatCompletionsEvent::ToolCallFinished(call) = event {
                     tool_calls.push(call.clone());
@@ -780,6 +1010,8 @@ where
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
                 };
             }
 
@@ -798,6 +1030,8 @@ where
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
                 };
             }
 
@@ -814,22 +1048,43 @@ where
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
                 };
             }
 
             if tool_calls.is_empty() {
+                if !assistant_text.is_empty() || !assistant_reasoning.is_empty() {
+                    messages.push(ChatCompletionMessage {
+                        role: ChatMessageRole::Assistant,
+                        content: (!assistant_text.is_empty()).then_some(assistant_text.clone()),
+                        reasoning_content: (!assistant_reasoning.is_empty())
+                            .then_some(assistant_reasoning.clone()),
+                        name: None,
+                        tool_call_id: None,
+                        tool_calls: Vec::new(),
+                    });
+                }
                 if assistant_text.trim().is_empty() {
                     if let Some(fallback) = input.final_message_fallback {
                         stream.extend(mapper.map_final_message(&input.context, fallback));
                     }
                 }
                 stream.push(success_actions_item(&input.context));
+                let provider_state = chat_completions_provider_state_output(
+                    &input.context,
+                    &self.request_builder.config,
+                    input.provider_state.as_ref(),
+                    messages,
+                );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: true,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state,
                 };
             }
 
@@ -849,11 +1104,17 @@ where
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
                 };
             }
             tool_round_count += 1;
 
-            messages.push(assistant_tool_call_message(&assistant_text, &tool_calls));
+            messages.push(assistant_tool_call_message(
+                &assistant_text,
+                &assistant_reasoning,
+                &tool_calls,
+            ));
             for call in tool_calls {
                 let repeated_key = (call.name.clone(), call.arguments_json.clone());
                 let count = repeated_calls.entry(repeated_key).or_insert(0);
@@ -873,6 +1134,8 @@ where
                         provider_request_count,
                         tool_round_count,
                         provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
                     };
                 }
 
@@ -905,6 +1168,8 @@ where
                         provider_request_count,
                         tool_round_count,
                         provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
                     };
                 }
                 messages.push(ChatCompletionMessage::tool(
@@ -1347,11 +1612,13 @@ fn increment_count(counts: &mut BTreeMap<String, usize>, key: &str) {
 
 fn assistant_tool_call_message(
     content: &str,
+    reasoning_content: &str,
     calls: &[PendingChatFunctionCall],
 ) -> ChatCompletionMessage {
     ChatCompletionMessage {
         role: ChatMessageRole::Assistant,
         content: (!content.is_empty()).then(|| content.to_string()),
+        reasoning_content: (!reasoning_content.is_empty()).then(|| reasoning_content.to_string()),
         name: None,
         tool_call_id: None,
         tool_calls: calls
@@ -1369,6 +1636,112 @@ fn assistant_tool_call_message(
             })
             .collect(),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct ChatCompletionsProviderStateV1 {
+    kind: String,
+    strategy_id: String,
+    payload_version: String,
+    messages: Vec<ChatCompletionMessage>,
+}
+
+fn chat_completions_messages_with_provider_state(
+    config: &ChatCompletionsChatConfig,
+    provider_state: Option<&BrainWakeProviderStateInput>,
+    current_messages: Vec<ChatCompletionMessage>,
+) -> Result<Vec<ChatCompletionMessage>, String> {
+    if config.reasoning_history != ChatCompletionsReasoningHistory::PreserveAll {
+        return Ok(current_messages);
+    }
+    let Some(state) = provider_state else {
+        return Ok(current_messages);
+    };
+    if state.module_id != MODULE_ID {
+        return Err(format!(
+            "chat completions provider state belongs to module {}",
+            state.module_id
+        ));
+    }
+    if state.strategy_id != config.provider_state_strategy_id {
+        return Err(format!(
+            "chat completions provider state strategy {} does not match {}",
+            state.strategy_id, config.provider_state_strategy_id
+        ));
+    }
+    if state.payload_version != PROVIDER_STATE_PAYLOAD_VERSION {
+        return Err(format!(
+            "chat completions provider state payload version {} is unsupported",
+            state.payload_version
+        ));
+    }
+    let payload: ChatCompletionsProviderStateV1 = serde_json::from_value(state.payload.clone())
+        .map_err(|error| {
+            format!("chat completions provider state payload is malformed: {error}")
+        })?;
+    if payload.kind != MODULE_ID
+        || payload.strategy_id != config.provider_state_strategy_id
+        || payload.payload_version != PROVIDER_STATE_PAYLOAD_VERSION
+    {
+        return Err("chat completions provider state payload identity mismatch".to_string());
+    }
+
+    let mut merged = Vec::with_capacity(payload.messages.len() + current_messages.len());
+    merged.extend(
+        current_messages
+            .iter()
+            .filter(|message| message.role == ChatMessageRole::System)
+            .cloned(),
+    );
+    merged.extend(
+        payload
+            .messages
+            .into_iter()
+            .filter(|message| message.role != ChatMessageRole::System),
+    );
+    merged.extend(
+        current_messages
+            .into_iter()
+            .filter(|message| message.role != ChatMessageRole::System),
+    );
+    Ok(merged)
+}
+
+fn chat_completions_provider_state_output(
+    _context: &BrainEventContext,
+    config: &ChatCompletionsChatConfig,
+    previous_state: Option<&BrainWakeProviderStateInput>,
+    messages: Vec<ChatCompletionMessage>,
+) -> Option<BrainWakeProviderStateOutput> {
+    if config.reasoning_history != ChatCompletionsReasoningHistory::PreserveAll {
+        return previous_state.map(|_| BrainWakeProviderStateOutput::Clear {
+            reason: ProviderStateClearReason::BrainRequestedClear,
+        });
+    }
+    let payload = ChatCompletionsProviderStateV1 {
+        kind: MODULE_ID.to_string(),
+        strategy_id: config.provider_state_strategy_id.clone(),
+        payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+        messages: messages
+            .into_iter()
+            .filter(|message| message.role != ChatMessageRole::System)
+            .collect(),
+    };
+    Some(BrainWakeProviderStateOutput::Replace {
+        state: BrainWakeProviderStateUpdate {
+            module_id: MODULE_ID.to_string(),
+            strategy_id: config.provider_state_strategy_id.clone(),
+            profile_fingerprint: previous_state
+                .map(|state| state.profile_fingerprint.clone())
+                .unwrap_or_else(|| "profile-fingerprint".to_string()),
+            provider_fingerprint: previous_state
+                .map(|state| state.provider_fingerprint.clone())
+                .unwrap_or_else(|| "provider-fingerprint".to_string()),
+            payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+            payload: serde_json::to_value(payload).unwrap_or_else(|_| json!({})),
+            ttl_ms: Some(PROVIDER_STATE_TTL_MS),
+        },
+    })
 }
 
 fn non_empty_event(
@@ -2047,6 +2420,7 @@ mod tests {
             reasoning_effort: Some("high".to_string()),
             max_output_tokens: Some(256),
             provider_request_timeout_ms: Some(45_000),
+            ..ChatCompletionsChatConfig::new("unused")
         })
         .tools(vec![NeutralBrainTool {
             name: "lookup".to_string(),
@@ -2083,6 +2457,100 @@ mod tests {
 
         assert!(value.get("temperature").is_none());
         assert!(value.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn maps_typed_chat_completions_reasoning_dialects() {
+        let request_value = |config: ChatCompletionsChatConfig| {
+            serde_json::to_value(
+                ChatCompletionsRequestBuilder::new(config)
+                    .build(vec![ChatCompletionMessage::user("hello")]),
+            )
+            .expect("request json")
+        };
+
+        let kimi_default = request_value(ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Kimi,
+            max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+            ..ChatCompletionsChatConfig::new("kimi")
+        });
+        assert!(kimi_default.get("thinking").is_none());
+
+        let kimi_preserved = request_value(ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Kimi,
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            reasoning_history: ChatCompletionsReasoningHistory::PreserveAll,
+            max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+            ..ChatCompletionsChatConfig::new("kimi")
+        });
+        assert_eq!(kimi_preserved["thinking"]["type"], "enabled");
+        assert_eq!(kimi_preserved["thinking"]["keep"], "all");
+
+        let kimi_disabled = request_value(ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Kimi,
+            thinking_mode: ChatCompletionsThinkingMode::Disabled,
+            ..ChatCompletionsChatConfig::new("kimi")
+        });
+        assert_eq!(kimi_disabled["thinking"]["type"], "disabled");
+
+        let glm_preserved = request_value(ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Glm,
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            reasoning_history: ChatCompletionsReasoningHistory::PreserveAll,
+            ..ChatCompletionsChatConfig::new("glm")
+        });
+        assert_eq!(glm_preserved["thinking"]["type"], "enabled");
+        assert_eq!(glm_preserved["thinking"]["clear_thinking"], false);
+
+        let qwen_preserved = request_value(ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Qwen,
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            reasoning_history: ChatCompletionsReasoningHistory::PreserveAll,
+            reasoning_budget_tokens: Some(4096),
+            ..ChatCompletionsChatConfig::new("qwen")
+        });
+        assert_eq!(qwen_preserved["enable_thinking"], true);
+        assert_eq!(qwen_preserved["preserve_thinking"], true);
+        assert_eq!(qwen_preserved["thinking_budget"], 4096);
+    }
+
+    #[test]
+    fn rejects_vendor_thinking_options_for_standard_dialect() {
+        let config = ChatCompletionsChatConfig {
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            ..ChatCompletionsChatConfig::new("standard")
+        };
+        assert!(matches!(
+            config.validate(),
+            Err(ChatCompletionsConfigError::UnsupportedDialectOption(message))
+                if message.contains("standard")
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_kimi_thinking_generation_limits() {
+        let low_limit = ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Kimi,
+            max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS - 1),
+            ..ChatCompletionsChatConfig::new("kimi")
+        };
+        assert!(matches!(
+            low_limit.validate(),
+            Err(ChatCompletionsConfigError::UnsupportedDialectOption(message))
+                if message.contains("at least 16000")
+        ));
+
+        let temperature = ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Kimi,
+            max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+            temperature_milli: Some(500),
+            ..ChatCompletionsChatConfig::new("kimi")
+        };
+        assert!(matches!(
+            temperature.validate(),
+            Err(ChatCompletionsConfigError::UnsupportedDialectOption(message))
+                if message.contains("temperature")
+        ));
     }
 
     #[test]
@@ -2546,6 +3014,266 @@ mod tests {
                 input_schema: json!({"type": "object"}),
             }],
         )
+    }
+
+    fn loop_with_config(
+        scripts: Vec<Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError>>,
+        outputs: Vec<ChatCompletionsToolOutput>,
+        config: ChatCompletionsChatConfig,
+    ) -> ChatCompletionsBrainLoop<FakeChatCompletionsClient, ScriptedToolExecutor> {
+        ChatCompletionsBrainLoop::new(
+            FakeChatCompletionsClient::new(scripts),
+            ScriptedToolExecutor::new(outputs),
+            config,
+            vec![NeutralBrainTool {
+                name: "lookup".to_string(),
+                description: "Look up".to_string(),
+                input_schema: json!({"type": "object"}),
+            }],
+        )
+    }
+
+    fn kimi_preserved_config() -> ChatCompletionsChatConfig {
+        ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Kimi,
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            reasoning_history: ChatCompletionsReasoningHistory::PreserveAll,
+            max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+            ..ChatCompletionsChatConfig::new("kimi-k2.7")
+        }
+    }
+
+    #[test]
+    fn tool_continuation_replays_exact_reasoning_content() {
+        let exact_reasoning = "line one\nline two with spacing  ";
+        let mut brain = loop_with_config(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: exact_reasoning.to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        r#"{"query":"one"}"#,
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("done".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok("result")],
+            kimi_preserved_config(),
+        );
+
+        let output =
+            brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("start")]);
+        let second_request = &output.provider_request_debug_samples[1];
+        let assistant = second_request["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .expect("assistant tool message");
+        assert_eq!(assistant["reasoning_content"], exact_reasoning);
+        assert_eq!(assistant["tool_calls"][0]["function"]["name"], "lookup");
+        assert!(
+            events(&output.stream).contains(&BrainEvent::ReasoningDelta {
+                text: exact_reasoning.to_string(),
+                format: Some(CANONICAL_REASONING_FORMAT.to_string()),
+            })
+        );
+        assert!(!events(&output.stream).iter().any(
+            |event| matches!(event, BrainEvent::TextDelta { text } if text.contains("line one"))
+        ));
+    }
+
+    #[test]
+    fn multiple_tool_rounds_preserve_reasoning_order() {
+        let mut brain = loop_with_config(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: "reason-one".to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", r#"{"round":1}"#)),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: "reason-two".to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", r#"{"round":2}"#)),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("done".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![
+                ChatCompletionsToolOutput::ok("one"),
+                ChatCompletionsToolOutput::ok("two"),
+            ],
+            kimi_preserved_config(),
+        );
+
+        let output =
+            brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("start")]);
+        let reasoning = output.provider_request_debug_samples[2]["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .filter_map(|message| message["reasoning_content"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(reasoning, vec!["reason-one", "reason-two"]);
+    }
+
+    #[test]
+    fn preserved_reasoning_state_survives_serialization_and_next_wake() {
+        let mut first_brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ReasoningDelta {
+                    text: "prior-reasoning".to_string(),
+                    field: "reasoning_content".to_string(),
+                },
+                ChatCompletionsEvent::ContentDelta("prior answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            kimi_preserved_config(),
+        );
+        let first = first_brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("first question")],
+        );
+        let state_json = serde_json::to_string(&first.provider_state).expect("serialize state");
+        let restored_state: Option<BrainWakeProviderStateOutput> =
+            serde_json::from_str(&state_json).expect("restore state");
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = restored_state else {
+            panic!("expected replacement state");
+        };
+        let provider_state = BrainWakeProviderStateInput {
+            module_id: state.module_id,
+            strategy_id: state.strategy_id,
+            profile_fingerprint: state.profile_fingerprint,
+            provider_fingerprint: state.provider_fingerprint,
+            payload_version: state.payload_version,
+            payload: state.payload,
+            expires_at: None,
+        };
+        let mut second_brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("next answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            kimi_preserved_config(),
+        );
+        let second = second_brain.wake(ChatCompletionsBrainLoopInput {
+            context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
+            messages: vec![
+                ChatCompletionMessage::system("system"),
+                ChatCompletionMessage::user("second question"),
+            ],
+            provider_state: Some(provider_state),
+            final_message_fallback: None,
+        });
+        let messages = second.provider_request_debug_samples[0]["messages"]
+            .as_array()
+            .expect("messages");
+        assert_eq!(messages[0]["role"], "system");
+        assert!(messages.iter().any(|message| {
+            message["role"] == "assistant"
+                && message["reasoning_content"] == "prior-reasoning"
+                && message["content"] == "prior answer"
+        }));
+        assert_eq!(
+            messages.last().expect("new user")["content"],
+            "second question"
+        );
+    }
+
+    #[test]
+    fn discard_policy_clears_prior_state_without_replaying_reasoning() {
+        let preserved = kimi_preserved_config();
+        let state_payload = ChatCompletionsProviderStateV1 {
+            kind: MODULE_ID.to_string(),
+            payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+            strategy_id: preserved.provider_state_strategy_id.clone(),
+            messages: vec![ChatCompletionMessage {
+                role: ChatMessageRole::Assistant,
+                content: Some("prior answer".to_string()),
+                reasoning_content: Some("prior reasoning".to_string()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+        };
+        let prior_state = BrainWakeProviderStateInput {
+            module_id: MODULE_ID.to_string(),
+            strategy_id: preserved.provider_state_strategy_id,
+            profile_fingerprint: "profile".to_string(),
+            provider_fingerprint: "provider".to_string(),
+            payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+            payload: serde_json::to_value(state_payload).expect("state payload"),
+            expires_at: None,
+        };
+        let mut brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("fresh answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            ChatCompletionsChatConfig {
+                wire_dialect: ChatCompletionsWireDialect::Kimi,
+                thinking_mode: ChatCompletionsThinkingMode::Enabled,
+                reasoning_history: ChatCompletionsReasoningHistory::Discard,
+                max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+                ..ChatCompletionsChatConfig::new("kimi-k2.6")
+            },
+        );
+
+        let output = brain.wake(ChatCompletionsBrainLoopInput {
+            context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
+            messages: vec![ChatCompletionMessage::user("new question")],
+            provider_state: Some(prior_state),
+            final_message_fallback: None,
+        });
+
+        let request = &output.provider_request_debug_samples[0];
+        assert!(!request["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .any(|message| message.get("reasoning_content").is_some()));
+        assert_eq!(request["thinking"]["keep"], Value::Null);
+        assert!(matches!(
+            output.provider_state,
+            Some(BrainWakeProviderStateOutput::Clear {
+                reason: ProviderStateClearReason::BrainRequestedClear
+            })
+        ));
     }
 
     #[test]
@@ -3072,6 +3800,7 @@ mod tests {
         let output = brain.wake(ChatCompletionsBrainLoopInput {
             context,
             messages: vec![ChatCompletionMessage::user("hi")],
+            provider_state: None,
             final_message_fallback: Some(ChatCompletionsFinalMessage {
                 text: Some("final-only".to_string()),
                 ..ChatCompletionsFinalMessage::default()

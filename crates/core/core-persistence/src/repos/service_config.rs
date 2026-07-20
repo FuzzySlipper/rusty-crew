@@ -1439,7 +1439,9 @@ fn query_model_providers(
                 mp.alias, mp.status, mp.protocol, mp.provider_kind,
                 mp.display_name, mp.description, mp.base_url, mp.model_id,
                 mp.context_window_tokens, mp.max_output_tokens, mp.temperature_milli,
-                mp.reasoning_effort, mp.reasoning_format, mp.credential_id,
+                mp.reasoning_effort, mp.reasoning_format,
+                mp.chat_completions_dialect, mp.thinking_mode,
+                mp.reasoning_history, mp.reasoning_budget_tokens, mp.credential_id,
                 sc.secret_ciphertext, sc.secret_updated_at, sc.credential_kind, sc.revision,
                 mp.metadata_json, mp.revision, mp.created_at, mp.updated_at
              FROM model_providers mp
@@ -1466,7 +1468,9 @@ fn get_model_provider(conn: &Connection, alias: &str) -> CoreResult<Option<Model
             mp.alias, mp.status, mp.protocol, mp.provider_kind,
             mp.display_name, mp.description, mp.base_url, mp.model_id,
             mp.context_window_tokens, mp.max_output_tokens, mp.temperature_milli,
-            mp.reasoning_effort, mp.reasoning_format, mp.credential_id,
+            mp.reasoning_effort, mp.reasoning_format,
+            mp.chat_completions_dialect, mp.thinking_mode,
+            mp.reasoning_history, mp.reasoning_budget_tokens, mp.credential_id,
             sc.secret_ciphertext, sc.secret_updated_at, sc.credential_kind, sc.revision,
             mp.metadata_json, mp.revision, mp.created_at, mp.updated_at
          FROM model_providers mp
@@ -1577,6 +1581,10 @@ fn upsert_model_provider_in_tx(
             temperature_milli,
             reasoning_effort,
             reasoning_format,
+            chat_completions_dialect,
+            thinking_mode,
+            reasoning_history,
+            reasoning_budget_tokens,
             secret_ciphertext,
             secret_updated_at,
             metadata_json,
@@ -1584,7 +1592,7 @@ fn upsert_model_provider_in_tx(
             created_at,
             updated_at,
             credential_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, ?14, ?15, ?16, ?17, ?18)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, NULL, NULL, ?18, ?19, ?20, ?21, ?22)
         ON CONFLICT(alias) DO UPDATE SET
             status = excluded.status,
             protocol = excluded.protocol,
@@ -1598,6 +1606,10 @@ fn upsert_model_provider_in_tx(
             temperature_milli = excluded.temperature_milli,
             reasoning_effort = excluded.reasoning_effort,
             reasoning_format = excluded.reasoning_format,
+            chat_completions_dialect = excluded.chat_completions_dialect,
+            thinking_mode = excluded.thinking_mode,
+            reasoning_history = excluded.reasoning_history,
+            reasoning_budget_tokens = excluded.reasoning_budget_tokens,
             secret_ciphertext = NULL,
             secret_updated_at = NULL,
             metadata_json = excluded.metadata_json,
@@ -1618,6 +1630,10 @@ fn upsert_model_provider_in_tx(
             write.temperature_milli.map(|value| value as i64),
             write.reasoning_effort.as_deref(),
             write.reasoning_format.as_deref(),
+            chat_completions_dialect_as_str(write.chat_completions_dialect),
+            chat_completions_thinking_mode_as_str(write.thinking_mode),
+            chat_completions_reasoning_history_as_str(write.reasoning_history),
+            write.reasoning_budget_tokens.map(|value| value as i64),
             to_json_text(&write.metadata_json)?,
             revision as i64,
             created_at.as_str(),
@@ -1632,10 +1648,13 @@ fn upsert_model_provider_in_tx(
 fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProviderRecord> {
     let status: String = row.get(1)?;
     let protocol: String = row.get(2)?;
-    let credential_id: Option<String> = row.get(13)?;
-    let secret_ciphertext: Option<String> = row.get(14)?;
-    let credential_kind: Option<String> = row.get(16)?;
-    let metadata_json: String = row.get(18)?;
+    let dialect: String = row.get(13)?;
+    let thinking_mode: String = row.get(14)?;
+    let reasoning_history: String = row.get(15)?;
+    let credential_id: Option<String> = row.get(17)?;
+    let secret_ciphertext: Option<String> = row.get(18)?;
+    let credential_kind: Option<String> = row.get(20)?;
+    let metadata_json: String = row.get(22)?;
     Ok(ModelProviderRecord {
         alias: row.get(0)?,
         status: model_provider_status_from_str(&status)?,
@@ -1650,6 +1669,10 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
         temperature_milli: row.get::<_, Option<i64>>(10)?.map(|value| value as u32),
         reasoning_effort: row.get(11)?,
         reasoning_format: row.get(12)?,
+        chat_completions_dialect: chat_completions_dialect_from_str(&dialect)?,
+        thinking_mode: chat_completions_thinking_mode_from_str(&thinking_mode)?,
+        reasoning_history: chat_completions_reasoning_history_from_str(&reasoning_history)?,
+        reasoning_budget_tokens: row.get::<_, Option<i64>>(16)?.map(|value| value as u32),
         credential_id: credential_id.clone(),
         credential: ModelProviderCredential {
             has_secret: secret_ciphertext.is_some(),
@@ -1657,17 +1680,17 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
                 .as_ref()
                 .and(credential_id.as_ref())
                 .map(|id| format!("db://service_credentials/{id}/secret")),
-            updated_at: row.get(15)?,
+            updated_at: row.get(19)?,
             kind: credential_kind
                 .as_deref()
                 .map(model_provider_credential_kind_from_str)
                 .transpose()?,
-            revision: row.get::<_, Option<i64>>(17)?.map(|value| value as u64),
+            revision: row.get::<_, Option<i64>>(21)?.map(|value| value as u64),
         },
         metadata_json: from_json_text(&metadata_json).map_err(to_sql_error)?,
-        revision: row.get::<_, i64>(19)? as u64,
-        created_at: row.get(20)?,
-        updated_at: row.get(21)?,
+        revision: row.get::<_, i64>(23)? as u64,
+        created_at: row.get(24)?,
+        updated_at: row.get(25)?,
     })
 }
 
@@ -2371,6 +2394,82 @@ fn model_provider_protocol_from_str(raw: &str) -> rusqlite::Result<ModelProvider
     }
 }
 
+fn chat_completions_dialect_as_str(dialect: ChatCompletionsWireDialect) -> &'static str {
+    match dialect {
+        ChatCompletionsWireDialect::Standard => "standard",
+        ChatCompletionsWireDialect::Kimi => "kimi",
+        ChatCompletionsWireDialect::Glm => "glm",
+        ChatCompletionsWireDialect::Qwen => "qwen",
+    }
+}
+
+fn chat_completions_dialect_from_str(raw: &str) -> rusqlite::Result<ChatCompletionsWireDialect> {
+    match raw {
+        "standard" => Ok(ChatCompletionsWireDialect::Standard),
+        "kimi" => Ok(ChatCompletionsWireDialect::Kimi),
+        "glm" => Ok(ChatCompletionsWireDialect::Glm),
+        "qwen" => Ok(ChatCompletionsWireDialect::Qwen),
+        other => Err(model_provider_text_conversion_error(
+            13,
+            format!("unknown chat completions dialect {other}"),
+        )),
+    }
+}
+
+fn chat_completions_thinking_mode_as_str(mode: ChatCompletionsThinkingMode) -> &'static str {
+    match mode {
+        ChatCompletionsThinkingMode::ProviderDefault => "provider_default",
+        ChatCompletionsThinkingMode::Enabled => "enabled",
+        ChatCompletionsThinkingMode::Disabled => "disabled",
+    }
+}
+
+fn chat_completions_thinking_mode_from_str(
+    raw: &str,
+) -> rusqlite::Result<ChatCompletionsThinkingMode> {
+    match raw {
+        "provider_default" => Ok(ChatCompletionsThinkingMode::ProviderDefault),
+        "enabled" => Ok(ChatCompletionsThinkingMode::Enabled),
+        "disabled" => Ok(ChatCompletionsThinkingMode::Disabled),
+        other => Err(model_provider_text_conversion_error(
+            14,
+            format!("unknown chat completions thinking mode {other}"),
+        )),
+    }
+}
+
+fn chat_completions_reasoning_history_as_str(
+    history: ChatCompletionsReasoningHistory,
+) -> &'static str {
+    match history {
+        ChatCompletionsReasoningHistory::ProviderDefault => "provider_default",
+        ChatCompletionsReasoningHistory::Discard => "discard",
+        ChatCompletionsReasoningHistory::PreserveAll => "preserve_all",
+    }
+}
+
+fn chat_completions_reasoning_history_from_str(
+    raw: &str,
+) -> rusqlite::Result<ChatCompletionsReasoningHistory> {
+    match raw {
+        "provider_default" => Ok(ChatCompletionsReasoningHistory::ProviderDefault),
+        "discard" => Ok(ChatCompletionsReasoningHistory::Discard),
+        "preserve_all" => Ok(ChatCompletionsReasoningHistory::PreserveAll),
+        other => Err(model_provider_text_conversion_error(
+            15,
+            format!("unknown chat completions reasoning history {other}"),
+        )),
+    }
+}
+
+fn model_provider_text_conversion_error(column: usize, message: String) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        rusqlite::types::Type::Text,
+        Box::new(CoreError::new(CoreErrorKind::PersistenceFailure, message)),
+    )
+}
+
 fn model_provider_credential_kind_as_str(kind: ModelProviderCredentialKind) -> &'static str {
     match kind {
         ModelProviderCredentialKind::ApiKey | ModelProviderCredentialKind::LegacyRawApiKey => {
@@ -2505,11 +2604,83 @@ pub(crate) fn validate_model_provider_write(write: &ModelProviderWrite) -> CoreR
     if let Some(base_url) = write.base_url.as_deref() {
         collect_required_text("model provider base_url", base_url)?;
     }
+    validate_chat_completions_dialect_policy(write)?;
     if write.clear_secret && write.secret.is_some() {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "model provider write cannot set and clear secret in one request",
         ));
+    }
+    Ok(())
+}
+
+fn validate_chat_completions_dialect_policy(write: &ModelProviderWrite) -> CoreResult<()> {
+    const KIMI_THINKING_MIN_OUTPUT_TOKENS: u32 = 16_000;
+    let is_default = write.chat_completions_dialect == ChatCompletionsWireDialect::Standard
+        && write.thinking_mode == ChatCompletionsThinkingMode::ProviderDefault
+        && write.reasoning_history == ChatCompletionsReasoningHistory::ProviderDefault
+        && write.reasoning_budget_tokens.is_none();
+    if write.protocol != ModelProviderProtocol::ChatCompletions {
+        if is_default {
+            return Ok(());
+        }
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat completions dialect settings require protocol chat_completions",
+        ));
+    }
+    if write.chat_completions_dialect == ChatCompletionsWireDialect::Standard && !is_default {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "standard chat completions dialect does not accept vendor thinking settings",
+        ));
+    }
+    if write.thinking_mode == ChatCompletionsThinkingMode::Disabled
+        && write.reasoning_history != ChatCompletionsReasoningHistory::ProviderDefault
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "disabled thinking cannot configure reasoning history preservation",
+        ));
+    }
+    if write.chat_completions_dialect == ChatCompletionsWireDialect::Kimi
+        && write.thinking_mode != ChatCompletionsThinkingMode::Disabled
+    {
+        if write.temperature_milli.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "kimi thinking models do not accept a temperature override",
+            ));
+        }
+        if !matches!(
+            write.max_output_tokens,
+            Some(tokens) if tokens >= KIMI_THINKING_MIN_OUTPUT_TOKENS
+        ) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "kimi thinking models require max_output_tokens of at least 16000",
+            ));
+        }
+    }
+    if let Some(budget) = write.reasoning_budget_tokens {
+        if budget == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "reasoning budget tokens must be greater than zero",
+            ));
+        }
+        if write.chat_completions_dialect != ChatCompletionsWireDialect::Qwen {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "reasoning budget tokens are supported only by the qwen chat completions dialect",
+            ));
+        }
+        if write.thinking_mode != ChatCompletionsThinkingMode::Enabled {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "qwen reasoning budget tokens require thinking mode enabled",
+            ));
+        }
     }
     Ok(())
 }
@@ -2853,6 +3024,10 @@ mod tests {
             temperature_milli: Some(500),
             reasoning_effort: None,
             reasoning_format: None,
+            chat_completions_dialect: Default::default(),
+            thinking_mode: Default::default(),
+            reasoning_history: Default::default(),
+            reasoning_budget_tokens: None,
             secret,
             clear_secret: false,
             expected_credential_revision: None,

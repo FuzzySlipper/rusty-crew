@@ -725,6 +725,23 @@ export const rawModelProviderRecordSchema = Type.Object(
     temperature_milli: Type.Optional(nullableNumber),
     reasoning_effort: Type.Optional(nullableString),
     reasoning_format: Type.Optional(nullableString),
+    chat_completions_dialect: Type.Union([
+      Type.Literal("standard"),
+      Type.Literal("kimi"),
+      Type.Literal("glm"),
+      Type.Literal("qwen"),
+    ]),
+    thinking_mode: Type.Union([
+      Type.Literal("provider_default"),
+      Type.Literal("enabled"),
+      Type.Literal("disabled"),
+    ]),
+    reasoning_history: Type.Union([
+      Type.Literal("provider_default"),
+      Type.Literal("discard"),
+      Type.Literal("preserve_all"),
+    ]),
+    reasoning_budget_tokens: Type.Optional(nullableNumber),
     credential_id: Type.Optional(nullableString),
     credential: rawModelProviderCredentialSchema,
     metadata_json: Type.Unknown(),
@@ -1152,6 +1169,7 @@ const chatCompletionMessageSchema = Type.Object(
       Type.Literal("tool"),
     ]),
     content: Type.Optional(Type.String()),
+    reasoningContent: Type.Optional(Type.String()),
     name: Type.Optional(Type.String()),
     toolCallId: Type.Optional(Type.String()),
     toolCalls: Type.Optional(Type.Array(Type.Unknown())),
@@ -1181,6 +1199,7 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
     wakeId: Type.String(),
     sessionId: Type.String(),
     messages: Type.Array(chatCompletionMessageSchema),
+    providerState: Type.Optional(providerStateInputSchema),
     tools: Type.Optional(
       Type.Array(
         Type.Object(
@@ -1199,6 +1218,31 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
         providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
         wakeTimeoutMs: Type.Optional(Type.Number()),
         temperatureMilli: Type.Optional(Type.Number()),
+        reasoningEffort: Type.Optional(Type.String()),
+        wireDialect: Type.Optional(
+          Type.Union([
+            Type.Literal("standard"),
+            Type.Literal("kimi"),
+            Type.Literal("glm"),
+            Type.Literal("qwen"),
+          ]),
+        ),
+        thinkingMode: Type.Optional(
+          Type.Union([
+            Type.Literal("provider_default"),
+            Type.Literal("enabled"),
+            Type.Literal("disabled"),
+          ]),
+        ),
+        reasoningHistory: Type.Optional(
+          Type.Union([
+            Type.Literal("provider_default"),
+            Type.Literal("discard"),
+            Type.Literal("preserve_all"),
+          ]),
+        ),
+        reasoningBudgetTokens: Type.Optional(Type.Number({ minimum: 1 })),
+        providerStateStrategyId: Type.Optional(Type.String()),
         maxOutputTokens: Type.Optional(Type.Number()),
         maxToolRounds: Type.Optional(
           Type.Integer({ minimum: 1, maximum: 512 }),
@@ -1428,6 +1472,7 @@ const chatCompletionsTransportMetricsSchema = Type.Object(
     provider_request_count: Type.Number(),
     tool_round_count: Type.Number(),
     provider_event_counts: Type.Record(Type.String(), Type.Number()),
+    provider_request_debug_samples: Type.Array(Type.Unknown()),
   },
   { additionalProperties: true },
 );
@@ -1454,6 +1499,9 @@ export const rawChatCompletionsBufferedDrainResultSchema = Type.Object(
     terminal: Type.Boolean(),
     transport_metrics: Type.Optional(
       Type.Union([Type.Null(), chatCompletionsTransportMetricsSchema]),
+    ),
+    provider_state: Type.Optional(
+      Type.Union([Type.Null(), rawProviderStateOutputSchema]),
     ),
     error: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     cancellation: Type.Optional(

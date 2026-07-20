@@ -1257,6 +1257,18 @@
           "chat_completions"
         ]
       },
+      "ChatCompletionsDialect": {
+        "type": "string",
+        "enum": ["standard", "kimi", "glm", "qwen"]
+      },
+      "ChatCompletionsThinkingMode": {
+        "type": "string",
+        "enum": ["provider_default", "enabled", "disabled"]
+      },
+      "ChatCompletionsReasoningHistory": {
+        "type": "string",
+        "enum": ["provider_default", "discard", "preserve_all"]
+      },
       "ModelProviderRefreshMode": {
         "type": "string",
         "enum": [
@@ -1328,6 +1340,9 @@
           "protocol",
           "providerKind",
           "modelId",
+          "chatCompletionsDialect",
+          "thinkingMode",
+          "reasoningHistory",
           "credential",
           "metadataJson",
           "revision",
@@ -1377,6 +1392,18 @@
           },
           "reasoningFormat": {
             "type": "string"
+          },
+          "chatCompletionsDialect": {
+            "$ref": "#/components/schemas/ChatCompletionsDialect"
+          },
+          "thinkingMode": {
+            "$ref": "#/components/schemas/ChatCompletionsThinkingMode"
+          },
+          "reasoningHistory": {
+            "$ref": "#/components/schemas/ChatCompletionsReasoningHistory"
+          },
+          "reasoningBudgetTokens": {
+            "type": "number"
           },
           "credential": {
             "$ref": "#/components/schemas/ModelProviderCredential"
@@ -1483,6 +1510,18 @@
           },
           "reasoningFormat": {
             "type": "string"
+          },
+          "chatCompletionsDialect": {
+            "$ref": "#/components/schemas/ChatCompletionsDialect"
+          },
+          "thinkingMode": {
+            "$ref": "#/components/schemas/ChatCompletionsThinkingMode"
+          },
+          "reasoningHistory": {
+            "$ref": "#/components/schemas/ChatCompletionsReasoningHistory"
+          },
+          "reasoningBudgetTokens": {
+            "type": "number"
           },
           "secret": {
             "type": "string"

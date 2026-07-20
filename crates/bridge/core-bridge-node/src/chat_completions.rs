@@ -13,6 +13,10 @@ use rusty_crew_chat_completions_brain::{
     NeutralBrainTool as ChatCompletionsNeutralBrainTool, PendingChatFunctionCall,
     ProviderCancellation, DEFAULT_MAX_TOOL_ROUNDS,
 };
+use rusty_crew_core_protocol::{
+    BrainWakeProviderStateInput, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
+    ChatCompletionsWireDialect,
+};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -23,6 +27,8 @@ struct JsChatCompletionsBrainRunInput {
     session_id: String,
     #[serde(default)]
     messages: Vec<ChatCompletionMessage>,
+    #[serde(default)]
+    provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default)]
     tools: Vec<JsChatCompletionsNeutralTool>,
     config: JsChatCompletionsBrainConfig,
@@ -50,6 +56,16 @@ struct JsChatCompletionsBrainConfig {
     temperature_milli: Option<u32>,
     #[serde(default)]
     reasoning_effort: Option<String>,
+    #[serde(default)]
+    wire_dialect: ChatCompletionsWireDialect,
+    #[serde(default)]
+    thinking_mode: ChatCompletionsThinkingMode,
+    #[serde(default)]
+    reasoning_history: ChatCompletionsReasoningHistory,
+    #[serde(default)]
+    reasoning_budget_tokens: Option<u32>,
+    #[serde(default = "default_chat_completions_strategy_id")]
+    provider_state_strategy_id: String,
     #[serde(default)]
     max_output_tokens: Option<u32>,
     #[serde(default)]
@@ -103,6 +119,11 @@ pub(crate) struct ChatCompletionsTransportMetrics {
     provider_request_count: usize,
     tool_round_count: usize,
     provider_event_counts: std::collections::BTreeMap<String, usize>,
+    provider_request_debug_samples: Vec<Value>,
+}
+
+fn default_chat_completions_strategy_id() -> String {
+    "default".to_string()
 }
 
 #[derive(Debug, Default)]
@@ -199,6 +220,7 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
                 "terminal": terminal,
                 "terminal_reason_code": terminal_reason_code,
                 "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
+                "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
                 "error": error,
                 "cancellation": terminal.then(|| run.coordinator.cancellation()).flatten(),
             });
@@ -324,7 +346,11 @@ fn run_chat_completions_brain_buffered(
                         provider_request_count: output.provider_request_count,
                         tool_round_count: output.tool_round_count,
                         provider_event_counts: output.provider_event_counts,
+                        provider_request_debug_samples: output.provider_request_debug_samples,
                     });
+                    if let Some(provider_state) = output.provider_state {
+                        let _ = run.coordinator.set_provider_state_output(provider_state);
+                    }
                     if !run.coordinator.phase().is_terminal() {
                         let _ = run.coordinator.fail(
                             "provider_stream_missing_terminal",
@@ -359,6 +385,12 @@ fn run_chat_completions_brain_with_buffered_tools(
         .with_run_mut(&wake_id, |run| run.payload.provider_cancellation.clone())
         .map_err(brain_runtime_error_to_napi)?;
     let chat_config = chat_completions_chat_config(&input.config);
+    chat_config.validate().map_err(|error| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("invalid chat-completions provider config: {error}"),
+        )
+    })?;
     let loop_config = ChatCompletionsBrainLoopConfig {
         max_tool_rounds: input
             .config
@@ -390,6 +422,7 @@ fn run_chat_completions_brain_with_buffered_tools(
     let loop_input = ChatCompletionsBrainLoopInput {
         context,
         messages: input.messages,
+        provider_state: input.provider_state,
         final_message_fallback,
     };
     match input.client {
@@ -441,6 +474,11 @@ fn chat_completions_chat_config(
         model: config.model.clone(),
         temperature_milli: config.temperature_milli,
         reasoning_effort: config.reasoning_effort.clone(),
+        wire_dialect: config.wire_dialect,
+        thinking_mode: config.thinking_mode,
+        reasoning_history: config.reasoning_history,
+        reasoning_budget_tokens: config.reasoning_budget_tokens,
+        provider_state_strategy_id: config.provider_state_strategy_id.clone(),
         max_output_tokens: config.max_output_tokens,
         provider_request_timeout_ms: config.provider_request_timeout_ms,
     }

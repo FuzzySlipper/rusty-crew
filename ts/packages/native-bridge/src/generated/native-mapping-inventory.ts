@@ -1044,6 +1044,7 @@ export const nativeMappingInventory = {
         "RawModelProviderRecord": [
           "alias",
           "base_url",
+          "chat_completions_dialect",
           "context_window_tokens",
           "created_at",
           "credential",
@@ -1057,9 +1058,11 @@ export const nativeMappingInventory = {
           "provider_kind",
           "reasoning_effort",
           "reasoning_format",
+          "reasoning_history",
           "revision",
           "status",
           "temperature_milli",
+          "thinking_mode",
           "updated_at"
         ],
         "RawModelProviderRefreshImpact": [

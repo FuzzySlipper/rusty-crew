@@ -1194,6 +1194,34 @@ pub enum ModelProviderProtocol {
     ChatCompletions,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatCompletionsWireDialect {
+    #[default]
+    Standard,
+    Kimi,
+    Glm,
+    Qwen,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatCompletionsThinkingMode {
+    #[default]
+    ProviderDefault,
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatCompletionsReasoningHistory {
+    #[default]
+    ProviderDefault,
+    Discard,
+    PreserveAll,
+}
+
 pub const MODEL_PROVIDER_SECRET_ENVELOPE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1478,6 +1506,14 @@ pub struct ModelProviderRecord {
     pub temperature_milli: Option<u32>,
     pub reasoning_effort: Option<String>,
     pub reasoning_format: Option<String>,
+    #[serde(default)]
+    pub chat_completions_dialect: ChatCompletionsWireDialect,
+    #[serde(default)]
+    pub thinking_mode: ChatCompletionsThinkingMode,
+    #[serde(default)]
+    pub reasoning_history: ChatCompletionsReasoningHistory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<String>,
     pub credential: ModelProviderCredential,
@@ -1502,6 +1538,14 @@ pub struct ModelProviderWrite {
     pub temperature_milli: Option<u32>,
     pub reasoning_effort: Option<String>,
     pub reasoning_format: Option<String>,
+    #[serde(default)]
+    pub chat_completions_dialect: ChatCompletionsWireDialect,
+    #[serde(default)]
+    pub thinking_mode: ChatCompletionsThinkingMode,
+    #[serde(default)]
+    pub reasoning_history: ChatCompletionsReasoningHistory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget_tokens: Option<u32>,
     pub secret: Option<String>,
     pub clear_secret: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,6 +1,6 @@
 # Model Provider Admin API Contract
 
-Status: v0.2 implemented contract for Rusty Crew model-provider and shared
+Status: v0.3 implemented contract for Rusty Crew model-provider and shared
 credential administration.
 
 The machine-readable source artifact is
@@ -46,6 +46,9 @@ artifact instead of hand-copying route shapes.
   decimal `temperature` when a temperature is configured. `temperatureMilli`
   remains the storage/write millivalue.
 - Write bodies may use decimal `temperature` or integer `temperatureMilli`.
+- Chat Completions vendor controls use the typed `chatCompletionsDialect`,
+  `thinkingMode`, `reasoningHistory`, and optional `reasoningBudgetTokens`
+  fields. Standard endpoints reject vendor-only combinations.
 - Revision conflicts use `reason_code:
   "model_provider_revision_mismatch"` and return `expectedRevision`,
   `currentRevision`, and the current projected provider when available.

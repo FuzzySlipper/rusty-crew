@@ -1025,6 +1025,10 @@ function modelProviderToBrainModelConfig(
     maxOutputTokens: provider.maxOutputTokens,
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
+    chatCompletionsDialect: provider.chatCompletionsDialect,
+    thinkingMode: provider.thinkingMode,
+    reasoningHistory: provider.reasoningHistory,
+    reasoningBudgetTokens: provider.reasoningBudgetTokens,
   };
 }
 

@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 52;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 53;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -279,7 +279,28 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add service-scoped provider credentials",
         apply: migrate_v52_add_service_credentials,
     },
+    SchemaMigration {
+        version: 53,
+        description: "add typed chat completions dialect policy",
+        apply: migrate_v53_add_chat_completions_dialect_policy,
+    },
 ];
+
+fn migrate_v53_add_chat_completions_dialect_policy(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "ALTER TABLE model_providers
+            ADD COLUMN chat_completions_dialect TEXT NOT NULL DEFAULT 'standard';
+         ALTER TABLE model_providers
+            ADD COLUMN thinking_mode TEXT NOT NULL DEFAULT 'provider_default';
+         ALTER TABLE model_providers
+            ADD COLUMN reasoning_history TEXT NOT NULL DEFAULT 'provider_default';
+         ALTER TABLE model_providers
+            ADD COLUMN reasoning_budget_tokens INTEGER;",
+    )
+    .map_err(|error| persistence_error("add chat completions dialect policy", error))
+}
 
 fn migrate_v52_add_service_credentials(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(

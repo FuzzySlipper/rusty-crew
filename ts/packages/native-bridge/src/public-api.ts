@@ -310,6 +310,7 @@ export interface OpenAiResponsesToolRequest {
 export interface ChatCompletionsChatCompletionMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string;
+  reasoningContent?: string;
   name?: string;
   toolCallId?: string;
   toolCalls?: unknown[];
@@ -319,6 +320,7 @@ export interface ChatCompletionsBrainRunInput {
   wakeId: string;
   sessionId: SessionId;
   messages: ChatCompletionsChatCompletionMessage[];
+  providerState?: BrainWakeProviderStateInput;
   tools?: Array<{
     name: string;
     description: string;
@@ -330,6 +332,11 @@ export interface ChatCompletionsBrainRunInput {
     wakeTimeoutMs?: number;
     temperatureMilli?: number;
     reasoningEffort?: string;
+    wireDialect?: "standard" | "kimi" | "glm" | "qwen";
+    thinkingMode?: "provider_default" | "enabled" | "disabled";
+    reasoningHistory?: "provider_default" | "discard" | "preserve_all";
+    reasoningBudgetTokens?: number;
+    providerStateStrategyId?: string;
     maxOutputTokens?: number;
     maxToolRounds?: number;
     repeatedToolCallLimit?: number;

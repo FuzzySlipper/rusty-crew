@@ -1,4 +1,4 @@
-export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.2.0";
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.3.0";
 
 export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
   "docs/model-provider-admin-api-v0.openapi.json";
@@ -14,6 +14,25 @@ export const MODEL_PROVIDER_STATUS_VALUES = [
 export const MODEL_PROVIDER_PROTOCOL_VALUES = [
   "responses",
   "chat_completions",
+] as const;
+
+export const CHAT_COMPLETIONS_DIALECT_VALUES = [
+  "standard",
+  "kimi",
+  "glm",
+  "qwen",
+] as const;
+
+export const CHAT_COMPLETIONS_THINKING_MODE_VALUES = [
+  "provider_default",
+  "enabled",
+  "disabled",
+] as const;
+
+export const CHAT_COMPLETIONS_REASONING_HISTORY_VALUES = [
+  "provider_default",
+  "discard",
+  "preserve_all",
 ] as const;
 
 export const MODEL_PROVIDER_REFRESH_MODE_VALUES = [
@@ -83,6 +102,9 @@ export const MODEL_PROVIDER_API_RECORD_REQUIRED_FIELDS = [
   "protocol",
   "providerKind",
   "modelId",
+  "chatCompletionsDialect",
+  "thinkingMode",
+  "reasoningHistory",
   "credential",
   "metadataJson",
   "revision",

@@ -279,4 +279,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "b6b48a713b681e0c86016205bdc7c3ffa05e5c80cfbf5e1619d7464aed432651" as const;
+export const bridgeWireShapeFingerprint = "11c95cfc108d8c4ecb9a83bb53595ade76454959d5c33699fcf4815a5999b01d" as const;

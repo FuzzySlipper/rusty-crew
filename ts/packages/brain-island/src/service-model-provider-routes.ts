@@ -483,6 +483,10 @@ function modelProviderWriteFromBody(
     temperatureMilli: optionalTemperatureMilli(body),
     reasoningEffort: optionalString(body.reasoningEffort),
     reasoningFormat: optionalString(body.reasoningFormat),
+    chatCompletionsDialect: chatCompletionsDialect(body.chatCompletionsDialect),
+    thinkingMode: chatCompletionsThinkingMode(body.thinkingMode),
+    reasoningHistory: chatCompletionsReasoningHistory(body.reasoningHistory),
+    reasoningBudgetTokens: optionalNumber(body.reasoningBudgetTokens),
     secret: modelProviderSecretFromBody(body),
     clearSecret: optionalBoolean(body.clearSecret),
     expectedCredentialRevision: optionalNumber(
@@ -492,6 +496,55 @@ function modelProviderWriteFromBody(
     expectedRevision: optionalNumber(body.expectedRevision),
     now,
   };
+}
+
+function chatCompletionsDialect(
+  value: unknown,
+): NonNullable<NativeModelProviderWrite["chatCompletionsDialect"]> {
+  const dialect = optionalString(value) ?? "standard";
+  if (
+    dialect === "standard" ||
+    dialect === "kimi" ||
+    dialect === "glm" ||
+    dialect === "qwen"
+  ) {
+    return dialect;
+  }
+  throw new Error(
+    "model provider chatCompletionsDialect must be standard, kimi, glm, or qwen",
+  );
+}
+
+function chatCompletionsThinkingMode(
+  value: unknown,
+): NonNullable<NativeModelProviderWrite["thinkingMode"]> {
+  const mode = optionalString(value) ?? "provider_default";
+  if (
+    mode === "provider_default" ||
+    mode === "enabled" ||
+    mode === "disabled"
+  ) {
+    return mode;
+  }
+  throw new Error(
+    "model provider thinkingMode must be provider_default, enabled, or disabled",
+  );
+}
+
+function chatCompletionsReasoningHistory(
+  value: unknown,
+): NonNullable<NativeModelProviderWrite["reasoningHistory"]> {
+  const history = optionalString(value) ?? "provider_default";
+  if (
+    history === "provider_default" ||
+    history === "discard" ||
+    history === "preserve_all"
+  ) {
+    return history;
+  }
+  throw new Error(
+    "model provider reasoningHistory must be provider_default, discard, or preserve_all",
+  );
 }
 
 function stringParam(url: URL, key: string): string | undefined {

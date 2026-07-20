@@ -32,6 +32,11 @@ import {
 } from "./event-body-wire.js";
 import type { RawResourceLimits } from "./runtime-config-wire.js";
 import * as streamRetention from "./brain-stream-retention-wire.js";
+import {
+  chatCompletionsTransportMetricsFromRaw,
+  type RawChatCompletionsTransportMetrics,
+} from "./chat-completions-metrics-wire.js";
+export { chatCompletionsTransportMetricsFromRaw };
 
 export function assertCanonicalBrainRunModule(
   moduleId: string,
@@ -40,27 +45,6 @@ export function assertCanonicalBrainRunModule(
     return moduleId;
   }
   throw new Error(`native bridge returned unknown brain module ${moduleId}`);
-}
-
-export function chatCompletionsTransportMetricsFromRaw(
-  raw:
-    | NonNullable<RawChatCompletionsBufferedDrainResult["transport_metrics"]>
-    | undefined,
-): ChatCompletionsTransportMetrics | undefined {
-  if (!raw) return undefined;
-  return {
-    effectiveTransport: "rust-chat-completions",
-    selectedStrategyId: "default",
-    effectiveStrategyId: "default",
-    fallbackReason: null,
-    providerRequestCount: raw.provider_request_count,
-    continuationRoundCount: raw.tool_round_count,
-    providerRequestPayloadBytes: 0,
-    providerEventCounts: raw.provider_event_counts,
-    firstTextDeltaLatencyMs: null,
-    totalTurnDurationMs: 0,
-    toolRoundCount: raw.tool_round_count,
-  };
 }
 
 export function toNativeBrainAction(action: BrainAction): unknown {
@@ -156,10 +140,14 @@ export function toNativeChatCompletionsBrainRunInput(
     messages: input.messages.map((message) => ({
       role: message.role,
       content: message.content,
+      reasoning_content: message.reasoningContent,
       name: message.name,
       tool_call_id: message.toolCallId,
       tool_calls: message.toolCalls,
     })),
+    providerState: input.providerState
+      ? toNativeProviderStateInput(input.providerState)
+      : undefined,
     tools: input.tools?.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -621,11 +609,8 @@ export interface RawChatCompletionsBufferedDrainResult {
     arguments_json: string;
   }>;
   terminal: boolean;
-  transport_metrics?: {
-    provider_request_count: number;
-    tool_round_count: number;
-    provider_event_counts: Record<string, number>;
-  };
+  provider_state?: RawBrainWakeProviderStateOutput | null;
+  transport_metrics?: RawChatCompletionsTransportMetrics;
   error?: string | null;
   cancellation?: RawOpenAiResponsesBufferedCancellation | null;
 }

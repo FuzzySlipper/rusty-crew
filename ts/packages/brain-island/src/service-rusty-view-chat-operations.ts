@@ -640,6 +640,28 @@ export async function rustyViewSessionContextUsage(
       session_reasoning_effort_override:
         input.session.inferenceOverrides?.reasoningEffort ?? undefined,
       reasoning_format: provider?.reasoningFormat,
+      chat_completions_dialect: provider?.chatCompletionsDialect,
+      thinking_mode: provider?.thinkingMode,
+      reasoning_history: provider?.reasoningHistory,
+      reasoning_budget_tokens: provider?.reasoningBudgetTokens,
+      thinking_settings_applied:
+        provider?.protocol === "chat_completions" &&
+        provider.chatCompletionsDialect !== "standard" &&
+        (provider.thinkingMode !== "provider_default" ||
+          provider.reasoningHistory !== "provider_default" ||
+          provider.reasoningBudgetTokens !== undefined),
+      thinking_mode_applied:
+        provider?.protocol === "chat_completions" &&
+        provider.chatCompletionsDialect !== "standard" &&
+        provider.thinkingMode !== "provider_default",
+      reasoning_history_applied:
+        provider?.protocol === "chat_completions" &&
+        provider.chatCompletionsDialect !== "standard" &&
+        provider.reasoningHistory !== "provider_default",
+      reasoning_budget_applied:
+        provider?.protocol === "chat_completions" &&
+        provider.chatCompletionsDialect === "qwen" &&
+        provider.reasoningBudgetTokens !== undefined,
       revision: provider?.revision,
     },
     brain: {

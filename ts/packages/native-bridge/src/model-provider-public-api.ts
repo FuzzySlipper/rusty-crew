@@ -80,6 +80,10 @@ export interface NativeModelProviderRecord {
   temperatureMilli?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
+  chatCompletionsDialect: NativeChatCompletionsWireDialect;
+  thinkingMode: NativeChatCompletionsThinkingMode;
+  reasoningHistory: NativeChatCompletionsReasoningHistory;
+  reasoningBudgetTokens?: number;
   credentialId?: string;
   credential: NativeModelProviderCredential;
   metadataJson: unknown;
@@ -102,6 +106,10 @@ export interface NativeModelProviderWrite {
   temperatureMilli?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
+  chatCompletionsDialect?: NativeChatCompletionsWireDialect;
+  thinkingMode?: NativeChatCompletionsThinkingMode;
+  reasoningHistory?: NativeChatCompletionsReasoningHistory;
+  reasoningBudgetTokens?: number;
   secret?: string;
   clearSecret?: boolean;
   expectedCredentialRevision?: number;
@@ -110,49 +118,18 @@ export interface NativeModelProviderWrite {
   now: string;
 }
 
-export interface NativeModelProviderQuery {
-  status?: NativeModelProviderStatus;
-  aliasPrefix?: string;
-  limit?: number;
-  offset?: number;
-}
+export type NativeChatCompletionsWireDialect =
+  | "standard"
+  | "kimi"
+  | "glm"
+  | "qwen";
+export type NativeChatCompletionsThinkingMode =
+  | "provider_default"
+  | "enabled"
+  | "disabled";
+export type NativeChatCompletionsReasoningHistory =
+  | "provider_default"
+  | "discard"
+  | "preserve_all";
 
-export interface NativeModelProviderAffectedProfile {
-  profileId: string;
-  sessionIds: string[];
-  configuredSessionIds: string[];
-  activeSessionIds: string[];
-}
-
-export interface NativeModelProviderRefreshImpact {
-  providerAlias: string;
-  affectedProfiles: NativeModelProviderAffectedProfile[];
-}
-
-export interface NativeModelProviderRefreshImpactRequest {
-  providerAlias: string;
-}
-
-export type NativeModelProviderRefreshMode = "none" | "plan" | "apply";
-
-export interface NativeModelProviderRefreshPlanRequest {
-  providerAlias: string;
-  mode: NativeModelProviderRefreshMode;
-}
-
-export interface NativeModelProviderRefreshProfileAction {
-  profileId: string;
-  commandName: string;
-  reason: string;
-  plannedSummary: string;
-  appliedSummary: string;
-  blockedSummary: string;
-  failureReasonCode: string;
-}
-
-export interface NativeModelProviderRefreshPlan {
-  providerAlias: string;
-  mode: NativeModelProviderRefreshMode;
-  affectedProfiles: NativeModelProviderAffectedProfile[];
-  actions: NativeModelProviderRefreshProfileAction[];
-}
+export * from "./model-provider-refresh-public-api.js";

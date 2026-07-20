@@ -225,6 +225,10 @@ export function toRawModelProviderWrite(
     temperature_milli: write.temperatureMilli,
     reasoning_effort: write.reasoningEffort,
     reasoning_format: write.reasoningFormat,
+    chat_completions_dialect: write.chatCompletionsDialect ?? "standard",
+    thinking_mode: write.thinkingMode ?? "provider_default",
+    reasoning_history: write.reasoningHistory ?? "provider_default",
+    reasoning_budget_tokens: write.reasoningBudgetTokens,
     secret: write.secret,
     clear_secret: write.clearSecret ?? false,
     expected_credential_revision: write.expectedCredentialRevision,
@@ -303,6 +307,10 @@ export function toNativeModelProviderRecord(
     temperatureMilli: record.temperature_milli ?? undefined,
     reasoningEffort: record.reasoning_effort ?? undefined,
     reasoningFormat: record.reasoning_format ?? undefined,
+    chatCompletionsDialect: record.chat_completions_dialect,
+    thinkingMode: record.thinking_mode,
+    reasoningHistory: record.reasoning_history,
+    reasoningBudgetTokens: record.reasoning_budget_tokens ?? undefined,
     credentialId: record.credential_id ?? undefined,
     credential: {
       hasSecret: record.credential.has_secret,
@@ -335,6 +343,10 @@ export function toRawModelProviderRecord(
     temperature_milli: record.temperatureMilli,
     reasoning_effort: record.reasoningEffort,
     reasoning_format: record.reasoningFormat,
+    chat_completions_dialect: record.chatCompletionsDialect,
+    thinking_mode: record.thinkingMode,
+    reasoning_history: record.reasoningHistory,
+    reasoning_budget_tokens: record.reasoningBudgetTokens,
     credential_id: record.credentialId,
     credential: {
       has_secret: record.credential.hasSecret,
@@ -559,6 +571,10 @@ export interface RawModelProviderRecord {
   temperature_milli?: number | null;
   reasoning_effort?: string | null;
   reasoning_format?: string | null;
+  chat_completions_dialect: NativeModelProviderRecord["chatCompletionsDialect"];
+  thinking_mode: NativeModelProviderRecord["thinkingMode"];
+  reasoning_history: NativeModelProviderRecord["reasoningHistory"];
+  reasoning_budget_tokens?: number | null;
   credential_id?: string | null;
   credential: RawModelProviderCredential;
   metadata_json: unknown;
@@ -581,6 +597,12 @@ export interface RawModelProviderWrite {
   temperature_milli?: number;
   reasoning_effort?: string;
   reasoning_format?: string;
+  chat_completions_dialect: NonNullable<
+    NativeModelProviderWrite["chatCompletionsDialect"]
+  >;
+  thinking_mode: NonNullable<NativeModelProviderWrite["thinkingMode"]>;
+  reasoning_history: NonNullable<NativeModelProviderWrite["reasoningHistory"]>;
+  reasoning_budget_tokens?: number;
   secret?: string;
   clear_secret: boolean;
   expected_credential_revision?: number;

@@ -1,6 +1,7 @@
 import type {
   BrainAction,
   BrainEventEnvelope,
+  BrainWakeProviderStateOutput,
   ToolProfile,
 } from "@rusty-crew/contracts";
 import type {
@@ -162,6 +163,7 @@ function createRustChatCompletionsBrainHostExecutor(
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
         messages: rustChatCompletionsMessages(wake),
+        providerState: wake.providerState,
         config: {
           model: context.profile.profile.modelConfig.modelName,
           ...(requestTimeoutMs === undefined
@@ -173,6 +175,22 @@ function createRustChatCompletionsBrainHostExecutor(
           reasoningEffort:
             wake.state.session.inferenceOverrides?.reasoningEffort ??
             context.profile.profile.modelConfig.reasoningEffort,
+          wireDialect:
+            context.profile.profile.modelConfig.chatCompletionsDialect ??
+            "standard",
+          thinkingMode:
+            context.profile.profile.modelConfig.thinkingMode ??
+            "provider_default",
+          reasoningHistory:
+            context.profile.profile.modelConfig.reasoningHistory ??
+            "provider_default",
+          reasoningBudgetTokens:
+            context.profile.profile.modelConfig.reasoningBudgetTokens,
+          providerStateStrategyId:
+            context.profile.profile.brain?.strategy ??
+            (context.profile.profile.roleplayNarrator
+              ? "roleplay_narrator"
+              : "default"),
           maxOutputTokens:
             context.profile.profile.modelConfig.maxOutputTokens ??
             context.maxTokens,
@@ -206,7 +224,7 @@ function createRustChatCompletionsBrainHostExecutor(
           events.push(event);
         }
       }
-      return runRustChatCompletionsBrainWithIncrementalDrain(
+      const result = await runRustChatCompletionsBrainWithIncrementalDrain(
         context,
         wake,
         input,
@@ -220,8 +238,80 @@ function createRustChatCompletionsBrainHostExecutor(
           planActions: implementation.planActions,
         },
       );
+      const exactDebug = recordChatCompletionsProviderRequestSamples(
+        context,
+        wake,
+        input.config.model,
+        result.transportMetrics?.providerRequestDebugSamples,
+      );
+      if (exactDebug && submitEvent) {
+        await submitEvent(providerRequestDebugEvent(wake, exactDebug));
+      } else if (exactDebug) {
+        result.events.push(providerRequestDebugEvent(wake, exactDebug));
+      }
+      return withChatCompletionsProviderStateScope(result, context);
     },
   };
+}
+
+function withChatCompletionsProviderStateScope<
+  T extends { providerState?: BrainWakeProviderStateOutput },
+>(result: T, context: BrainHostContext): T {
+  if (
+    result.providerState?.type !== "replace" ||
+    context.providerStateScope === undefined
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    providerState: {
+      type: "replace",
+      state: {
+        ...result.providerState.state,
+        profileFingerprint:
+          result.providerState.state.profileFingerprint ===
+          "profile-fingerprint"
+            ? context.providerStateScope.profileFingerprint
+            : result.providerState.state.profileFingerprint,
+        providerFingerprint:
+          result.providerState.state.providerFingerprint ===
+          "provider-fingerprint"
+            ? context.providerStateScope.providerFingerprint
+            : result.providerState.state.providerFingerprint,
+      },
+    },
+  };
+}
+
+function recordChatCompletionsProviderRequestSamples(
+  context: BrainHostContext,
+  wake: BrainWakeInput,
+  model: string,
+  samples: unknown[] | undefined,
+):
+  | {
+      debug_detail_id: string;
+      request_sha256: string;
+      request_json_chars: number;
+      expires_at: string;
+    }
+  | undefined {
+  if (!samples || samples.length === 0) return undefined;
+  return context.providerRequestDebugStore?.record({
+    sessionId: wake.sessionId,
+    wakeId: wake.wakeId,
+    brainModule: "chat-completions",
+    providerAlias: context.profile.profile.providerAlias,
+    model,
+    protocol: "chat_completions",
+    providerKind: context.profile.profile.modelConfig.provider,
+    request: {
+      boundary: "rust_chat_completions_request",
+      requestCount: samples.length,
+      requests: samples,
+    },
+  });
 }
 
 function rustChatCompletionsMessages(
@@ -262,6 +352,7 @@ async function runRustChatCompletionsBrainWithIncrementalDrain(
 ): Promise<{
   events: BrainEventEnvelope[];
   actions: BrainAction[];
+  providerState?: BrainWakeProviderStateOutput;
   transportMetrics?: ChatCompletionsTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;

@@ -22028,6 +22028,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "relevantLore": {
+              "default": [],
               "items": {
                 "properties": {
                   "body": {

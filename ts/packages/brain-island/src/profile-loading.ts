@@ -1187,6 +1187,16 @@ function modelConfigFromProfileObject(
     temperatureMilli,
     reasoningEffort: optionalString(modelConfig.reasoningEffort),
     reasoningFormat: optionalString(modelConfig.reasoningFormat),
+    chatCompletionsDialect: optionalString(
+      modelConfig.chatCompletionsDialect,
+    ) as BrainModelConfig["chatCompletionsDialect"],
+    thinkingMode: optionalString(
+      modelConfig.thinkingMode,
+    ) as BrainModelConfig["thinkingMode"],
+    reasoningHistory: optionalString(
+      modelConfig.reasoningHistory,
+    ) as BrainModelConfig["reasoningHistory"],
+    reasoningBudgetTokens: optionalNumber(modelConfig.reasoningBudgetTokens),
     maxOutputTokens:
       optionalNumber(modelConfig.maxOutputTokens) ??
       optionalNumber(modelConfig.maxTokens),

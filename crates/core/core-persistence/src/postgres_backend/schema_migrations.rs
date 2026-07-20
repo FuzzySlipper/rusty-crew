@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 36;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 37;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -194,6 +194,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 36,
         description: "add service-scoped provider credentials",
         apply: Some(apply_postgres_service_credentials),
+    },
+    PostgresSchemaMigration {
+        version: 37,
+        description: "record typed chat completions dialect policy in provider JSON",
+        apply: None,
     },
 ];
 

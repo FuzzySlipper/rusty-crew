@@ -290,8 +290,8 @@ fn chat_completions_module() -> BrainCatalogModule {
         strategies: vec![
             strategy(
                 "default",
-                BrainProviderStateMode::Unused,
-                "chat completions does not persist provider wire state",
+                BrainProviderStateMode::Optional,
+                "chat completions reasoning history is provider-scoped and is discarded on runtime brain rebuild",
                 None,
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "default".to_string(),
@@ -303,8 +303,8 @@ fn chat_completions_module() -> BrainCatalogModule {
             ),
             strategy(
                 "roleplay_narrator",
-                BrainProviderStateMode::Unused,
-                "roleplay narrator phase turns do not persist provider wire state",
+                BrainProviderStateMode::Optional,
+                "roleplay narrator chat completions reasoning history is provider-scoped and is discarded on runtime brain rebuild",
                 None,
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "roleplay_narrator".to_string(),

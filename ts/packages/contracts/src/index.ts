@@ -586,6 +586,10 @@ export interface BrainModelConfig {
   maxOutputTokens?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
+  chatCompletionsDialect?: "standard" | "kimi" | "glm" | "qwen";
+  thinkingMode?: "provider_default" | "enabled" | "disabled";
+  reasoningHistory?: "provider_default" | "discard" | "preserve_all";
+  reasoningBudgetTokens?: number;
 }
 
 export interface BrainImplementationRegistration {

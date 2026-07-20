@@ -5318,6 +5318,10 @@ fn sample_model_provider_record() -> ModelProviderRecord {
         temperature_milli: Some(500),
         reasoning_effort: Some("medium".to_owned()),
         reasoning_format: Some("summary".to_owned()),
+        chat_completions_dialect: Default::default(),
+        thinking_mode: Default::default(),
+        reasoning_history: Default::default(),
+        reasoning_budget_tokens: None,
         credential_id: Some("provider:validation-provider".to_owned()),
         credential: ModelProviderCredential {
             has_secret: true,

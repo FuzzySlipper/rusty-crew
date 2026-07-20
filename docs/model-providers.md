@@ -57,6 +57,10 @@ chat completions or vice versa.
 | `temperatureMilli` | Integer storage form, `temperature * 1000` |
 | `reasoningEffort` | Provider-specific reasoning effort string |
 | `reasoningFormat` | Provider-specific reasoning/output format string |
+| `chatCompletionsDialect` | Typed Chat Completions wire dialect: `standard`, `kimi`, `glm`, or `qwen` |
+| `thinkingMode` | `provider_default`, `enabled`, or `disabled` |
+| `reasoningHistory` | `provider_default`, `discard`, or `preserve_all` |
+| `reasoningBudgetTokens` | Optional Qwen-only thinking budget |
 | `credentialSecret` | Typed secret envelope for API key or OAuth material |
 | `metadataJson` | Non-secret provider-specific metadata |
 | `expectedRevision` | Optimistic concurrency revision for updates |
@@ -76,6 +80,30 @@ The native Responses path maps `reasoningEffort` to `reasoning.effort` and
 `reasoningEffort` to `reasoning_effort`. `reasoningFormat` remains diagnostic
 metadata until a protocol-specific mapping is configured; `/model` reports a
 warning instead of claiming it was applied.
+
+### Chat Completions Reasoning Dialects
+
+Chat Completions reasoning controls are explicit provider configuration. Crew
+does not infer them from model names, endpoint URLs, or `providerKind`.
+
+| Dialect | Thinking control | Historical reasoning control | Budget | Assistant history |
+| --- | --- | --- | --- | --- |
+| `standard` | none | none | unsupported | Omits vendor extensions; non-default dialect settings are rejected |
+| `kimi` | `thinking.type` | `thinking.keep: null \| "all"` | unsupported | Replays exact `reasoning_content` during tool loops and, with `preserve_all`, across wakes |
+| `glm` | `thinking.type` | `thinking.clear_thinking: true \| false` | unsupported | Uses exact structured `reasoning_content` history when preserved |
+| `qwen` | `enable_thinking` | `preserve_thinking` | `thinking_budget` | Uses exact structured `reasoning_content` history when preserved |
+
+Vendor settings fail closed when combined with `standard` or a non-chat
+protocol. `reasoningBudgetTokens` additionally requires the `qwen` dialect and
+`thinkingMode: "enabled"`. Disabling thinking cannot be combined with an
+explicit history policy.
+
+For Kimi thinking models, Crew rejects an explicit temperature and requires
+`maxOutputTokens >= 16000`; it never silently changes either value. Kimi K2.7
+always preserves thinking, so configure `reasoningHistory: "preserve_all"` and
+retain every assistant `reasoning_content` value exactly. These constraints
+follow Moonshot's tool-loop guidance and are enforced at provider-write and
+Rust brain boundaries.
 
 ## Admin API
 
@@ -138,6 +166,25 @@ For a normal API-key provider, include a typed secret:
 The legacy top-level `apiKey`/`secret` input remains accepted by the current
 API, but new clients should use `credentialSecret` so credential type is
 explicit.
+
+For a Kimi K2.7 thinking provider, omit temperature and select the typed wire
+policy explicitly:
+
+```json
+{
+  "alias": "kimi-k2.7",
+  "status": "active",
+  "protocol": "chat_completions",
+  "providerKind": "moonshot",
+  "baseUrl": "https://api.moonshot.ai/v1",
+  "modelId": "kimi-k2.7-code",
+  "contextWindowTokens": 262144,
+  "maxOutputTokens": 32768,
+  "chatCompletionsDialect": "kimi",
+  "thinkingMode": "provider_default",
+  "reasoningHistory": "preserve_all"
+}
+```
 
 ## Responses Example
 
