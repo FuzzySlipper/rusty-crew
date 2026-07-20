@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   AgentId,
+  BrainWakeProviderStateInput,
   ProfileId,
   SessionHandle,
   SessionId,
@@ -92,6 +93,94 @@ test("Chat Completions host sends the continuation budget to the native boundary
   );
 });
 
+test("Chat Completions host sends role bootstrap messages only before provider state exists", async () => {
+  const capturedMessages: ChatCompletionsBrainRunInput["messages"][] = [];
+  const providerState = {
+    type: "replace" as const,
+    state: {
+      moduleId: "chat-completions",
+      strategyId: "default",
+      profileFingerprint: "profile-fingerprint",
+      providerFingerprint: "provider-fingerprint",
+      payloadVersion: "chat-completions-history-v1",
+      payload: { messages: [] },
+      ttlMs: 60_000,
+    },
+  };
+  const bridge = {
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
+    ) => {
+      if (input.moduleId !== "chat-completions") {
+        throw new Error(`unexpected module ${input.moduleId}`);
+      }
+      capturedMessages.push(input.providerInput.messages);
+      return { moduleId: input.moduleId, wakeId: input.providerInput.wakeId };
+    },
+    drainBrainRun: async () => ({
+      items: [],
+      toolRequests: [],
+      terminal: true,
+      providerState,
+    }),
+  } as unknown as NativeBridgeModule;
+  const context = {
+    bridge,
+    profile: {
+      profile: {
+        profileId: "history-profile" as ProfileId,
+        modelConfig: {
+          provider: "test",
+          modelName: "test-model",
+          api: "openai-completions",
+          chatCompletionsDialect: "kimi",
+          thinkingMode: "enabled",
+          reasoningHistory: "preserve_all",
+          maxOutputTokens: 16_000,
+        },
+      },
+      skills: [],
+      toolSelection: { toolProfile: { tools: [] } },
+    },
+  } as unknown as BrainHostContext;
+  const brain = createChatCompletionsBrainHost(context, { mode: "fake" });
+  const firstWake = historyWake("history-wake-1", "first question");
+
+  const first = await brain.wake(firstWake);
+  assert.equal(first.providerState?.type, "replace");
+  const state =
+    first.providerState?.type === "replace"
+      ? first.providerState.state
+      : undefined;
+  assert.ok(state);
+  const restored: BrainWakeProviderStateInput = {
+    moduleId: state.moduleId,
+    strategyId: state.strategyId,
+    profileFingerprint: state.profileFingerprint,
+    providerFingerprint: state.providerFingerprint,
+    payloadVersion: state.payloadVersion,
+    payload: state.payload,
+  };
+  await brain.wake({
+    ...historyWake("history-wake-2", "second question"),
+    providerState: restored,
+  });
+
+  assert.deepEqual(
+    capturedMessages.map((messages) =>
+      messages.map((message) => message.content),
+    ),
+    [
+      [
+        "system\n\nrole instructions",
+        "bootstrap role message",
+        "first question",
+      ],
+      ["system\n\nrole instructions", "second question"],
+    ],
+  );
+});
+
 function continuationWake(): BrainWakeInput {
   const sessionId = "continuation-session" as SessionId;
   return {
@@ -123,6 +212,35 @@ function continuationWake(): BrainWakeInput {
         queuedMessageTtlMs: 5_000,
         maxQueuedMessages: 32,
       },
+    },
+  };
+}
+
+function historyWake(wakeId: string, pendingBody: string): BrainWakeInput {
+  const wake = continuationWake();
+  return {
+    ...wake,
+    wakeId,
+    systemPrompt: "system",
+    roleAssembly: {
+      instructions: "role instructions",
+      initialMessages: [
+        {
+          from: "history-operator" as AgentId,
+          to: "continuation-agent" as AgentId,
+          body: "bootstrap role message",
+        },
+      ],
+    },
+    state: {
+      ...wake.state,
+      pendingMessages: [
+        {
+          from: "history-operator" as AgentId,
+          to: "continuation-agent" as AgentId,
+          body: pendingBody,
+        },
+      ],
     },
   };
 }

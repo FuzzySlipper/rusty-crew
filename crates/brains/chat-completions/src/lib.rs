@@ -11,8 +11,7 @@ use rusty_crew_core_protocol::{
     BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure,
     BrainWakeProviderStateInput, BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate,
     BrainWakeStreamItem, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
-    ChatCompletionsWireDialect, CoreErrorKind, ModelProviderRecord, ProviderStateClearReason,
-    SessionId,
+    ChatCompletionsWireDialect, CoreErrorKind, ModelProviderRecord, SessionId,
 };
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -1651,9 +1650,6 @@ fn chat_completions_messages_with_provider_state(
     provider_state: Option<&BrainWakeProviderStateInput>,
     current_messages: Vec<ChatCompletionMessage>,
 ) -> Result<Vec<ChatCompletionMessage>, String> {
-    if config.reasoning_history != ChatCompletionsReasoningHistory::PreserveAll {
-        return Ok(current_messages);
-    }
     let Some(state) = provider_state else {
         return Ok(current_messages);
     };
@@ -1693,12 +1689,10 @@ fn chat_completions_messages_with_provider_state(
             .filter(|message| message.role == ChatMessageRole::System)
             .cloned(),
     );
-    merged.extend(
-        payload
-            .messages
-            .into_iter()
-            .filter(|message| message.role != ChatMessageRole::System),
-    );
+    merged.extend(payload.messages.into_iter().filter_map(|message| {
+        (message.role != ChatMessageRole::System)
+            .then(|| message_for_reasoning_history(message, config.reasoning_history))
+    }));
     merged.extend(
         current_messages
             .into_iter()
@@ -1713,11 +1707,6 @@ fn chat_completions_provider_state_output(
     previous_state: Option<&BrainWakeProviderStateInput>,
     messages: Vec<ChatCompletionMessage>,
 ) -> Option<BrainWakeProviderStateOutput> {
-    if config.reasoning_history != ChatCompletionsReasoningHistory::PreserveAll {
-        return previous_state.map(|_| BrainWakeProviderStateOutput::Clear {
-            reason: ProviderStateClearReason::BrainRequestedClear,
-        });
-    }
     let payload = ChatCompletionsProviderStateV1 {
         kind: MODULE_ID.to_string(),
         strategy_id: config.provider_state_strategy_id.clone(),
@@ -1725,6 +1714,7 @@ fn chat_completions_provider_state_output(
         messages: messages
             .into_iter()
             .filter(|message| message.role != ChatMessageRole::System)
+            .map(|message| message_for_reasoning_history(message, config.reasoning_history))
             .collect(),
     };
     Some(BrainWakeProviderStateOutput::Replace {
@@ -1742,6 +1732,16 @@ fn chat_completions_provider_state_output(
             ttl_ms: Some(PROVIDER_STATE_TTL_MS),
         },
     })
+}
+
+fn message_for_reasoning_history(
+    mut message: ChatCompletionMessage,
+    history: ChatCompletionsReasoningHistory,
+) -> ChatCompletionMessage {
+    if history != ChatCompletionsReasoningHistory::PreserveAll {
+        message.reasoning_content = None;
+    }
+    message
 }
 
 fn non_empty_event(
@@ -3161,7 +3161,10 @@ mod tests {
         );
         let first = first_brain.wake_with_messages(
             context(),
-            vec![ChatCompletionMessage::user("first question")],
+            vec![
+                ChatCompletionMessage::user("bootstrap role message"),
+                ChatCompletionMessage::user("first question"),
+            ],
         );
         let state_json = serde_json::to_string(&first.provider_state).expect("serialize state");
         let restored_state: Option<BrainWakeProviderStateOutput> =
@@ -3207,26 +3210,118 @@ mod tests {
                 && message["content"] == "prior answer"
         }));
         assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message["content"] == "bootstrap role message")
+                .count(),
+            1,
+            "role bootstrap history must appear exactly once after hydration"
+        );
+        assert_eq!(
             messages.last().expect("new user")["content"],
             "second question"
         );
     }
 
     #[test]
-    fn discard_policy_clears_prior_state_without_replaying_reasoning() {
+    fn provider_default_preserves_visible_history_without_reasoning_or_vendor_controls() {
+        let config = ChatCompletionsChatConfig::new("standard-model");
+        let mut first_brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ReasoningDelta {
+                    text: "first private reasoning".to_string(),
+                    field: "reasoning_content".to_string(),
+                },
+                ChatCompletionsEvent::ContentDelta("first answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            config.clone(),
+        );
+        let first = first_brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("first question")],
+        );
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = first.provider_state else {
+            panic!("provider default must persist ordinary conversation history");
+        };
+        let mut second_brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("second answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            config,
+        );
+        let second = second_brain.wake(ChatCompletionsBrainLoopInput {
+            context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
+            messages: vec![ChatCompletionMessage::user("second question")],
+            provider_state: Some(BrainWakeProviderStateInput {
+                module_id: state.module_id,
+                strategy_id: state.strategy_id,
+                profile_fingerprint: state.profile_fingerprint,
+                provider_fingerprint: state.provider_fingerprint,
+                payload_version: state.payload_version,
+                payload: state.payload,
+                expires_at: None,
+            }),
+            final_message_fallback: None,
+        });
+        let request = &second.provider_request_debug_samples[0];
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(
+            messages
+                .iter()
+                .filter_map(|message| message["content"].as_str())
+                .collect::<Vec<_>>(),
+            vec!["first question", "first answer", "second question"]
+        );
+        assert!(messages
+            .iter()
+            .all(|message| message.get("reasoning_content").is_none()));
+        assert!(request.get("thinking").is_none());
+        assert!(request.get("preserve_thinking").is_none());
+        assert!(request.get("enable_thinking").is_none());
+    }
+
+    #[test]
+    fn discard_policy_preserves_visible_history_without_replaying_reasoning() {
         let preserved = kimi_preserved_config();
         let state_payload = ChatCompletionsProviderStateV1 {
             kind: MODULE_ID.to_string(),
             payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
             strategy_id: preserved.provider_state_strategy_id.clone(),
-            messages: vec![ChatCompletionMessage {
-                role: ChatMessageRole::Assistant,
-                content: Some("prior answer".to_string()),
-                reasoning_content: Some("prior reasoning".to_string()),
-                name: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            }],
+            messages: vec![
+                ChatCompletionMessage::user("prior question"),
+                ChatCompletionMessage {
+                    role: ChatMessageRole::Assistant,
+                    content: Some("checking".to_string()),
+                    reasoning_content: Some("prior tool reasoning".to_string()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: vec![ChatAssistantToolCall {
+                        id: "call_prior".to_string(),
+                        kind: "function".to_string(),
+                        function: ChatFunctionCall {
+                            name: "lookup".to_string(),
+                            arguments: r#"{"query":"prior"}"#.to_string(),
+                        },
+                    }],
+                },
+                ChatCompletionMessage::tool("call_prior", "prior tool result"),
+                ChatCompletionMessage {
+                    role: ChatMessageRole::Assistant,
+                    content: Some("prior answer".to_string()),
+                    reasoning_content: Some("prior final reasoning".to_string()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+            ],
         };
         let prior_state = BrainWakeProviderStateInput {
             module_id: MODULE_ID.to_string(),
@@ -3262,18 +3357,78 @@ mod tests {
         });
 
         let request = &output.provider_request_debug_samples[0];
-        assert!(!request["messages"]
-            .as_array()
-            .expect("messages")
+        let messages = request["messages"].as_array().expect("messages");
+        assert!(!messages
             .iter()
             .any(|message| message.get("reasoning_content").is_some()));
+        assert_eq!(
+            messages
+                .iter()
+                .filter_map(|message| message["content"].as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "prior question",
+                "checking",
+                "prior tool result",
+                "prior answer",
+                "new question"
+            ]
+        );
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_prior");
+        assert_eq!(messages[2]["tool_call_id"], "call_prior");
         assert_eq!(request["thinking"]["keep"], Value::Null);
-        assert!(matches!(
-            output.provider_state,
-            Some(BrainWakeProviderStateOutput::Clear {
-                reason: ProviderStateClearReason::BrainRequestedClear
-            })
-        ));
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = output.provider_state else {
+            panic!("discard must replace provider state with sanitized ordinary history");
+        };
+        let persisted: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload.clone()).expect("persisted discard history");
+        assert!(persisted
+            .messages
+            .iter()
+            .all(|message| message.reasoning_content.is_none()));
+
+        let mut next_brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("next answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            ChatCompletionsChatConfig {
+                wire_dialect: ChatCompletionsWireDialect::Kimi,
+                thinking_mode: ChatCompletionsThinkingMode::Enabled,
+                reasoning_history: ChatCompletionsReasoningHistory::Discard,
+                max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+                ..ChatCompletionsChatConfig::new("kimi-k2.6")
+            },
+        );
+        let next = next_brain.wake(ChatCompletionsBrainLoopInput {
+            context: BrainEventContext::new("wake-3", SessionId::new("session-1")),
+            messages: vec![ChatCompletionMessage::user("third question")],
+            provider_state: Some(BrainWakeProviderStateInput {
+                module_id: state.module_id,
+                strategy_id: state.strategy_id,
+                profile_fingerprint: state.profile_fingerprint,
+                provider_fingerprint: state.provider_fingerprint,
+                payload_version: state.payload_version,
+                payload: state.payload,
+                expires_at: None,
+            }),
+            final_message_fallback: None,
+        });
+        let next_messages = next.provider_request_debug_samples[0]["messages"]
+            .as_array()
+            .expect("next messages");
+        assert!(next_messages
+            .iter()
+            .any(|message| message["content"] == "prior answer"));
+        assert!(next_messages
+            .iter()
+            .any(|message| message["content"] == "fresh answer"));
+        assert!(next_messages
+            .iter()
+            .all(|message| message.get("reasoning_content").is_none()));
     }
 
     #[test]

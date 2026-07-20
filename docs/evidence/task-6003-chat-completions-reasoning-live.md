@@ -52,3 +52,14 @@ represented by the SHA-256 digest below.
 ```bash
 npm run smoke:chat-completions-reasoning-live-debug-service -w @rusty-crew/brain-island
 ```
+
+## Review-Fix Rerun
+
+After correcting cross-wake ordinary-history retention and role-bootstrap
+deduplication, the native addon and debug service were rebuilt and the same
+certificate was rerun. The live model again selected `git_status` followed by
+`read_file` in separate rounds. Three first-wake provider requests and one
+second-wake request completed. The first-round reasoning and the reasoning
+restored on the second wake shared SHA-256 digest
+`33e994686b357cda2024cff492b26c6a9c4151348a01d3afd214f23e7c22620a`.
+No raw reasoning was persisted.

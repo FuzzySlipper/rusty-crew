@@ -86,6 +86,13 @@ warning instead of claiming it was applied.
 Chat Completions reasoning controls are explicit provider configuration. Crew
 does not infer them from model names, endpoint URLs, or `providerKind`.
 
+All history policies retain ordinary ordered user, assistant, tool-call, and
+tool-result messages across wakes. `provider_default` strips historical
+`reasoning_content` without sending a vendor history control. `discard` also
+strips reasoning and explicitly asks the selected dialect to clear or ignore
+historical reasoning. `preserve_all` retains exact structured reasoning with
+the ordinary history and emits the dialect's preservation control.
+
 | Dialect | Thinking control | Historical reasoning control | Budget | Assistant history |
 | --- | --- | --- | --- | --- |
 | `standard` | none | none | unsupported | Omits vendor extensions; non-default dialect settings are rejected |

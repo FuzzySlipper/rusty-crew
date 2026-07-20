@@ -320,9 +320,13 @@ function rustChatCompletionsMessages(
   const system = [wake.systemPrompt, wake.roleAssembly.instructions]
     .filter(Boolean)
     .join("\n\n");
+  const initialMessages =
+    wake.providerState === undefined
+      ? (wake.roleAssembly.initialMessages ?? [])
+      : [];
   return [
     ...(system ? [{ role: "system" as const, content: system }] : []),
-    ...(wake.roleAssembly.initialMessages ?? []).map((message) => ({
+    ...initialMessages.map((message) => ({
       role: "user" as const,
       content: message.body,
     })),
