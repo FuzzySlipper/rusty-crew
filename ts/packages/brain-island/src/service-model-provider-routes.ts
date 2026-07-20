@@ -194,11 +194,21 @@ export async function handleModelProviderAdminRequest(
   }
 
   if ((method === "POST" && !alias) || (method === "PATCH" && alias)) {
-    const write = modelProviderWriteFromBody(
-      request.body,
-      alias || undefined,
-      context.now(),
-    );
+    let write: NativeModelProviderWrite;
+    let refreshMode: ModelProviderRefreshMode;
+    try {
+      write = modelProviderWriteFromBody(
+        request.body,
+        alias || undefined,
+        context.now(),
+      );
+      refreshMode = modelProviderRefreshMode(url, request.body);
+    } catch (error) {
+      return modelProviderValidationFailureRoute(
+        request.requestId,
+        errorMessage(error, "invalid model provider write"),
+      );
+    }
     let provider: NativeModelProviderRecord;
     try {
       provider = await context.upsertModelProvider(write);
@@ -212,12 +222,19 @@ export async function handleModelProviderAdminRequest(
           currentProvider,
         );
       }
+      const validationMessage = modelProviderInvalidInputMessage(error);
+      if (validationMessage !== undefined) {
+        return modelProviderValidationFailureRoute(
+          request.requestId,
+          validationMessage,
+        );
+      }
       throw error;
     }
     const refresh = await context.refreshAfterWrite({
       requestId: request.requestId,
       provider,
-      refreshMode: modelProviderRefreshMode(url, request.body),
+      refreshMode,
     });
     return successRoute(request.requestId, {
       provider: modelProviderApiRecord(provider),
@@ -298,6 +315,24 @@ function modelProviderRevisionConflictRoute(
       meta: { request_id: requestIdValue, schema_version: 1 },
     } as AdminRouteResult["body"],
   };
+}
+
+function modelProviderInvalidInputMessage(error: unknown): string | undefined {
+  const message = errorMessage(error, "");
+  const match = /^InvalidInput:\s*(.+)$/su.exec(message);
+  return match?.[1]?.trim() || undefined;
+}
+
+function modelProviderValidationFailureRoute(
+  requestId: string,
+  message: string,
+): AdminRouteResult {
+  return failure(400, requestId, {
+    code: "invalid_input",
+    reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.invalidProvider,
+    message,
+    retryable: false,
+  });
 }
 
 function modelProviderCredentialConflictRoute(

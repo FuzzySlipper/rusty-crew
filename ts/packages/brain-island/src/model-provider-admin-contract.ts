@@ -1,4 +1,4 @@
-export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.4.0";
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.5.0";
 
 export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
   "docs/model-provider-admin-api-v0.openapi.json";
@@ -87,6 +87,7 @@ export const MODEL_PROVIDER_ADMIN_PATHS = {
 } as const;
 
 export const MODEL_PROVIDER_ADMIN_REASON_CODES = {
+  invalidProvider: "invalid_model_provider",
   invalidStatus: "invalid_model_provider_status",
   notFound: "model_provider_not_found",
   revisionMismatch: "model_provider_revision_mismatch",

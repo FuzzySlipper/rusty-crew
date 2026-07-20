@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew Model Provider Admin API",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Admin contract for model-provider aliases, shared service credentials, revision-aware writes, and credential-scoped OpenAI OAuth."
   },
   "servers": [
@@ -109,6 +109,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
           "409": {
             "$ref": "#/components/responses/RevisionConflictEnvelope"
           }
@@ -193,6 +196,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
           },
           "409": {
             "$ref": "#/components/responses/RevisionConflictEnvelope"
@@ -1293,6 +1299,7 @@
       "ModelProviderReasonCode": {
         "type": "string",
         "enum": [
+          "invalid_model_provider",
           "invalid_model_provider_status",
           "model_provider_not_found",
           "model_provider_revision_mismatch",

@@ -806,6 +806,129 @@ test("model provider admin routes list, project records, and report revision con
   assert.equal(deepseekData.provider.reasoningHistory, "tool_calls_only");
 });
 
+test("model provider admin routes type validation failures without mutating create or update state", async () => {
+  const existing = modelProviderRecord({
+    alias: "standard-model",
+    chatCompletionsDialect: "standard",
+    thinkingMode: "provider_default",
+    reasoningHistory: "provider_default",
+    revision: 3,
+  });
+  const context = modelProviderRouteContext([existing]);
+  const persist = context.upsertModelProvider.bind(context);
+  context.upsertModelProvider = async (write) => {
+    if (
+      write.chatCompletionsDialect === "kimi" &&
+      write.thinkingMode === "enabled" &&
+      write.temperatureMilli !== undefined
+    ) {
+      throw new Error(
+        "InvalidInput: kimi thinking models do not accept a temperature override",
+      );
+    }
+    if (
+      write.chatCompletionsDialect === "standard" &&
+      write.reasoningHistory === "preserve_all"
+    ) {
+      throw new Error(
+        "InvalidInput: standard chat completions dialect does not accept vendor thinking settings",
+      );
+    }
+    return persist(write);
+  };
+
+  const rejectedCreate = await handleModelProviderAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/model-providers",
+      requestId: "req-invalid-kimi-create",
+      body: {
+        alias: "invalid-kimi",
+        protocol: "chat_completions",
+        providerKind: "moonshot",
+        modelId: "kimi-k2.7",
+        chatCompletionsDialect: "kimi",
+        thinkingMode: "enabled",
+        reasoningHistory: "preserve_all",
+        temperature: 0.5,
+        maxOutputTokens: 16_000,
+      },
+    },
+    context,
+  );
+  assert.equal(rejectedCreate.status, 400);
+  assert.deepEqual(errorDetails(rejectedCreate), {
+    code: "invalid_input",
+    reason_code: "invalid_model_provider",
+    message: "kimi thinking models do not accept a temperature override",
+    retryable: false,
+  });
+  const missingCreate = await handleModelProviderAdminRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/model-providers/invalid-kimi",
+      requestId: "req-invalid-kimi-readback",
+    },
+    context,
+  );
+  assert.equal(missingCreate.status, 404);
+
+  const rejectedUpdate = await handleModelProviderAdminRequest(
+    {
+      method: "PATCH",
+      url: "http://local/v1/admin/model-providers/standard-model",
+      requestId: "req-invalid-standard-update",
+      body: {
+        modelId: existing.modelId,
+        expectedRevision: existing.revision,
+        chatCompletionsDialect: "standard",
+        thinkingMode: "enabled",
+        reasoningHistory: "preserve_all",
+      },
+    },
+    context,
+  );
+  assert.equal(rejectedUpdate.status, 400);
+  assert.equal(errorReason(rejectedUpdate), "invalid_model_provider");
+  const unchangedUpdate = okData<NativeModelProviderRecord>(
+    await handleModelProviderAdminRequest(
+      {
+        method: "GET",
+        url: "http://local/v1/admin/model-providers/standard-model",
+        requestId: "req-invalid-standard-readback",
+      },
+      context,
+    ),
+  );
+  assert.deepEqual(unchangedUpdate, existing);
+
+  const invalidRefresh = await handleModelProviderAdminRequest(
+    {
+      method: "PATCH",
+      url: "http://local/v1/admin/model-providers/standard-model?refresh=eventually",
+      requestId: "req-invalid-provider-refresh",
+      body: {
+        modelId: "would-have-mutated",
+        expectedRevision: existing.revision,
+      },
+    },
+    context,
+  );
+  assert.equal(invalidRefresh.status, 400);
+  assert.equal(errorReason(invalidRefresh), "invalid_model_provider");
+  const unchangedRefresh = okData<NativeModelProviderRecord>(
+    await handleModelProviderAdminRequest(
+      {
+        method: "GET",
+        url: "http://local/v1/admin/model-providers/standard-model",
+        requestId: "req-invalid-refresh-readback",
+      },
+      context,
+    ),
+  );
+  assert.deepEqual(unchangedRefresh, existing);
+});
+
 test("model provider OpenAI OAuth routes expose status and start without leaking verifier", async () => {
   const context = modelProviderRouteContext(
     [
@@ -2180,4 +2303,9 @@ function okData<T>(result: AdminRouteResult): T {
 function errorReason(result: AdminRouteResult): string {
   assert.equal(result.body.ok, false);
   return result.body.error.reason_code;
+}
+
+function errorDetails(result: AdminRouteResult): Record<string, unknown> {
+  assert.equal(result.body.ok, false);
+  return result.body.error;
 }

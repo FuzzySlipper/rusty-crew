@@ -9416,6 +9416,7 @@ mod tests {
             &self,
             write: &ModelProviderWrite,
         ) -> CoreResult<ModelProviderRecord>;
+        fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>>;
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>>;
         fn upsert_service_credential(
             &self,
@@ -9885,6 +9886,10 @@ mod tests {
             write: &ModelProviderWrite,
         ) -> CoreResult<ModelProviderRecord> {
             CoordinationStore::upsert_model_provider(self, write)
+        }
+
+        fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+            CoordinationStore::get_model_provider(self, alias)
         }
 
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
@@ -10474,6 +10479,10 @@ mod tests {
             write: &ModelProviderWrite,
         ) -> CoreResult<ModelProviderRecord> {
             PostgresBackendStore::upsert_model_provider(self, write)
+        }
+
+        fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+            PostgresBackendStore::get_model_provider(self, alias)
         }
 
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
@@ -14785,6 +14794,30 @@ mod tests {
         );
         assert_eq!(
             api_key.reasoning_history,
+            ChatCompletionsReasoningHistory::ToolCallsOnly
+        );
+        let mut rejected_update = deepseek_write.clone();
+        rejected_update.expected_revision = Some(api_key.revision);
+        rejected_update.chat_completions_dialect = ChatCompletionsWireDialect::Standard;
+        rejected_update.reasoning_history = ChatCompletionsReasoningHistory::PreserveAll;
+        let validation_error = store
+            .upsert_model_provider(&rejected_update)
+            .expect_err("invalid provider policy must be rejected before persistence");
+        assert_eq!(validation_error.kind, CoreErrorKind::InvalidInput);
+        assert!(validation_error
+            .message
+            .contains("standard chat completions dialect"));
+        let unchanged = store
+            .get_model_provider("deepseek-flash")
+            .unwrap()
+            .expect("rejected provider update must preserve the existing record");
+        assert_eq!(unchanged.revision, api_key.revision);
+        assert_eq!(
+            unchanged.chat_completions_dialect,
+            ChatCompletionsWireDialect::Deepseek
+        );
+        assert_eq!(
+            unchanged.reasoning_history,
             ChatCompletionsReasoningHistory::ToolCallsOnly
         );
         assert_eq!(
