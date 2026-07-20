@@ -24,11 +24,17 @@ export const CHAT_COMPLETIONS_DIALECT_VALUES = [
   "deepseek",
 ] as const;
 
+export type ChatCompletionsDialect =
+  (typeof CHAT_COMPLETIONS_DIALECT_VALUES)[number];
+
 export const CHAT_COMPLETIONS_THINKING_MODE_VALUES = [
   "provider_default",
   "enabled",
   "disabled",
 ] as const;
+
+export type ChatCompletionsThinkingMode =
+  (typeof CHAT_COMPLETIONS_THINKING_MODE_VALUES)[number];
 
 export const CHAT_COMPLETIONS_REASONING_HISTORY_VALUES = [
   "provider_default",
@@ -36,6 +42,9 @@ export const CHAT_COMPLETIONS_REASONING_HISTORY_VALUES = [
   "preserve_all",
   "tool_calls_only",
 ] as const;
+
+export type ChatCompletionsReasoningHistory =
+  (typeof CHAT_COMPLETIONS_REASONING_HISTORY_VALUES)[number];
 
 export const MODEL_PROVIDER_REFRESH_MODE_VALUES = [
   "none",

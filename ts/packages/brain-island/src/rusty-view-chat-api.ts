@@ -8,6 +8,11 @@ import {
   chatCommandAutocomplete,
   chatCommandRegistry,
 } from "./api-command-registry.js";
+import type {
+  ChatCompletionsDialect,
+  ChatCompletionsReasoningHistory,
+  ChatCompletionsThinkingMode,
+} from "./model-provider-admin-contract.js";
 import type { SlashCommandResponse } from "./slash-command-router.js";
 
 export type {
@@ -360,18 +365,9 @@ export interface SessionContextUsageResult {
     provider_reasoning_effort?: string;
     session_reasoning_effort_override?: string;
     reasoning_format?: string;
-    chat_completions_dialect?:
-      | "standard"
-      | "kimi"
-      | "glm"
-      | "qwen"
-      | "deepseek";
-    thinking_mode?: "provider_default" | "enabled" | "disabled";
-    reasoning_history?:
-      | "provider_default"
-      | "discard"
-      | "preserve_all"
-      | "tool_calls_only";
+    chat_completions_dialect?: ChatCompletionsDialect;
+    thinking_mode?: ChatCompletionsThinkingMode;
+    reasoning_history?: ChatCompletionsReasoningHistory;
     reasoning_budget_tokens?: number;
     thinking_settings_applied?: boolean;
     thinking_mode_applied?: boolean;

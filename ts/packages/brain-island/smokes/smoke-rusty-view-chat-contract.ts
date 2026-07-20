@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import { API_CAPABILITY_OPENAPI_PATH } from "../src/api-capability-openapi.js";
 import { apiCapabilityRegistry } from "../src/api-command-registry.js";
 import {
+  CHAT_COMPLETIONS_DIALECT_VALUES,
+  CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
+  CHAT_COMPLETIONS_THINKING_MODE_VALUES,
+} from "../src/model-provider-admin-contract.js";
+import {
   RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
   RUSTY_VIEW_CHAT_EVENT_REQUIRED_FIELDS,
   RUSTY_VIEW_CHAT_OPENAPI_PATH,
@@ -120,6 +125,36 @@ assert.deepEqual(schema("ProviderRequestDebugDetail").required, [
   "expires_at",
   "limits",
 ]);
+
+const contextProvider = schema("SessionContextUsageResult").properties
+  ?.provider;
+assert.ok(contextProvider?.properties, "missing context provider schema");
+assert.deepEqual(contextProvider.required, ["alias", "status"]);
+assert.deepEqual(contextProvider.properties.chat_completions_dialect?.enum, [
+  ...CHAT_COMPLETIONS_DIALECT_VALUES,
+]);
+assert.deepEqual(contextProvider.properties.thinking_mode?.enum, [
+  ...CHAT_COMPLETIONS_THINKING_MODE_VALUES,
+]);
+assert.deepEqual(contextProvider.properties.reasoning_history?.enum, [
+  ...CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
+]);
+assert.deepEqual(
+  contextProvider.properties.reasoning_budget_tokens?.type,
+  "integer",
+);
+for (const field of [
+  "thinking_settings_applied",
+  "thinking_mode_applied",
+  "reasoning_history_applied",
+  "reasoning_budget_applied",
+]) {
+  assert.deepEqual(
+    contextProvider.properties[field]?.type,
+    "boolean",
+    `context provider ${field} must remain boolean`,
+  );
+}
 
 const commandDescriptor = schema("ChatCommandDescriptor");
 assert.ok(commandDescriptor.required?.includes("positional_args"));

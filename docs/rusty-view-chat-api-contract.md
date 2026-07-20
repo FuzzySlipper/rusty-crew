@@ -61,6 +61,12 @@ schemas, or chat mutation conflict envelopes drift.
 - `GET /v1/chat/sessions`: list chat-capable sessions.
 - `GET /v1/chat/sessions/{session_id}`: open a session and return a bounded
   transcript page plus the latest cursor.
+- `GET /v1/chat/sessions/{session_id}/context`: return browser-safe provider,
+  brain, tool, and context-window diagnostics. Chat Completions providers expose
+  their configured dialect, thinking mode, reasoning-history policy, optional
+  reasoning budget, and explicit booleans indicating which vendor settings are
+  actually applied to provider requests. Configuration values remain visible
+  even when a dialect does not apply them.
 - `GET /v1/chat/sessions/{session_id}/events`: replay historical session
   events after an optional cursor.
 - `GET /v1/chat/sessions/{session_id}/stream`: SSE stream for live and replayed

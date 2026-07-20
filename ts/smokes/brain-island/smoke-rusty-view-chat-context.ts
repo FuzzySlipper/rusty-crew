@@ -15,6 +15,18 @@ const bridge = await loadNativeBridge();
 const host = await startHost();
 
 try {
+  await bridge.createProfileRegistryRecord({
+    profileId: "chat-profile",
+    lifecycleStatus: "active",
+    displayName: "Chat profile",
+    defaultSessionKind: "full",
+    agentId: "chat-agent",
+    activeRuntimeSettingsJson: {},
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [],
+    importExport: { metadataJson: {} },
+    now: new Date().toISOString(),
+  });
   const provider = await post("/v1/admin/model-providers", token, {
     alias: "default",
     status: "active",
@@ -28,6 +40,10 @@ try {
     temperature: 0.5,
     reasoningEffort: "low",
     reasoningFormat: "none",
+    chatCompletionsDialect: "qwen",
+    thinkingMode: "enabled",
+    reasoningHistory: "preserve_all",
+    reasoningBudgetTokens: 8_192,
   });
   assert.ok(provider.status === 200 || provider.status === 201);
   const loreLayer = await post("/v1/profile/chat-profile/layers", token, {
@@ -68,15 +84,13 @@ try {
     },
   );
   assert.equal(narrator.status, 200, JSON.stringify(narrator.body));
-  const roleplaySession = await patch(
-    "/v1/admin/roleplay/sessions/chat-session",
-    token,
-    {
-      displayName: "Context Smoke Session",
-      characterId: "chat-hero",
-      activeLayerIds: ["chat-world"],
-    },
-  );
+  const roleplaySession = await post("/v1/admin/roleplay/sessions", token, {
+    sessionId: "chat-session",
+    profileId: "chat-profile",
+    displayName: "Context Smoke Session",
+    characterId: "chat-hero",
+    activeLayerIds: ["chat-world"],
+  });
   assert.equal(
     roleplaySession.status,
     200,
@@ -120,6 +134,20 @@ try {
   assert.equal(contextUsage.body.data.provider.model_id, "gpt");
   assert.equal(contextUsage.body.data.provider.temperature, 0.5);
   assert.equal(contextUsage.body.data.provider.context_window_tokens, 128_000);
+  assert.equal(
+    contextUsage.body.data.provider.chat_completions_dialect,
+    "qwen",
+  );
+  assert.equal(contextUsage.body.data.provider.thinking_mode, "enabled");
+  assert.equal(
+    contextUsage.body.data.provider.reasoning_history,
+    "preserve_all",
+  );
+  assert.equal(contextUsage.body.data.provider.reasoning_budget_tokens, 8_192);
+  assert.equal(contextUsage.body.data.provider.thinking_settings_applied, true);
+  assert.equal(contextUsage.body.data.provider.thinking_mode_applied, true);
+  assert.equal(contextUsage.body.data.provider.reasoning_history_applied, true);
+  assert.equal(contextUsage.body.data.provider.reasoning_budget_applied, true);
   assert.equal(contextUsage.body.data.context.estimate_quality, "approximate");
   assert.equal(
     contextUsage.body.data.context.estimator_id,
@@ -287,29 +315,8 @@ function writeRuntimeConfig(dataRoot: string): void {
         profilesDir,
         skillsDir,
         brains: [{ profileId: "chat-profile" }],
-        sessions: [
-          {
-            sessionId: "chat-session",
-            agentId: "chat-agent",
-            profileId: "chat-profile",
-            kind: "full",
-          },
-        ],
-        mcpBindings: [
-          {
-            bindingId: "chat-profile-den",
-            adapterId: "mcp-ts-main",
-            agentId: "chat-agent",
-            sessionId: "chat-session",
-            profileId: "chat-profile",
-            serverNames: ["den"],
-            endpointRef: "http://127.0.0.1:5199/mcp",
-            transport: "streamable_http",
-            toolProfileKey: "planner",
-            status: "active",
-            diagnostics: {},
-          },
-        ],
+        sessions: [],
+        mcpBindings: [],
       },
       null,
       2,
@@ -323,6 +330,7 @@ function writeRuntimeConfig(dataRoot: string): void {
         modelConfig: {
           provider: "local",
           modelName: "deterministic",
+          baseUrl: "http://127.0.0.1:18082/v1",
         },
         prompt: {
           system: "Chat profile system prompt.",

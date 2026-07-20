@@ -1381,6 +1381,23 @@
               "temperature": { "type": "number", "minimum": 0 },
               "reasoning_effort": { "type": "string" },
               "reasoning_format": { "type": "string" },
+              "chat_completions_dialect": {
+                "type": "string",
+                "enum": ["standard", "kimi", "glm", "qwen", "deepseek"]
+              },
+              "thinking_mode": {
+                "type": "string",
+                "enum": ["provider_default", "enabled", "disabled"]
+              },
+              "reasoning_history": {
+                "type": "string",
+                "enum": ["provider_default", "discard", "preserve_all", "tool_calls_only"]
+              },
+              "reasoning_budget_tokens": { "type": "integer", "minimum": 0 },
+              "thinking_settings_applied": { "type": "boolean" },
+              "thinking_mode_applied": { "type": "boolean" },
+              "reasoning_history_applied": { "type": "boolean" },
+              "reasoning_budget_applied": { "type": "boolean" },
               "revision": { "type": "integer", "minimum": 0 }
             },
             "additionalProperties": false
