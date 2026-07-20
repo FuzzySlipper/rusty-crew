@@ -4,37 +4,67 @@ import { createHash } from "node:crypto";
 const baseUrl = (
   process.env.RUSTY_CREW_DEBUG_ADMIN_BASE_URL ?? "http://127.0.0.1:9348"
 ).replace(/\/+$/, "");
+const certificateDialect =
+  process.env.RUSTY_CREW_REASONING_CERT_DIALECT ?? "kimi";
+const taskNumber = certificateDialect === "deepseek" ? "6020" : "6003";
 const providerAlias =
-  process.env.RUSTY_CREW_KIMI_CERT_PROVIDER_ALIAS ?? "kimi-k2.7";
+  process.env.RUSTY_CREW_REASONING_CERT_PROVIDER_ALIAS ??
+  (certificateDialect === "deepseek" ? "deepseek-flash" : "kimi-k2.7");
 const suffix = Date.now().toString(36);
-const profileId = `kimi-reasoning-cert-${suffix}`;
+const profileId = `${certificateDialect}-reasoning-cert-${suffix}`;
 let sessionId: string | undefined;
+let originalProvider: Record<string, unknown> | undefined;
+let providerUpdated = false;
 
 if (new URL(baseUrl).port !== "9348") {
-  throw new Error("Kimi reasoning live smoke requires debug port 9348");
+  throw new Error("reasoning live smoke requires debug port 9348");
 }
-if (providerAlias !== "kimi-k2.7") {
+if (certificateDialect !== "kimi" && certificateDialect !== "deepseek") {
+  throw new Error("reasoning live smoke supports kimi or deepseek dialects");
+}
+if (certificateDialect === "kimi" && providerAlias !== "kimi-k2.7") {
   throw new Error("Kimi reasoning live smoke requires provider kimi-k2.7");
 }
 
 try {
-  const provider = await apiData<Record<string, unknown>>(
+  originalProvider = await apiData<Record<string, unknown>>(
     "GET",
     `/v1/admin/model-providers/${encodeURIComponent(providerAlias)}`,
   );
-  assert.equal(nested(provider, "chatCompletionsDialect"), "kimi");
-  assert.equal(nested(provider, "reasoningHistory"), "preserve_all");
+  if (certificateDialect === "deepseek") {
+    providerUpdated = true;
+    const updated = await apiData<Record<string, unknown>>(
+      "PATCH",
+      `/v1/admin/model-providers/${encodeURIComponent(providerAlias)}?refresh=apply`,
+      providerWriteBody(originalProvider, {
+        chatCompletionsDialect: "deepseek",
+        thinkingMode: "enabled",
+        reasoningHistory: "tool_calls_only",
+      }),
+    );
+    assert.equal(
+      nested(updated, "provider", "chatCompletionsDialect"),
+      "deepseek",
+    );
+    assert.equal(
+      nested(updated, "provider", "reasoningHistory"),
+      "tool_calls_only",
+    );
+  } else {
+    assert.equal(nested(originalProvider, "chatCompletionsDialect"), "kimi");
+    assert.equal(nested(originalProvider, "reasoningHistory"), "preserve_all");
+  }
 
   const created = await apiData<Record<string, unknown>>(
     "POST",
     "/v1/admin/control/profiles",
     {
       profileId,
-      displayName: `Kimi reasoning certification ${suffix}`,
+      displayName: `${certificateDialect} reasoning certification ${suffix}`,
       providerAlias,
       kind: "full",
       localToolProfileId: "code_read",
-      reason: "task-6003 Kimi live reasoning certification",
+      reason: `task-${taskNumber} ${certificateDialect} live reasoning certification`,
     },
   );
   sessionId = nestedString(created, "outcome", "result", "sessionId");
@@ -47,7 +77,7 @@ try {
       "First call git_status for /home/dev/rusty-crew.",
       "Only after that tool result returns, call read_file for /home/dev/rusty-crew/README.md.",
       "Do not issue those tool calls in parallel.",
-      `Then answer with the exact marker KIMI_REASONING_${suffix} and one short sentence.`,
+      `Then answer with the exact marker ${certificateDialect.toUpperCase()}_REASONING_${suffix} and one short sentence.`,
     ].join("\n"),
   );
   const firstTools = successfulTools(first.events);
@@ -75,10 +105,17 @@ try {
     firstReplayReasoning,
     "later provider requests must retain exact first-round reasoning_content",
   );
+  const firstToolReasoning = assistantToolReasonings(
+    firstRequests[firstRequests.length - 1],
+  );
+  assert.ok(
+    firstToolReasoning.length >= 2,
+    "both sequential assistant tool calls must retain reasoning_content",
+  );
 
   const second = await sendAndWait(
     sessionId,
-    `Without calling tools, confirm the earlier README verification with marker KIMI_HISTORY_${suffix}.`,
+    `Without calling tools, confirm the earlier README verification with marker ${certificateDialect.toUpperCase()}_HISTORY_${suffix}.`,
     first.cursor,
   );
   assert.equal(successfulTools(second.events).length, 0);
@@ -86,15 +123,29 @@ try {
   const secondRequests = requestSamples(secondDebug);
   assert.ok(secondRequests.length >= 1);
   const restoredReasoning = allReasoning(secondRequests[0]);
-  assert.ok(
-    restoredReasoning.includes(firstReplayReasoning),
-    "second wake must restore the exact prior reasoning_content under preserve_all",
-  );
+  if (certificateDialect === "deepseek") {
+    assert.deepEqual(
+      assistantToolReasonings(secondRequests[0]),
+      firstToolReasoning,
+      "DeepSeek second wake must restore exact reasoning only on tool-call assistant messages",
+    );
+    assert.deepEqual(
+      assistantNonToolReasonings(secondRequests[0]),
+      [],
+      "DeepSeek tool_calls_only history must omit non-tool assistant reasoning",
+    );
+  } else {
+    assert.ok(
+      restoredReasoning.includes(firstReplayReasoning),
+      "second wake must restore the exact prior reasoning_content under preserve_all",
+    );
+  }
 
   console.log(
     JSON.stringify(
       {
         baseUrl,
+        certificateDialect,
         providerAlias,
         profileId,
         sessionId,
@@ -116,9 +167,22 @@ try {
       `/v1/admin/control/profiles/${encodeURIComponent(profileId)}/delete`,
       {
         confirmProfileId: profileId,
-        reason: "task-6003 Kimi live certification cleanup",
+        reason: `task-${taskNumber} reasoning certification cleanup`,
       },
     ).catch(() => undefined);
+  }
+  if (providerUpdated && originalProvider !== undefined) {
+    const current = await apiData<Record<string, unknown>>(
+      "GET",
+      `/v1/admin/model-providers/${encodeURIComponent(providerAlias)}`,
+    );
+    await apiData<Record<string, unknown>>(
+      "PATCH",
+      `/v1/admin/model-providers/${encodeURIComponent(providerAlias)}?refresh=apply`,
+      providerWriteBody(originalProvider, {
+        expectedRevision: nested(current, "revision"),
+      }),
+    );
   }
 }
 
@@ -144,15 +208,15 @@ async function sendAndWait(
   initialCursor?: string,
 ): Promise<SendResult> {
   let cursor = initialCursor ?? `${currentSessionId}:0`;
-  const key = `task-6003:${currentSessionId}:${Date.now()}`;
+  const key = `task-${taskNumber}:${currentSessionId}:${Date.now()}`;
   const sent = await api(
     "POST",
     `/v1/chat/sessions/${encodeURIComponent(currentSessionId)}/messages`,
     {
-      actor: { id: "task-6003-operator", kind: "human" },
+      actor: { id: `task-${taskNumber}-operator`, kind: "human" },
       body,
       client_message_id: key,
-      reason: "task-6003 Kimi live reasoning certification",
+      reason: `task-${taskNumber} ${certificateDialect} live reasoning certification`,
     },
     { "Idempotency-Key": key },
   );
@@ -302,6 +366,61 @@ function assistantToolReasoning(request: unknown): string {
   return typeof reasoning === "string" ? reasoning : "";
 }
 
+function assistantToolReasonings(request: unknown): string[] {
+  const messages = nested(request, "messages");
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter(
+      (message) =>
+        nested(message, "role") === "assistant" &&
+        Array.isArray(nested(message, "tool_calls")) &&
+        (nested(message, "tool_calls") as unknown[]).length > 0,
+    )
+    .map((message) => nested(message, "reasoning_content"))
+    .filter((value): value is string => typeof value === "string");
+}
+
+function assistantNonToolReasonings(request: unknown): string[] {
+  const messages = nested(request, "messages");
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter(
+      (message) =>
+        nested(message, "role") === "assistant" &&
+        (!Array.isArray(nested(message, "tool_calls")) ||
+          (nested(message, "tool_calls") as unknown[]).length === 0),
+    )
+    .map((message) => nested(message, "reasoning_content"))
+    .filter((value): value is string => typeof value === "string");
+}
+
+function providerWriteBody(
+  provider: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    status: provider.status,
+    protocol: provider.protocol,
+    providerKind: provider.providerKind,
+    displayName: provider.displayName,
+    description: provider.description,
+    baseUrl: provider.baseUrl,
+    modelId: provider.modelId,
+    contextWindowTokens: provider.contextWindowTokens,
+    maxOutputTokens: provider.maxOutputTokens,
+    temperatureMilli: provider.temperatureMilli,
+    reasoningEffort: provider.reasoningEffort,
+    reasoningFormat: provider.reasoningFormat,
+    chatCompletionsDialect: provider.chatCompletionsDialect,
+    thinkingMode: provider.thinkingMode,
+    reasoningHistory: provider.reasoningHistory,
+    reasoningBudgetTokens: provider.reasoningBudgetTokens,
+    metadataJson: provider.metadataJson,
+    expectedRevision: provider.revision,
+    ...overrides,
+  };
+}
+
 function allReasoning(request: unknown): string {
   const messages = nested(request, "messages");
   if (!Array.isArray(messages)) return "";
@@ -353,7 +472,7 @@ function sha256(value: string): string {
 }
 
 async function apiData<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -364,7 +483,7 @@ async function apiData<T>(
 }
 
 async function api(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},

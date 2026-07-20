@@ -15,6 +15,7 @@ import {
   type RuntimeCounterSummary,
   type SlashCommandSession,
 } from "../src/index.js";
+import type { SessionContextUsageResult } from "../src/rusty-view-chat-api.js";
 
 const now = "2026-06-20T18:00:00.000Z";
 const sessionContext: SlashCommandSession = {
@@ -132,77 +133,78 @@ assert.equal(currentSession.fields?.channelPresence, "idle");
 assert.equal(currentSession.fields?.mcpStatus, "active");
 assert.equal(currentSession.fields?.tools, 1);
 
+const modelContext: SessionContextUsageResult = {
+  session_id: "session-alpha",
+  agent_id: "agent-alpha",
+  profile_id: "prime",
+  provider: {
+    alias: "deepseek-flash",
+    status: "active",
+    protocol: "chat_completions",
+    provider_kind: "openai-compatible",
+    base_url_host: "127.0.0.1:18082",
+    base_url_redacted: "http://127.0.0.1:18082",
+    model_id: "gpt",
+    context_window_tokens: 128_000,
+    max_output_tokens: 4096,
+    temperature: 0.5,
+    reasoning_effort: "high",
+    provider_reasoning_effort: "low",
+    session_reasoning_effort_override: "high",
+    reasoning_format: "none",
+    chat_completions_dialect: "qwen",
+    thinking_mode: "enabled",
+    reasoning_history: "preserve_all",
+    reasoning_budget_tokens: 8192,
+    thinking_settings_applied: true,
+    thinking_mode_applied: true,
+    reasoning_history_applied: true,
+    reasoning_budget_applied: true,
+    revision: 3,
+  },
+  brain: {
+    module: "chat-completions",
+    backend: "chat-completions",
+  },
+  context_strategy: {
+    strategy_id: "recent_window",
+    enabled: true,
+    auto_compaction_enabled: false,
+    compact_at_percent: 80,
+    target_percent_after_compaction: 55,
+    max_context_percent_for_wake: 95,
+    debug_visibility: "status",
+    include_debug_events_in_model_context: false,
+  },
+  tools: {
+    local_tool_profile_id: "full-agent",
+    tool_count: 3,
+    requested_toolsets: ["local_code_read"],
+    requested_tools: ["todo"],
+    mcp_binding_count: 1,
+    mcp_active_count: 1,
+  },
+  context: {
+    estimate_quality: "approximate",
+    estimate_method: "test",
+    estimator_id: "test_estimator",
+    context_window_tokens: 128_000,
+    estimated_prompt_tokens: 512,
+    estimated_remaining_tokens: 127_488,
+    max_output_tokens: 4096,
+    reserved_response_tokens: 4096,
+    safety_margin_tokens: 2560,
+    usable_input_tokens: 121_344,
+    sampled_event_count: 7,
+    sampled_message_count: 2,
+  },
+  degraded: false,
+  diagnostics: [],
+};
 const model = buildReadOnlySlashCommandResponse("model", {
   diagnostics,
   session: sessionContext,
-  modelContext: {
-    session_id: "session-alpha",
-    agent_id: "agent-alpha",
-    profile_id: "prime",
-    provider: {
-      alias: "deepseek-flash",
-      status: "active",
-      protocol: "chat_completions",
-      provider_kind: "openai-compatible",
-      base_url_host: "127.0.0.1:18082",
-      base_url_redacted: "http://127.0.0.1:18082",
-      model_id: "gpt",
-      context_window_tokens: 128_000,
-      max_output_tokens: 4096,
-      temperature: 0.5,
-      reasoning_effort: "high",
-      provider_reasoning_effort: "low",
-      session_reasoning_effort_override: "high",
-      reasoning_format: "none",
-      chat_completions_dialect: "qwen",
-      thinking_mode: "enabled",
-      reasoning_history: "preserve_all",
-      reasoning_budget_tokens: 8192,
-      thinking_settings_applied: true,
-      thinking_mode_applied: true,
-      reasoning_history_applied: true,
-      reasoning_budget_applied: true,
-      revision: 3,
-    },
-    brain: {
-      module: "chat-completions",
-      backend: "chat-completions",
-    },
-    context_strategy: {
-      strategy_id: "recent_window",
-      enabled: true,
-      auto_compaction_enabled: false,
-      compact_at_percent: 80,
-      target_percent_after_compaction: 55,
-      max_context_percent_for_wake: 95,
-      debug_visibility: "status",
-      include_debug_events_in_model_context: false,
-    },
-    tools: {
-      local_tool_profile_id: "full-agent",
-      tool_count: 3,
-      requested_toolsets: ["local_code_read"],
-      requested_tools: ["todo"],
-      mcp_binding_count: 1,
-      mcp_active_count: 1,
-    },
-    context: {
-      estimate_quality: "approximate",
-      estimate_method: "test",
-      estimator_id: "test_estimator",
-      context_window_tokens: 128_000,
-      estimated_prompt_tokens: 512,
-      estimated_remaining_tokens: 127_488,
-      max_output_tokens: 4096,
-      reserved_response_tokens: 4096,
-      safety_margin_tokens: 2560,
-      usable_input_tokens: 121_344,
-      sampled_event_count: 7,
-      sampled_message_count: 2,
-    },
-    degraded: false,
-    diagnostics: [],
-  },
+  modelContext,
 });
 assert.equal(model.title, "Model");
 assert.equal(model.fields?.providerAlias, "deepseek-flash");
@@ -228,6 +230,24 @@ assert.equal(
   model.items?.some((item) => item.includes("chat completions dialect qwen")),
   true,
 );
+
+const deepseekModel = buildReadOnlySlashCommandResponse("model", {
+  diagnostics,
+  session: sessionContext,
+  modelContext: {
+    ...modelContext,
+    provider: {
+      ...modelContext.provider,
+      chat_completions_dialect: "deepseek",
+      reasoning_history: "tool_calls_only",
+      reasoning_budget_tokens: undefined,
+      reasoning_budget_applied: false,
+    },
+  },
+});
+assert.equal(deepseekModel.fields?.chatCompletionsDialect, "deepseek");
+assert.equal(deepseekModel.fields?.reasoningHistory, "tool_calls_only");
+assert.equal(deepseekModel.fields?.reasoningHistoryApplied, true);
 
 const effort = buildReadOnlySlashCommandResponse("effort", {
   diagnostics,

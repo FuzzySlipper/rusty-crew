@@ -730,6 +730,7 @@ export const rawModelProviderRecordSchema = Type.Object(
       Type.Literal("kimi"),
       Type.Literal("glm"),
       Type.Literal("qwen"),
+      Type.Literal("deepseek"),
     ]),
     thinking_mode: Type.Union([
       Type.Literal("provider_default"),
@@ -740,6 +741,7 @@ export const rawModelProviderRecordSchema = Type.Object(
       Type.Literal("provider_default"),
       Type.Literal("discard"),
       Type.Literal("preserve_all"),
+      Type.Literal("tool_calls_only"),
     ]),
     reasoning_budget_tokens: Type.Optional(nullableNumber),
     credential_id: Type.Optional(nullableString),
@@ -1225,6 +1227,7 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
             Type.Literal("kimi"),
             Type.Literal("glm"),
             Type.Literal("qwen"),
+            Type.Literal("deepseek"),
           ]),
         ),
         thinkingMode: Type.Optional(
@@ -1239,6 +1242,7 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
             Type.Literal("provider_default"),
             Type.Literal("discard"),
             Type.Literal("preserve_all"),
+            Type.Literal("tool_calls_only"),
           ]),
         ),
         reasoningBudgetTokens: Type.Optional(Type.Number({ minimum: 1 })),

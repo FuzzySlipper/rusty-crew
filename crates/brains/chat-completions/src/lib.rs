@@ -348,6 +348,13 @@ impl ChatCompletionsChatConfig {
         let default_policy = self.thinking_mode == ChatCompletionsThinkingMode::ProviderDefault
             && self.reasoning_history == ChatCompletionsReasoningHistory::ProviderDefault
             && self.reasoning_budget_tokens.is_none();
+        if self.reasoning_history == ChatCompletionsReasoningHistory::ToolCallsOnly
+            && self.wire_dialect != ChatCompletionsWireDialect::Deepseek
+        {
+            return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
+                "tool_calls_only reasoning history requires the deepseek chat completions dialect",
+            ));
+        }
         if self.wire_dialect == ChatCompletionsWireDialect::Standard && !default_policy {
             return Err(ChatCompletionsConfigError::UnsupportedDialectOption(
                 "standard chat completions dialect does not accept vendor thinking settings",
@@ -687,6 +694,7 @@ fn chat_completions_dialect_extensions(
                 ChatCompletionsReasoningHistory::PreserveAll => {
                     thinking.insert("keep".to_string(), json!("all"));
                 }
+                ChatCompletionsReasoningHistory::ToolCallsOnly => {}
             }
             ChatCompletionsDialectExtensions {
                 thinking: (!thinking.is_empty()).then_some(Value::Object(thinking)),
@@ -712,6 +720,7 @@ fn chat_completions_dialect_extensions(
                 ChatCompletionsReasoningHistory::PreserveAll => {
                     thinking.insert("clear_thinking".to_string(), json!(false));
                 }
+                ChatCompletionsReasoningHistory::ToolCallsOnly => {}
             }
             ChatCompletionsDialectExtensions {
                 thinking: (!thinking.is_empty()).then_some(Value::Object(thinking)),
@@ -728,10 +737,27 @@ fn chat_completions_dialect_extensions(
                 ChatCompletionsReasoningHistory::ProviderDefault => None,
                 ChatCompletionsReasoningHistory::Discard => Some(false),
                 ChatCompletionsReasoningHistory::PreserveAll => Some(true),
+                ChatCompletionsReasoningHistory::ToolCallsOnly => None,
             },
             thinking_budget: config.reasoning_budget_tokens,
             thinking: None,
         },
+        ChatCompletionsWireDialect::Deepseek => {
+            let mut thinking = serde_json::Map::new();
+            match config.thinking_mode {
+                ChatCompletionsThinkingMode::ProviderDefault => {}
+                ChatCompletionsThinkingMode::Enabled => {
+                    thinking.insert("type".to_string(), json!("enabled"));
+                }
+                ChatCompletionsThinkingMode::Disabled => {
+                    thinking.insert("type".to_string(), json!("disabled"));
+                }
+            }
+            ChatCompletionsDialectExtensions {
+                thinking: (!thinking.is_empty()).then_some(Value::Object(thinking)),
+                ..ChatCompletionsDialectExtensions::default()
+            }
+        }
     }
 }
 
@@ -1738,7 +1764,15 @@ fn message_for_reasoning_history(
     mut message: ChatCompletionMessage,
     history: ChatCompletionsReasoningHistory,
 ) -> ChatCompletionMessage {
-    if history != ChatCompletionsReasoningHistory::PreserveAll {
+    let preserve_reasoning = match history {
+        ChatCompletionsReasoningHistory::PreserveAll => true,
+        ChatCompletionsReasoningHistory::ToolCallsOnly => {
+            message.role == ChatMessageRole::Assistant && !message.tool_calls.is_empty()
+        }
+        ChatCompletionsReasoningHistory::ProviderDefault
+        | ChatCompletionsReasoningHistory::Discard => false,
+    };
+    if !preserve_reasoning {
         message.reasoning_content = None;
     }
     message
@@ -2512,6 +2546,20 @@ mod tests {
         assert_eq!(qwen_preserved["enable_thinking"], true);
         assert_eq!(qwen_preserved["preserve_thinking"], true);
         assert_eq!(qwen_preserved["thinking_budget"], 4096);
+
+        let deepseek_tool_history = request_value(ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Deepseek,
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            reasoning_history: ChatCompletionsReasoningHistory::ToolCallsOnly,
+            ..ChatCompletionsChatConfig::new("deepseek-v4-pro")
+        });
+        assert_eq!(deepseek_tool_history["thinking"]["type"], "enabled");
+        assert!(deepseek_tool_history.get("enable_thinking").is_none());
+        assert!(deepseek_tool_history.get("preserve_thinking").is_none());
+        assert!(deepseek_tool_history["thinking"].get("keep").is_none());
+        assert!(deepseek_tool_history["thinking"]
+            .get("clear_thinking")
+            .is_none());
     }
 
     #[test]
@@ -2525,6 +2573,29 @@ mod tests {
             Err(ChatCompletionsConfigError::UnsupportedDialectOption(message))
                 if message.contains("standard")
         ));
+    }
+
+    #[test]
+    fn rejects_tool_call_only_history_for_non_deepseek_dialects() {
+        for wire_dialect in [
+            ChatCompletionsWireDialect::Standard,
+            ChatCompletionsWireDialect::Kimi,
+            ChatCompletionsWireDialect::Glm,
+            ChatCompletionsWireDialect::Qwen,
+        ] {
+            let config = ChatCompletionsChatConfig {
+                wire_dialect,
+                thinking_mode: ChatCompletionsThinkingMode::Enabled,
+                reasoning_history: ChatCompletionsReasoningHistory::ToolCallsOnly,
+                max_output_tokens: Some(KIMI_THINKING_MIN_OUTPUT_TOKENS),
+                ..ChatCompletionsChatConfig::new("model")
+            };
+            assert!(matches!(
+                config.validate(),
+                Err(ChatCompletionsConfigError::UnsupportedDialectOption(message))
+                    if message.contains("deepseek")
+            ));
+        }
     }
 
     #[test]
@@ -3043,6 +3114,27 @@ mod tests {
         }
     }
 
+    fn deepseek_tool_history_config() -> ChatCompletionsChatConfig {
+        ChatCompletionsChatConfig {
+            wire_dialect: ChatCompletionsWireDialect::Deepseek,
+            thinking_mode: ChatCompletionsThinkingMode::Enabled,
+            reasoning_history: ChatCompletionsReasoningHistory::ToolCallsOnly,
+            ..ChatCompletionsChatConfig::new("deepseek-v4-pro")
+        }
+    }
+
+    fn provider_state_input(state: BrainWakeProviderStateUpdate) -> BrainWakeProviderStateInput {
+        BrainWakeProviderStateInput {
+            module_id: state.module_id,
+            strategy_id: state.strategy_id,
+            profile_fingerprint: state.profile_fingerprint,
+            provider_fingerprint: state.provider_fingerprint,
+            payload_version: state.payload_version,
+            payload: state.payload,
+            expires_at: None,
+        }
+    }
+
     #[test]
     fn tool_continuation_replays_exact_reasoning_content() {
         let exact_reasoning = "line one\nline two with spacing  ";
@@ -3220,6 +3312,127 @@ mod tests {
         assert_eq!(
             messages.last().expect("new user")["content"],
             "second question"
+        );
+    }
+
+    #[test]
+    fn deepseek_tool_call_reasoning_survives_restart_and_non_tool_reasoning_does_not() {
+        let mut first_brain = loop_with_config(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: "tool-reasoning-one".to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", r#"{"round":1}"#)),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: "tool-reasoning-two".to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", r#"{"round":2}"#)),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: "final-answer-reasoning".to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ContentDelta("first answer".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![
+                ChatCompletionsToolOutput::ok("result-one"),
+                ChatCompletionsToolOutput::ok("result-two"),
+            ],
+            deepseek_tool_history_config(),
+        );
+        let first = first_brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("first question")],
+        );
+        assert!(first.completed);
+        assert_eq!(first.provider_request_count, 3);
+        let third_request_messages = first.provider_request_debug_samples[2]["messages"]
+            .as_array()
+            .expect("third request messages");
+        assert_eq!(
+            third_request_messages
+                .iter()
+                .filter_map(|message| message["reasoning_content"].as_str())
+                .collect::<Vec<_>>(),
+            vec!["tool-reasoning-one", "tool-reasoning-two"]
+        );
+
+        let serialized = serde_json::to_string(&first.provider_state).expect("serialize state");
+        let restored: Option<BrainWakeProviderStateOutput> =
+            serde_json::from_str(&serialized).expect("restore state");
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = restored else {
+            panic!("expected replacement state");
+        };
+        let persisted: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload.clone()).expect("persisted history");
+        assert_eq!(
+            persisted
+                .messages
+                .iter()
+                .filter_map(|message| message.reasoning_content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["tool-reasoning-one", "tool-reasoning-two"]
+        );
+        assert!(persisted.messages.iter().any(|message| {
+            message.content.as_deref() == Some("first answer")
+                && message.reasoning_content.is_none()
+                && message.tool_calls.is_empty()
+        }));
+
+        let mut second_brain = loop_with_config(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("second answer".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+            deepseek_tool_history_config(),
+        );
+        let second = second_brain.wake(ChatCompletionsBrainLoopInput {
+            context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
+            messages: vec![ChatCompletionMessage::user("second question")],
+            provider_state: Some(provider_state_input(state)),
+            final_message_fallback: None,
+        });
+        let second_request = &second.provider_request_debug_samples[0];
+        let second_messages = second_request["messages"].as_array().expect("messages");
+        assert_eq!(second_request["thinking"]["type"], "enabled");
+        assert_eq!(
+            second_messages
+                .iter()
+                .filter_map(|message| message["reasoning_content"].as_str())
+                .collect::<Vec<_>>(),
+            vec!["tool-reasoning-one", "tool-reasoning-two"]
+        );
+        assert_eq!(
+            second_messages
+                .iter()
+                .filter_map(|message| message["content"].as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "first question",
+                "result-one",
+                "result-two",
+                "first answer",
+                "second question"
+            ]
         );
     }
 

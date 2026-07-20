@@ -586,9 +586,13 @@ export interface BrainModelConfig {
   maxOutputTokens?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
-  chatCompletionsDialect?: "standard" | "kimi" | "glm" | "qwen";
+  chatCompletionsDialect?: "standard" | "kimi" | "glm" | "qwen" | "deepseek";
   thinkingMode?: "provider_default" | "enabled" | "disabled";
-  reasoningHistory?: "provider_default" | "discard" | "preserve_all";
+  reasoningHistory?:
+    | "provider_default"
+    | "discard"
+    | "preserve_all"
+    | "tool_calls_only";
   reasoningBudgetTokens?: number;
 }
 

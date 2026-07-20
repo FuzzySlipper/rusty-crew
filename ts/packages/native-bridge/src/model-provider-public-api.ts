@@ -122,7 +122,8 @@ export type NativeChatCompletionsWireDialect =
   | "standard"
   | "kimi"
   | "glm"
-  | "qwen";
+  | "qwen"
+  | "deepseek";
 export type NativeChatCompletionsThinkingMode =
   | "provider_default"
   | "enabled"
@@ -130,6 +131,7 @@ export type NativeChatCompletionsThinkingMode =
 export type NativeChatCompletionsReasoningHistory =
   | "provider_default"
   | "discard"
-  | "preserve_all";
+  | "preserve_all"
+  | "tool_calls_only";
 
 export * from "./model-provider-refresh-public-api.js";

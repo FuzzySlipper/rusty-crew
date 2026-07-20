@@ -360,9 +360,18 @@ export interface SessionContextUsageResult {
     provider_reasoning_effort?: string;
     session_reasoning_effort_override?: string;
     reasoning_format?: string;
-    chat_completions_dialect?: "standard" | "kimi" | "glm" | "qwen";
+    chat_completions_dialect?:
+      | "standard"
+      | "kimi"
+      | "glm"
+      | "qwen"
+      | "deepseek";
     thinking_mode?: "provider_default" | "enabled" | "disabled";
-    reasoning_history?: "provider_default" | "discard" | "preserve_all";
+    reasoning_history?:
+      | "provider_default"
+      | "discard"
+      | "preserve_all"
+      | "tool_calls_only";
     reasoning_budget_tokens?: number;
     thinking_settings_applied?: boolean;
     thinking_mode_applied?: boolean;

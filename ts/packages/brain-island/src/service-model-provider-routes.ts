@@ -506,12 +506,13 @@ function chatCompletionsDialect(
     dialect === "standard" ||
     dialect === "kimi" ||
     dialect === "glm" ||
-    dialect === "qwen"
+    dialect === "qwen" ||
+    dialect === "deepseek"
   ) {
     return dialect;
   }
   throw new Error(
-    "model provider chatCompletionsDialect must be standard, kimi, glm, or qwen",
+    "model provider chatCompletionsDialect must be standard, kimi, glm, qwen, or deepseek",
   );
 }
 
@@ -538,12 +539,13 @@ function chatCompletionsReasoningHistory(
   if (
     history === "provider_default" ||
     history === "discard" ||
-    history === "preserve_all"
+    history === "preserve_all" ||
+    history === "tool_calls_only"
   ) {
     return history;
   }
   throw new Error(
-    "model provider reasoningHistory must be provider_default, discard, or preserve_all",
+    "model provider reasoningHistory must be provider_default, discard, preserve_all, or tool_calls_only",
   );
 }
 

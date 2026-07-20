@@ -57,9 +57,9 @@ chat completions or vice versa.
 | `temperatureMilli` | Integer storage form, `temperature * 1000` |
 | `reasoningEffort` | Provider-specific reasoning effort string |
 | `reasoningFormat` | Provider-specific reasoning/output format string |
-| `chatCompletionsDialect` | Typed Chat Completions wire dialect: `standard`, `kimi`, `glm`, or `qwen` |
+| `chatCompletionsDialect` | Typed Chat Completions wire dialect: `standard`, `kimi`, `glm`, `qwen`, or `deepseek` |
 | `thinkingMode` | `provider_default`, `enabled`, or `disabled` |
-| `reasoningHistory` | `provider_default`, `discard`, or `preserve_all` |
+| `reasoningHistory` | `provider_default`, `discard`, `preserve_all`, or `tool_calls_only` |
 | `reasoningBudgetTokens` | Optional Qwen-only thinking budget |
 | `credentialSecret` | Typed secret envelope for API key or OAuth material |
 | `metadataJson` | Non-secret provider-specific metadata |
@@ -88,10 +88,12 @@ does not infer them from model names, endpoint URLs, or `providerKind`.
 
 All history policies retain ordinary ordered user, assistant, tool-call, and
 tool-result messages across wakes. `provider_default` strips historical
-`reasoning_content` without sending a vendor history control. `discard` also
-strips reasoning and explicitly asks the selected dialect to clear or ignore
-historical reasoning. `preserve_all` retains exact structured reasoning with
-the ordinary history and emits the dialect's preservation control.
+`reasoning_content` without sending a vendor history control. `discard` strips
+all historical reasoning and emits a dialect-specific clear control where one
+exists. `preserve_all` retains exact structured reasoning with the ordinary
+history and emits a dialect's preservation control where one exists.
+`tool_calls_only` retains reasoning only on assistant messages containing tool
+calls; it is available only with the `deepseek` dialect.
 
 | Dialect | Thinking control | Historical reasoning control | Budget | Assistant history |
 | --- | --- | --- | --- | --- |
@@ -99,11 +101,20 @@ the ordinary history and emits the dialect's preservation control.
 | `kimi` | `thinking.type` | `thinking.keep: null \| "all"` | unsupported | Replays exact `reasoning_content` during tool loops and, with `preserve_all`, across wakes |
 | `glm` | `thinking.type` | `thinking.clear_thinking: true \| false` | unsupported | Uses exact structured `reasoning_content` history when preserved |
 | `qwen` | `enable_thinking` | `preserve_thinking` | `thinking_budget` | Uses exact structured `reasoning_content` history when preserved |
+| `deepseek` | `thinking.type` | message filtering only | unsupported | With `tool_calls_only`, replays exact reasoning on every assistant tool-call message across later requests and drops non-tool reasoning |
 
 Vendor settings fail closed when combined with `standard` or a non-chat
 protocol. `reasoningBudgetTokens` additionally requires the `qwen` dialect and
 `thinkingMode: "enabled"`. Disabling thinking cannot be combined with an
 explicit history policy.
+
+DeepSeek's current thinking-mode tool contract requires exact
+`reasoning_content` from assistant tool-call messages in every later request;
+omitting it can produce HTTP 400. Configure `chatCompletionsDialect:
+"deepseek"`, `thinkingMode: "enabled"`, and `reasoningHistory:
+"tool_calls_only"` for that contract. `discard` remains available for legacy
+DeepSeek reasoning endpoints that reject historical reasoning. Crew does not
+infer either behavior from a DeepSeek-looking model ID or URL.
 
 For Kimi thinking models, Crew rejects an explicit temperature and requires
 `maxOutputTokens >= 16000`; it never silently changes either value. Kimi K2.7

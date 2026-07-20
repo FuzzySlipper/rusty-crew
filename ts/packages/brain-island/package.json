@@ -82,6 +82,7 @@
     "smoke:rusty-view-chat-authority-boundary": "tsx smokes/smoke-rusty-view-chat-authority-boundary.ts",
     "smoke:chat-rust-authority-live-debug-service": "tsx smokes/chat-rust-authority-live-debug-service.ts",
     "smoke:chat-completions-reasoning-live-debug-service": "tsx smokes/chat-completions-reasoning-live-debug-service.ts",
+    "smoke:chat-completions-deepseek-live-debug-service": "RUSTY_CREW_REASONING_CERT_DIALECT=deepseek tsx smokes/chat-completions-reasoning-live-debug-service.ts",
     "smoke:model-provider-admin-contract": "tsx smokes/smoke-model-provider-admin-contract.ts",
     "smoke:rusty-view-chat-context": "tsx ../../smokes/brain-island/smoke-rusty-view-chat-context.ts",
     "smoke:chat-api-cassettes": "tsx smokes/chat-api-cassettes.ts",

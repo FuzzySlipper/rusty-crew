@@ -778,6 +778,32 @@ test("model provider admin routes list, project records, and report revision con
   assert.equal(conflictData.provider?.temperature, 0.5);
   assert.equal(conflictData.expectedRevision, 1);
   assert.equal(conflictData.currentRevision, 2);
+
+  const deepseek = await handleModelProviderAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/model-providers",
+      requestId: "req-deepseek-policy",
+      body: {
+        alias: "deepseek-v4-pro",
+        status: "active",
+        protocol: "chat_completions",
+        providerKind: "deepseek",
+        modelId: "deepseek-v4-pro",
+        chatCompletionsDialect: "deepseek",
+        thinkingMode: "enabled",
+        reasoningHistory: "tool_calls_only",
+      },
+    },
+    context,
+  );
+  assert.equal(deepseek.status, 200);
+  const deepseekData = okData<{
+    provider: NativeModelProviderRecord;
+  }>(deepseek);
+  assert.equal(deepseekData.provider.chatCompletionsDialect, "deepseek");
+  assert.equal(deepseekData.provider.thinkingMode, "enabled");
+  assert.equal(deepseekData.provider.reasoningHistory, "tool_calls_only");
 });
 
 test("model provider OpenAI OAuth routes expose status and start without leaking verifier", async () => {
@@ -1837,6 +1863,10 @@ function modelProviderRouteContext(
         temperatureMilli: write.temperatureMilli,
         reasoningEffort: write.reasoningEffort,
         reasoningFormat: write.reasoningFormat,
+        chatCompletionsDialect: write.chatCompletionsDialect,
+        thinkingMode: write.thinkingMode,
+        reasoningHistory: write.reasoningHistory,
+        reasoningBudgetTokens: write.reasoningBudgetTokens,
         credentialId: current?.credentialId,
         metadataJson: write.metadataJson ?? current?.metadataJson ?? {},
         revision: (current?.revision ?? 0) + 1,

@@ -1202,6 +1202,7 @@ pub enum ChatCompletionsWireDialect {
     Kimi,
     Glm,
     Qwen,
+    Deepseek,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1220,6 +1221,7 @@ pub enum ChatCompletionsReasoningHistory {
     ProviderDefault,
     Discard,
     PreserveAll,
+    ToolCallsOnly,
 }
 
 pub const MODEL_PROVIDER_SECRET_ENVELOPE_VERSION: u32 = 1;

@@ -48,7 +48,8 @@ artifact instead of hand-copying route shapes.
 - Write bodies may use decimal `temperature` or integer `temperatureMilli`.
 - Chat Completions vendor controls use the typed `chatCompletionsDialect`,
   `thinkingMode`, `reasoningHistory`, and optional `reasoningBudgetTokens`
-  fields. Standard endpoints reject vendor-only combinations.
+  fields. The `deepseek` dialect supports the explicit `tool_calls_only`
+  history policy. Standard endpoints reject vendor-only combinations.
 - Revision conflicts use `reason_code:
   "model_provider_revision_mismatch"` and return `expectedRevision`,
   `currentRevision`, and the current projected provider when available.

@@ -2400,6 +2400,7 @@ fn chat_completions_dialect_as_str(dialect: ChatCompletionsWireDialect) -> &'sta
         ChatCompletionsWireDialect::Kimi => "kimi",
         ChatCompletionsWireDialect::Glm => "glm",
         ChatCompletionsWireDialect::Qwen => "qwen",
+        ChatCompletionsWireDialect::Deepseek => "deepseek",
     }
 }
 
@@ -2409,6 +2410,7 @@ fn chat_completions_dialect_from_str(raw: &str) -> rusqlite::Result<ChatCompleti
         "kimi" => Ok(ChatCompletionsWireDialect::Kimi),
         "glm" => Ok(ChatCompletionsWireDialect::Glm),
         "qwen" => Ok(ChatCompletionsWireDialect::Qwen),
+        "deepseek" => Ok(ChatCompletionsWireDialect::Deepseek),
         other => Err(model_provider_text_conversion_error(
             13,
             format!("unknown chat completions dialect {other}"),
@@ -2445,6 +2447,7 @@ fn chat_completions_reasoning_history_as_str(
         ChatCompletionsReasoningHistory::ProviderDefault => "provider_default",
         ChatCompletionsReasoningHistory::Discard => "discard",
         ChatCompletionsReasoningHistory::PreserveAll => "preserve_all",
+        ChatCompletionsReasoningHistory::ToolCallsOnly => "tool_calls_only",
     }
 }
 
@@ -2455,6 +2458,7 @@ fn chat_completions_reasoning_history_from_str(
         "provider_default" => Ok(ChatCompletionsReasoningHistory::ProviderDefault),
         "discard" => Ok(ChatCompletionsReasoningHistory::Discard),
         "preserve_all" => Ok(ChatCompletionsReasoningHistory::PreserveAll),
+        "tool_calls_only" => Ok(ChatCompletionsReasoningHistory::ToolCallsOnly),
         other => Err(model_provider_text_conversion_error(
             15,
             format!("unknown chat completions reasoning history {other}"),
@@ -2627,6 +2631,14 @@ fn validate_chat_completions_dialect_policy(write: &ModelProviderWrite) -> CoreR
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "chat completions dialect settings require protocol chat_completions",
+        ));
+    }
+    if write.reasoning_history == ChatCompletionsReasoningHistory::ToolCallsOnly
+        && write.chat_completions_dialect != ChatCompletionsWireDialect::Deepseek
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "tool_calls_only reasoning history requires the deepseek chat completions dialect",
         ));
     }
     if write.chat_completions_dialect == ChatCompletionsWireDialect::Standard && !is_default {
@@ -2810,6 +2822,46 @@ mod tests {
         assert!(validate_model_provider_alias("GPT-5.4").is_err());
         assert!(validate_model_provider_alias("openai/gpt-5.4").is_err());
         assert!(validate_profile_registry_id(&ProfileId::new("runner.profile")).is_err());
+    }
+
+    #[test]
+    fn deepseek_tool_call_reasoning_policy_validates_and_round_trips() {
+        let db_path = std::env::temp_dir().join(format!(
+            "rusty-crew-deepseek-policy-{}.sqlite3",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let mut write = model_provider_write("deepseek-v4-pro", None, None, "2026-07-20T00:00:00Z");
+        write.model_id = "deepseek-v4-pro".to_string();
+        write.temperature_milli = None;
+        write.chat_completions_dialect = ChatCompletionsWireDialect::Deepseek;
+        write.thinking_mode = ChatCompletionsThinkingMode::Enabled;
+        write.reasoning_history = ChatCompletionsReasoningHistory::ToolCallsOnly;
+
+        validate_model_provider_write(&write).unwrap();
+        let created = store.upsert_model_provider(&write).unwrap();
+        assert_eq!(
+            created.chat_completions_dialect,
+            ChatCompletionsWireDialect::Deepseek
+        );
+        assert_eq!(
+            created.reasoning_history,
+            ChatCompletionsReasoningHistory::ToolCallsOnly
+        );
+        let read = store
+            .get_model_provider("deepseek-v4-pro")
+            .unwrap()
+            .expect("provider");
+        assert_eq!(read, created);
+
+        write.chat_completions_dialect = ChatCompletionsWireDialect::Standard;
+        let error = validate_model_provider_write(&write).expect_err("invalid standard policy");
+        assert!(error.message.contains("requires the deepseek"));
+        drop(store);
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

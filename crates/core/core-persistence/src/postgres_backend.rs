@@ -9245,7 +9245,8 @@ mod tests {
     };
     use postgres::NoTls;
     use rusty_crew_core_protocol::{
-        AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource,
+        AgentMessage, BrainEvent, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
+        ChatCompletionsWireDialect, MemoryEvidenceRef, MemoryProposalSource,
         ModelProviderCredentialKind, ProfileRegistryImportExportMetadata, ResourceLimits,
         SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
         MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
@@ -14766,15 +14767,26 @@ mod tests {
             .unwrap()
         };
 
-        let api_key = store
-            .upsert_model_provider(&model_provider_write(
-                "deepseek-flash",
-                ModelProviderProtocol::ChatCompletions,
-                "deepseek",
-                "deepseek-chat",
-                Some("sk-legacy-api-key"),
-            ))
-            .unwrap();
+        let mut deepseek_write = model_provider_write(
+            "deepseek-flash",
+            ModelProviderProtocol::ChatCompletions,
+            "deepseek",
+            "deepseek-chat",
+            Some("sk-legacy-api-key"),
+        );
+        deepseek_write.temperature_milli = None;
+        deepseek_write.chat_completions_dialect = ChatCompletionsWireDialect::Deepseek;
+        deepseek_write.thinking_mode = ChatCompletionsThinkingMode::Enabled;
+        deepseek_write.reasoning_history = ChatCompletionsReasoningHistory::ToolCallsOnly;
+        let api_key = store.upsert_model_provider(&deepseek_write).unwrap();
+        assert_eq!(
+            api_key.chat_completions_dialect,
+            ChatCompletionsWireDialect::Deepseek
+        );
+        assert_eq!(
+            api_key.reasoning_history,
+            ChatCompletionsReasoningHistory::ToolCallsOnly
+        );
         assert_eq!(
             api_key.credential.kind,
             Some(ModelProviderCredentialKind::ApiKey)

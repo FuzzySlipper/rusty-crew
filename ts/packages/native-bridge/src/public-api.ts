@@ -332,9 +332,13 @@ export interface ChatCompletionsBrainRunInput {
     wakeTimeoutMs?: number;
     temperatureMilli?: number;
     reasoningEffort?: string;
-    wireDialect?: "standard" | "kimi" | "glm" | "qwen";
+    wireDialect?: "standard" | "kimi" | "glm" | "qwen" | "deepseek";
     thinkingMode?: "provider_default" | "enabled" | "disabled";
-    reasoningHistory?: "provider_default" | "discard" | "preserve_all";
+    reasoningHistory?:
+      | "provider_default"
+      | "discard"
+      | "preserve_all"
+      | "tool_calls_only";
     reasoningBudgetTokens?: number;
     providerStateStrategyId?: string;
     maxOutputTokens?: number;

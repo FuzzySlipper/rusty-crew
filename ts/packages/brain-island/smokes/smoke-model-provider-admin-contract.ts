@@ -11,10 +11,13 @@ import type {
 } from "@rusty-crew/native-bridge";
 import {
   MODEL_PROVIDER_ADMIN_OPENAPI_PATH,
+  MODEL_PROVIDER_ADMIN_CONTRACT_VERSION,
   MODEL_PROVIDER_ADMIN_PATHS,
   MODEL_PROVIDER_ADMIN_REASON_CODES,
   MODEL_PROVIDER_API_RECORD_REQUIRED_FIELDS,
   MODEL_PROVIDER_CREDENTIAL_KIND_VALUES,
+  CHAT_COMPLETIONS_DIALECT_VALUES,
+  CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
   MODEL_PROVIDER_PROTOCOL_VALUES,
   MODEL_PROVIDER_REFRESH_MODE_VALUES,
   MODEL_PROVIDER_REVISION_CONFLICT_DATA_FIELDS,
@@ -36,6 +39,7 @@ const contract = JSON.parse(readFileSync(contractPath, "utf8")) as OpenApiDoc;
 
 assert.equal(contract.openapi, "3.1.0");
 assert.equal(contract.info.title, "Rusty Crew Model Provider Admin API");
+assert.equal(contract.info.version, MODEL_PROVIDER_ADMIN_CONTRACT_VERSION);
 
 for (const path of Object.values(MODEL_PROVIDER_ADMIN_PATHS)) {
   assert.ok(contract.paths[path], `missing path ${path}`);
@@ -46,6 +50,12 @@ assert.deepEqual(schema("ModelProviderStatus").enum, [
 ]);
 assert.deepEqual(schema("ModelProviderProtocol").enum, [
   ...MODEL_PROVIDER_PROTOCOL_VALUES,
+]);
+assert.deepEqual(schema("ChatCompletionsDialect").enum, [
+  ...CHAT_COMPLETIONS_DIALECT_VALUES,
+]);
+assert.deepEqual(schema("ChatCompletionsReasoningHistory").enum, [
+  ...CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
 ]);
 assert.deepEqual(schema("ModelProviderRefreshMode").enum, [
   ...MODEL_PROVIDER_REFRESH_MODE_VALUES,

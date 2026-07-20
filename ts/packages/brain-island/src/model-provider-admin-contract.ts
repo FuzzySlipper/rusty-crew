@@ -1,4 +1,4 @@
-export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.3.0";
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.4.0";
 
 export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
   "docs/model-provider-admin-api-v0.openapi.json";
@@ -21,6 +21,7 @@ export const CHAT_COMPLETIONS_DIALECT_VALUES = [
   "kimi",
   "glm",
   "qwen",
+  "deepseek",
 ] as const;
 
 export const CHAT_COMPLETIONS_THINKING_MODE_VALUES = [
@@ -33,6 +34,7 @@ export const CHAT_COMPLETIONS_REASONING_HISTORY_VALUES = [
   "provider_default",
   "discard",
   "preserve_all",
+  "tool_calls_only",
 ] as const;
 
 export const MODEL_PROVIDER_REFRESH_MODE_VALUES = [
