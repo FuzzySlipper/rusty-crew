@@ -144,14 +144,15 @@ export function createRoleplayNarratorBrain(
 
       const sceneBrief = receipt.state.sceneBrief?.trim();
       if (sceneBrief && options.persistDiagnostic) {
+        const relevantLore = Array.isArray(receipt.state.relevantLore)
+          ? receipt.state.relevantLore
+          : [];
         await options.persistDiagnostic({
           wakeId: receipt.wakeId,
           sessionId: receipt.sessionId,
           profileId: receipt.state.profileId,
           sceneBrief,
-          relevantLoreRecordIds: receipt.state.relevantLore.map(
-            (source) => source.source_id,
-          ),
+          relevantLoreRecordIds: relevantLore.map((source) => source.source_id),
         });
       }
 

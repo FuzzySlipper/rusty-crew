@@ -50,7 +50,7 @@ pub(crate) use crate::sqlite_memory_support::{
 };
 pub(crate) use crate::sqlite_provider_wire_state::expire_provider_wire_states_in_tx;
 pub(crate) use crate::sqlite_runtime_search::{
-    dedupe_non_empty, insert_runtime_search_row, quote_fts_query, RuntimeSearchInsert,
+    dedupe_non_empty, insert_runtime_search_row, RuntimeSearchInsert,
 };
 pub(crate) use crate::sqlite_schema::*;
 #[cfg(feature = "postgres")]
@@ -130,19 +130,20 @@ pub(crate) use repos::queued_messages::{
 };
 #[cfg(feature = "postgres")]
 pub(crate) use repos::roleplay_lore::{
-    default_lore_layer_config, estimate_lore_tokens, excluded_subject_match,
+    default_lore_layer_config, estimate_lore_tokens, excluded_subject_match, lore_query_overlap,
     lore_recall_config_snapshot, normalized_optional_text, parse_roleplay_lore_canon_status,
     parse_roleplay_lore_layer_purpose, parse_roleplay_lore_layer_write_policy,
     parse_roleplay_lore_record_status, parse_roleplay_lore_visibility,
-    roleplay_lore_canon_status_as_str, roleplay_lore_layer_purpose_as_str,
-    roleplay_lore_layer_write_policy_as_str, roleplay_lore_memory_space_descriptor,
-    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, score_lore_recall_entry,
-    validate_lore_recall_query, validate_lore_recall_trace_query,
-    validate_roleplay_chat_layers_write, validate_roleplay_lore_entry_promotion,
-    validate_roleplay_lore_fact_capture, validate_roleplay_lore_identifier,
-    validate_roleplay_lore_layer_config_write, validate_roleplay_lore_layer_entry_link,
-    validate_roleplay_lore_layer_update, validate_roleplay_lore_layer_write,
-    validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_unique_roleplay_ids,
+    postgres_lore_recall_tsquery, roleplay_lore_canon_status_as_str,
+    roleplay_lore_layer_purpose_as_str, roleplay_lore_layer_write_policy_as_str,
+    roleplay_lore_memory_space_descriptor, roleplay_lore_record_status_as_str,
+    roleplay_lore_visibility_as_str, score_lore_recall_entry, validate_lore_recall_query,
+    validate_lore_recall_trace_query, validate_roleplay_chat_layers_write,
+    validate_roleplay_lore_entry_promotion, validate_roleplay_lore_fact_capture,
+    validate_roleplay_lore_identifier, validate_roleplay_lore_layer_config_write,
+    validate_roleplay_lore_layer_entry_link, validate_roleplay_lore_layer_update,
+    validate_roleplay_lore_layer_write, validate_roleplay_lore_record_id,
+    validate_roleplay_lore_write, validate_unique_roleplay_ids,
 };
 pub(crate) use repos::runtime_counters::{
     increment_counter_for_scopes_in_tx, increment_event_counters_in_tx, load_runtime_counters,

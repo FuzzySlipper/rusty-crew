@@ -2154,7 +2154,9 @@ fn scored_lore_entries_for_recall(
     if query_text.is_empty() || layer_configs.is_empty() {
         return Ok(Vec::new());
     }
-    let fts_query = quote_fts_query(query_text);
+    let Some(fts_query) = sqlite_lore_recall_fts_query(query_text) else {
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
     for (layer, config) in layer_configs {
         let mut stmt = tx
@@ -2236,6 +2238,13 @@ fn scored_lore_entries_for_recall(
             if excluded_subject_match(&entry.record, &query.excluded_subjects) {
                 continue;
             }
+            // The FTS index also contains structured content metadata. Require
+            // at least one title/body match so broad natural-language OR
+            // queries cannot pull records solely through repeated IDs or
+            // world metadata.
+            if lore_query_overlap(&entry.record, query_text) == 0.0 {
+                continue;
+            }
             if entry.score < config.min_relevance_score {
                 continue;
             }
@@ -2288,22 +2297,17 @@ pub(crate) fn excluded_subject_match(record: &RoleplayLoreRecord, subjects: &[St
     subject_match(record, subjects)
 }
 
-fn lore_query_overlap(record: &RoleplayLoreRecord, query_text: &str) -> f32 {
+pub(crate) fn lore_query_overlap(record: &RoleplayLoreRecord, query_text: &str) -> f32 {
     let haystack = format!(
-        "{} {} {}",
+        "{} {}",
         record.title.to_lowercase(),
-        record.body.to_lowercase(),
-        record.content.to_string().to_lowercase()
+        record.body.to_lowercase()
     );
     let mut total = 0_u32;
     let mut matched = 0_u32;
-    for token in query_text
-        .split(|ch: char| !ch.is_alphanumeric())
-        .map(str::trim)
-        .filter(|token| token.len() >= 3)
-    {
+    for token in lore_recall_search_terms(query_text) {
         total += 1;
-        if haystack.contains(&token.to_lowercase()) {
+        if haystack.contains(&token) {
             matched += 1;
         }
     }
@@ -2312,6 +2316,89 @@ fn lore_query_overlap(record: &RoleplayLoreRecord, query_text: &str) -> f32 {
     } else {
         matched as f32 / total as f32
     }
+}
+
+const LORE_RECALL_STOP_WORDS: &[&str] = &[
+    "about",
+    "after",
+    "again",
+    "answer",
+    "answering",
+    "before",
+    "character",
+    "continue",
+    "could",
+    "does",
+    "from",
+    "have",
+    "into",
+    "just",
+    "keep",
+    "keeps",
+    "more",
+    "once",
+    "only",
+    "other",
+    "roleplay",
+    "scene",
+    "should",
+    "that",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "through",
+    "turn",
+    "turns",
+    "voice",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "without",
+    "would",
+    "write",
+    "your",
+];
+
+pub(crate) fn lore_recall_search_terms(query_text: &str) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    query_text
+        .split(|ch: char| !ch.is_alphanumeric())
+        .map(str::trim)
+        .filter(|token| token.len() >= 4)
+        .map(str::to_lowercase)
+        .filter(|token| !LORE_RECALL_STOP_WORDS.contains(&token.as_str()))
+        .filter(|token| seen.insert(token.clone()))
+        .take(24)
+        .collect()
+}
+
+pub(crate) fn sqlite_lore_recall_fts_query(query_text: &str) -> Option<String> {
+    let terms = lore_recall_search_terms(query_text);
+    (!terms.is_empty()).then(|| {
+        terms
+            .iter()
+            .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    })
+}
+
+#[cfg(feature = "postgres")]
+pub(crate) fn postgres_lore_recall_tsquery(query_text: &str) -> Option<String> {
+    let terms = lore_recall_search_terms(query_text);
+    (!terms.is_empty()).then(|| {
+        terms
+            .iter()
+            .map(|term| format!("{term}:*"))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    })
 }
 
 pub(crate) fn estimate_lore_tokens(record: &RoleplayLoreRecord) -> u32 {
@@ -3070,6 +3157,86 @@ mod tests {
             .unwrap();
         assert_eq!(provenance.len(), 1);
         assert_eq!(provenance[0].note.as_deref(), Some("observed in chat"));
+
+        drop(store);
+        let _ = fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn roleplay_lore_recall_matches_natural_language_roleplay_prompts() {
+        let db_path = std::env::temp_dir().join(format!(
+            "rusty-crew-roleplay-lore-repo-{}-{}-{}.sqlite3",
+            std::process::id(),
+            "natural-language-recall",
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = fs::remove_file(&db_path);
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store
+            .create_lore_layer(&RoleplayLoreLayerWrite {
+                layer_id: "layer-philos".to_string(),
+                profile_id: "profile-roleplay".to_string(),
+                name: "The World of Philos".to_string(),
+                description: Some("Imported setting lore".to_string()),
+                purpose: RoleplayLoreLayerPurpose::World,
+                write_policy: RoleplayLoreLayerWritePolicy::AutoCapture,
+                now: "2026-07-20T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .set_chat_layers(&RoleplayChatLayersWrite {
+                chat_id: "chat-imported".to_string(),
+                layers: vec![RoleplayChatLayerLink {
+                    layer_id: "layer-philos".to_string(),
+                    priority: 0,
+                    enabled: true,
+                }],
+                now: "2026-07-20T00:01:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .capture_lore_fact(&RoleplayLoreFactCapture {
+                layer_id: "layer-philos".to_string(),
+                write: lore_write(
+                    "lore-dream-planet",
+                    "The Dream Planet",
+                    "Uluru is a young planet covered in flowers and free of Wanderers. Xavier promised to take his knight there if she gave up the dream.",
+                    MemoryProposalSource::Import,
+                ),
+                is_constant: false,
+                priority: 0,
+                capture_reason: Some("imported from SillyTavern lorebook".to_string()),
+            })
+            .unwrap();
+
+        let prompt = "The copied library key turns in the lock. If we could leave the court after the tournament, where did you once promise to take me, and why? Continue the scene in Xavier's voice without answering out of character.";
+        let recall = store
+            .recall_lore(&LoreRecallQuery {
+                chat_id: "chat-imported".to_string(),
+                session_id: Some(SessionId::new("session-imported")),
+                trace_id: Some("trace-natural-language".to_string()),
+                query_text: Some(prompt.to_string()),
+                active_subjects: vec![],
+                excluded_subjects: vec![],
+                token_budget: Some(512),
+                record_trace: true,
+                now: "2026-07-20T00:02:00Z".to_string(),
+            })
+            .unwrap();
+
+        assert!(
+            recall
+                .entries
+                .iter()
+                .any(|entry| entry.record.record_id == "lore-dream-planet"),
+            "natural roleplay prose should retrieve the matching imported lore entry"
+        );
+        let trace = recall.trace.expect("recorded recall trace");
+        assert!(trace.entries_considered > 0);
+        assert!(trace.entries_returned > 0);
+        let sqlite_query = sqlite_lore_recall_fts_query(prompt).expect("searchable terms");
+        assert!(sqlite_query.contains("\"promise\"*"));
+        assert!(sqlite_query.contains(" OR "));
 
         drop(store);
         let _ = fs::remove_file(&db_path);

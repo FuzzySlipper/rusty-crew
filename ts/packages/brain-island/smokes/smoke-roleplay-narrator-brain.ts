@@ -197,6 +197,39 @@ async function runSmoke(): Promise<void> {
     "the final text must precede Rust's terminal idle activity",
   );
 
+  const omittedLoreDiagnostics: Array<{ relevantLoreRecordIds: string[] }> = [];
+  const omittedLoreFsm = {
+    startTurn: (input: Parameters<typeof narratorFsm.startTurn>[0]) =>
+      narratorFsm.startTurn(input),
+    advanceTurn: async (
+      input: Parameters<typeof narratorFsm.advanceTurn>[0],
+    ) => {
+      const receipt = await narratorFsm.advanceTurn(input);
+      if (receipt.terminal) {
+        delete (receipt.state as unknown as Record<string, unknown>)[
+          "relevantLore"
+        ];
+      }
+      return receipt;
+    },
+  };
+  const omittedLoreFactory = new RecordingPhaseBrainFactory([
+    '{"sceneBrief":{"location":"Empty Archive"}}',
+    "The empty archive held its breath.",
+  ]);
+  const omittedLoreResult = await createRoleplayNarratorBrain({
+    narratorFsm: omittedLoreFsm,
+    createPhaseBrain: (options) => omittedLoreFactory.create(options),
+    resolveTools: () => ALL_TOOLS,
+    persistDiagnostic: async (diagnostic) => {
+      omittedLoreDiagnostics.push({
+        relevantLoreRecordIds: diagnostic.relevantLoreRecordIds,
+      });
+    },
+  }).wake(wakeInput("roleplay-narrator-omitted-lore-wake"));
+  assert.equal(omittedLoreResult.actions.length, 0);
+  assert.deepEqual(omittedLoreDiagnostics, [{ relevantLoreRecordIds: [] }]);
+
   console.log(
     JSON.stringify(
       {

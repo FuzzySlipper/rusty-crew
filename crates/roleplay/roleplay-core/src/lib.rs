@@ -604,7 +604,10 @@ pub struct RoleplayNarratorTurnState {
     pub review_cycle: u32,
     #[serde(default)]
     pub prelude_observations: Vec<RoleplayNarratorToolObservation>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // Keep the empty array on the bridge wire. An empty recall is a valid
+    // narrator outcome, and consumers must not have to distinguish it from a
+    // missing state field.
+    #[serde(default)]
     pub relevant_lore: Vec<RoleplayPromptStackSourceText>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_brief: Option<String>,
@@ -4915,6 +4918,12 @@ mod tests {
         assert_eq!(
             start.activity.as_ref().map(|activity| &activity.phase),
             Some(&RoleplayNarratorActivityPhase::Exploring)
+        );
+        let wire = serde_json::to_value(&start).expect("serialize receipt to value");
+        assert_eq!(
+            wire.pointer("/state/relevantLore"),
+            Some(&serde_json::json!([])),
+            "empty lore recall state must remain explicit on the bridge wire"
         );
         let serialized = serde_json::to_string(&start).expect("serialize receipt");
         let restored: RoleplayNarratorTurnReceipt =

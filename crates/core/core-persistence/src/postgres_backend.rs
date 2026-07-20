@@ -32,13 +32,13 @@ use crate::repos::runtime_counters::{
 };
 use crate::{
     default_lore_layer_config, estimate_lore_tokens, excluded_subject_match, from_json_text,
-    lore_recall_config_snapshot, memory_proposal_source_as_str, normalized_optional_text,
-    profile_memory_target_parts, roleplay_lore_canon_status_as_str,
-    roleplay_lore_layer_purpose_as_str, roleplay_lore_layer_write_policy_as_str,
-    roleplay_lore_memory_space_descriptor, roleplay_lore_record_status_as_str,
-    roleplay_lore_visibility_as_str, score_lore_recall_entry, to_json_text,
-    validate_lore_recall_query, validate_lore_recall_trace_query, validate_profile_memory_key,
-    validate_profile_memory_write, validate_provider_wire_state_key,
+    lore_query_overlap, lore_recall_config_snapshot, memory_proposal_source_as_str,
+    normalized_optional_text, postgres_lore_recall_tsquery, profile_memory_target_parts,
+    roleplay_lore_canon_status_as_str, roleplay_lore_layer_purpose_as_str,
+    roleplay_lore_layer_write_policy_as_str, roleplay_lore_memory_space_descriptor,
+    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, score_lore_recall_entry,
+    to_json_text, validate_lore_recall_query, validate_lore_recall_trace_query,
+    validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
     validate_roleplay_chat_layers_write, validate_roleplay_lore_entry_promotion,
     validate_roleplay_lore_fact_capture, validate_roleplay_lore_identifier,
     validate_roleplay_lore_layer_config_write, validate_roleplay_lore_layer_entry_link,
@@ -8613,23 +8613,26 @@ fn scored_lore_entries_for_recall<C: GenericClient>(
     if query_text.is_empty() || layer_configs.is_empty() {
         return Ok(Vec::new());
     }
+    let Some(tsquery) = postgres_lore_recall_tsquery(query_text) else {
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
     for (layer, config) in layer_configs {
         let rows = conn
             .query(
                 &format!(
                     "SELECT {},
-                            (1.0 - LEAST(ts_rank(r.search_vector, plainto_tsquery('simple', $1)), 1.0)) AS fts_rank
+                            (1.0 - LEAST(ts_rank(r.search_vector, to_tsquery('simple', $1)), 1.0)) AS fts_rank
                      FROM {schema}.module_roleplay_lore_layer_entries e
                      JOIN {schema}.module_roleplay_lore_records r ON r.record_id = e.record_id
-                     WHERE r.search_vector @@ plainto_tsquery('simple', $1)
+                     WHERE r.search_vector @@ to_tsquery('simple', $1)
                        AND e.layer_id = $2
                        AND r.status = 'active'
                      ORDER BY fts_rank ASC, e.priority ASC, r.updated_at DESC
                      LIMIT 100",
                     lore_layer_entry_join_select()
                 ),
-                &[&query_text, &layer.layer_id],
+                &[&tsquery, &layer.layer_id],
             )
             .map_err(|error| postgres_error("query PostgreSQL roleplay lore scored recall", error))?;
         for row in rows {
@@ -8637,6 +8640,9 @@ fn scored_lore_entries_for_recall<C: GenericClient>(
             if seen_records.contains(&join.record.record_id)
                 || excluded_subject_match(&join.record, &query.excluded_subjects)
             {
+                continue;
+            }
+            if lore_query_overlap(&join.record, query_text) == 0.0 {
                 continue;
             }
             let fts_rank = row.get::<_, f64>(29) as f32;
