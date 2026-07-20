@@ -342,6 +342,7 @@ try {
           ],
         },
         bridge: noMutationBridge,
+        onBrainWakeResult: () => undefined,
       }),
     /binding target session cron-session has agent\/profile/,
   );

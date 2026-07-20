@@ -801,7 +801,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
-  onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
+  onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
     runtimeGraphSourceFromEffective(input.runtimeConfig),
@@ -1085,7 +1085,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
-  onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
+  onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
     runtimeGraphSourceFromEffective(input.runtimeConfig),

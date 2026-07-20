@@ -3180,6 +3180,8 @@ async function applyServiceRuntimeConfigFromDisk(
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
+    onBrainWakeResult: (observation) =>
+      recordResponsesWakeMetrics(state, observation),
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;

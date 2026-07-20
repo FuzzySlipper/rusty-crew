@@ -53,6 +53,9 @@ completed and failed turns can be distinguished from active queue pressure.
 Chat Completions terminal transport metrics also expose `providerEventCounts`,
 including per-field keys such as `reasoning_delta:reasoning_content`. These raw
 counts explain mapper expansion without retaining an unbounded raw-event log.
+Runtime configuration application requires a wake-result observer, so profiles
+created or reloaded through the admin API publish the same bounded diagnostics
+as profiles registered during service startup.
 
 ## Regression Coverage
 
@@ -122,3 +125,56 @@ the original two tool calls and terminated under the independent repeated-call
 safety policy. This is a distinct model-behavior failure, not retention or
 output-length exhaustion. Both this run and the original reproduction used
 only `rusty-crew-debug.service` on port 9348 and its SQLite database.
+
+### Exact Live StepFun Metrics
+
+The bounded metrics certificate was repeated after wiring runtime-created
+profiles into the same wake-observation sink as startup profiles:
+
+- GoblinBench run: `run-20260719-231522-26b565f2`
+- scenario: `coding.asha-authority-door`
+- provider alias: `stepfun`, configured with `maxOutputTokens=64000`
+- service: `rusty-crew-debug.service` on port 9348 with SQLite
+- runtime duration: 293,204 ms
+- provider requests / tool rounds: 7 / 6
+- terminal result: `chat_completions_output_limit_exceeded` after 15 completed
+  tool calls; the provider returned `finish_reason=length`
+- canonical GoblinBench result: failed with score 0.185 (3 of 9 gates); no
+  fixture files changed
+
+The terminal `/v1/admin/diagnostics/provider-state` snapshot reported:
+
+| Retention metric | Exact value |
+| --- | ---: |
+| raw stream items | 32,685 |
+| raw delta items | 32,652 |
+| retained stream items | 40 |
+| coalesced delta items | 32,645 |
+| dropped stream items | 0 |
+| retained delta bytes | 519,482 |
+| queued delta bytes after terminal drain | 0 |
+| max stream items | 4,096 |
+| max stream delta bytes | 8,388,608 |
+
+The raw-to-retained stream multiplier was exactly `32685 / 40 = 817.125`.
+All 32,652 raw deltas were reasoning. StepFun alternated the two provider field
+aliases evenly:
+
+| Provider event count | Exact value |
+| --- | ---: |
+| `reasoning_delta` | 32,652 |
+| `reasoning_delta:reasoning` | 16,326 |
+| `reasoning_delta:reasoning_content` | 16,326 |
+| `finished` | 7 |
+| `tool_call_delta` | 15 |
+| `tool_call_finished` | 15 |
+| `usage` | 16,358 |
+
+Canonical alias mapping retained seven reasoning spans, one per provider
+request, so the delta-only multiplier was `32652 / 7`, approximately
+4,664.57 raw deltas per retained reasoning item. The other 33 retained records
+were meaningful ordering boundaries: one `started` event, 15 tool starts, 15
+tool finishes, one provider-status event, and one terminal `wake_failed` item.
+The final stream shape was 39 event items plus the terminal failure. No tool,
+status, or terminal boundary was coalesced or dropped, and no raw reasoning
+text was persisted in this certificate.

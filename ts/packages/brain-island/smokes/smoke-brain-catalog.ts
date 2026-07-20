@@ -84,6 +84,7 @@ try {
       serviceConfig,
       runtimeConfig,
       bridge: native,
+      onBrainWakeResult: () => undefined,
     });
 
     assert.equal(
