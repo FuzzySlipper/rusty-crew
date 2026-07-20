@@ -133,7 +133,8 @@ pub struct ResponsesRequest {
     pub previous_response_id: Option<String>,
     pub input: Vec<ResponsesInputItem>,
     pub tools: Vec<ResponsesToolDescriptor>,
-    pub tool_choice: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<Value>,
     pub parallel_tool_calls: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<Value>,
@@ -307,19 +308,25 @@ impl ResponsesRequestBuilder {
                 content: format!("wake {} has no Rust-owned history yet", wake.wake_id),
             });
         }
+        let tools = self
+            .tools
+            .iter()
+            .map(adapt_neutral_tool)
+            .collect::<Vec<_>>();
+        let tool_choice = (!tools.is_empty()).then(|| match &self.config.tool_choice {
+            ResponsesToolChoice::Auto => json!("auto"),
+            ResponsesToolChoice::None => json!("none"),
+            ResponsesToolChoice::Function { name } => {
+                json!({"type": "function", "name": name})
+            }
+        });
         ResponsesRequest {
             model: self.config.model.clone(),
             instructions: self.config.instructions.clone(),
             previous_response_id: None,
             input,
-            tools: self.tools.iter().map(adapt_neutral_tool).collect(),
-            tool_choice: match &self.config.tool_choice {
-                ResponsesToolChoice::Auto => json!("auto"),
-                ResponsesToolChoice::None => json!("none"),
-                ResponsesToolChoice::Function { name } => {
-                    json!({"type": "function", "name": name})
-                }
-            },
+            tools,
+            tool_choice,
             parallel_tool_calls: self.config.parallel_tool_calls,
             reasoning: self
                 .config
@@ -2375,7 +2382,7 @@ mod tests {
             previous_response_id: None,
             input: Vec::new(),
             tools: Vec::new(),
-            tool_choice: json!("auto"),
+            tool_choice: None,
             parallel_tool_calls: true,
             reasoning: None,
             store: false,
@@ -2477,11 +2484,47 @@ mod tests {
 
         assert_eq!(request.model, "gpt-5");
         assert_eq!(request.tools[0].name, "lookup");
+        assert_eq!(request.tool_choice, Some(json!("auto")));
+        assert_eq!(
+            serde_json::to_value(&request).unwrap()["tool_choice"],
+            json!("auto")
+        );
         assert_eq!(request.input.len(), 2);
         assert_eq!(request.reasoning.as_ref().unwrap()["effort"], "medium");
         assert_eq!(request.max_output_tokens, Some(2048));
         assert_eq!(request.text.as_ref().unwrap()["verbosity"], "low");
         assert!(request.stream);
+    }
+
+    #[test]
+    fn zero_tool_basic_chat_request_omits_tool_choice() {
+        for configured_choice in [
+            ResponsesToolChoice::Auto,
+            ResponsesToolChoice::None,
+            ResponsesToolChoice::Function {
+                name: "unavailable_tool".to_string(),
+            },
+        ] {
+            let mut config = ResponsesBrainConfig::replay("grok-4.5");
+            config.tool_choice = configured_choice;
+            let request = ResponsesRequestBuilder::new(config).build(
+                &wake_request(None, None),
+                None,
+                ResponsesReplayProjection {
+                    input_items: vec![ResponsesInputItem::UserMessage {
+                        content: "continue the scene".to_string(),
+                    }],
+                    replay_hints: Vec::new(),
+                },
+                Vec::new(),
+            );
+
+            assert!(request.tools.is_empty());
+            assert_eq!(request.tool_choice, None);
+            let payload = serde_json::to_value(request).expect("basic_chat request json");
+            assert_eq!(payload["tools"], json!([]));
+            assert!(payload.get("tool_choice").is_none());
+        }
     }
 
     #[test]
@@ -3347,7 +3390,7 @@ mod tests {
                 is_error: false,
             }],
             tools: Vec::new(),
-            tool_choice: json!("auto"),
+            tool_choice: None,
             parallel_tool_calls: true,
             reasoning: None,
             store: false,

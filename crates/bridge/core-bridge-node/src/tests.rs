@@ -115,6 +115,8 @@ fn openai_responses_bridge_uses_oauth_bearer_and_headers_without_secret_update()
     assert!(captured.contains("authorization: bearer "));
     assert!(captured.contains("chatgpt-account-id: account-1"));
     assert!(captured.contains("x-openai-fedramp: true"));
+    assert!(captured.contains("\"tools\":[]"));
+    assert!(!captured.contains("\"tool_choice\""));
     assert!(!captured.contains("refresh-secret"));
 }
 
