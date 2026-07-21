@@ -722,6 +722,52 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn put_agent_route(&self, write: &AgentRouteWrite) -> CoreResult<AgentRouteRecord> {
+        match self {
+            Self::Sqlite(store) => store.put_agent_route(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.put_agent_route(write),
+        }
+    }
+
+    pub fn get_agent_route(
+        &self,
+        route_key: &AgentRouteKey,
+    ) -> CoreResult<Option<AgentRouteRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_agent_route(route_key),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_agent_route(route_key),
+        }
+    }
+
+    pub fn list_agent_routes(&self) -> CoreResult<Vec<AgentRouteRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_agent_routes(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_agent_routes(),
+        }
+    }
+
+    pub fn get_latest_agent_route_delivery(
+        &self,
+        route_key: &AgentRouteKey,
+    ) -> CoreResult<Option<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.get_latest_agent_route_delivery(route_key),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_latest_agent_route_delivery(route_key),
+        }
+    }
+
+    pub fn delete_agent_route(&self, delete: &AgentRouteDelete) -> CoreResult<AgentRouteRecord> {
+        match self {
+            Self::Sqlite(store) => store.delete_agent_route(delete),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.delete_agent_route(delete),
+        }
+    }
+
     pub fn update_agent_correlated_round(
         &self,
         next: &AgentCorrelatedRound,

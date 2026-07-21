@@ -4,6 +4,11 @@ import type { NativeBridgeModule } from "./public-api.js";
 type AgentCoordinationMethodName =
   | "routeAgentMessage"
   | "listAgentDirectory"
+  | "listAgentRouteResolutions"
+  | "getAgentRouteResolution"
+  | "resolveAgentAddress"
+  | "putAgentRoute"
+  | "deleteAgentRoute"
   | "deliverAgentMessage"
   | "replyAgentMessage"
   | "listAgentMessageInbox"
@@ -22,6 +27,30 @@ export function createNativeBridgeAgentCoordinationMethods(
       JSON.parse(binding.listAgentDirectoryJson()) as Awaited<
         ReturnType<NativeBridgeModule["listAgentDirectory"]>
       >,
+    listAgentRouteResolutions: async () =>
+      JSON.parse(binding.listAgentRouteResolutionsJson()) as Awaited<
+        ReturnType<NativeBridgeModule["listAgentRouteResolutions"]>
+      >,
+    getAgentRouteResolution: async (routeKey) => {
+      const value = binding.getAgentRouteResolutionJson(routeKey);
+      return value === null || value === undefined
+        ? undefined
+        : (JSON.parse(value) as Awaited<
+            ReturnType<NativeBridgeModule["getAgentRouteResolution"]>
+          >);
+    },
+    resolveAgentAddress: async (address) =>
+      JSON.parse(binding.resolveAgentAddressJson(address)) as Awaited<
+        ReturnType<NativeBridgeModule["resolveAgentAddress"]>
+      >,
+    putAgentRoute: async (write) =>
+      JSON.parse(binding.putAgentRouteJson(JSON.stringify(write))) as Awaited<
+        ReturnType<NativeBridgeModule["putAgentRoute"]>
+      >,
+    deleteAgentRoute: async (deleteRequest) =>
+      JSON.parse(
+        binding.deleteAgentRouteJson(JSON.stringify(deleteRequest)),
+      ) as Awaited<ReturnType<NativeBridgeModule["deleteAgentRoute"]>>,
     deliverAgentMessage: async (command) =>
       JSON.parse(
         binding.deliverAgentMessageJson(JSON.stringify(command)),

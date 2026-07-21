@@ -495,6 +495,83 @@
         "public": true
       },
       {
+        "id": "coordination.production.routes.list",
+        "method": "GET",
+        "path_template": "/v1/coordination/routes",
+        "description": "List production switchboard routes and current exact-target resolution status.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.routes.create",
+        "method": "POST",
+        "path_template": "/v1/coordination/routes",
+        "description": "Create a revisioned production switchboard route.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.routes.read",
+        "method": "GET",
+        "path_template": "/v1/coordination/routes/{route_key}",
+        "description": "Read one production switchboard route and current resolution status.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.routes.update",
+        "method": "PATCH",
+        "path_template": "/v1/coordination/routes/{route_key}",
+        "description": "Replace one production switchboard route with optimistic revision control.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.routes.delete",
+        "method": "DELETE",
+        "path_template": "/v1/coordination/routes/{route_key}",
+        "description": "Delete one production switchboard route with optimistic revision control.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "delegation"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.routes.resolve",
+        "method": "POST",
+        "path_template": "/v1/coordination/routes/resolve",
+        "description": "Resolve an exact production address without delivering a message.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.production.routes.test",
+        "method": "POST",
+        "path_template": "/v1/coordination/routes/{route_key}/test",
+        "description": "Send a bounded test delivery through one production switchboard route.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "coordination.production.messages.create",
         "method": "POST",
         "path_template": "/v1/coordination/messages",
@@ -558,6 +635,83 @@
         "mutation": "read",
         "stability": "stable",
         "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.list",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/routes",
+        "description": "List debug switchboard routes and current exact-target resolution status.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.create",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/routes",
+        "description": "Create a revisioned debug switchboard route.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.read",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/routes/{route_key}",
+        "description": "Read one debug switchboard route and current resolution status.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.update",
+        "method": "PATCH",
+        "path_template": "/v1/debug/coordination/routes/{route_key}",
+        "description": "Replace one debug switchboard route with optimistic revision control.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.delete",
+        "method": "DELETE",
+        "path_template": "/v1/debug/coordination/routes/{route_key}",
+        "description": "Delete one debug switchboard route with optimistic revision control.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.resolve",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/routes/resolve",
+        "description": "Resolve an exact debug address without delivering a message.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "coordination.debug.routes.test",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/routes/{route_key}/test",
+        "description": "Send a bounded test delivery through one debug switchboard route.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "session", "diagnostics"],
         "public": true
       },
       {
@@ -2589,6 +2743,55 @@
         "auth_phase": "after_auth"
       },
       {
+        "capability_id": "coordination.production.routes.list",
+        "method": "GET",
+        "path_template": "/v1/coordination/routes",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.routes.create",
+        "method": "POST",
+        "path_template": "/v1/coordination/routes",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.routes.read",
+        "method": "GET",
+        "path_template": "/v1/coordination/routes/{route_key}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.routes.update",
+        "method": "PATCH",
+        "path_template": "/v1/coordination/routes/{route_key}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.routes.delete",
+        "method": "DELETE",
+        "path_template": "/v1/coordination/routes/{route_key}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.routes.resolve",
+        "method": "POST",
+        "path_template": "/v1/coordination/routes/resolve",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.production.routes.test",
+        "method": "POST",
+        "path_template": "/v1/coordination/routes/{route_key}/test",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
         "capability_id": "coordination.production.messages.create",
         "method": "POST",
         "path_template": "/v1/coordination/messages",
@@ -2627,6 +2830,55 @@
         "capability_id": "coordination.debug.agents.list",
         "method": "GET",
         "path_template": "/v1/debug/coordination/agents",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.list",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/routes",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.create",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/routes",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.read",
+        "method": "GET",
+        "path_template": "/v1/debug/coordination/routes/{route_key}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.update",
+        "method": "PATCH",
+        "path_template": "/v1/debug/coordination/routes/{route_key}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.delete",
+        "method": "DELETE",
+        "path_template": "/v1/debug/coordination/routes/{route_key}",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.resolve",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/routes/resolve",
+        "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "coordination.debug.routes.test",
+        "method": "POST",
+        "path_template": "/v1/debug/coordination/routes/{route_key}/test",
         "route_id": "coordination_operator",
         "auth_phase": "after_auth"
       },

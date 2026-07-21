@@ -94,7 +94,7 @@ test("coordination operator routes are deployment-bound and start system rounds"
         return {
           round: {
             roundId: command.roundId,
-            recipientAgentId: command.toAgentId,
+            recipientAgentId: command.toAddress,
             status: "pending",
             terminalReasonCode: null,
           },
@@ -107,7 +107,7 @@ test("coordination operator routes are deployment-bound and start system rounds"
     now: () => "2026-07-12T00:00:00.000Z",
     requestId: () => "req-coordination-operator",
     readJsonBody: async () => ({
-      toAgentId: "agent-a",
+      toAddress: "agent-a",
       body: "reply through the correlated round",
       roundId: "round-a",
       idempotencyKey: "round-key-a",
@@ -173,6 +173,156 @@ test("coordination operator routes are deployment-bound and start system rounds"
   assert.deepEqual(
     okData<{ items: unknown[] }>(inbox as AdminRouteResult).items,
     [{ status: "queued", query: { toAgentId: "agent-a", limit: 25 } }],
+  );
+});
+
+test("coordination switchboard CRUD resolves and tests exact role-bound addresses", async () => {
+  let requestBody: Record<string, unknown> = {};
+  let savedRoute: Record<string, unknown> | undefined;
+  let capturedDelivery: Record<string, unknown> | undefined;
+  const resolution = () => ({
+    address: "@reviewer",
+    route: savedRoute,
+    routable: true,
+    resolvedTarget: {
+      agentId: "review-agent",
+      sessionId: "review-session",
+      profileId: "review-profile",
+      displayLabel: "Reviewer",
+      runtimeKind: "direct_brain",
+    },
+  });
+  const context = {
+    deploymentRole: "debug",
+    bridge: {
+      async listAgentRouteResolutions() {
+        return savedRoute === undefined ? [] : [resolution()];
+      },
+      async putAgentRoute(write: Record<string, unknown>) {
+        savedRoute = {
+          ...write,
+          revision: write.expectedRevision === undefined ? 1 : 2,
+          createdAt: "2026-07-20T00:00:00.000Z",
+        };
+        return savedRoute;
+      },
+      async getAgentRouteResolution() {
+        return savedRoute === undefined ? undefined : resolution();
+      },
+      async resolveAgentAddress() {
+        return resolution();
+      },
+      async deleteAgentRoute() {
+        const deleted = savedRoute;
+        savedRoute = undefined;
+        return deleted;
+      },
+      async deliverAgentMessage(command: Record<string, unknown>) {
+        capturedDelivery = command;
+        return {
+          request: {
+            deliveryId: command.deliveryId,
+            requestedAddress: command.toAddress,
+            toAgentId: "review-agent",
+          },
+          status: "accepted",
+          revision: 2,
+        };
+      },
+    },
+    now: () => "2026-07-20T00:00:00.000Z",
+    requestId: () => "req-switchboard",
+    readJsonBody: async () => requestBody,
+    settleDelivery: async (receipt: unknown) => receipt,
+  } as unknown as CoordinationOperatorRouteContext;
+
+  requestBody = {
+    routeKey: "reviewer",
+    label: "Reviewer",
+    enabled: true,
+    target: {
+      type: "direct_brain",
+      agentId: "review-agent",
+      sessionId: "review-session",
+    },
+    requiredRuntimeKind: "direct_brain",
+  };
+  const created = await handleCoordinationOperatorRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/routes"),
+    context,
+  );
+  assert.equal(
+    okData<{ route: { revision: number } }>(created as AdminRouteResult).route
+      .revision,
+    1,
+  );
+
+  const listed = await handleCoordinationOperatorRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/routes"),
+    context,
+  );
+  assert.equal(
+    okData<{ routes: unknown[] }>(listed as AdminRouteResult).routes.length,
+    1,
+  );
+
+  requestBody = { address: "@reviewer" };
+  const resolved = await handleCoordinationOperatorRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/routes/resolve"),
+    context,
+  );
+  assert.equal(
+    okData<{ resolution: { address: string } }>(resolved as AdminRouteResult)
+      .resolution.address,
+    "@reviewer",
+  );
+
+  requestBody = { body: "live route proof", ttlMs: 5_000 };
+  const tested = await handleCoordinationOperatorRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/routes/reviewer/test"),
+    context,
+  );
+  assert.equal(
+    okData<{ status: string }>(tested as AdminRouteResult).status,
+    "accepted",
+  );
+  assert.equal(capturedDelivery?.toAddress, "@reviewer");
+
+  requestBody = {
+    label: "Reviewer queue",
+    enabled: true,
+    expectedRevision: 1,
+    target: {
+      type: "direct_brain",
+      agentId: "review-agent",
+      sessionId: "review-session",
+    },
+  };
+  const updated = await handleCoordinationOperatorRequest(
+    { method: "PATCH" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/routes/reviewer"),
+    context,
+  );
+  assert.equal(
+    okData<{ route: { revision: number } }>(updated as AdminRouteResult).route
+      .revision,
+    2,
+  );
+  const deleted = await handleCoordinationOperatorRequest(
+    { method: "DELETE" } as IncomingMessage,
+    new URL(
+      "http://local/v1/debug/coordination/routes/reviewer?expectedRevision=2",
+    ),
+    context,
+  );
+  assert.equal(
+    okData<{ route: { routeKey: string } }>(deleted as AdminRouteResult).route
+      .routeKey,
+    "reviewer",
   );
 });
 

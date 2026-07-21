@@ -370,6 +370,51 @@ errors = "core_protocol::CoreError"
 summary = "List same-service Crew agent recipients with Rust-owned runtime and routability projection."
 
 [[operation]]
+name = "list_agent_route_resolutions"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "vec<core_protocol::AgentRouteResolution>"
+errors = "core_protocol::CoreError"
+summary = "List DB-backed switchboard routes with Rust-resolved target health."
+
+[[operation]]
+name = "get_agent_route_resolution"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentRouteKey"
+output = "option<core_protocol::AgentRouteResolution>"
+errors = "core_protocol::CoreError"
+summary = "Read one switchboard route and its current exact-target health."
+
+[[operation]]
+name = "resolve_agent_address"
+surface = "stable"
+direction = "ts_to_rust"
+input = "string"
+output = "core_protocol::AgentRouteResolution"
+errors = "core_protocol::CoreError"
+summary = "Dry-run a raw agent ID or explicit @route address without fallback inference."
+
+[[operation]]
+name = "put_agent_route"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentRouteWrite"
+output = "core_protocol::AgentRouteRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or revision-check update one durable switchboard route."
+
+[[operation]]
+name = "delete_agent_route"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentRouteDelete"
+output = "core_protocol::AgentRouteRecord"
+errors = "core_protocol::CoreError"
+summary = "Revision-check delete one durable switchboard route."
+
+[[operation]]
 name = "deliver_agent_message"
 surface = "stable"
 direction = "ts_to_rust"

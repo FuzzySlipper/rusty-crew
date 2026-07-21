@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type {
   AgentId,
+  AgentRouteKey,
   BrainAction,
   ProfileId,
   SessionHandle,
@@ -57,6 +58,35 @@ const runtime: CoordinationToolRuntime = {
       },
     ];
   },
+  async listRoutes() {
+    return [
+      {
+        address: "@reviewer",
+        routable: true,
+        route: {
+          routeKey: "reviewer" as AgentRouteKey,
+          label: "Reviewer",
+          enabled: true,
+          target: {
+            type: "direct_brain",
+            agentId: "coordination-target" as AgentId,
+            sessionId: "coordination-target-session" as SessionId,
+          },
+          requiredRuntimeKind: "direct_brain",
+          revision: 3,
+          createdAt: "2026-07-20T00:00:00Z",
+          updatedAt: "2026-07-20T00:00:00Z",
+        },
+        resolvedTarget: {
+          agentId: "coordination-target" as AgentId,
+          sessionId: "coordination-target-session" as SessionId,
+          profileId: "coordination-target-profile" as ProfileId,
+          displayLabel: "Coordination target",
+          runtimeKind: "direct_brain",
+        },
+      },
+    ];
+  },
   async routeMessage(input) {
     calls.push({ kind: "route", input });
     return {
@@ -65,7 +95,7 @@ const runtime: CoordinationToolRuntime = {
       wake: {
         status: "completed",
         wakeId: "wake-target",
-        summary: `woke ${input.toAgentId}`,
+        summary: `woke ${input.toAddress}`,
       },
     };
   },
@@ -88,10 +118,10 @@ const runtime: CoordinationToolRuntime = {
       wake: {
         status: "completed",
         wakeId: "wake-round-target",
-        summary: `round woke ${input.toAgentId}`,
+        summary: `round woke ${input.toAddress}`,
       },
       reply: {
-        from: input.toAgentId,
+        from: input.toAddress,
         to: input.fromAgentId,
         body: `reply:${input.body}`,
         correlationId: input.correlationId,
@@ -107,11 +137,14 @@ assert.equal(
   directoryResult?.details.agents?.[0]?.agentId,
   "coordination-target",
 );
+assert.equal(directoryResult?.details.routes?.[0]?.address, "@reviewer");
+assert.match(directoryResult?.content[0]?.text ?? "", /Switchboard routes/);
+assert.match(directoryResult?.content[0]?.text ?? "", /Raw agent directory/);
 
 const sendTool = sendAgentMessageTool({ runtime });
 const sendResult = await sendTool.executeWithContext?.(
   {
-    toAgentId: "coordination-target",
+    toAddress: "coordination-target",
     body: "please wake",
     correlationId: "coordination-proof",
   },
@@ -133,7 +166,7 @@ assert.deepEqual(
       fromSessionId: "coordination-session",
       wakeId: "coordination-wake",
       toolCallId: "send-call",
-      toAgentId: "coordination-target",
+      toAddress: "coordination-target",
       body: "please wake",
       correlationId: "coordination-proof",
       requireWake: true,
@@ -176,7 +209,7 @@ assert.deepEqual(
 const roundTool = agentRoundTool({ runtime });
 const roundResult = await roundTool.executeWithContext?.(
   {
-    toAgentId: "coordination-target",
+    toAddress: "coordination-target",
     body: "one round please",
     correlationId: "round-proof",
     timeoutMs: 250,
@@ -196,7 +229,7 @@ const collector = new MemoryActionCollector();
 const fallbackTool = sendAgentMessageTool({ actions: collector });
 const fallback = await fallbackTool.executeWithContext?.(
   {
-    toAgentId: "fallback-target",
+    toAddress: "fallback-target",
     body: "post-turn route",
     correlationId: "fallback-proof",
   },
@@ -244,7 +277,7 @@ const piSendTool = toChatCompletionsTool(
   { wake },
 );
 const piSend = await piSendTool.execute("chat-send-call", {
-  toAgentId: "chat-adapted-target",
+  toAddress: "chat-adapted-target",
   body: "adapter keeps context",
   correlationId: "chat-adapter-proof",
 });

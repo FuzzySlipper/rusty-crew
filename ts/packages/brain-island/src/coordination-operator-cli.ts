@@ -38,14 +38,26 @@ export async function runCoordinationOperatorCli(
     return;
   }
 
+  if (command === "routes" && rest.length === 0) {
+    const listed = await requestJson(
+      target,
+      io.fetch,
+      "GET",
+      `${prefix}/routes`,
+    );
+    assertDeploymentRole(listed, deploymentRole);
+    io.write(JSON.stringify(listed, null, 2));
+    return;
+  }
+
   if (command !== "send" && command !== "round") {
     throw new Error(usage(deploymentRole));
   }
-  const [toAgentId, ttlSecondsText, ...messageParts] = rest;
+  const [toAddress, ttlSecondsText, ...messageParts] = rest;
   const ttlSeconds = Number(ttlSecondsText);
   const body = messageParts.join(" ").trim();
   if (
-    !toAgentId ||
+    !toAddress ||
     !Number.isSafeInteger(ttlSeconds) ||
     ttlSeconds < 1 ||
     ttlSeconds > 300 ||
@@ -59,7 +71,7 @@ export async function runCoordinationOperatorCli(
     io.fetch,
     "POST",
     `${prefix}/${command === "send" ? "messages" : "rounds"}`,
-    { toAgentId, ttlMs, body },
+    { toAddress, ttlMs, body },
   );
   assertDeploymentRole(started, deploymentRole);
 
@@ -193,8 +205,9 @@ function usage(role: RustyCrewDeploymentRole): string {
     role === "debug" ? "agent:coordination:debug" : "agent:coordination";
   return [
     `Usage: npm run ${command} -- list`,
-    `       npm run ${command} -- send <agent-id> <ttl-seconds> <message...>`,
-    `       npm run ${command} -- round <agent-id> <ttl-seconds> <message...>`,
+    `       npm run ${command} -- routes`,
+    `       npm run ${command} -- send <@route-or-agent-id> <ttl-seconds> <message...>`,
+    `       npm run ${command} -- round <@route-or-agent-id> <ttl-seconds> <message...>`,
   ].join("\n");
 }
 

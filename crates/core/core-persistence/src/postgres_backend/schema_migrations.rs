@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 37;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 39;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -200,7 +200,74 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "record typed chat completions dialect policy in provider JSON",
         apply: None,
     },
+    PostgresSchemaMigration {
+        version: 38,
+        description: "add agent routing switchboard",
+        apply: Some(apply_postgres_agent_routes),
+    },
+    PostgresSchemaMigration {
+        version: 39,
+        description: "add requested address to durable agent delivery history",
+        apply: Some(apply_postgres_agent_delivery_requested_address),
+    },
 ];
+
+fn apply_postgres_agent_routes(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE {schema}.agent_routes (
+            route_key TEXT PRIMARY KEY,
+            enabled BOOLEAN NOT NULL,
+            target_kind TEXT NOT NULL,
+            target_agent_id TEXT NOT NULL,
+            target_session_id TEXT,
+            target_binding_id TEXT,
+            revision BIGINT NOT NULL,
+            updated_at TEXT NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         CREATE INDEX agent_routes_enabled_idx
+            ON {schema}.agent_routes(enabled, route_key);
+         CREATE INDEX agent_routes_direct_target_idx
+            ON {schema}.agent_routes(target_agent_id, target_session_id);
+         CREATE INDEX agent_routes_external_target_idx
+            ON {schema}.agent_routes(target_binding_id)
+            WHERE target_binding_id IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("create PostgreSQL agent route tables", error))?;
+    Ok(())
+}
+
+fn apply_postgres_agent_delivery_requested_address(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.agent_message_delivery_receipts
+            SET record_json = jsonb_set(
+                record_json::jsonb,
+                '{{request,requestedAddress}}',
+                record_json::jsonb #> '{{request,toAgentId}}',
+                true
+            )::text
+          WHERE record_json::jsonb #> '{{request,requestedAddress}}' IS NULL;
+         UPDATE {schema}.event_history
+            SET event_json = jsonb_set(
+                event_json::jsonb,
+                '{{receipt,request,requestedAddress}}',
+                event_json::jsonb #> '{{receipt,request,toAgentId}}',
+                true
+            )::text
+          WHERE event_json::jsonb #> '{{receipt,request}}' IS NOT NULL
+            AND event_json::jsonb #> '{{receipt,request,requestedAddress}}' IS NULL;"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "migrate PostgreSQL agent delivery requested addresses",
+            error,
+        )
+    })?;
+    Ok(())
+}
 
 fn apply_postgres_service_credentials(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
     tx.batch_execute(&format!(

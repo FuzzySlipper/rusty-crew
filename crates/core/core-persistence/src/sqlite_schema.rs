@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 53;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 55;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -283,6 +283,16 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 53,
         description: "add typed chat completions dialect policy",
         apply: migrate_v53_add_chat_completions_dialect_policy,
+    },
+    SchemaMigration {
+        version: 54,
+        description: "add agent routing switchboard",
+        apply: repos::agent_routes::migrate_v54_add_agent_routes,
+    },
+    SchemaMigration {
+        version: 55,
+        description: "add requested address to durable agent delivery history",
+        apply: repos::agent_routes::migrate_v55_add_agent_delivery_requested_address,
     },
 ];
 
@@ -2842,6 +2852,64 @@ mod tests {
             )
             .unwrap();
         assert_eq!(event_input_kind, "operator");
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn agent_delivery_requested_address_migration_rewrites_receipts_and_events() {
+        let db_path = temp_db_path("agent-message-requested-address");
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            prepare_migration_metadata(&conn).unwrap();
+            apply_schema_migrations(&mut conn, &SCHEMA_MIGRATIONS[..54]).unwrap();
+            conn.execute(
+                "INSERT INTO agent_message_delivery_receipts
+                    (delivery_id, idempotency_key, message_id, from_agent_id, from_session_id,
+                     to_agent_id, to_session_id, reply_to_message_id, status, created_at,
+                     expires_at, revision, record_json)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL, 'accepted', ?6, ?7, 1, ?8)",
+                params![
+                    "old-delivery",
+                    "old-delivery-key",
+                    "old-message",
+                    "old-sender",
+                    "old-recipient",
+                    "2026-07-20T00:00:00Z",
+                    "2026-07-20T00:05:00Z",
+                    r#"{"request":{"toAgentId":"old-recipient"}}"#,
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO event_history (sequence, event_kind, event_json)
+                 VALUES (5969, 'AgentMessageDeliveryObserved', ?1)",
+                params![r#"{"type":"agent_message_delivery_observed","receipt":{"request":{"toAgentId":"old-recipient"}}}"#],
+            )
+            .unwrap();
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        let conn = Connection::open(&db_path).unwrap();
+        let receipt_address: String = conn
+            .query_row(
+                "SELECT json_extract(record_json, '$.request.requestedAddress')
+                 FROM agent_message_delivery_receipts WHERE delivery_id = 'old-delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt_address, "old-recipient");
+        let event_address: String = conn
+            .query_row(
+                "SELECT json_extract(event_json, '$.receipt.request.requestedAddress')
+                 FROM event_history WHERE sequence = 5969",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_address, "old-recipient");
 
         remove_temp_db(&db_path);
     }

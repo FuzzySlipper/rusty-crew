@@ -1,17 +1,7 @@
 import type {
   ActionBatchReceipt,
   AdapterId,
-  AgentDirectoryEntry,
   AgentId,
-  AgentCorrelatedRound,
-  AgentMessageCommand,
-  AgentMessageDeliveryCompletion,
-  AgentMessageDeliveryReceipt,
-  AgentMessageInboxItem,
-  AgentMessageInboxQuery,
-  AgentMessageReplyCommand,
-  AgentRoundCommand,
-  AgentRoundStartReceipt,
   AgentMessage,
   BrainAction,
   BrainActionBatch,
@@ -88,6 +78,7 @@ import type {
   Unit,
 } from "@rusty-crew/contracts";
 
+import type { NativeAgentCoordinationBridgeMethods } from "./agent-coordination-public-api.js";
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
 import type {
   NativeModelProviderCredentialKind,
@@ -1968,7 +1959,10 @@ export interface NativeChatSessionReadResult {
   message_slots: NativeExactPage<unknown>;
 }
 
-export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
+export interface NativeBridgeModule
+  extends
+    NativeExternalRuntimeBridgeMethods,
+    NativeAgentCoordinationBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;
@@ -2103,24 +2097,6 @@ export interface NativeBridgeModule extends NativeExternalRuntimeBridgeMethods {
     body: string,
     correlationId?: string,
   ): Promise<EventReceipt>;
-  deliverAgentMessage(
-    command: AgentMessageCommand,
-  ): Promise<AgentMessageDeliveryReceipt>;
-  replyAgentMessage(
-    command: AgentMessageReplyCommand,
-  ): Promise<AgentMessageDeliveryReceipt>;
-  listAgentMessageInbox(
-    query: AgentMessageInboxQuery,
-  ): Promise<AgentMessageInboxItem[]>;
-  listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
-  beginAgentRound(command: AgentRoundCommand): Promise<AgentRoundStartReceipt>;
-  getAgentRound(roundId: string): Promise<AgentCorrelatedRound | undefined>;
-  getAgentMessageDelivery(
-    deliveryId: string,
-  ): Promise<AgentMessageDeliveryReceipt | undefined>;
-  completeAgentMessageDelivery(
-    completion: AgentMessageDeliveryCompletion,
-  ): Promise<AgentMessageDeliveryReceipt>;
   enqueueBodyFollowUpMessage(input: {
     sessionId: SessionId;
     from: AgentId;

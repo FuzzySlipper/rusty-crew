@@ -49,12 +49,13 @@ notes = "Append-only events and restart hydration projections."
 id = "queues_messages"
 label = "Queues And Messages"
 owns = [
+  "agent_routes",
   "agent_messages",
   "agent_message_delivery_receipts",
   "agent_correlated_rounds",
   "queued_messages",
 ]
-notes = "Internal messages, queued messages, TTL expiry, terminal state, no-resurrection policy."
+notes = "Stable routing aliases, internal messages, queued messages, TTL expiry, terminal state, no-resurrection policy."
 
 [[scope]]
 id = "scheduler_jobs"

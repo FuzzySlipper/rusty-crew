@@ -491,7 +491,7 @@ export async function handleExternalRuntimeRequest(
       deliveryId,
       idempotencyKey,
       messageId,
-      toAgentId: binding.agentId,
+      toAddress: binding.agentId,
       inputKind: "operator",
       body: messageBody,
       ...(collaborationMode === undefined ? {} : { collaborationMode }),

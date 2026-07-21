@@ -5110,6 +5110,13 @@ function createServiceCoordinationRuntime(
       }
       return state.bridge.listAgentDirectory();
     },
+    async listRoutes() {
+      const state = getState();
+      if (state === undefined) {
+        throw new Error("service coordination runtime is not ready");
+      }
+      return state.bridge.listAgentRouteResolutions();
+    },
     async routeMessage(input) {
       const state = getState();
       if (state === undefined) {
@@ -5131,7 +5138,7 @@ function createServiceCoordinationRuntime(
         deliveryId: `delivery:${identity}`,
         idempotencyKey: `delivery:${identity}`,
         messageId: `message:${identity}`,
-        toAgentId: input.toAgentId,
+        toAddress: input.toAddress,
         inputKind: "routed_agent_message",
         body: input.body,
         ...(input.correlationId === undefined
@@ -5155,7 +5162,7 @@ function createServiceCoordinationRuntime(
           receipt.status === "expired"
             ? {
                 status: "failed",
-                summary: `message delivery to ${input.toAgentId} ${receipt.status}`,
+                summary: `message delivery to ${input.toAddress} ${receipt.status}`,
                 reasonCode:
                   activation?.type === "rejected"
                     ? activation.reasonCode
@@ -5164,20 +5171,20 @@ function createServiceCoordinationRuntime(
             : activation?.type === "queued_for_next_turn"
               ? {
                   status: "skipped",
-                  summary: `message queued for ${input.toAgentId}'s next external turn`,
+                  summary: `message queued for ${input.toAddress}'s next external turn`,
                   reasonCode: "external_turn_active",
                 }
               : activation?.type === "external_turn_steer_requested"
                 ? {
                     status: "completed",
-                    summary: `message steered into ${input.toAgentId}'s active external turn`,
+                    summary: `message steered into ${input.toAddress}'s active external turn`,
                   }
                 : {
                     status: "completed",
                     summary:
                       activation?.type === "external_turn_requested"
-                        ? `external turn requested for ${input.toAgentId}`
-                        : `direct wake requested for ${input.toAgentId}`,
+                        ? `external turn requested for ${input.toAddress}`
+                        : `direct wake requested for ${input.toAddress}`,
                   },
       };
     },
@@ -5244,7 +5251,7 @@ function createServiceCoordinationRuntime(
         roundId: `round:${identity}`,
         idempotencyKey: `round:${identity}`,
         messageId: `round-message:${identity}`,
-        toAgentId: input.toAgentId,
+        toAddress: input.toAddress,
         body: input.body,
         correlationId: input.correlationId,
         createdAt,
@@ -5272,7 +5279,7 @@ function createServiceCoordinationRuntime(
             accepted: true,
             sequence: started.delivery.sequence ?? undefined,
             reply: {
-              from: outcome?.from ?? input.toAgentId,
+              from: outcome?.from ?? input.toAddress,
               to: outcome?.to ?? input.fromAgentId,
               body: outcome?.body ?? "",
               correlationId: outcome?.correlationId ?? input.correlationId,

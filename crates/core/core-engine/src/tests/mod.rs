@@ -31,6 +31,7 @@ mod delegation_support;
 mod github_gate;
 use chat_support::*;
 use delegation_support::*;
+mod agent_routes;
 mod body;
 mod bootstrap_sessions;
 mod brain_runtime;

@@ -214,7 +214,7 @@ try {
     deliveryId: "external-service-live-delivery",
     idempotencyKey: "external-service-live-delivery",
     messageId: "external-service-live-message",
-    toAgentId: agentId,
+    toAddress: agentId,
     inputKind: "operator",
     body: "Reply with exactly EXTERNAL_SERVICE_LIVE_OK and nothing else.",
     requireWake: true,

@@ -3316,8 +3316,98 @@ export const bridgeWireSchemaArtifact = {
                       "null"
                     ]
                   },
+                  "requestedAddress": {
+                    "type": "string"
+                  },
                   "requireWake": {
                     "type": "boolean"
+                  },
+                  "routing": {
+                    "properties": {
+                      "address": {
+                        "type": "string"
+                      },
+                      "resolvedTarget": {
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "bindingId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bindingRevision": {
+                            "format": "uint64",
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "deliveryPolicy": {
+                            "enum": [
+                              "immediate_steer",
+                              "serial_next_turn",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "displayLabel": {
+                            "type": "string"
+                          },
+                          "profileId": {
+                            "type": "string"
+                          },
+                          "runtimeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "runtimeKind": {
+                            "enum": [
+                              "direct_brain",
+                              "codex_app_server"
+                            ],
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "sessionId",
+                          "profileId",
+                          "displayLabel",
+                          "runtimeKind"
+                        ],
+                        "type": "object"
+                      },
+                      "routeKey": {
+                        "type": "string"
+                      },
+                      "routeRevision": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "address",
+                      "routeKey",
+                      "routeRevision",
+                      "resolvedTarget"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
                   },
                   "toAgentId": {
                     "type": "string"
@@ -3334,6 +3424,7 @@ export const bridgeWireSchemaArtifact = {
                   "idempotencyKey",
                   "messageId",
                   "fromAgentId",
+                  "requestedAddress",
                   "toAgentId",
                   "inputKind",
                   "body",
@@ -3590,8 +3681,98 @@ export const bridgeWireSchemaArtifact = {
                       "null"
                     ]
                   },
+                  "requestedAddress": {
+                    "type": "string"
+                  },
                   "requireWake": {
                     "type": "boolean"
+                  },
+                  "routing": {
+                    "properties": {
+                      "address": {
+                        "type": "string"
+                      },
+                      "resolvedTarget": {
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "bindingId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bindingRevision": {
+                            "format": "uint64",
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "deliveryPolicy": {
+                            "enum": [
+                              "immediate_steer",
+                              "serial_next_turn",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "displayLabel": {
+                            "type": "string"
+                          },
+                          "profileId": {
+                            "type": "string"
+                          },
+                          "runtimeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "runtimeKind": {
+                            "enum": [
+                              "direct_brain",
+                              "codex_app_server"
+                            ],
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "sessionId",
+                          "profileId",
+                          "displayLabel",
+                          "runtimeKind"
+                        ],
+                        "type": "object"
+                      },
+                      "routeKey": {
+                        "type": "string"
+                      },
+                      "routeRevision": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "address",
+                      "routeKey",
+                      "routeRevision",
+                      "resolvedTarget"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
                   },
                   "toAgentId": {
                     "type": "string"
@@ -3608,6 +3789,7 @@ export const bridgeWireSchemaArtifact = {
                   "idempotencyKey",
                   "messageId",
                   "fromAgentId",
+                  "requestedAddress",
                   "toAgentId",
                   "inputKind",
                   "body",
@@ -3689,6 +3871,257 @@ export const bridgeWireSchemaArtifact = {
         "type": "object"
       },
       "title": "Array_of_AgentMessageInboxItem",
+      "type": "array"
+    },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>": {
+      "items": {
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "lastDelivery": {
+            "properties": {
+              "createdAt": {
+                "type": "string"
+              },
+              "deliveryId": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "routeRevision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected",
+                  "expired"
+                ],
+                "type": "string"
+              },
+              "terminalAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "deliveryId",
+              "routeRevision",
+              "status",
+              "createdAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolvedTarget": {
+            "properties": {
+              "agentId": {
+                "type": "string"
+              },
+              "bindingId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bindingRevision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "deliveryPolicy": {
+                "enum": [
+                  "immediate_steer",
+                  "serial_next_turn",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "displayLabel": {
+                "type": "string"
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "runtimeId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "runtimeKind": {
+                "enum": [
+                  "direct_brain",
+                  "codex_app_server"
+                ],
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentId",
+              "sessionId",
+              "profileId",
+              "displayLabel",
+              "runtimeKind"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "routable": {
+            "type": "boolean"
+          },
+          "route": {
+            "properties": {
+              "createdAt": {
+                "type": "string"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "label": {
+                "type": "string"
+              },
+              "requiredDeliveryPolicy": {
+                "enum": [
+                  "immediate_steer",
+                  "serial_next_turn",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requiredRuntimeKind": {
+                "enum": [
+                  "direct_brain",
+                  "codex_app_server",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "routeKey": {
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "agentId": {
+                        "type": "string"
+                      },
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "direct_brain",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "agentId",
+                      "sessionId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "agentId": {
+                        "type": "string"
+                      },
+                      "bindingId": {
+                        "type": "string"
+                      },
+                      "bindingRevision": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "type": {
+                        "const": "managed_external",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "agentId",
+                      "bindingId",
+                      "bindingRevision"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "routeKey",
+              "label",
+              "enabled",
+              "target",
+              "revision",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "routable"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_AgentRouteResolution",
       "type": "array"
     },
     "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>": {
@@ -6017,8 +6450,98 @@ export const bridgeWireSchemaArtifact = {
                 "null"
               ]
             },
+            "requestedAddress": {
+              "type": "string"
+            },
             "requireWake": {
               "type": "boolean"
+            },
+            "routing": {
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "resolvedTarget": {
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "bindingId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "bindingRevision": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "deliveryPolicy": {
+                      "enum": [
+                        "immediate_steer",
+                        "serial_next_turn",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "displayLabel": {
+                      "type": "string"
+                    },
+                    "profileId": {
+                      "type": "string"
+                    },
+                    "runtimeId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "runtimeKind": {
+                      "enum": [
+                        "direct_brain",
+                        "codex_app_server"
+                      ],
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "agentId",
+                    "sessionId",
+                    "profileId",
+                    "displayLabel",
+                    "runtimeKind"
+                  ],
+                  "type": "object"
+                },
+                "routeKey": {
+                  "type": "string"
+                },
+                "routeRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "address",
+                "routeKey",
+                "routeRevision",
+                "resolvedTarget"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
             },
             "toAgentId": {
               "type": "string"
@@ -6035,6 +6558,7 @@ export const bridgeWireSchemaArtifact = {
             "idempotencyKey",
             "messageId",
             "fromAgentId",
+            "requestedAddress",
             "toAgentId",
             "inputKind",
             "body",
@@ -6085,6 +6609,257 @@ export const bridgeWireSchemaArtifact = {
         "revision"
       ],
       "title": "Nullable_AgentMessageDeliveryReceipt",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>": {
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "lastDelivery": {
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "deliveryId": {
+              "type": "string"
+            },
+            "reasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "routeRevision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "accepted",
+                "rejected",
+                "expired"
+              ],
+              "type": "string"
+            },
+            "terminalAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "deliveryId",
+            "routeRevision",
+            "status",
+            "createdAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedTarget": {
+          "properties": {
+            "agentId": {
+              "type": "string"
+            },
+            "bindingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "bindingRevision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "deliveryPolicy": {
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "displayLabel": {
+              "type": "string"
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "runtimeId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "runtimeKind": {
+              "enum": [
+                "direct_brain",
+                "codex_app_server"
+              ],
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agentId",
+            "sessionId",
+            "profileId",
+            "displayLabel",
+            "runtimeKind"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "routable": {
+          "type": "boolean"
+        },
+        "route": {
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "label": {
+              "type": "string"
+            },
+            "requiredDeliveryPolicy": {
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "requiredRuntimeKind": {
+              "enum": [
+                "direct_brain",
+                "codex_app_server",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "routeKey": {
+              "type": "string"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "direct_brain",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "agentId",
+                    "sessionId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "bindingId": {
+                      "type": "string"
+                    },
+                    "bindingRevision": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": {
+                      "const": "managed_external",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "agentId",
+                    "bindingId",
+                    "bindingRevision"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "routeKey",
+            "label",
+            "enabled",
+            "target",
+            "revision",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "routable"
+      ],
+      "title": "Nullable_AgentRouteResolution",
       "type": [
         "object",
         "null"
@@ -17949,8 +18724,98 @@ export const bridgeWireSchemaArtifact = {
                 "null"
               ]
             },
+            "requestedAddress": {
+              "type": "string"
+            },
             "requireWake": {
               "type": "boolean"
+            },
+            "routing": {
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "resolvedTarget": {
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "bindingId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "bindingRevision": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "deliveryPolicy": {
+                      "enum": [
+                        "immediate_steer",
+                        "serial_next_turn",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "displayLabel": {
+                      "type": "string"
+                    },
+                    "profileId": {
+                      "type": "string"
+                    },
+                    "runtimeId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "runtimeKind": {
+                      "enum": [
+                        "direct_brain",
+                        "codex_app_server"
+                      ],
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "agentId",
+                    "sessionId",
+                    "profileId",
+                    "displayLabel",
+                    "runtimeKind"
+                  ],
+                  "type": "object"
+                },
+                "routeKey": {
+                  "type": "string"
+                },
+                "routeRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "address",
+                "routeKey",
+                "routeRevision",
+                "resolvedTarget"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
             },
             "toAgentId": {
               "type": "string"
@@ -17967,6 +18832,7 @@ export const bridgeWireSchemaArtifact = {
             "idempotencyKey",
             "messageId",
             "fromAgentId",
+            "requestedAddress",
             "toAgentId",
             "inputKind",
             "body",
@@ -18214,8 +19080,98 @@ export const bridgeWireSchemaArtifact = {
                     "null"
                   ]
                 },
+                "requestedAddress": {
+                  "type": "string"
+                },
                 "requireWake": {
                   "type": "boolean"
+                },
+                "routing": {
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    },
+                    "resolvedTarget": {
+                      "properties": {
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "bindingId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "bindingRevision": {
+                          "format": "uint64",
+                          "minimum": 0,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "deliveryPolicy": {
+                          "enum": [
+                            "immediate_steer",
+                            "serial_next_turn",
+                            null
+                          ],
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "displayLabel": {
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "type": "string"
+                        },
+                        "runtimeId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "runtimeKind": {
+                          "enum": [
+                            "direct_brain",
+                            "codex_app_server"
+                          ],
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "agentId",
+                        "sessionId",
+                        "profileId",
+                        "displayLabel",
+                        "runtimeKind"
+                      ],
+                      "type": "object"
+                    },
+                    "routeKey": {
+                      "type": "string"
+                    },
+                    "routeRevision": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "address",
+                    "routeKey",
+                    "routeRevision",
+                    "resolvedTarget"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 },
                 "toAgentId": {
                   "type": "string"
@@ -18232,6 +19188,7 @@ export const bridgeWireSchemaArtifact = {
                 "idempotencyKey",
                 "messageId",
                 "fromAgentId",
+                "requestedAddress",
                 "toAgentId",
                 "inputKind",
                 "body",
@@ -18380,6 +19337,367 @@ export const bridgeWireSchemaArtifact = {
         "delivery"
       ],
       "title": "AgentRoundStartReceipt",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::AgentRouteRecord": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "requiredDeliveryPolicy": {
+          "enum": [
+            "immediate_steer",
+            "serial_next_turn",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requiredRuntimeKind": {
+          "enum": [
+            "direct_brain",
+            "codex_app_server",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "routeKey": {
+          "type": "string"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "direct_brain",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "agentId",
+                "sessionId"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "bindingId": {
+                  "type": "string"
+                },
+                "bindingRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "managed_external",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "agentId",
+                "bindingId",
+                "bindingRevision"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeKey",
+        "label",
+        "enabled",
+        "target",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "AgentRouteRecord",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::external_runtime::AgentRouteResolution": {
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "lastDelivery": {
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "deliveryId": {
+              "type": "string"
+            },
+            "reasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "routeRevision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "accepted",
+                "rejected",
+                "expired"
+              ],
+              "type": "string"
+            },
+            "terminalAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "deliveryId",
+            "routeRevision",
+            "status",
+            "createdAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedTarget": {
+          "properties": {
+            "agentId": {
+              "type": "string"
+            },
+            "bindingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "bindingRevision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "deliveryPolicy": {
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "displayLabel": {
+              "type": "string"
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "runtimeId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "runtimeKind": {
+              "enum": [
+                "direct_brain",
+                "codex_app_server"
+              ],
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agentId",
+            "sessionId",
+            "profileId",
+            "displayLabel",
+            "runtimeKind"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "routable": {
+          "type": "boolean"
+        },
+        "route": {
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "label": {
+              "type": "string"
+            },
+            "requiredDeliveryPolicy": {
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "requiredRuntimeKind": {
+              "enum": [
+                "direct_brain",
+                "codex_app_server",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "routeKey": {
+              "type": "string"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "direct_brain",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "agentId",
+                    "sessionId"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "bindingId": {
+                      "type": "string"
+                    },
+                    "bindingRevision": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": {
+                      "const": "managed_external",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "agentId",
+                    "bindingId",
+                    "bindingRevision"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "routeKey",
+            "label",
+            "enabled",
+            "target",
+            "revision",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "routable"
+      ],
+      "title": "AgentRouteResolution",
       "type": "object"
     },
     "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding": {
@@ -22918,6 +24236,7 @@ export const bridgeWireSchemaArtifact = {
     "create_roleplay_mechanic_proposal": "rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord",
     "create_roleplay_mechanic_session_association": "rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord",
     "decide_roleplay_mechanic_proposal": "rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord",
+    "delete_agent_route": "rusty_crew_core_protocol::external_runtime::AgentRouteRecord",
     "delete_chat_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
     "delete_message_variant": "rusty_crew_core_persistence::contracts::MessageSlotRecord",
     "deliver_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
@@ -22925,6 +24244,7 @@ export const bridgeWireSchemaArtifact = {
     "expire_external_turn_dispatches": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "get_agent_message_delivery": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt>",
     "get_agent_round": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentCorrelatedRound>",
+    "get_agent_route_resolution": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>",
     "get_chat_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayChatLayerRecord>",
     "get_conversation_branch_state": "rusty_crew_core_persistence::contracts::ConversationBranchStateRecord",
     "get_external_binding": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
@@ -22946,6 +24266,7 @@ export const bridgeWireSchemaArtifact = {
     "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "list_agent_directory": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentDirectoryEntry>",
     "list_agent_message_inbox": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageInboxItem>",
+    "list_agent_route_resolutions": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>",
     "list_entries_by_layer": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin>",
     "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
     "list_external_runtime_certifications": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>",
@@ -22991,6 +24312,7 @@ export const bridgeWireSchemaArtifact = {
     "plan_web_browser_resource_policy": "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan",
     "prepare_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "promote_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
+    "put_agent_route": "rusty_crew_core_protocol::external_runtime::AgentRouteRecord",
     "put_roleplay_character": "rusty_crew_core_persistence::contracts::RoleplayCharacterRecord",
     "put_roleplay_import": "rusty_crew_core_persistence::contracts::RoleplayImportRecord",
     "put_roleplay_player_persona": "rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord",
@@ -23032,6 +24354,7 @@ export const bridgeWireSchemaArtifact = {
     "reply_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "request_scheduled_host_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "request_scheduled_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "resolve_agent_address": "rusty_crew_core_protocol::external_runtime::AgentRouteResolution",
     "resolve_conversation_jump": "rusty_crew_core_persistence::contracts::ConversationJumpResult",
     "resolve_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
     "roleplay_speaker_identity": "rusty_crew_roleplay_core::RoleplaySpeakerIdentitySnapshot",

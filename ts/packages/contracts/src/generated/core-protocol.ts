@@ -10,6 +10,8 @@ export type AgentInstanceId = Brand<string, "AgentInstanceId">;
 
 export type AgentMessageDeliveryId = Brand<string, "AgentMessageDeliveryId">;
 
+export type AgentRouteKey = Brand<string, "AgentRouteKey">;
+
 export type AgentRoundId = Brand<string, "AgentRoundId">;
 
 export type BrainImplementationId = Brand<string, "BrainImplementationId">;
@@ -166,7 +168,7 @@ export type AgentMessageCommand = {
   inputKind: AgentMessageInputKind;
   messageId: string;
   requireWake: boolean;
-  toAgentId: string;
+  toAddress: string;
 };
 
 export type AgentMessageDeliveryCompletion = {
@@ -201,7 +203,9 @@ export type AgentMessageDeliveryRequest = {
   inputKind: AgentMessageInputKind;
   messageId: string;
   replyToMessageId?: string | null;
+  requestedAddress: string;
   requireWake: boolean;
+  routing?: AgentRouteDeliveryProvenance | null;
   toAgentId: string;
   toSessionId?: string | null;
 };
@@ -253,7 +257,7 @@ export type AgentRoundCommand = {
   idempotencyKey: string;
   messageId: string;
   roundId: string;
-  toAgentId: string;
+  toAddress: string;
 };
 
 export type AgentRoundStartReceipt = {
@@ -262,6 +266,84 @@ export type AgentRoundStartReceipt = {
 };
 
 export type AgentRoundStatus = "pending" | "replied" | "expired" | "cancelled" | "failed";
+
+export type AgentRouteDelete = {
+  expectedRevision: number;
+  routeKey: string;
+};
+
+export type AgentRouteDeliveryProvenance = {
+  address: string;
+  resolvedTarget: AgentRouteResolvedTarget;
+  routeKey: string;
+  routeRevision: number;
+};
+
+export type AgentRouteLastDelivery = {
+  createdAt: string;
+  deliveryId: string;
+  reasonCode?: string | null;
+  routeRevision: number;
+  status: AgentMessageDeliveryStatus;
+  terminalAt?: string | null;
+};
+
+export type AgentRouteRecord = {
+  createdAt: string;
+  description?: string | null;
+  enabled: boolean;
+  label: string;
+  requiredDeliveryPolicy?: ExternalMessageDeliveryPolicy | null;
+  requiredRuntimeKind?: AgentDirectoryRuntimeKind | null;
+  revision: number;
+  routeKey: string;
+  target: AgentRouteTarget;
+  updatedAt: string;
+};
+
+export type AgentRouteResolution = {
+  address: string;
+  lastDelivery?: AgentRouteLastDelivery | null;
+  reasonCode?: string | null;
+  resolvedTarget?: AgentRouteResolvedTarget | null;
+  routable: boolean;
+  route?: AgentRouteRecord | null;
+};
+
+export type AgentRouteResolvedTarget = {
+  agentId: string;
+  bindingId?: string | null;
+  bindingRevision?: number | null;
+  deliveryPolicy?: ExternalMessageDeliveryPolicy | null;
+  displayLabel: string;
+  profileId: string;
+  runtimeId?: string | null;
+  runtimeKind: AgentDirectoryRuntimeKind;
+  sessionId: string;
+};
+
+export type AgentRouteTarget = {
+  agentId: string;
+  sessionId: string;
+  type: "direct_brain";
+} | {
+  agentId: string;
+  bindingId: string;
+  bindingRevision: number;
+  type: "managed_external";
+};
+
+export type AgentRouteWrite = {
+  description?: string | null;
+  enabled: boolean;
+  expectedRevision?: number | null;
+  label: string;
+  requiredDeliveryPolicy?: ExternalMessageDeliveryPolicy | null;
+  requiredRuntimeKind?: AgentDirectoryRuntimeKind | null;
+  routeKey: string;
+  target: AgentRouteTarget;
+  updatedAt: string;
+};
 
 export type BodyDeltaPolicy = {
   maxQueuedMessages: number;

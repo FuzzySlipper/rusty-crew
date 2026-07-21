@@ -621,6 +621,17 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
     schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
     schema!("list_agent_directory", Vec<protocol::AgentDirectoryEntry>);
     schema!(
+        "list_agent_route_resolutions",
+        Vec<protocol::AgentRouteResolution>
+    );
+    schema!(
+        "get_agent_route_resolution",
+        Option<protocol::AgentRouteResolution>
+    );
+    schema!("resolve_agent_address", protocol::AgentRouteResolution);
+    schema!("put_agent_route", protocol::AgentRouteRecord);
+    schema!("delete_agent_route", protocol::AgentRouteRecord);
+    schema!(
         "deliver_agent_message",
         protocol::AgentMessageDeliveryReceipt
     );

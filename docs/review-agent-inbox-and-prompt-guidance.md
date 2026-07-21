@@ -32,16 +32,16 @@ silently retried. Do not manually start another queued review in this turn.
 ## Review Requester Prompt
 
 Copy this block into guidance for an agent that submits asynchronous reviews.
-Replace only `<reviewer-agent-id>` with the stable ID returned by
-`rusty_crew.list_agents` or `list_agents` on the same service.
+Replace only `<reviewer-route>` with a curated route such as `@reviewer`
+returned by `rusty_crew.list_agents` or `list_agents` on the same service.
 
 ```md
-When review is needed, call `list_agents` and locate the routable review agent.
-Use its stable agent ID `<reviewer-agent-id>`, never its display label, profile
-ID, session ID, or Codex thread name.
+When review is needed, call `list_agents` and locate the routable switchboard
+route. Use its explicit address `<reviewer-route>`, never its display label,
+profile ID, session ID, Codex thread name, or a guessed alias.
 
 Submit one self-contained asynchronous request with `send_agent_message`. Set
-the recipient to `<reviewer-agent-id>`, choose a `ttlSeconds` from 1 through
+the recipient to `<reviewer-route>`, choose a `ttlSeconds` from 1 through
 86400 that covers the expected queue delay, and put the repository/path, exact
 commit or artifact identity, review scope, acceptance criteria, and relevant
 test evidence in `body`. Do not use `agent_round` for queued review work.
@@ -59,12 +59,13 @@ other service.
 
 ## Identity and Delivery Policy
 
-The stable `agentId` is the sender-facing address. Crew resolves it to the
-currently active session and persists that concrete recipient `sessionId` on
-acceptance. Profile IDs, labels, and Codex thread names are descriptive and are
-not routing keys. If the recipient session is replaced before queued work runs,
-Crew rejects that work with `agent_message_recipient_session_changed` instead
-of delivering it to a different session.
+The preferred sender-facing address is a DB-backed `@route`. Crew resolves it
+server-side to the exact session or exact managed binding revision recorded by
+the route and persists that route revision and concrete destination on
+acceptance. Raw agent IDs remain available as diagnostics and explicit direct
+addresses. Profile IDs, labels, and Codex thread names are descriptive and are
+not routing keys. A replaced session or binding makes the route unroutable;
+Crew never silently follows it to a newer destination.
 
 `immediate_steer` delivers a new message into an already active Codex turn. It
 is useful for ordinary collaboration where the new message belongs to the same
@@ -92,9 +93,9 @@ Built-in Crew brains receive the same capabilities without the namespace:
 | Tool | Required arguments | Optional arguments |
 | --- | --- | --- |
 | `list_agents` | none | none |
-| `send_agent_message` | `toAgentId`, `body` | `correlationId`, `requireWake`, `ttlSeconds` |
+| `send_agent_message` | `toAddress`, `body` | `correlationId`, `requireWake`, `ttlSeconds` |
 | `reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
-| `agent_round` | `toAgentId`, `body` | `correlationId`, `timeoutMs` |
+| `agent_round` | `toAddress`, `body` | `correlationId`, `timeoutMs` |
 
 Both message tools default to a 300-second TTL and accept integer `ttlSeconds`
 values from 1 through 86,400. Review requesters should set the TTL explicitly
@@ -132,6 +133,11 @@ Use the deployment-specific admin route and optional `toAgentId`/`limit` query:
 
 - production: `GET /v1/coordination/messages`
 - debug: `GET /v1/debug/coordination/messages`
+
+Inspect curated route resolution separately from raw inbox records:
+
+- production: `GET /v1/coordination/routes`
+- debug: `GET /v1/debug/coordination/routes`
 
 The response includes each delivery, linked reply, inbox status, queued-message
 ID, external-turn request ID, and terminal reason. The production and debug

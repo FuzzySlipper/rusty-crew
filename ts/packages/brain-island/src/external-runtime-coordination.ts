@@ -4,6 +4,7 @@ import type {
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
   AgentMessageReplyCommand,
+  AgentRouteResolution,
   AgentRoundCommand,
   AgentRoundStartReceipt,
 } from "@rusty-crew/contracts";
@@ -27,6 +28,7 @@ export interface CodexCoordinationBinding {
 
 export interface CodexCoordinationPort {
   listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
+  listAgentRouteResolutions(): Promise<AgentRouteResolution[]>;
   deliverAgentMessage(
     command: AgentMessageCommand,
   ): Promise<AgentMessageDeliveryReceipt>;
@@ -65,8 +67,11 @@ export async function resolveCodexCoordinationToolCall(input: {
     ) {
       return failed("list_agents does not accept arguments");
     }
-    const agents = await input.port.listAgentDirectory();
-    return succeeded(formatAgentDirectory(agents));
+    const [routes, agents] = await Promise.all([
+      input.port.listAgentRouteResolutions(),
+      input.port.listAgentDirectory(),
+    ]);
+    return succeeded(formatAgentDirectory(routes, agents));
   }
   const now = input.now?.() ?? new Date();
   const identity = `${input.binding.bindingId}:${params.threadId}:${params.turnId}:${params.callId}`;
@@ -112,7 +117,7 @@ export async function resolveCodexCoordinationToolCall(input: {
       deliveryId: `codex-delivery:${identity}`,
       idempotencyKey: `codex-delivery:${identity}`,
       messageId: `codex-message:${identity}`,
-      toAgentId: args.recipient,
+      toAddress: args.recipient,
       inputKind: "routed_agent_message",
       body: args.body,
       ...(args.correlationId === undefined
@@ -144,7 +149,7 @@ export async function resolveCodexCoordinationToolCall(input: {
     roundId: `codex-round:${identity}`,
     idempotencyKey: `codex-round:${identity}`,
     messageId: `codex-round-message:${identity}`,
-    toAgentId: args.recipient,
+    toAddress: args.recipient,
     body: args.body,
     correlationId: args.correlationId ?? `codex-round:${identity}`,
     createdAt: now.toISOString(),
@@ -278,12 +283,24 @@ function failed(text: string): DynamicToolCallResponse {
   return { success: false, contentItems: [{ type: "inputText", text }] };
 }
 
-function formatAgentDirectory(agents: readonly AgentDirectoryEntry[]): string {
-  if (agents.length === 0) {
-    return "No non-archived agents are registered on this Rusty Crew service.";
-  }
+function formatAgentDirectory(
+  routes: readonly AgentRouteResolution[],
+  agents: readonly AgentDirectoryEntry[],
+): string {
   return [
-    "Agents on this Rusty Crew service:",
+    "Switchboard routes (preferred addresses):",
+    ...(routes.length === 0
+      ? ["- none configured"]
+      : routes.map((resolution) => {
+          const target = resolution.resolvedTarget;
+          const status = resolution.routable
+            ? "routable"
+            : `unavailable (${resolution.reasonCode ?? "unknown_reason"})`;
+          return `- ${resolution.address}: ${resolution.route?.label ?? "unknown route"}; target=${target?.agentId ?? "unresolved"}; runtime=${target?.runtimeKind ?? resolution.route?.requiredRuntimeKind ?? "unresolved"}; status=${status}`;
+        })),
+    "",
+    "Raw agent directory (diagnostics):",
+    ...(agents.length === 0 ? ["- no non-archived agents registered"] : []),
     ...agents.map((agent) => {
       const status = agent.routable
         ? "routable"

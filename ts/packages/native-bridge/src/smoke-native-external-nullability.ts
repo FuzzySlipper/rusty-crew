@@ -126,7 +126,7 @@ try {
     deliveryId: "nullability-delivery",
     idempotencyKey: "nullability-delivery",
     messageId: "nullability-message",
-    toAgentId: agentId,
+    toAddress: agentId,
     inputKind: "operator",
     body: "Exercise external turn nullability.",
     requireWake: true,

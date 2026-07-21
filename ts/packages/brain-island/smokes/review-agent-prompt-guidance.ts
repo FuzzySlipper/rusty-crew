@@ -91,8 +91,8 @@ assertSchema(
 assertSchema(schemaOf(listAgentsTool({})), [], [], false);
 assertSchema(
   schemaOf(sendAgentMessageTool({})),
-  ["toAgentId", "body", "correlationId", "requireWake", "ttlSeconds"],
-  ["toAgentId", "body"],
+  ["toAddress", "body", "correlationId", "requireWake", "ttlSeconds"],
+  ["toAddress", "body"],
   undefined,
 );
 assertSchema(
@@ -103,8 +103,8 @@ assertSchema(
 );
 assertSchema(
   schemaOf(agentRoundTool({})),
-  ["toAgentId", "body", "correlationId", "timeoutMs"],
-  ["toAgentId", "body"],
+  ["toAddress", "body", "correlationId", "timeoutMs"],
+  ["toAddress", "body"],
   undefined,
 );
 
@@ -124,6 +124,8 @@ for (const status of [
 for (const path of [
   "/v1/coordination/messages",
   "/v1/debug/coordination/messages",
+  "/v1/coordination/routes",
+  "/v1/debug/coordination/routes",
 ]) {
   assert.ok(openApi.paths[path], `operator API path missing: ${path}`);
   assert.match(guidance, new RegExp(path.replaceAll("/", "\\/")));
@@ -134,7 +136,8 @@ assert.match(
   /accept integer `ttlSeconds`[\s\S]*?values from 1 through 86,400/,
 );
 assert.match(guidance, /agent_message_recipient_session_changed/);
-assert.match(guidance, /<reviewer-agent-id>/);
+assert.match(guidance, /<reviewer-route>/);
+assert.match(guidance, /@reviewer/);
 assert.match(guidance, /does not return\n?durable message or delivery IDs/);
 
 const codexSendResult = await resolveCodexCoordinationToolCall({
@@ -145,7 +148,7 @@ const codexSendResult = await resolveCodexCoordinationToolCall({
     namespace: "rusty_crew",
     tool: "send_agent_message",
     arguments: {
-      recipient: "reviewer",
+      recipient: "@reviewer",
       body: "review exact commit",
       correlationId: "review-correlation",
       ttlSeconds: 600,
@@ -164,7 +167,7 @@ assert.equal(codexSendResult?.success, true);
 assert.equal(codexSendResult?.contentItems[0]?.type, "inputText");
 assert.equal(
   codexSendResult?.contentItems[0]?.text,
-  "message accepted for reviewer",
+  "message accepted for @reviewer",
 );
 assert.doesNotMatch(codexSendResult?.contentItems[0]?.text ?? "", /Id=/);
 
@@ -172,7 +175,7 @@ const builtInResult = await sendAgentMessageTool({
   runtime: acceptedBuiltInRuntime(),
 }).executeWithContext?.(
   {
-    toAgentId: "reviewer",
+    toAddress: "@reviewer",
     body: "review exact commit",
     correlationId: "review-correlation",
     ttlSeconds: 600,
@@ -195,7 +198,7 @@ assert.equal(
   builtInResult?.content[0]?.type === "text"
     ? builtInResult.content[0].text
     : undefined,
-  "message routed to reviewer",
+  "message routed to @reviewer",
 );
 
 console.log(
@@ -203,7 +206,7 @@ console.log(
     codexTools: codexTools.length,
     builtInTools: builtInTools.length,
     statuses: 8,
-    operatorRoutes: 2,
+    operatorRoutes: 4,
   }),
 );
 
@@ -237,6 +240,7 @@ function assertSchema(
 function acceptedCodexPort(): CodexCoordinationPort {
   return {
     listAgentDirectory: async () => [],
+    listAgentRouteResolutions: async () => [],
     deliverAgentMessage: async (command) => acceptedDelivery(command),
     replyAgentMessage: async () => {
       throw new Error("unexpected reply");
@@ -258,7 +262,8 @@ function acceptedDelivery(
       messageId: command.messageId,
       fromAgentId: "requester",
       fromSessionId: "requester-session" as SessionId,
-      toAgentId: command.toAgentId,
+      requestedAddress: command.toAddress,
+      toAgentId: command.toAddress,
       toSessionId: "reviewer-session" as SessionId,
       replyToMessageId: null,
       body: command.body,
@@ -277,6 +282,7 @@ function acceptedDelivery(
 function acceptedBuiltInRuntime(): CoordinationToolRuntime {
   return {
     listAgents: async () => [],
+    listRoutes: async () => [],
     routeMessage: async () => ({ accepted: true, sequence: 42 }),
     replyMessage: async () => ({ accepted: true, sequence: 43 }),
     roundTrip: async () => ({ accepted: true, sequence: 44 }),

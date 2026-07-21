@@ -4,11 +4,14 @@ import test from "node:test";
 import type {
   AgentCorrelatedRound,
   AgentDirectoryEntry,
+  AgentId,
   AgentMessageCommand,
   AgentMessageDeliveryReceipt,
   AgentMessageReplyCommand,
   AgentRoundCommand,
   AgentRoundStartReceipt,
+  AgentRouteKey,
+  ProfileId,
   SessionId,
 } from "@rusty-crew/contracts";
 
@@ -50,7 +53,7 @@ test("Codex coordination derives trusted identity outside model arguments", asyn
   });
 });
 
-test("Codex coordination lists only the Rust-projected same-service directory", async () => {
+test("Codex coordination lists routes separately from raw same-service diagnostics", async () => {
   const port = new RecordingPort();
   const result = await resolveCodexCoordinationToolCall({
     params: {
@@ -76,6 +79,7 @@ test("Codex coordination lists only the Rust-projected same-service directory", 
     content?.type === "inputText" ? content.text : "",
     /recipient=planner/,
   );
+  assert.match(content?.type === "inputText" ? content.text : "", /@reviewer/);
   assert.equal(port.directoryReads, 1);
 });
 
@@ -169,6 +173,35 @@ class RecordingPort implements CodexCoordinationPort {
     ];
   }
 
+  async listAgentRouteResolutions() {
+    return [
+      {
+        address: "@reviewer",
+        routable: true,
+        route: {
+          routeKey: "reviewer" as AgentRouteKey,
+          label: "Reviewer",
+          enabled: true,
+          target: {
+            type: "direct_brain" as const,
+            agentId: "planner" as AgentId,
+            sessionId: "planner-session" as SessionId,
+          },
+          revision: 1,
+          createdAt: "2026-07-10T00:00:00Z",
+          updatedAt: "2026-07-10T00:00:00Z",
+        },
+        resolvedTarget: {
+          agentId: "planner" as AgentId,
+          sessionId: "planner-session" as SessionId,
+          profileId: "planner-profile" as ProfileId,
+          displayLabel: "Planner",
+          runtimeKind: "direct_brain" as const,
+        },
+      },
+    ];
+  }
+
   async deliverAgentMessage(
     command: AgentMessageCommand,
   ): Promise<AgentMessageDeliveryReceipt> {
@@ -187,6 +220,7 @@ class RecordingPort implements CodexCoordinationPort {
         messageId: command.messageId,
         fromAgentId: "codex-agent",
         fromSessionId: "codex-session" as SessionId,
+        requestedAddress: "requester",
         toAgentId: "requester",
         toSessionId: "requester-session" as SessionId,
         replyToMessageId: command.inReplyToMessageId,
@@ -213,7 +247,7 @@ class RecordingPort implements CodexCoordinationPort {
       idempotencyKey: command.idempotencyKey,
       senderAgentId: "codex-agent",
       senderSessionId: "codex-session" as SessionId,
-      recipientAgentId: command.toAgentId,
+      recipientAgentId: command.toAddress,
       recipientSessionId: "recipient-session" as SessionId,
       senderRequestId: "external-turn-1",
       messageId: command.messageId,
@@ -233,7 +267,7 @@ class RecordingPort implements CodexCoordinationPort {
         deliveryId: `delivery:${command.roundId}`,
         idempotencyKey: `delivery:${command.idempotencyKey}`,
         messageId: command.messageId,
-        toAgentId: command.toAgentId,
+        toAddress: command.toAddress,
         inputKind: "routed_agent_message",
         body: command.body,
         correlationId: command.correlationId,
@@ -259,7 +293,8 @@ function deliveryReceipt(
       messageId: command.messageId,
       fromAgentId: "codex-agent",
       fromSessionId: "codex-session" as SessionId,
-      toAgentId: command.toAgentId,
+      requestedAddress: command.toAddress,
+      toAgentId: command.toAddress,
       toSessionId: "recipient-session" as SessionId,
       replyToMessageId: null,
       inputKind: command.inputKind,

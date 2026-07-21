@@ -14,7 +14,7 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
         type: "function",
         name: "list_agents",
         description:
-          "List agents addressable through this Rusty Crew service, including their stable recipient IDs.",
+          "List curated Rusty Crew @route addresses first, followed by raw agent diagnostics.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -24,7 +24,8 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
       {
         type: "function",
         name: "send_agent_message",
-        description: "Send a message to another Rusty Crew agent.",
+        description:
+          "Send a message to an exact Rusty Crew @route address or raw agent ID.",
         inputSchema: {
           type: "object",
           properties: {
@@ -65,7 +66,7 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
         type: "function",
         name: "agent_round",
         description:
-          "Send a message to another Rusty Crew agent and wait for one correlated reply.",
+          "Send a message to an exact Rusty Crew @route address or raw agent ID and wait for one correlated reply.",
         inputSchema: {
           type: "object",
           properties: {

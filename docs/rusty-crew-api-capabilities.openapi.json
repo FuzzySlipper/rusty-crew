@@ -4025,6 +4025,158 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/coordination/routes": {
+      "get": {
+        "operationId": "coordinationProductionRoutesList",
+        "summary": "List production switchboard routes and current exact-target resolution status.",
+        "tags": ["service", "session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "coordinationProductionRoutesCreate",
+        "summary": "Create a revisioned production switchboard route.",
+        "tags": ["service", "session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/routes/{route_key}": {
+      "delete": {
+        "operationId": "coordinationProductionRoutesDelete",
+        "summary": "Delete one production switchboard route with optimistic revision control.",
+        "tags": ["service", "session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.delete",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "get": {
+        "operationId": "coordinationProductionRoutesRead",
+        "summary": "Read one production switchboard route and current resolution status.",
+        "tags": ["service", "session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "patch": {
+        "operationId": "coordinationProductionRoutesUpdate",
+        "summary": "Replace one production switchboard route with optimistic revision control.",
+        "tags": ["service", "session", "delegation"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.update",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/routes/{route_key}/test": {
+      "post": {
+        "operationId": "coordinationProductionRoutesTest",
+        "summary": "Send a bounded test delivery through one production switchboard route.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.test",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/coordination/routes/resolve": {
+      "post": {
+        "operationId": "coordinationProductionRoutesResolve",
+        "summary": "Resolve an exact production address without delivering a message.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.production.routes.resolve",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/debug/coordination/agents": {
       "get": {
         "operationId": "coordinationDebugAgentsList",
@@ -4144,6 +4296,158 @@
         "x-rusty-crew-auth": "admin",
         "x-rusty-crew-mutation": "read",
         "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/routes": {
+      "get": {
+        "operationId": "coordinationDebugRoutesList",
+        "summary": "List debug switchboard routes and current exact-target resolution status.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "coordinationDebugRoutesCreate",
+        "summary": "Create a revisioned debug switchboard route.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/routes/{route_key}": {
+      "delete": {
+        "operationId": "coordinationDebugRoutesDelete",
+        "summary": "Delete one debug switchboard route with optimistic revision control.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.delete",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "get": {
+        "operationId": "coordinationDebugRoutesRead",
+        "summary": "Read one debug switchboard route and current resolution status.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "patch": {
+        "operationId": "coordinationDebugRoutesUpdate",
+        "summary": "Replace one debug switchboard route with optimistic revision control.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.update",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/routes/{route_key}/test": {
+      "post": {
+        "operationId": "coordinationDebugRoutesTest",
+        "summary": "Send a bounded test delivery through one debug switchboard route.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "route_key",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.test",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/debug/coordination/routes/resolve": {
+      "post": {
+        "operationId": "coordinationDebugRoutesResolve",
+        "summary": "Resolve an exact debug address without delivering a message.",
+        "tags": ["service", "session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "coordination.debug.routes.resolve",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
         "x-rusty-crew-contract-detail": "capability"
       }
     },
@@ -4971,7 +5275,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 197,
+    "capability_count": 211,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

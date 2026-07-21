@@ -5,6 +5,29 @@ impl NativeBridge {
         self.engine()?.list_agent_directory()
     }
 
+    pub fn list_agent_route_resolutions(&self) -> CoreResult<Vec<AgentRouteResolution>> {
+        self.engine()?.list_agent_route_resolutions()
+    }
+
+    pub fn get_agent_route_resolution(
+        &self,
+        route_key: &AgentRouteKey,
+    ) -> CoreResult<Option<AgentRouteResolution>> {
+        self.engine()?.get_agent_route_resolution(route_key)
+    }
+
+    pub fn resolve_agent_address(&self, address: &str) -> CoreResult<AgentRouteResolution> {
+        self.engine()?.resolve_agent_address(address)
+    }
+
+    pub fn put_agent_route(&self, write: AgentRouteWrite) -> CoreResult<AgentRouteRecord> {
+        self.engine()?.put_agent_route(write)
+    }
+
+    pub fn delete_agent_route(&self, delete: AgentRouteDelete) -> CoreResult<AgentRouteRecord> {
+        self.engine()?.delete_agent_route(delete)
+    }
+
     pub fn deliver_agent_message(
         &self,
         command: AgentMessageCommand,
@@ -64,6 +87,66 @@ impl NativeBridgeBinding {
             .list_agent_directory()
             .map_err(to_napi_error)?;
         serde_json::to_string(&entries)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn list_agent_route_resolutions_json(&self) -> napi::Result<String> {
+        let routes = self
+            .bridge()?
+            .list_agent_route_resolutions()
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&routes)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn get_agent_route_resolution_json(
+        &self,
+        route_key: String,
+    ) -> napi::Result<Option<String>> {
+        self.bridge()?
+            .get_agent_route_resolution(&AgentRouteKey::new(route_key))
+            .map_err(to_napi_error)?
+            .map(|route| {
+                serde_json::to_string(&route).map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })
+            })
+            .transpose()
+    }
+
+    #[napi]
+    pub fn resolve_agent_address_json(&self, address: String) -> napi::Result<String> {
+        let resolution = self
+            .bridge()?
+            .resolve_agent_address(&address)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&resolution)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn put_agent_route_json(&self, write_json: String) -> napi::Result<String> {
+        let write = serde_json::from_str::<AgentRouteWrite>(&write_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let route = self
+            .bridge()?
+            .put_agent_route(write)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&route)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn delete_agent_route_json(&self, delete_json: String) -> napi::Result<String> {
+        let delete = serde_json::from_str::<AgentRouteDelete>(&delete_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let route = self
+            .bridge()?
+            .delete_agent_route(delete)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&route)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 

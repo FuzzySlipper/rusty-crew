@@ -4,6 +4,7 @@
 //! so it must fail closed on schema incompatibility and report capabilities
 //! honestly while repository split/parity work continues.
 
+mod agent_routes;
 mod capabilities;
 mod chat_events;
 mod conversation_attachment;
@@ -15989,8 +15990,10 @@ mod tests {
                 message_id: "message-a".into(),
                 from_agent_id: session.agent_id.clone(),
                 from_session_id: Some(session.session_id.clone()),
+                requested_address: recipient.agent_id.0.clone(),
                 to_agent_id: recipient.agent_id.clone(),
                 to_session_id: Some(recipient.session_id.clone()),
+                routing: None,
                 reply_to_message_id: None,
                 input_kind: rusty_crew_core_protocol::AgentMessageInputKind::RoutedAgentMessage,
                 body: "inspect".into(),
@@ -16044,8 +16047,10 @@ mod tests {
                 message_id: "reply-message-a".into(),
                 from_agent_id: accepted.request.to_agent_id.clone(),
                 from_session_id: accepted.request.to_session_id.clone(),
+                requested_address: accepted.request.from_agent_id.0.clone(),
                 to_agent_id: accepted.request.from_agent_id.clone(),
                 to_session_id: accepted.request.from_session_id.clone(),
+                routing: None,
                 reply_to_message_id: Some("message-a".into()),
                 input_kind: rusty_crew_core_protocol::AgentMessageInputKind::RoutedAgentMessage,
                 body: "review passed".into(),
@@ -16270,6 +16275,106 @@ mod tests {
                 },)
                 .unwrap(),
             vec![updated]
+        );
+        reopened.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_agent_routes_are_revisioned_and_restart_durable() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_agent_routes");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let write = rusty_crew_core_protocol::AgentRouteWrite {
+            route_key: rusty_crew_core_protocol::AgentRouteKey::new("reviewer"),
+            label: "Reviewer".into(),
+            description: None,
+            enabled: true,
+            target: rusty_crew_core_protocol::AgentRouteTarget::DirectBrain {
+                agent_id: AgentId::new("review-agent"),
+                session_id: SessionId::new("review-session"),
+            },
+            required_runtime_kind: Some(
+                rusty_crew_core_protocol::AgentDirectoryRuntimeKind::DirectBrain,
+            ),
+            required_delivery_policy: None,
+            expected_revision: None,
+            updated_at: "2026-07-20T00:00:00Z".into(),
+        };
+        let created = store.put_agent_route(&write).unwrap();
+        assert_eq!(created.revision, 1);
+        drop(store);
+
+        let reopened = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        assert_eq!(
+            reopened
+                .get_agent_route(&rusty_crew_core_protocol::AgentRouteKey::new("reviewer"))
+                .unwrap(),
+            Some(created.clone())
+        );
+        let mut update = write;
+        update.label = "Reviewer queue".into();
+        update.expected_revision = Some(created.revision);
+        update.updated_at = "2026-07-20T00:01:00Z".into();
+        let updated = reopened.put_agent_route(&update).unwrap();
+        assert_eq!(updated.revision, 2);
+        assert_eq!(reopened.list_agent_routes().unwrap(), vec![updated.clone()]);
+        let delivery = rusty_crew_core_protocol::AgentMessageDeliveryReceipt {
+            request: rusty_crew_core_protocol::AgentMessageDeliveryRequest {
+                delivery_id: rusty_crew_core_protocol::AgentMessageDeliveryId::new(
+                    "route-delivery-pg",
+                ),
+                idempotency_key: "route-delivery-pg".into(),
+                message_id: "route-message-pg".into(),
+                from_agent_id: AgentId::new("operator"),
+                from_session_id: None,
+                requested_address: "@reviewer".into(),
+                to_agent_id: AgentId::new("review-agent"),
+                to_session_id: Some(SessionId::new("review-session")),
+                routing: Some(Box::new(
+                    rusty_crew_core_protocol::AgentRouteDeliveryProvenance {
+                        address: "@reviewer".into(),
+                        route_key: updated.route_key.clone(),
+                        route_revision: updated.revision,
+                        resolved_target: rusty_crew_core_protocol::AgentRouteResolvedTarget {
+                            agent_id: AgentId::new("review-agent"),
+                            session_id: SessionId::new("review-session"),
+                            profile_id: ProfileId::new("review-profile"),
+                            display_label: "Reviewer".into(),
+                            runtime_kind:
+                                rusty_crew_core_protocol::AgentDirectoryRuntimeKind::DirectBrain,
+                            runtime_id: None,
+                            binding_id: None,
+                            binding_revision: None,
+                            delivery_policy: None,
+                        },
+                    },
+                )),
+                reply_to_message_id: None,
+                input_kind: rusty_crew_core_protocol::AgentMessageInputKind::RoutedAgentMessage,
+                body: "review this".into(),
+                collaboration_mode: None,
+                correlation_id: Some("route-proof-pg".into()),
+                require_wake: true,
+                created_at: "2026-07-20T00:02:00Z".into(),
+                expires_at: "2026-07-20T00:07:00Z".into(),
+            },
+            status: rusty_crew_core_protocol::AgentMessageDeliveryStatus::Accepted,
+            sequence: Some(1),
+            activation: None,
+            resolved_round_id: None,
+            reason_code: None,
+            terminal_at: Some("2026-07-20T00:02:01Z".into()),
+            revision: 1,
+        };
+        reopened.create_agent_message_delivery(&delivery).unwrap();
+        assert_eq!(
+            reopened
+                .get_latest_agent_route_delivery(&updated.route_key)
+                .unwrap(),
+            Some(delivery)
         );
         reopened.drop_schema_for_test().unwrap();
     }

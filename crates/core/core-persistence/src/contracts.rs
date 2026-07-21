@@ -3268,6 +3268,7 @@ pub enum DiagnosticTable {
     ExternalControlReceipts,
     ExternalInteractions,
     ExternalRuntimeEvents,
+    AgentRoutes,
     AgentMessageDeliveryReceipts,
     AgentCorrelatedRounds,
 }
@@ -3337,6 +3338,7 @@ impl DiagnosticTable {
         Self::ExternalControlReceipts,
         Self::ExternalInteractions,
         Self::ExternalRuntimeEvents,
+        Self::AgentRoutes,
         Self::AgentMessageDeliveryReceipts,
         Self::AgentCorrelatedRounds,
     ];
@@ -3406,6 +3408,7 @@ impl DiagnosticTable {
             "external_control_receipts" => Ok(Self::ExternalControlReceipts),
             "external_interactions" => Ok(Self::ExternalInteractions),
             "external_runtime_events" => Ok(Self::ExternalRuntimeEvents),
+            "agent_routes" => Ok(Self::AgentRoutes),
             "agent_message_delivery_receipts" => Ok(Self::AgentMessageDeliveryReceipts),
             "agent_correlated_rounds" => Ok(Self::AgentCorrelatedRounds),
             _ => Err(CoreError::new(
@@ -3480,6 +3483,7 @@ impl DiagnosticTable {
             Self::ExternalControlReceipts => "external_control_receipts",
             Self::ExternalInteractions => "external_interactions",
             Self::ExternalRuntimeEvents => "external_runtime_events",
+            Self::AgentRoutes => "agent_routes",
             Self::AgentMessageDeliveryReceipts => "agent_message_delivery_receipts",
             Self::AgentCorrelatedRounds => "agent_correlated_rounds",
         }

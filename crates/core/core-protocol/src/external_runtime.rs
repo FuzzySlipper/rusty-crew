@@ -36,6 +36,7 @@ external_string_id!(ExternalInteractionId);
 external_string_id!(AgentRoundId);
 external_string_id!(AgentMessageDeliveryId);
 external_string_id!(ExternalAgentSessionCreationId);
+external_string_id!(AgentRouteKey);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +68,220 @@ pub struct AgentDirectoryEntry {
     pub workdir: Option<String>,
     pub routable: bool,
     pub routability_reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum AgentRouteTarget {
+    DirectBrain {
+        agent_id: AgentId,
+        session_id: SessionId,
+    },
+    ManagedExternal {
+        agent_id: AgentId,
+        binding_id: ExternalBindingId,
+        binding_revision: u64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteRecord {
+    pub route_key: AgentRouteKey,
+    pub label: String,
+    pub description: Option<String>,
+    pub enabled: bool,
+    pub target: AgentRouteTarget,
+    pub required_runtime_kind: Option<AgentDirectoryRuntimeKind>,
+    pub required_delivery_policy: Option<ExternalMessageDeliveryPolicy>,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+impl AgentRouteRecord {
+    pub fn address(&self) -> String {
+        format!("@{}", self.route_key.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteWrite {
+    pub route_key: AgentRouteKey,
+    pub label: String,
+    pub description: Option<String>,
+    pub enabled: bool,
+    pub target: AgentRouteTarget,
+    pub required_runtime_kind: Option<AgentDirectoryRuntimeKind>,
+    pub required_delivery_policy: Option<ExternalMessageDeliveryPolicy>,
+    pub expected_revision: Option<u64>,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteDelete {
+    pub route_key: AgentRouteKey,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteResolvedTarget {
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    pub profile_id: ProfileId,
+    pub display_label: String,
+    pub runtime_kind: AgentDirectoryRuntimeKind,
+    pub runtime_id: Option<ExternalRuntimeId>,
+    pub binding_id: Option<ExternalBindingId>,
+    pub binding_revision: Option<u64>,
+    pub delivery_policy: Option<ExternalMessageDeliveryPolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteResolution {
+    pub address: String,
+    pub route: Option<AgentRouteRecord>,
+    pub routable: bool,
+    pub reason_code: Option<String>,
+    pub resolved_target: Option<AgentRouteResolvedTarget>,
+    pub last_delivery: Option<AgentRouteLastDelivery>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteLastDelivery {
+    pub delivery_id: AgentMessageDeliveryId,
+    pub route_revision: u64,
+    pub status: AgentMessageDeliveryStatus,
+    pub reason_code: Option<String>,
+    pub created_at: IsoTimestamp,
+    pub terminal_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRouteDeliveryProvenance {
+    pub address: String,
+    pub route_key: AgentRouteKey,
+    pub route_revision: u64,
+    pub resolved_target: AgentRouteResolvedTarget,
+}
+
+pub fn agent_route_address(route_key: &AgentRouteKey) -> String {
+    format!("@{}", route_key.0)
+}
+
+pub fn parse_agent_route_address(address: &str) -> CoreResult<Option<AgentRouteKey>> {
+    let Some(route_key) = address.strip_prefix('@') else {
+        return Ok(None);
+    };
+    validate_agent_route_key(route_key)?;
+    Ok(Some(AgentRouteKey::new(route_key)))
+}
+
+pub fn validate_agent_route_write(write: &AgentRouteWrite) -> CoreResult<()> {
+    validate_agent_route_key(&write.route_key.0)?;
+    validate_bounded_route_text("label", &write.label, 256, false)?;
+    if let Some(description) = &write.description {
+        validate_bounded_route_text("description", description, 4_096, true)?;
+    }
+    validate_non_empty("updated_at", &write.updated_at)?;
+    if write.expected_revision == Some(0) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "agent route expected_revision must be positive",
+        ));
+    }
+    match &write.target {
+        AgentRouteTarget::DirectBrain {
+            agent_id,
+            session_id,
+        } => {
+            validate_non_empty("target.agent_id", &agent_id.0)?;
+            validate_non_empty("target.session_id", &session_id.0)?;
+            if matches!(
+                write.required_runtime_kind,
+                Some(AgentDirectoryRuntimeKind::CodexAppServer)
+            ) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "direct-brain route cannot require codex_app_server runtime",
+                ));
+            }
+            if write.required_delivery_policy.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "direct-brain route cannot require an external delivery policy",
+                ));
+            }
+        }
+        AgentRouteTarget::ManagedExternal {
+            agent_id,
+            binding_id,
+            binding_revision,
+        } => {
+            validate_non_empty("target.agent_id", &agent_id.0)?;
+            validate_non_empty("target.binding_id", &binding_id.0)?;
+            if *binding_revision == 0 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "managed external route binding_revision must be positive",
+                ));
+            }
+            if matches!(
+                write.required_runtime_kind,
+                Some(AgentDirectoryRuntimeKind::DirectBrain)
+            ) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "managed external route cannot require direct_brain runtime",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_agent_route_key(route_key: &str) -> CoreResult<()> {
+    if route_key.is_empty()
+        || route_key.len() > 128
+        || !route_key
+            .chars()
+            .next()
+            .is_some_and(|value| value.is_ascii_alphanumeric())
+        || !route_key
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || matches!(value, '.' | '_' | '-'))
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "agent route key must be 1-128 characters, start alphanumeric, and contain only alphanumeric, '.', '_', or '-'",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_bounded_route_text(
+    label: &str,
+    value: &str,
+    max_chars: usize,
+    allow_empty: bool,
+) -> CoreResult<()> {
+    if (!allow_empty && value.trim().is_empty()) || value.chars().count() > max_chars {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("agent route {label} must contain at most {max_chars} characters"),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -778,8 +993,11 @@ pub struct AgentMessageDeliveryRequest {
     pub message_id: String,
     pub from_agent_id: AgentId,
     pub from_session_id: Option<SessionId>,
+    pub requested_address: String,
     pub to_agent_id: AgentId,
     pub to_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<Box<AgentRouteDeliveryProvenance>>,
     pub reply_to_message_id: Option<String>,
     pub input_kind: AgentMessageInputKind,
     pub body: String,
@@ -868,7 +1086,7 @@ pub struct AgentMessageCommand {
     pub delivery_id: AgentMessageDeliveryId,
     pub idempotency_key: String,
     pub message_id: String,
-    pub to_agent_id: AgentId,
+    pub to_address: String,
     pub input_kind: AgentMessageInputKind,
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -886,7 +1104,7 @@ pub struct AgentRoundCommand {
     pub round_id: AgentRoundId,
     pub idempotency_key: String,
     pub message_id: String,
-    pub to_agent_id: AgentId,
+    pub to_address: String,
     pub body: String,
     pub correlation_id: String,
     pub created_at: IsoTimestamp,
@@ -1275,6 +1493,17 @@ fn validate_non_empty(field: &str, value: &str) -> CoreResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switchboard_address_grammar_is_explicit_and_collision_free() {
+        assert_eq!(
+            parse_agent_route_address("@reviewer").unwrap(),
+            Some(AgentRouteKey::new("reviewer"))
+        );
+        assert_eq!(parse_agent_route_address("reviewer").unwrap(), None);
+        assert!(parse_agent_route_address("@review queue").is_err());
+        assert!(parse_agent_route_address("@").is_err());
+    }
 
     #[test]
     fn compatibility_probe_reports_require_coherent_reasoning() {

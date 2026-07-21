@@ -2,6 +2,11 @@
 /* eslint-disable */
 export declare class NativeBridgeBinding {
   listAgentDirectoryJson(): string
+  listAgentRouteResolutionsJson(): string
+  getAgentRouteResolutionJson(routeKey: string): string | null
+  resolveAgentAddressJson(address: string): string
+  putAgentRouteJson(writeJson: string): string
+  deleteAgentRouteJson(deleteJson: string): string
   deliverAgentMessageJson(commandJson: string): string
   replyAgentMessageJson(commandJson: string): string
   listAgentMessageInboxJson(queryJson: string): string

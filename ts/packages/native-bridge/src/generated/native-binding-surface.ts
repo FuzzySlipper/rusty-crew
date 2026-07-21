@@ -2,6 +2,11 @@
 
 export interface NativeBridgeBinding {
   listAgentDirectoryJson(): string
+  listAgentRouteResolutionsJson(): string
+  getAgentRouteResolutionJson(routeKey: string): string | null
+  resolveAgentAddressJson(address: string): string
+  putAgentRouteJson(writeJson: string): string
+  deleteAgentRouteJson(deleteJson: string): string
   deliverAgentMessageJson(commandJson: string): string
   replyAgentMessageJson(commandJson: string): string
   listAgentMessageInboxJson(queryJson: string): string
@@ -814,7 +819,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 267,
+  "manifestOperationCount": 272,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -823,6 +828,46 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "list_agent_directory"
+    },
+    {
+      "name": "listAgentRouteResolutionsJson",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_agent_route_resolutions"
+    },
+    {
+      "name": "getAgentRouteResolutionJson",
+      "parameterSource": "routeKey: string",
+      "parameterCount": 1,
+      "returnType": "string | null",
+      "returnKind": "string",
+      "operationName": "get_agent_route_resolution"
+    },
+    {
+      "name": "resolveAgentAddressJson",
+      "parameterSource": "address: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "resolve_agent_address"
+    },
+    {
+      "name": "putAgentRouteJson",
+      "parameterSource": "writeJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "put_agent_route"
+    },
+    {
+      "name": "deleteAgentRouteJson",
+      "parameterSource": "deleteJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "delete_agent_route"
     },
     {
       "name": "deliverAgentMessageJson",

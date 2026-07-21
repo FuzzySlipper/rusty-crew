@@ -505,7 +505,7 @@
         "requireWake": {
           "type": "boolean"
         },
-        "toAgentId": {
+        "toAddress": {
           "type": "string"
         }
       },
@@ -514,7 +514,7 @@
         "deliveryId",
         "idempotencyKey",
         "messageId",
-        "toAgentId",
+        "toAddress",
         "inputKind",
         "body",
         "requireWake",
@@ -665,8 +665,21 @@
             "null"
           ]
         },
+        "requestedAddress": {
+          "type": "string"
+        },
         "requireWake": {
           "type": "boolean"
+        },
+        "routing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRouteDeliveryProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "toAgentId": {
           "type": "string"
@@ -683,6 +696,7 @@
         "idempotencyKey",
         "messageId",
         "fromAgentId",
+        "requestedAddress",
         "toAgentId",
         "inputKind",
         "body",
@@ -885,7 +899,7 @@
         "roundId": {
           "type": "string"
         },
-        "toAgentId": {
+        "toAddress": {
           "type": "string"
         }
       },
@@ -894,7 +908,7 @@
         "roundId",
         "idempotencyKey",
         "messageId",
-        "toAgentId",
+        "toAddress",
         "body",
         "correlationId",
         "createdAt",
@@ -926,6 +940,367 @@
         "failed"
       ],
       "type": "string"
+    },
+    "AgentRouteDelete": {
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "routeKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeKey",
+        "expectedRevision"
+      ],
+      "type": "object"
+    },
+    "AgentRouteDeliveryProvenance": {
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "resolvedTarget": {
+          "$ref": "#/$defs/AgentRouteResolvedTarget"
+        },
+        "routeKey": {
+          "type": "string"
+        },
+        "routeRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "address",
+        "routeKey",
+        "routeRevision",
+        "resolvedTarget"
+      ],
+      "type": "object"
+    },
+    "AgentRouteLastDelivery": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "routeRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentMessageDeliveryStatus"
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "deliveryId",
+        "routeRevision",
+        "status",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "AgentRouteRecord": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "requiredDeliveryPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalMessageDeliveryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredRuntimeKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentDirectoryRuntimeKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "routeKey": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/AgentRouteTarget"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeKey",
+        "label",
+        "enabled",
+        "target",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "AgentRouteResolution": {
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "lastDelivery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRouteLastDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedTarget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRouteResolvedTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routable": {
+          "type": "boolean"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRouteRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "routable"
+      ],
+      "type": "object"
+    },
+    "AgentRouteResolvedTarget": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bindingRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "deliveryPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalMessageDeliveryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayLabel": {
+          "type": "string"
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "runtimeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeKind": {
+          "$ref": "#/$defs/AgentDirectoryRuntimeKind"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "sessionId",
+        "profileId",
+        "displayLabel",
+        "runtimeKind"
+      ],
+      "type": "object"
+    },
+    "AgentRouteTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "agentId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "direct_brain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "agentId",
+            "sessionId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "agentId": {
+              "type": "string"
+            },
+            "bindingId": {
+              "type": "string"
+            },
+            "bindingRevision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "managed_external",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "agentId",
+            "bindingId",
+            "bindingRevision"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentRouteWrite": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "requiredDeliveryPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalMessageDeliveryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredRuntimeKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentDirectoryRuntimeKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routeKey": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/AgentRouteTarget"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeKey",
+        "label",
+        "enabled",
+        "target",
+        "updatedAt"
+      ],
+      "type": "object"
     },
     "BodyDeltaPolicy": {
       "properties": {
@@ -5470,6 +5845,18 @@
     "agent_round_start_receipt": {
       "$ref": "#/$defs/AgentRoundStartReceipt"
     },
+    "agent_route_delete": {
+      "$ref": "#/$defs/AgentRouteDelete"
+    },
+    "agent_route_record": {
+      "$ref": "#/$defs/AgentRouteRecord"
+    },
+    "agent_route_resolution": {
+      "$ref": "#/$defs/AgentRouteResolution"
+    },
+    "agent_route_write": {
+      "$ref": "#/$defs/AgentRouteWrite"
+    },
     "body_state": {
       "$ref": "#/$defs/BodyState"
     },
@@ -5714,6 +6101,10 @@
     "memory_governance_decision_input",
     "memory_governance_decision_record",
     "agent_directory_entry",
+    "agent_route_record",
+    "agent_route_write",
+    "agent_route_delete",
+    "agent_route_resolution",
     "agent_message_command",
     "agent_message_delivery_completion",
     "agent_message_reply_command",

@@ -1721,14 +1721,14 @@
           "inputKind": { "$ref": "#/components/schemas/AgentMessageInputKind" },
           "messageId": { "type": "string" },
           "requireWake": { "type": "boolean" },
-          "toAgentId": { "type": "string" }
+          "toAddress": { "type": "string" }
         },
         "required": [
           "caller",
           "deliveryId",
           "idempotencyKey",
           "messageId",
-          "toAgentId",
+          "toAddress",
           "inputKind",
           "body",
           "requireWake",
@@ -1800,7 +1800,14 @@
           "inputKind": { "$ref": "#/components/schemas/AgentMessageInputKind" },
           "messageId": { "type": "string" },
           "replyToMessageId": { "type": ["string", "null"] },
+          "requestedAddress": { "type": "string" },
           "requireWake": { "type": "boolean" },
+          "routing": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentRouteDeliveryProvenance" },
+              { "type": "null" }
+            ]
+          },
           "toAgentId": { "type": "string" },
           "toSessionId": { "type": ["string", "null"] }
         },
@@ -1809,6 +1816,7 @@
           "idempotencyKey",
           "messageId",
           "fromAgentId",
+          "requestedAddress",
           "toAgentId",
           "inputKind",
           "body",
@@ -1922,14 +1930,14 @@
           "idempotencyKey": { "type": "string" },
           "messageId": { "type": "string" },
           "roundId": { "type": "string" },
-          "toAgentId": { "type": "string" }
+          "toAddress": { "type": "string" }
         },
         "required": [
           "caller",
           "roundId",
           "idempotencyKey",
           "messageId",
-          "toAgentId",
+          "toAddress",
           "body",
           "correlationId",
           "createdAt",
@@ -1950,6 +1958,201 @@
       "AgentRoundStatus": {
         "enum": ["pending", "replied", "expired", "cancelled", "failed"],
         "type": "string"
+      },
+      "AgentRouteDelete": {
+        "properties": {
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "routeKey": { "type": "string" }
+        },
+        "required": ["routeKey", "expectedRevision"],
+        "type": "object"
+      },
+      "AgentRouteDeliveryProvenance": {
+        "properties": {
+          "address": { "type": "string" },
+          "resolvedTarget": {
+            "$ref": "#/components/schemas/AgentRouteResolvedTarget"
+          },
+          "routeKey": { "type": "string" },
+          "routeRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["address", "routeKey", "routeRevision", "resolvedTarget"],
+        "type": "object"
+      },
+      "AgentRouteLastDelivery": {
+        "properties": {
+          "createdAt": { "type": "string" },
+          "deliveryId": { "type": "string" },
+          "reasonCode": { "type": ["string", "null"] },
+          "routeRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryStatus"
+          },
+          "terminalAt": { "type": ["string", "null"] }
+        },
+        "required": ["deliveryId", "routeRevision", "status", "createdAt"],
+        "type": "object"
+      },
+      "AgentRouteRecord": {
+        "properties": {
+          "createdAt": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "enabled": { "type": "boolean" },
+          "label": { "type": "string" },
+          "requiredDeliveryPolicy": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalMessageDeliveryPolicy" },
+              { "type": "null" }
+            ]
+          },
+          "requiredRuntimeKind": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentDirectoryRuntimeKind" },
+              { "type": "null" }
+            ]
+          },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "routeKey": { "type": "string" },
+          "target": { "$ref": "#/components/schemas/AgentRouteTarget" },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "routeKey",
+          "label",
+          "enabled",
+          "target",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "AgentRouteResolution": {
+        "properties": {
+          "address": { "type": "string" },
+          "lastDelivery": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentRouteLastDelivery" },
+              { "type": "null" }
+            ]
+          },
+          "reasonCode": { "type": ["string", "null"] },
+          "resolvedTarget": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentRouteResolvedTarget" },
+              { "type": "null" }
+            ]
+          },
+          "routable": { "type": "boolean" },
+          "route": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentRouteRecord" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["address", "routable"],
+        "type": "object"
+      },
+      "AgentRouteResolvedTarget": {
+        "properties": {
+          "agentId": { "type": "string" },
+          "bindingId": { "type": ["string", "null"] },
+          "bindingRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "deliveryPolicy": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalMessageDeliveryPolicy" },
+              { "type": "null" }
+            ]
+          },
+          "displayLabel": { "type": "string" },
+          "profileId": { "type": "string" },
+          "runtimeId": { "type": ["string", "null"] },
+          "runtimeKind": {
+            "$ref": "#/components/schemas/AgentDirectoryRuntimeKind"
+          },
+          "sessionId": { "type": "string" }
+        },
+        "required": [
+          "agentId",
+          "sessionId",
+          "profileId",
+          "displayLabel",
+          "runtimeKind"
+        ],
+        "type": "object"
+      },
+      "AgentRouteTarget": {
+        "oneOf": [
+          {
+            "properties": {
+              "agentId": { "type": "string" },
+              "sessionId": { "type": "string" },
+              "type": { "const": "direct_brain", "type": "string" }
+            },
+            "required": ["type", "agentId", "sessionId"],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "agentId": { "type": "string" },
+              "bindingId": { "type": "string" },
+              "bindingRevision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": { "const": "managed_external", "type": "string" }
+            },
+            "required": ["type", "agentId", "bindingId", "bindingRevision"],
+            "type": "object"
+          }
+        ]
+      },
+      "AgentRouteWrite": {
+        "properties": {
+          "description": { "type": ["string", "null"] },
+          "enabled": { "type": "boolean" },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "label": { "type": "string" },
+          "requiredDeliveryPolicy": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalMessageDeliveryPolicy" },
+              { "type": "null" }
+            ]
+          },
+          "requiredRuntimeKind": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/AgentDirectoryRuntimeKind" },
+              { "type": "null" }
+            ]
+          },
+          "routeKey": { "type": "string" },
+          "target": { "$ref": "#/components/schemas/AgentRouteTarget" },
+          "updatedAt": { "type": "string" }
+        },
+        "required": ["routeKey", "label", "enabled", "target", "updatedAt"],
+        "type": "object"
       },
       "BodyDeltaPolicy": {
         "properties": {

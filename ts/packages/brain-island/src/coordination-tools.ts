@@ -1,4 +1,8 @@
-import type { AgentDirectoryEntry, AgentId } from "@rusty-crew/contracts";
+import type {
+  AgentDirectoryEntry,
+  AgentId,
+  AgentRouteResolution,
+} from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type {
@@ -7,7 +11,7 @@ import type {
 } from "./tool-session-selection.js";
 
 const sendAgentMessageParameters = Type.Object({
-  toAgentId: Type.String({ minLength: 1 }),
+  toAddress: Type.String({ minLength: 1 }),
   body: Type.String({ minLength: 1 }),
   correlationId: Type.Optional(Type.String({ minLength: 1 })),
   requireWake: Type.Optional(Type.Boolean()),
@@ -21,7 +25,7 @@ const replyAgentMessageParameters = Type.Object({
 });
 
 const agentRoundParameters = Type.Object({
-  toAgentId: Type.String({ minLength: 1 }),
+  toAddress: Type.String({ minLength: 1 }),
   body: Type.String({ minLength: 1 }),
   correlationId: Type.Optional(Type.String({ minLength: 1 })),
   timeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
@@ -56,12 +60,13 @@ export interface AgentRoundResult extends AgentMessageRouteResult {
 
 export interface CoordinationToolRuntime {
   listAgents(): Promise<AgentDirectoryEntry[]>;
+  listRoutes(): Promise<AgentRouteResolution[]>;
   routeMessage(input: {
     fromAgentId: string;
     fromSessionId: string;
     wakeId: string;
     toolCallId: string;
-    toAgentId: string;
+    toAddress: string;
     body: string;
     correlationId?: string;
     requireWake?: boolean;
@@ -81,7 +86,7 @@ export interface CoordinationToolRuntime {
     fromSessionId: string;
     wakeId: string;
     toolCallId: string;
-    toAgentId: string;
+    toAddress: string;
     body: string;
     correlationId: string;
     timeoutMs: number;
@@ -102,6 +107,7 @@ export interface CoordinationToolDetails {
     | "agent_round";
   reasonCode?: string;
   agents?: AgentDirectoryEntry[];
+  routes?: AgentRouteResolution[];
   routed?: AgentMessageRouteResult;
   round?: AgentRoundResult;
   queuedActions: number;
@@ -171,20 +177,24 @@ export function listAgentsTool(
         text: "list_agents requires the Rusty Crew service coordination runtime.",
       });
     }
-    const agents = await context.runtime.listAgents();
+    const [routes, agents] = await Promise.all([
+      context.runtime.listRoutes(),
+      context.runtime.listAgents(),
+    ]);
     return coordinationResult({
       ok: true,
       operation: "list_agents",
       agents,
+      routes,
       queuedActions: 0,
-      text: formatAgentDirectory(agents),
+      text: formatAgentDirectory(routes, agents),
     });
   };
   return {
     name: "list_agents",
     label: "List agents",
     description:
-      "List agents addressable through this Rusty Crew service and their stable recipient IDs.",
+      "List curated @route addresses first, followed by raw same-service agent diagnostics.",
     parameters: listAgentsParameters,
     executeWithContext: execute,
     execute: execute,
@@ -198,7 +208,7 @@ export function sendAgentMessageTool(
     name: "send_agent_message",
     label: "Send agent message",
     description:
-      "Route a Rusty Crew internal message to another agent and request a wake when the service runtime is available.",
+      "Route a Rusty Crew internal message to an exact @route address or raw agent ID and request a wake.",
     parameters: sendAgentMessageParameters,
     executeWithContext: async (params, toolContext) =>
       sendAgentMessage(context, {
@@ -226,7 +236,7 @@ export function agentRoundTool(
     name: "agent_round",
     label: "Agent round",
     description:
-      "Send an internal message to another agent, wake it, and wait for one correlated reply.",
+      "Send an internal message to an exact @route address or raw agent ID, wake it, and wait for one correlated reply.",
     parameters: agentRoundParameters,
     executeWithContext: async (params, toolContext) => {
       const fromAgentId = toolContext.wake.state.session.agentId;
@@ -247,7 +257,7 @@ export function agentRoundTool(
         fromSessionId: toolContext.sessionId,
         wakeId: toolContext.wakeId,
         toolCallId: toolContext.callId,
-        toAgentId: params.toAgentId,
+        toAddress: params.toAddress,
         body: params.body,
         correlationId,
         timeoutMs: Math.min(Math.max(params.timeoutMs ?? 30_000, 1), 300_000),
@@ -260,7 +270,7 @@ export function agentRoundTool(
         round,
         text:
           round.reply === undefined
-            ? `round message sent to ${params.toAgentId}; no reply received`
+            ? `round message sent to ${params.toAddress}; no reply received`
             : `reply from ${round.reply.from}: ${round.reply.body}`,
       });
     },
@@ -315,7 +325,7 @@ async function sendAgentMessage(
       fromSessionId: input.fromSessionId,
       wakeId: input.wakeId,
       toolCallId: input.toolCallId,
-      toAgentId: input.params.toAgentId,
+      toAddress: input.params.toAddress,
       body: input.params.body,
       ...(input.params.correlationId === undefined
         ? {}
@@ -331,8 +341,18 @@ async function sendAgentMessage(
       routed,
       queuedActions: 0,
       text: routed.wake
-        ? `message routed to ${input.params.toAgentId}; wake ${routed.wake.status}`
-        : `message routed to ${input.params.toAgentId}`,
+        ? `message routed to ${input.params.toAddress}; wake ${routed.wake.status}`
+        : `message routed to ${input.params.toAddress}`,
+    });
+  }
+
+  if (input.params.toAddress.startsWith("@")) {
+    return coordinationResult({
+      ok: false,
+      operation: "send_agent_message",
+      reasonCode: "coordination_runtime_unavailable",
+      queuedActions: 0,
+      text: "switchboard addresses require the Rusty Crew service coordination runtime",
     });
   }
 
@@ -340,7 +360,7 @@ async function sendAgentMessage(
     type: "send_message",
     message: {
       from: fromAgentId as AgentId,
-      to: input.params.toAgentId as AgentId,
+      to: input.params.toAddress as AgentId,
       body: input.params.body,
       correlationId: input.params.correlationId,
     },
@@ -407,6 +427,7 @@ function coordinationResult(input: {
   text: string;
   reasonCode?: string;
   agents?: AgentDirectoryEntry[];
+  routes?: AgentRouteResolution[];
   routed?: AgentMessageRouteResult;
   round?: AgentRoundResult;
   queuedActions: number;
@@ -418,6 +439,7 @@ function coordinationResult(input: {
       operation: input.operation,
       reasonCode: input.reasonCode,
       agents: input.agents,
+      routes: input.routes,
       routed: input.routed,
       round: input.round,
       queuedActions: input.queuedActions,
@@ -425,20 +447,38 @@ function coordinationResult(input: {
   };
 }
 
-function formatAgentDirectory(agents: readonly AgentDirectoryEntry[]): string {
-  if (agents.length === 0) {
-    return "No non-archived agents are registered on this Rusty Crew service.";
-  }
+function formatAgentDirectory(
+  routes: readonly AgentRouteResolution[],
+  agents: readonly AgentDirectoryEntry[],
+): string {
+  const routeLines =
+    routes.length === 0
+      ? ["- none configured"]
+      : routes.map((resolution) => {
+          const route = resolution.route;
+          const target = resolution.resolvedTarget;
+          const status = resolution.routable
+            ? "routable"
+            : `unavailable (${resolution.reasonCode ?? "unknown_reason"})`;
+          return `- ${resolution.address}: ${route?.label ?? "unknown route"}; target=${target?.agentId ?? "unresolved"}; runtime=${target?.runtimeKind ?? route?.requiredRuntimeKind ?? "unresolved"}; status=${status}`;
+        });
+  const agentLines =
+    agents.length === 0
+      ? ["- no non-archived agents registered"]
+      : agents.map((agent) => {
+          const status = agent.routable
+            ? "routable"
+            : `unavailable (${agent.routabilityReasonCode ?? "unknown_reason"})`;
+          const task = agent.taskRef?.projectId
+            ? `; project=${agent.taskRef.projectId}`
+            : "";
+          return `- ${agent.displayLabel}: recipient=${agent.agentId}; profile=${agent.profileId}; runtime=${agent.runtimeKind}; status=${status}${task}`;
+        });
   return [
-    "Agents on this Rusty Crew service:",
-    ...agents.map((agent) => {
-      const status = agent.routable
-        ? "routable"
-        : `unavailable (${agent.routabilityReasonCode ?? "unknown_reason"})`;
-      const task = agent.taskRef?.projectId
-        ? `; project=${agent.taskRef.projectId}`
-        : "";
-      return `- ${agent.displayLabel}: recipient=${agent.agentId}; profile=${agent.profileId}; runtime=${agent.runtimeKind}; status=${status}${task}`;
-    }),
+    "Switchboard routes (preferred addresses):",
+    ...routeLines,
+    "",
+    "Raw agent directory (diagnostics):",
+    ...agentLines,
   ].join("\n");
 }

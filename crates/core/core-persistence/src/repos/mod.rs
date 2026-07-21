@@ -1,3 +1,4 @@
+pub(crate) mod agent_routes;
 pub(crate) mod attachments;
 pub(crate) mod chat_events;
 pub(crate) mod conversations;
