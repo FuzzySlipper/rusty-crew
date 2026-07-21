@@ -42,7 +42,9 @@ impl CoreEngine {
             scheduler_tick_lock: Arc::new(Mutex::new(())),
             github_gate_lock: Arc::new(Mutex::new(())),
             external_follow_up_lock: Arc::new(Mutex::new(())),
+            agent_route_lifecycle_lock: Arc::new(Mutex::new(())),
         };
+        engine.validate_agent_route_session_collisions()?;
         engine.cleanup_orphaned_delegated_sessions()?;
         engine.expire_delegated_sessions()?;
         engine.reactivate_active_roleplay_sessions()?;

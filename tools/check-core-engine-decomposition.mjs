@@ -7,6 +7,7 @@ const engineDir = "crates/core/core-engine/src";
 const libPath = join(engineDir, "lib.rs");
 const testDir = join(engineDir, "tests");
 const requiredDomains = [
+  "agent_route_activation.rs",
   "body.rs",
   "bootstrap.rs",
   "brain_runtime.rs",

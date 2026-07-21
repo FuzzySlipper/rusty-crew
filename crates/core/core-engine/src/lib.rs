@@ -1,6 +1,7 @@
 //! Coordination engine composition.
 
 mod agent_coordination;
+mod agent_route_activation;
 mod body;
 mod body_queue;
 mod bootstrap;
@@ -187,6 +188,7 @@ pub struct CoreEngine {
     scheduler_tick_lock: Arc<Mutex<()>>,
     github_gate_lock: Arc<Mutex<()>>,
     external_follow_up_lock: Arc<Mutex<()>>,
+    agent_route_lifecycle_lock: Arc<Mutex<()>>,
 }
 
 fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {

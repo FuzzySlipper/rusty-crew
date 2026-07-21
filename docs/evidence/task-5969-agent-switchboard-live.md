@@ -50,3 +50,25 @@ route `@task-5969-final-proof` accepted delivery
 `operator-route-test:32615954-c6f0-4044-8031-0db4d61a76e2`. A subsequent route
 GET returned `lastDelivery` with route revision `1`, status `accepted`, and its
 terminal timestamp. The disposable route was deleted immediately afterward.
+
+## Review-Finding Closure
+
+Re-certified on 2026-07-21 after addressing `R5969-1` and `R5969-2`.
+
+- Deterministic engine coverage now creates two active sessions with the same
+  agent ID, deliberately routes to the session that agent-only selection would
+  not choose, and proves the direct wake event names the resolved session.
+- The managed-runtime variant proves the exact session and binding are retained
+  for both immediate activation and a queued `serial_next_turn` promotion.
+- Route activation revalidates the frozen session/profile/runtime/binding target
+  and fails closed with `agent_route_activation_target_changed` if it drifts.
+- Collision coverage now exercises raw-agent-first and route-first creation.
+  Startup hydration also rejects a deliberately persisted route/raw-agent
+  collision instead of allowing a shadowed address.
+- After rebuilding the native bridge, both installed services restarted with
+  `health: ok`. On the debug service, `@task-5969-rereview-proof` targeted
+  `gb-run-20260719-052209-6e47afd3-coding-leased-dag-queue-rust-rusty-crew-native-longcat-2-0-benchmark`
+  while another active session had the same agent ID. Delivery
+  `operator-route-test:29f0ab0c-dd1d-4df9-acc7-11540844b060` returned
+  `direct_brain_wake_requested` for that exact target session. The route was
+  deleted immediately afterward.

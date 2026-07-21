@@ -139,9 +139,9 @@ impl CoreEngine {
         };
         let recipient_session_changed = self
             .sessions
-            .get_session_by_agent(&queued.message.to)
+            .get_session(session_id)
             .map(|current| {
-                current.session_id != *session_id || current.status == SessionStatus::Archived
+                current.agent_id != queued.message.to || current.status == SessionStatus::Archived
             })
             .unwrap_or(true);
         if recipient_session_changed {
@@ -160,7 +160,7 @@ impl CoreEngine {
         }
         let request_id =
             ExternalTurnRequestId::new(format!("external-follow-up:{}", queued.message_id));
-        let provenance_kind = match queued
+        let source_delivery = match queued
             .state_reason
             .as_deref()
             .and_then(|reason| reason.strip_prefix("agent_delivery:"))
@@ -177,15 +177,24 @@ impl CoreEngine {
                             ),
                         )
                     })?;
-                match delivery.request.input_kind {
-                    AgentMessageInputKind::Operator => TurnInputProvenanceKind::Operator,
-                    AgentMessageInputKind::RoutedAgentMessage => {
-                        TurnInputProvenanceKind::RoutedAgentMessage
-                    }
-                }
+                Some(delivery)
+            }
+            None => None,
+        };
+        let provenance_kind = match source_delivery
+            .as_ref()
+            .map(|delivery| delivery.request.input_kind)
+        {
+            Some(AgentMessageInputKind::Operator) => TurnInputProvenanceKind::Operator,
+            Some(AgentMessageInputKind::RoutedAgentMessage) => {
+                TurnInputProvenanceKind::RoutedAgentMessage
             }
             None => TurnInputProvenanceKind::ScheduledWake,
         };
+        let resolved_target = source_delivery
+            .as_ref()
+            .and_then(|delivery| delivery.request.routing.as_deref())
+            .map(|routing| &routing.resolved_target);
         let activation = self.activate_agent_execution_inner(
             AgentActivationRequest {
                 agent_id: queued.message.to.clone(),
@@ -208,7 +217,20 @@ impl CoreEngine {
                 expires_at: Some(queued.expires_at.clone()),
             },
             Some((&queued.message_id, now)),
+            resolved_target,
         )?;
+        if matches!(
+            &activation,
+            AgentActivation::Rejected { reason_code }
+                if reason_code == "agent_route_activation_target_changed"
+        ) {
+            let mut cancelled = queued;
+            cancelled.state = QueuedMessageState::Cancelled;
+            cancelled.terminal_at = Some(now.clone());
+            cancelled.state_reason = Some("agent_route_activation_target_changed".into());
+            self.store.save_queued_message(&cancelled)?;
+            return Ok(None);
+        }
         if !matches!(activation, AgentActivation::ExternalTurnRequested { .. }) {
             return Ok(None);
         }

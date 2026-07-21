@@ -7,18 +7,19 @@ use crate::external_controls::{
 };
 use rusty_crew_core_protocol::{
     validate_external_runtime_handshake_observation, AgentActivation, AgentMessageDeliveryStatus,
-    AgentRoundStatus, ExternalAgentBinding, ExternalAgentBindingMetadataWrite,
-    ExternalAgentSessionCreationId, ExternalAgentSessionCreationPhase,
-    ExternalAgentSessionCreationRecord, ExternalAgentSessionCreationRequest,
-    ExternalAgentSessionIdentity, ExternalBindingId, ExternalBindingPurpose, ExternalBindingStatus,
-    ExternalCollaborationMode, ExternalControlId, ExternalControlKind, ExternalControlReceipt,
-    ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
-    ExternalControllerLease, ExternalInteractionRecord, ExternalInteractionStatus,
-    ExternalMessageDeliveryPolicy, ExternalRuntimeCompatibilityProbeOutcome,
-    ExternalRuntimeCompatibilityState, ExternalRuntimeDesiredState, ExternalRuntimeEventInput,
-    ExternalRuntimeHandshakeDecision, ExternalRuntimeHandshakeObservation, ExternalRuntimeId,
-    ExternalRuntimeObservedState, ExternalRuntimeRegistration, ExternalRuntimeStateObservation,
-    ExternalTurnCorrelation, ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    AgentRoundStatus, AgentRouteResolvedTarget, ExternalAgentBinding,
+    ExternalAgentBindingMetadataWrite, ExternalAgentSessionCreationId,
+    ExternalAgentSessionCreationPhase, ExternalAgentSessionCreationRecord,
+    ExternalAgentSessionCreationRequest, ExternalAgentSessionIdentity, ExternalBindingId,
+    ExternalBindingPurpose, ExternalBindingStatus, ExternalCollaborationMode, ExternalControlId,
+    ExternalControlKind, ExternalControlReceipt, ExternalControlRequest, ExternalControlStatus,
+    ExternalControllerContext, ExternalControllerLease, ExternalInteractionRecord,
+    ExternalInteractionStatus, ExternalMessageDeliveryPolicy,
+    ExternalRuntimeCompatibilityProbeOutcome, ExternalRuntimeCompatibilityState,
+    ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
+    ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
+    ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -1038,19 +1039,40 @@ impl CoreEngine {
         &self,
         request: AgentActivationRequest,
     ) -> CoreResult<AgentActivation> {
-        self.activate_agent_execution_inner(request, None)
+        self.activate_agent_execution_inner(request, None, None)
+    }
+
+    pub(crate) fn activate_agent_execution_for_resolved_target(
+        &self,
+        request: AgentActivationRequest,
+        target: &AgentRouteResolvedTarget,
+    ) -> CoreResult<AgentActivation> {
+        self.activate_agent_execution_inner(request, None, Some(target))
     }
 
     pub(crate) fn activate_agent_execution_inner(
         &self,
         request: AgentActivationRequest,
         queued_claim: Option<(&str, &IsoTimestamp)>,
+        resolved_target: Option<&AgentRouteResolvedTarget>,
     ) -> CoreResult<AgentActivation> {
-        let session = self.sessions.get_session_by_agent(&request.agent_id)?;
-        let Some(binding) = self
-            .store
-            .get_external_binding_for_agent(&request.agent_id)?
-        else {
+        let (session, binding) = if let Some(target) = resolved_target {
+            let Some(target) =
+                self.resolve_agent_route_activation_target(&request.agent_id, target)?
+            else {
+                return Ok(AgentActivation::Rejected {
+                    reason_code: "agent_route_activation_target_changed".into(),
+                });
+            };
+            target
+        } else {
+            let session = self.sessions.get_session_by_agent(&request.agent_id)?;
+            let binding = self
+                .store
+                .get_external_binding_for_agent(&request.agent_id)?;
+            (session, binding)
+        };
+        let Some(binding) = binding else {
             return Ok(AgentActivation::DirectBrainWakeRequested {
                 session_id: session.session_id,
                 wake_id: request.direct_wake_id,

@@ -18,6 +18,12 @@ use serde_json::json;
 
 impl CoreEngine {
     pub fn put_agent_route(&self, write: AgentRouteWrite) -> CoreResult<AgentRouteRecord> {
+        let _lifecycle_guard = self.agent_route_lifecycle_lock.lock().map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "agent route lifecycle lock poisoned",
+            )
+        })?;
         let address = format!("@{}", write.route_key.0);
         if self
             .sessions
@@ -34,7 +40,33 @@ impl CoreEngine {
     }
 
     pub fn delete_agent_route(&self, delete: AgentRouteDelete) -> CoreResult<AgentRouteRecord> {
+        let _lifecycle_guard = self.agent_route_lifecycle_lock.lock().map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "agent route lifecycle lock poisoned",
+            )
+        })?;
         self.store.delete_agent_route(&delete)
+    }
+
+    pub(crate) fn validate_agent_id_route_reservation(&self, agent_id: &AgentId) -> CoreResult<()> {
+        let Some(route_key) = parse_agent_route_address(&agent_id.0)? else {
+            return Ok(());
+        };
+        if self.store.get_agent_route(&route_key)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "agent_route_address_collides_with_raw_agent_id",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_agent_route_session_collisions(&self) -> CoreResult<()> {
+        for session in self.sessions.all_sessions()? {
+            self.validate_agent_id_route_reservation(&session.agent_id)?;
+        }
+        Ok(())
     }
 
     pub fn get_agent_route_resolution(
@@ -422,7 +454,15 @@ impl CoreEngine {
             .map(|target| target.agent_id.clone())
             .or_else(|| route_target_agent_id(address_resolution.route.as_ref()))
             .unwrap_or_else(|| AgentId::new(command.to_address.clone()));
-        let recipient = self.sessions.get_session_by_agent(&recipient_agent_id);
+        let recipient = if address_resolution.route.is_some() {
+            address_resolution
+                .resolved_target
+                .as_ref()
+                .map(|target| self.sessions.get_session(&target.session_id))
+                .unwrap_or_else(|| self.sessions.get_session_by_agent(&recipient_agent_id))
+        } else {
+            self.sessions.get_session_by_agent(&recipient_agent_id)
+        };
         let recipient_session_id = address_resolution
             .resolved_target
             .as_ref()
@@ -606,7 +646,7 @@ impl CoreEngine {
                 TurnInputProvenanceKind::RoutedAgentMessage
             }
         };
-        let activation = self.activate_agent_execution(AgentActivationRequest {
+        let activation_request = AgentActivationRequest {
             agent_id: recipient_agent_id,
             request_id: ExternalTurnRequestId::new(format!("agent-message:{}", command.message_id)),
             idempotency_key: format!("agent-message-turn:{}", command.message_id),
@@ -625,7 +665,16 @@ impl CoreEngine {
             queued_message_id: format!("agent-message-queue:{}", command.message_id),
             created_at: command.created_at,
             expires_at: Some(command.expires_at),
-        })?;
+        };
+        let activation = match (
+            address_resolution.route.as_ref(),
+            address_resolution.resolved_target.as_ref(),
+        ) {
+            (Some(_), Some(target)) => {
+                self.activate_agent_execution_for_resolved_target(activation_request, target)?
+            }
+            _ => self.activate_agent_execution(activation_request)?,
+        };
         match &activation {
             AgentActivation::DirectBrainWakeRequested { session_id, .. } => {
                 self.bus.publish(CoreEvent::BrainWakeRequested {

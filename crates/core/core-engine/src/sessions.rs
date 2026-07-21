@@ -21,6 +21,13 @@ impl CoreEngine {
     }
 
     pub fn create_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
+        let _lifecycle_guard = self.agent_route_lifecycle_lock.lock().map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "agent route lifecycle lock poisoned",
+            )
+        })?;
+        self.validate_agent_id_route_reservation(&config.agent_id)?;
         let state = self.sessions.create_session(config.clone(), self.now())?;
         save_engine_session_with_config(&self.store, &state, &config)?;
         self.bus.publish(CoreEvent::SessionCreated {
@@ -32,6 +39,13 @@ impl CoreEngine {
     pub fn ensure_configured_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
         match self.sessions.get_session(&config.session_id) {
             Ok(existing) => {
+                let _lifecycle_guard = self.agent_route_lifecycle_lock.lock().map_err(|_| {
+                    CoreError::new(
+                        CoreErrorKind::InternalError,
+                        "agent route lifecycle lock poisoned",
+                    )
+                })?;
+                self.validate_agent_id_route_reservation(&config.agent_id)?;
                 if existing.agent_id != config.agent_id
                     || existing.profile_id != config.profile_id
                     || existing.kind != config.kind
