@@ -11,7 +11,7 @@ use rusty_crew_chat_completions_brain::{
     ChatCompletionsFinalMessage, ChatCompletionsNeutralToolExecutor, ChatCompletionsToolOutput,
     FakeChatCompletionsClient, LiveChatCompletionsClient,
     NeutralBrainTool as ChatCompletionsNeutralBrainTool, PendingChatFunctionCall,
-    ProviderCancellation, DEFAULT_MAX_TOOL_ROUNDS,
+    ProviderCancellation, DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES, DEFAULT_MAX_TOOL_ROUNDS,
 };
 use rusty_crew_core_protocol::{
     BrainWakeProviderStateInput, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
@@ -72,6 +72,8 @@ struct JsChatCompletionsBrainConfig {
     max_tool_rounds: Option<usize>,
     #[serde(default)]
     repeated_tool_call_limit: Option<usize>,
+    #[serde(default)]
+    max_malformed_tool_call_recoveries: Option<usize>,
     #[serde(default)]
     final_message_fallback_text: Option<String>,
 }
@@ -397,6 +399,10 @@ fn run_chat_completions_brain_with_buffered_tools(
             .max_tool_rounds
             .unwrap_or(DEFAULT_MAX_TOOL_ROUNDS),
         repeated_tool_call_limit: input.config.repeated_tool_call_limit.unwrap_or(3),
+        max_malformed_tool_call_recoveries: input
+            .config
+            .max_malformed_tool_call_recoveries
+            .unwrap_or(DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES),
     };
     let descriptors = input
         .tools

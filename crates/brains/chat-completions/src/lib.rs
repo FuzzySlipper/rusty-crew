@@ -27,6 +27,7 @@ use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "chat-completions";
 pub const DEFAULT_MAX_TOOL_ROUNDS: usize = 64;
+pub const DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES: usize = 1;
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
 pub const OUTPUT_LIMIT_EXCEEDED_REASON_CODE: &str = "chat_completions_output_limit_exceeded";
 pub const MALFORMED_PROVIDER_STREAM_REASON_CODE: &str =
@@ -874,6 +875,7 @@ pub trait ChatCompletionsNeutralToolExecutor {
 pub struct ChatCompletionsBrainLoopConfig {
     pub max_tool_rounds: usize,
     pub repeated_tool_call_limit: usize,
+    pub max_malformed_tool_call_recoveries: usize,
 }
 
 impl Default for ChatCompletionsBrainLoopConfig {
@@ -881,6 +883,7 @@ impl Default for ChatCompletionsBrainLoopConfig {
         Self {
             max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
             repeated_tool_call_limit: 3,
+            max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
         }
     }
 }
@@ -975,9 +978,11 @@ where
                 };
             }
         };
+        let mut durable_messages = messages.clone();
         let mut repeated_calls: HashMap<(String, String), usize> = HashMap::new();
         let mut provider_request_count = 0;
         let mut tool_round_count = 0;
+        let mut malformed_tool_call_recovery_count = 0;
         let mut provider_event_counts = BTreeMap::new();
         let mut provider_request_debug_samples = Vec::new();
 
@@ -1012,12 +1017,9 @@ where
                 {
                     finish_reason = provider_finish_reason.clone();
                 }
-                if matches!(
-                    event,
-                    ChatCompletionsEvent::Finished {
-                        finish_reason: Some(reason)
-                    } if reason == "tool_calls"
-                ) {
+                if matches!(event, ChatCompletionsEvent::Finished { .. })
+                    && (!tool_calls.is_empty() || !malformed_tool_calls.is_empty())
+                {
                     return;
                 }
                 stream.extend(mapper.map_provider_event(&input.context, event));
@@ -1040,8 +1042,77 @@ where
                 };
             }
 
-            if finish_reason.as_deref() == Some("length")
-                && (!malformed_tool_calls.is_empty() || !tool_calls_are_actionable(&tool_calls))
+            if !malformed_tool_calls.is_empty() {
+                let reason_code = if finish_reason.as_deref() == Some("length") {
+                    OUTPUT_LIMIT_EXCEEDED_REASON_CODE
+                } else {
+                    MALFORMED_PROVIDER_STREAM_REASON_CODE
+                };
+                if malformed_tool_call_recovery_count
+                    < self.config.max_malformed_tool_call_recoveries
+                {
+                    malformed_tool_call_recovery_count += 1;
+                    // Some OpenAI-compatible providers reject assistant history
+                    // entries that contain reasoning_content without visible
+                    // content or executable tool calls. The reasoning deltas
+                    // remain observable, but only replay a provider-valid
+                    // partial assistant message during recovery.
+                    if !assistant_text.is_empty() {
+                        messages.push(assistant_partial_message(
+                            &assistant_text,
+                            &assistant_reasoning,
+                        ));
+                    }
+                    messages.push(ChatCompletionMessage::user(
+                        malformed_tool_call_recovery_feedback(
+                            finish_reason.as_deref(),
+                            &malformed_tool_calls,
+                            malformed_tool_call_recovery_count,
+                            self.config.max_malformed_tool_call_recoveries,
+                        ),
+                    ));
+                    stream.push(malformed_tool_call_recovery_status(
+                        &input.context,
+                        reason_code,
+                        malformed_tool_call_recovery_count,
+                        self.config.max_malformed_tool_call_recoveries,
+                        &malformed_tool_calls,
+                    ));
+                    continue;
+                }
+                let message = if reason_code == OUTPUT_LIMIT_EXCEEDED_REASON_CODE {
+                    format!(
+                        "chat-completions provider reached finish_reason length with malformed tool arguments and exhausted {} recovery attempt(s)",
+                        self.config.max_malformed_tool_call_recoveries
+                    )
+                } else {
+                    format!(
+                        "{}; exhausted {} recovery attempt(s)",
+                        malformed_tool_call_summary(
+                            finish_reason.as_deref(),
+                            &malformed_tool_calls,
+                        ),
+                        self.config.max_malformed_tool_call_recoveries
+                    )
+                };
+                stream.push(wake_failed_item_with_reason(
+                    &input.context,
+                    CoreErrorKind::BrainUnavailable,
+                    reason_code,
+                    message,
+                ));
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    provider_request_count,
+                    tool_round_count,
+                    provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
+                };
+            }
+
+            if finish_reason.as_deref() == Some("length") && !tool_calls_are_actionable(&tool_calls)
             {
                 stream.push(wake_failed_item_with_reason(
                     &input.context,
@@ -1060,27 +1131,9 @@ where
                 };
             }
 
-            if !malformed_tool_calls.is_empty() {
-                stream.push(wake_failed_item_with_reason(
-                    &input.context,
-                    CoreErrorKind::BrainUnavailable,
-                    MALFORMED_PROVIDER_STREAM_REASON_CODE,
-                    malformed_tool_call_summary(finish_reason.as_deref(), &malformed_tool_calls),
-                ));
-                return ChatCompletionsBrainLoopOutput {
-                    stream,
-                    completed: false,
-                    provider_request_count,
-                    tool_round_count,
-                    provider_event_counts,
-                    provider_request_debug_samples,
-                    provider_state: None,
-                };
-            }
-
             if tool_calls.is_empty() {
                 if !assistant_text.is_empty() || !assistant_reasoning.is_empty() {
-                    messages.push(ChatCompletionMessage {
+                    let assistant_message = ChatCompletionMessage {
                         role: ChatMessageRole::Assistant,
                         content: (!assistant_text.is_empty()).then_some(assistant_text.clone()),
                         reasoning_content: (!assistant_reasoning.is_empty())
@@ -1088,7 +1141,9 @@ where
                         name: None,
                         tool_call_id: None,
                         tool_calls: Vec::new(),
-                    });
+                    };
+                    messages.push(assistant_message.clone());
+                    durable_messages.push(assistant_message);
                 }
                 if assistant_text.trim().is_empty() {
                     if let Some(fallback) = input.final_message_fallback {
@@ -1100,7 +1155,7 @@ where
                     &input.context,
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
-                    messages,
+                    durable_messages,
                 );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
@@ -1135,11 +1190,10 @@ where
             }
             tool_round_count += 1;
 
-            messages.push(assistant_tool_call_message(
-                &assistant_text,
-                &assistant_reasoning,
-                &tool_calls,
-            ));
+            let assistant_tool_message =
+                assistant_tool_call_message(&assistant_text, &assistant_reasoning, &tool_calls);
+            messages.push(assistant_tool_message.clone());
+            durable_messages.push(assistant_tool_message);
             for call in tool_calls {
                 let repeated_key = (call.name.clone(), call.arguments_json.clone());
                 let count = repeated_calls.entry(repeated_key).or_insert(0);
@@ -1197,12 +1251,14 @@ where
                         provider_state: None,
                     };
                 }
-                messages.push(ChatCompletionMessage::tool(
+                let tool_message = ChatCompletionMessage::tool(
                     call.id
                         .clone()
                         .unwrap_or_else(|| format!("call_{}", call.index)),
                     output.output,
-                ));
+                );
+                messages.push(tool_message.clone());
+                durable_messages.push(tool_message);
             }
         }
     }
@@ -1661,6 +1717,77 @@ fn assistant_tool_call_message(
             })
             .collect(),
     }
+}
+
+fn assistant_partial_message(content: &str, reasoning_content: &str) -> ChatCompletionMessage {
+    ChatCompletionMessage {
+        role: ChatMessageRole::Assistant,
+        content: (!content.is_empty()).then(|| content.to_string()),
+        reasoning_content: (!reasoning_content.is_empty()).then(|| reasoning_content.to_string()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }
+}
+
+fn malformed_tool_call_recovery_feedback(
+    finish_reason: Option<&str>,
+    calls: &[MalformedChatFunctionCall],
+    attempt: usize,
+    max_attempts: usize,
+) -> String {
+    let diagnostics = calls
+        .iter()
+        .map(|call| {
+            let name = call.name.as_deref().unwrap_or("unknown tool");
+            format!(
+                "{name} at index {}: {}",
+                call.index,
+                call.diagnostics.join("; ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let output_limit_guidance = if finish_reason == Some("length") {
+        " The provider also reached its output limit, so keep the corrected call concise."
+    } else {
+        ""
+    };
+    format!(
+        "[Rusty Crew tool-call recovery {attempt}/{max_attempts}] The previous assistant response did not produce executable tool arguments: {diagnostics}. No tool from that response was executed. Retry the intended tool call with one complete JSON object, or continue without the tool if it is unnecessary. Do not repeat text already emitted.{output_limit_guidance}"
+    )
+}
+
+fn malformed_tool_call_recovery_status(
+    context: &BrainEventContext,
+    trigger_reason_code: &str,
+    attempt: usize,
+    max_attempts: usize,
+    calls: &[MalformedChatFunctionCall],
+) -> BrainWakeStreamItem {
+    brain_event_item(
+        context,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Degraded,
+            message: format!(
+                "Retrying provider after malformed tool call (attempt {attempt} of {max_attempts}); no malformed call was executed."
+            ),
+            metadata_json: Some(
+                json!({
+                    "kind": "malformed_tool_call_recovery",
+                    "trigger_reason_code": trigger_reason_code,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "malformed_call_count": calls.len(),
+                    "tool_names": calls
+                        .iter()
+                        .filter_map(|call| call.name.as_deref())
+                        .collect::<Vec<_>>(),
+                })
+                .to_string(),
+            ),
+        },
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3747,48 +3874,91 @@ mod tests {
     }
 
     #[test]
-    fn minimal_loop_rejects_truncated_tool_arguments_at_output_limit() {
+    fn minimal_loop_recovers_truncated_tool_arguments_at_output_limit() {
         let provider_stream = concat!(
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"den\"}}]},\"finish_reason\":null}]}\n\n",
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
             "data: [DONE]\n\n",
         );
         let mut brain = loop_with(
-            vec![Ok(
-                parse(provider_stream).expect("parse truncated tool stream")
-            )],
-            Vec::new(),
+            vec![
+                Ok(parse(provider_stream).expect("parse truncated tool stream")),
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        r#"{"query":"den"}"#,
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("recovered".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok("found")],
         );
 
         let output =
             brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
 
-        assert!(!output.completed);
-        assert_eq!(output.tool_round_count, 0);
-        assert_eq!(terminal_kind(&output.stream), "wake_failed");
-        assert!(!events(&output.stream).iter().any(|event| matches!(
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 3);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert_eq!(
+            events(&output.stream)
+                .iter()
+                .filter(|event| matches!(event, BrainEvent::ToolCallStarted { .. }))
+                .count(),
+            1
+        );
+        assert!(events(&output.stream).iter().any(|event| matches!(
             event,
-            BrainEvent::ToolCallStarted { .. } | BrainEvent::ToolCallFinished { .. }
+            BrainEvent::ProviderStatus {
+                level: BrainProviderStatusLevel::Degraded,
+                metadata_json: Some(metadata),
+                ..
+            } if metadata.contains("malformed_tool_call_recovery")
+                && metadata.contains(OUTPUT_LIMIT_EXCEEDED_REASON_CODE)
         )));
-        assert!(matches!(
-            output.stream.last(),
-            Some(BrainWakeStreamItem::WakeFailed { failure })
-                if failure.reason_code.as_deref()
-                    == Some(OUTPUT_LIMIT_EXCEEDED_REASON_CODE)
-        ));
+        let recovery_messages = output.provider_request_debug_samples[1]["messages"]
+            .as_array()
+            .expect("recovery request messages");
+        assert!(recovery_messages.iter().any(|message| {
+            message["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("No tool from that response was executed"))
+        }));
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = output.provider_state else {
+            panic!("successful recovery must persist provider state");
+        };
+        let persisted: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload).expect("persisted recovery history");
+        assert!(persisted.messages.iter().all(|message| {
+            !message
+                .content
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Rusty Crew tool-call recovery")
+        }));
     }
 
     #[test]
-    fn minimal_loop_classifies_missing_name_at_length_without_executing_tools() {
+    fn minimal_loop_exhausts_recovery_for_repeated_missing_name_at_length() {
         let provider_stream = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"partial answer\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n",
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
             "data: [DONE]\n\n",
         );
         let mut brain = loop_with(
-            vec![Ok(
-                parse(provider_stream).expect("parse incomplete tool stream")
-            )],
+            vec![
+                Ok(parse(provider_stream).expect("parse first incomplete tool stream")),
+                Ok(parse(provider_stream).expect("parse repeated incomplete tool stream")),
+            ],
             Vec::new(),
         );
 
@@ -3796,6 +3966,7 @@ mod tests {
             brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
 
         assert!(!output.completed);
+        assert_eq!(output.provider_request_count, 2);
         assert_eq!(output.tool_round_count, 0);
         assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
             text: "partial answer".to_string(),
@@ -3817,11 +3988,73 @@ mod tests {
             output.stream.last(),
             Some(BrainWakeStreamItem::WakeFailed { failure })
                 if failure.reason_code.as_deref() == Some(OUTPUT_LIMIT_EXCEEDED_REASON_CODE)
+                    && failure.message.contains("exhausted 1 recovery attempt")
         ));
     }
 
     #[test]
-    fn minimal_loop_preserves_completed_round_before_malformed_non_length_finish() {
+    fn minimal_loop_recovers_malformed_non_length_tool_call() {
+        let malformed = MalformedChatFunctionCall {
+            index: 0,
+            id: Some("call_bad".to_string()),
+            name: Some("lookup".to_string()),
+            arguments_json: "[1,2]".to_string(),
+            diagnostics: vec![
+                "function.arguments must decode to a JSON object, found array".to_string(),
+            ],
+        };
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallMalformed(malformed),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        r#"{"query":"den"}"#,
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("corrected".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok("found")],
+        );
+
+        let output =
+            brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
+
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 3);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(
+            events(&output.stream)
+                .iter()
+                .filter(|event| matches!(event, BrainEvent::Finished))
+                .count(),
+            1
+        );
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ProviderStatus {
+                level: BrainProviderStatusLevel::Degraded,
+                metadata_json: Some(metadata),
+                ..
+            } if metadata.contains(MALFORMED_PROVIDER_STREAM_REASON_CODE)
+        )));
+    }
+
+    #[test]
+    fn minimal_loop_preserves_completed_round_across_malformed_recovery() {
         let valid_stream = concat!(
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
             "data: [DONE]\n\n",
@@ -3834,8 +4067,28 @@ mod tests {
             vec![
                 Ok(parse(valid_stream).expect("parse valid tool stream")),
                 Ok(parse(malformed_stream).expect("parse malformed tool stream")),
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(PendingChatFunctionCall {
+                        index: 0,
+                        id: Some("call_3".to_string()),
+                        name: "patch".to_string(),
+                        arguments_json: r#"{"path":"target"}"#.to_string(),
+                    }),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("patched".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
             ],
-            vec![ChatCompletionsToolOutput::ok("found")],
+            vec![
+                ChatCompletionsToolOutput::ok("found"),
+                ChatCompletionsToolOutput::ok("patched target"),
+            ],
         );
 
         let output = brain.wake_with_messages(
@@ -3843,22 +4096,22 @@ mod tests {
             vec![ChatCompletionMessage::user("inspect and patch")],
         );
 
-        assert!(!output.completed);
-        assert_eq!(output.tool_round_count, 1);
-        assert_eq!(output.provider_request_count, 2);
+        assert!(output.completed);
+        assert_eq!(output.tool_round_count, 2);
+        assert_eq!(output.provider_request_count, 4);
         assert_eq!(
             events(&output.stream)
                 .iter()
                 .filter(|event| matches!(event, BrainEvent::ToolCallStarted { .. }))
                 .count(),
-            1
+            2
         );
         assert_eq!(
             events(&output.stream)
                 .iter()
                 .filter(|event| matches!(event, BrainEvent::ToolCallFinished { .. }))
                 .count(),
-            1
+            2
         );
         assert!(
             events(&output.stream).contains(&BrainEvent::ReasoningDelta {
@@ -3866,13 +4119,35 @@ mod tests {
                 format: Some(CANONICAL_REASONING_FORMAT.to_string()),
             })
         );
-        assert!(matches!(
-            output.stream.last(),
-            Some(BrainWakeStreamItem::WakeFailed { failure })
-                if failure.reason_code.as_deref()
-                    == Some(MALFORMED_PROVIDER_STREAM_REASON_CODE)
-                    && failure.message.contains("function.arguments must decode to a JSON object")
-        ));
+        let recovery_messages = output.provider_request_debug_samples[2]["messages"]
+            .as_array()
+            .expect("post-malformed recovery request");
+        assert!(recovery_messages
+            .iter()
+            .any(|message| message["content"] == "found"));
+        assert!(recovery_messages
+            .iter()
+            .all(|message| message["reasoning_content"] != "continuing"));
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = output.provider_state else {
+            panic!("successful recovery must persist completed rounds");
+        };
+        let persisted: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload).expect("persisted completed rounds");
+        assert!(persisted
+            .messages
+            .iter()
+            .any(|message| message.content.as_deref() == Some("found")));
+        assert!(persisted
+            .messages
+            .iter()
+            .any(|message| message.content.as_deref() == Some("patched target")));
+        assert!(persisted.messages.iter().all(|message| {
+            !message
+                .content
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Rusty Crew tool-call recovery")
+        }));
     }
 
     #[test]
@@ -3978,6 +4253,7 @@ mod tests {
             loop_with(scripts, outputs).with_loop_config(ChatCompletionsBrainLoopConfig {
                 max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
                 repeated_tool_call_limit: 3,
+                max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
             });
 
         let output = brain.wake_with_messages(
@@ -4016,6 +4292,7 @@ mod tests {
         .with_loop_config(ChatCompletionsBrainLoopConfig {
             max_tool_rounds: 1,
             repeated_tool_call_limit: 3,
+            max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
         });
 
         let output = brain.wake_with_messages(

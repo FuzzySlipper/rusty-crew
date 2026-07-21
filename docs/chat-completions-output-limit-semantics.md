@@ -6,22 +6,36 @@ success signals. Rust owns their interpretation in the native
 
 - `stop` completes the provider response normally.
 - `tool_calls` continues through the bounded tool loop.
-- `length` does not emit `BrainEvent::Finished`. If no fully parsed tool call
-  is available, the wake terminates with
-  `chat_completions_output_limit_exceeded`.
+- `length` does not emit `BrainEvent::Finished`. A response with no tool-call
+  fragment still terminates with `chat_completions_output_limit_exceeded` when
+  no fully parsed tool call is available.
 - A tool call remains actionable when the provider reports `length` only when
   its complete arguments parse as a JSON object. The bounded tool loop may then
-  execute it and request the next provider turn. Truncated, malformed, or
-  non-object arguments terminate as an output-limit failure without invoking
-  the tool.
+  execute it and request the next provider turn.
 - Pending tool-call fragments are classified only after the provider's terminal
   chunk is read. A missing/empty function name, invalid argument JSON, or
   non-object argument value is retained as a diagnostic rather than aborting
   parsing before the finish reason is observed.
-- If malformed fragments accompany a non-`length` finish, the wake fails with
-  `chat_completions_malformed_provider_stream`. The provider-status event names
-  the fragment index and includes field-level diagnostics. No call from that
-  malformed response is executed.
+- A malformed response never executes any call from that provider round. The
+  Rust brain instead supplies deterministic model-visible feedback and permits
+  one provider recovery attempt by default. The feedback says that no tool ran,
+  includes the field-level diagnostics, and asks for one complete JSON object.
+- Recovery is temporary wake-local context. The malformed assistant fragment
+  and runtime-generated feedback are sent to the next provider request but are
+  excluded from durable provider history. Successful tool rounds before and
+  after recovery remain durable.
+- A partial assistant message is replayed only when it contains visible text.
+  Reasoning-only fragments remain observable but are not placed in recovery
+  request history because some OpenAI-compatible providers reject assistant
+  messages without content or executable tool calls.
+- Recovery emits a degraded provider status with kind
+  `malformed_tool_call_recovery`, the attempt count, the triggering reason code,
+  and affected tool names. Partial text, reasoning, and malformed-fragment
+  diagnostics remain visible in the event stream.
+- Repeated malformed output exhausts the bounded recovery and fails under the
+  original stable reason family: `chat_completions_output_limit_exceeded` for a
+  `length` finish or `chat_completions_malformed_provider_stream` otherwise.
+  The terminal failure states that recovery was exhausted.
 
 The output-limit failure preserves all text, reasoning, and completed tool
 events emitted before the terminal provider event. It also emits an info-level
@@ -29,16 +43,20 @@ provider status with `finish_reason: length` in structured metadata. Service
 chat projection therefore records the partial transcript and a failed terminal
 event instead of a successful empty or partial completion.
 
-Rusty Crew does not increase a provider's output-token setting or start a
-hidden continuation for this condition. Provider configuration remains the
-operator's authority, and an incomplete provider result remains visible.
+Rusty Crew does not increase a provider's output-token setting. Provider
+configuration remains the operator's authority, and an incomplete provider
+result remains visible. The bounded malformed-call recovery is not a generic
+hidden continuation: it runs only when a tool fragment is present but unsafe to
+execute, records an explicit degraded status, and cannot exceed
+`DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES` without deliberate configuration.
 
 ## Verification
 
 Focused Rust regressions cover reasoning-only truncation, truncation after
-partial visible text, missing-name and malformed-argument terminal fragments,
-normal multi-chunk tool names, normal `stop`, normal tool continuation, and the
-bounded actionable-tool exception:
+partial visible text, successful recovery from truncated and malformed tool
+arguments, bounded recovery exhaustion, durable preservation of earlier tool
+rounds, normal multi-chunk tool names, normal `stop`, normal tool continuation,
+and the actionable-tool exception:
 
 ```bash
 cargo test -p rusty-crew-chat-completions-brain
@@ -72,3 +90,11 @@ recur. The deterministic scorer retained a separate model-quality result of
 fixtures retain direct coverage of the typed `length` and malformed non-length
 terminal branches because provider output is nondeterministic between live
 runs.
+
+Task 6056 forced two truncated `write_file` calls through the debug-only
+SQLite service and its `tester-chat` live provider. The malformed calls did not
+execute, the first emitted `malformed_tool_call_recovery`, and the repeated
+truncation failed with `chat_completions_output_limit_exceeded`. A subsequent
+short `write_file` turn in the same session completed and returned
+`RECOVERY_SESSION_OK`, proving the failed turn did not strand the session. The
+disposable profile and temporary files were removed after certification.
