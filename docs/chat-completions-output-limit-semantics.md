@@ -23,7 +23,8 @@ success signals. Rust owns their interpretation in the native
 - Recovery is temporary wake-local context. The malformed assistant fragment
   and runtime-generated feedback are sent to the next provider request but are
   excluded from durable provider history. Successful tool rounds before and
-  after recovery remain durable.
+  after recovery remain durable, including when recovery is exhausted and the
+  wake terminates as failed.
 - A partial assistant message is replayed only when it contains visible text.
   Reasoning-only fragments remain observable but are not placed in recovery
   request history because some OpenAI-compatible providers reject assistant

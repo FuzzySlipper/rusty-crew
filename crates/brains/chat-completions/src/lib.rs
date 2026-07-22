@@ -1101,6 +1101,16 @@ where
                     reason_code,
                     message,
                 ));
+                let provider_state = if tool_round_count > 0 {
+                    chat_completions_provider_state_output(
+                        &input.context,
+                        &self.request_builder.config,
+                        input.provider_state.as_ref(),
+                        durable_messages,
+                    )
+                } else {
+                    None
+                };
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
@@ -1108,7 +1118,7 @@ where
                     tool_round_count,
                     provider_event_counts,
                     provider_request_debug_samples,
-                    provider_state: None,
+                    provider_state,
                 };
             }
 
@@ -4148,6 +4158,110 @@ mod tests {
                 .unwrap_or_default()
                 .contains("Rusty Crew tool-call recovery")
         }));
+    }
+
+    fn assert_completed_round_survives_exhausted_recovery(
+        finish_reason: &str,
+        expected_reason_code: &str,
+    ) {
+        let malformed_round = || {
+            vec![
+                ChatCompletionsEvent::ContentDelta("partial malformed output".to_string()),
+                ChatCompletionsEvent::ReasoningDelta {
+                    text: "malformed reasoning".to_string(),
+                    field: "reasoning_content".to_string(),
+                },
+                ChatCompletionsEvent::ToolCallMalformed(MalformedChatFunctionCall {
+                    index: 0,
+                    id: Some("call_bad".to_string()),
+                    name: Some("lookup".to_string()),
+                    arguments_json: r#"{"query":"unfinished"#.to_string(),
+                    diagnostics: vec![
+                        "function.arguments is invalid JSON: EOF while parsing a string"
+                            .to_string(),
+                    ],
+                }),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some(finish_reason.to_string()),
+                },
+            ]
+        };
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        r#"{"query":"commit side effect"}"#,
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(malformed_round()),
+                Ok(malformed_round()),
+            ],
+            vec![ChatCompletionsToolOutput::ok("side effect committed")],
+        );
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("commit once, then continue")],
+        );
+
+        assert!(!output.completed);
+        assert_eq!(output.provider_request_count, 3);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(
+            events(&output.stream)
+                .iter()
+                .filter(|event| matches!(event, BrainEvent::ToolCallStarted { .. }))
+                .count(),
+            1,
+            "malformed calls must never execute",
+        );
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.reason_code.as_deref() == Some(expected_reason_code)
+        ));
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = output.provider_state else {
+            panic!("completed tool round must remain durable after recovery exhaustion");
+        };
+        let persisted: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload).expect("persisted completed tool round");
+        assert!(persisted.messages.iter().any(|message| {
+            message.role == ChatMessageRole::Assistant
+                && message.tool_calls.iter().any(|call| {
+                    call.function.name == "lookup"
+                        && call.function.arguments == r#"{"query":"commit side effect"}"#
+                })
+        }));
+        assert!(persisted.messages.iter().any(|message| {
+            message.role == ChatMessageRole::Tool
+                && message.content.as_deref() == Some("side effect committed")
+        }));
+        assert!(persisted.messages.iter().all(|message| {
+            let content = message.content.as_deref().unwrap_or_default();
+            content != "partial malformed output"
+                && !content.contains("Rusty Crew tool-call recovery")
+                && message.reasoning_content.as_deref() != Some("malformed reasoning")
+        }));
+    }
+
+    #[test]
+    fn minimal_loop_preserves_completed_round_when_length_recovery_exhausts() {
+        assert_completed_round_survives_exhausted_recovery(
+            "length",
+            OUTPUT_LIMIT_EXCEEDED_REASON_CODE,
+        );
+    }
+
+    #[test]
+    fn minimal_loop_preserves_completed_round_when_malformed_recovery_exhausts() {
+        assert_completed_round_survives_exhausted_recovery(
+            "stop",
+            MALFORMED_PROVIDER_STREAM_REASON_CODE,
+        );
     }
 
     #[test]
