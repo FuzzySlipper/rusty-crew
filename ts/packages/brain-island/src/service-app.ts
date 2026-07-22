@@ -920,6 +920,7 @@ export async function createRustyCrewServiceApp(
       options.browserResources ??
       createServiceBrowserResources({
         resourcePolicy: await bridge.planWebBrowserResourcePolicy({}),
+        bridge,
       });
     const externalRuntimeController = new ServiceExternalRuntimeController({
       bridge,
@@ -1864,6 +1865,7 @@ async function buildDiagnosticsContext(
     storage,
     providerStates,
     bufferedBrainRuns,
+    runtimeActivities,
     memorySpaces,
   ] = await Promise.all([
     state.bridge
@@ -1881,6 +1883,7 @@ async function buildDiagnosticsContext(
       .catch(() => undefined),
     state.bridge.providerStateDiagnostics().catch(() => []),
     state.bridge.bufferedBrainRunDiagnostics().catch(() => undefined),
+    state.bridge.runtimeActivityCensus({}).catch(() => undefined),
     buildMemorySpaceDiagnostics(state).catch(() => undefined),
   ]);
   const profileRegistry = options.includeProfileRegistry
@@ -1904,6 +1907,7 @@ async function buildDiagnosticsContext(
     providerStates,
     responsesWakeMetrics: state.responsesWakeMetrics,
     ...(bufferedBrainRuns === undefined ? {} : { bufferedBrainRuns }),
+    ...(runtimeActivities === undefined ? {} : { runtimeActivities }),
     adapters: buildServiceAdapterDiagnostics(state, now),
     tools: buildSelectedToolDiagnostics(state, sessions),
     persistence: {

@@ -112,6 +112,10 @@ pub struct BufferedBrainStreamRetentionMetrics {
 pub struct BufferedBrainTurnDiagnostic {
     pub module_label: String,
     pub wake_id: String,
+    pub session_id: String,
+    pub agent_id: Option<String>,
+    pub profile_id: Option<String>,
+    pub phase: String,
     pub queued_stream_item_count: usize,
     pub stream_retention_metrics: BufferedBrainStreamRetentionMetrics,
     pub pending_tool_request_count: usize,

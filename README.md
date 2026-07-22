@@ -30,6 +30,9 @@ changes when that produces a cleaner long-term path.
   operator reference for the current source-run deployment.
 - [API capability registry](docs/api-capability-command-catalog-ratchet.md) documents the
   queryable API and slash-command registry.
+- [Runtime activity census](docs/runtime-activity-census.md) documents the
+  Rust-owned active-work ledger, topology, mismatch findings, and privacy
+  boundary used to diagnose detached or apparently idle agent work.
 - [Review-agent inbox guidance](docs/review-agent-inbox-and-prompt-guidance.md)
   provides copy-ready prompts and the durable serial review contract.
 
@@ -164,6 +167,8 @@ admin auth mode:
 curl http://127.0.0.1:9347/v1/admin/healthz
 curl -H "Authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
   http://127.0.0.1:9347/v1/admin/readyz
+curl -H "Authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  http://127.0.0.1:9347/v1/admin/diagnostics/activities
 ```
 
 When a static frontend is copied to `<runtime-root>/site`, Crew serves it at

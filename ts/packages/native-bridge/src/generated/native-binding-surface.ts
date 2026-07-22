@@ -241,6 +241,10 @@ export interface NativeBridgeBinding {
   recallLoreJson(inputJson: string): string
   listRecallTracesJson(inputJson: string): string
   getRecallTraceJson(traceId: string): string
+  beginRuntimeActivityJson(inputJson: string): string
+  progressRuntimeActivityJson(inputJson: string): string
+  finishRuntimeActivityJson(inputJson: string): string
+  runtimeActivityCensusJson(inputJson: string): string
   registerScheduledWakeJobJson(jobId: string, targetSessionId: string, intervalMs: number | undefined | null, firstDueAt: string): string
   registerScheduledHostJobJson(jobId: string, jobKind: string, intervalMs: number | undefined | null, firstDueAt: string, payloadJson: string): string
   listScheduledJobsJson(status?: string | undefined | null, jobKind?: string | undefined | null, limit?: number | undefined | null, offset?: number | undefined | null): string
@@ -819,7 +823,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 272,
+  "manifestOperationCount": 276,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2716,6 +2720,38 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_recall_trace"
+    },
+    {
+      "name": "beginRuntimeActivityJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "begin_runtime_activity"
+    },
+    {
+      "name": "progressRuntimeActivityJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "progress_runtime_activity"
+    },
+    {
+      "name": "finishRuntimeActivityJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "finish_runtime_activity"
+    },
+    {
+      "name": "runtimeActivityCensusJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "runtime_activity_census"
     },
     {
       "name": "registerScheduledWakeJobJson",

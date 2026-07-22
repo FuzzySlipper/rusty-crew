@@ -55,6 +55,12 @@ import type {
   RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  RuntimeActivityBegin,
+  RuntimeActivityCensus,
+  RuntimeActivityCensusQuery,
+  RuntimeActivityFinish,
+  RuntimeActivityProgress,
+  RuntimeActivityRecord,
   ScheduledHostJobManualRunRequest,
   ScheduledHostJobRegistrationInput,
   ScheduledHostRunClaimQuery,
@@ -941,6 +947,10 @@ export interface NativeBufferedBrainRunModuleDiagnostics {
 export interface NativeBufferedBrainRunDiagnostic {
   module_label: string;
   wake_id: string;
+  session_id: string;
+  agent_id?: string;
+  profile_id?: string;
+  phase: string;
   queued_stream_item_count: number;
   stream_retention_metrics: {
     raw_stream_item_count: number;
@@ -2153,6 +2163,18 @@ export interface NativeBridgeModule
   diagnosticCountRows(table: string): Promise<number>;
   databaseSize(): Promise<NativeRuntimeDatabaseSize>;
   storageDiagnostics(): Promise<NativeRuntimeStorageDiagnostics>;
+  beginRuntimeActivity(
+    input: RuntimeActivityBegin,
+  ): Promise<RuntimeActivityRecord>;
+  progressRuntimeActivity(
+    input: RuntimeActivityProgress,
+  ): Promise<RuntimeActivityRecord>;
+  finishRuntimeActivity(
+    input: RuntimeActivityFinish,
+  ): Promise<RuntimeActivityRecord>;
+  runtimeActivityCensus(
+    query?: RuntimeActivityCensusQuery,
+  ): Promise<RuntimeActivityCensus>;
   bufferedBrainRunDiagnostics(): Promise<NativeBufferedBrainRunDiagnostics>;
   cleanupBufferedBrainRuns(input: {
     reasonCode: string;

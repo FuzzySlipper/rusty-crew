@@ -95,6 +95,7 @@ import {
   type RawBrainWakeProviderStateOutput,
 } from "./brain-run-wire.js";
 import { createNativeBridgeRuntimeConfigMethods } from "./runtime-config-wrappers.js";
+import { createNativeBridgeRuntimeActivityMethods } from "./runtime-activity-wrappers.js";
 import { createNativeBridgeProfileProviderMethods } from "./profile-provider-wrappers.js";
 import { createNativeBridgeServiceCredentialMethods } from "./service-credential-wrappers.js";
 import {
@@ -937,6 +938,10 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     removeDataBankScope: unavailable("remove_data_bank_scope"),
     removeChatDataBankScope: unavailable("remove_chat_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
+    beginRuntimeActivity: unavailable("begin_runtime_activity"),
+    progressRuntimeActivity: unavailable("progress_runtime_activity"),
+    finishRuntimeActivity: unavailable("finish_runtime_activity"),
+    runtimeActivityCensus: unavailable("runtime_activity_census"),
     bufferedBrainRunDiagnostics: unavailable("buffered_brain_run_diagnostics"),
     cleanupBufferedBrainRuns: unavailable("cleanup_buffered_brain_runs"),
     suspendForGitHubGate: unavailable("suspend_for_github_gate"),
@@ -1678,6 +1683,7 @@ function createNativeBridgeModule(
       });
     },
     ...createNativeBridgeAdminMethods(binding),
+    ...createNativeBridgeRuntimeActivityMethods(binding),
     bufferedBrainRunDiagnostics: async () =>
       JSON.parse(
         binding.bufferedBrainRunDiagnosticsJson(),

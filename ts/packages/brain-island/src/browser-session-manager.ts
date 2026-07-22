@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 export type BrowserSessionState =
   | "starting"
@@ -25,6 +26,7 @@ export interface BrowserOpenInput {
   sessionId: SessionId;
   agentId: AgentId;
   profileId: ProfileId;
+  wakeId?: string;
   now?: Date;
 }
 
@@ -44,6 +46,10 @@ export interface BrowserManagerOptions {
   launcher?: BrowserLauncher;
   limits?: Partial<BrowserSessionLimits>;
   now?: () => Date;
+  activityBridge?: Pick<
+    NativeBridgeModule,
+    "beginRuntimeActivity" | "finishRuntimeActivity"
+  >;
 }
 
 export interface BrowserProcessHandle {
@@ -157,6 +163,7 @@ interface BrowserSessionRecord {
   title?: string;
   lastError?: string;
   closeReason?: BrowserCloseReason;
+  activityId?: string;
 }
 
 interface CdpResponse {
@@ -198,12 +205,17 @@ export class BrowserSessionManager {
   readonly #launcher: BrowserLauncher;
   readonly #limits: BrowserSessionLimits;
   readonly #now: () => Date;
+  readonly #activityBridge?: Pick<
+    NativeBridgeModule,
+    "beginRuntimeActivity" | "finishRuntimeActivity"
+  >;
   readonly #sessions = new Map<SessionId, BrowserSessionRecord>();
 
   constructor(options: BrowserManagerOptions = {}) {
     this.#launcher = options.launcher ?? createChromiumBrowserLauncher();
     this.#limits = { ...defaultLimits, ...options.limits };
     this.#now = options.now ?? (() => new Date());
+    this.#activityBridge = options.activityBridge;
   }
 
   async open(
@@ -248,6 +260,24 @@ export class BrowserSessionManager {
       pending.pageWebSocketUrl = launched.pageWebSocketUrl;
       pending.state = "ready";
       pending.lastUsedAt = this.#now();
+      if (this.#activityBridge !== undefined) {
+        pending.activityId = `browser:${pending.sessionId}`;
+        await this.#activityBridge
+          .beginRuntimeActivity({
+            activityId: pending.activityId,
+            kind: "browser",
+            owner: "type_script_host",
+            agentId: pending.agentId,
+            profileId: pending.profileId,
+            sessionId: pending.sessionId,
+            wakeId: input.wakeId,
+            phase: "ready",
+            summary: "session browser process",
+            toolName: "browser",
+            processId: pending.process.pid,
+          })
+          .catch(() => undefined);
+      }
       return toHandle(pending);
     } catch (error) {
       pending.state = "crashed";
@@ -330,6 +360,7 @@ export class BrowserSessionManager {
     if (!record) {
       return;
     }
+    const failed = record.state === "crashed" || reason === "launch_failed";
     record.state = "closing";
     record.closeReason = reason;
     record.refs.clear();
@@ -347,6 +378,17 @@ export class BrowserSessionManager {
       );
     }
     record.state = "closed";
+    if (record.activityId !== undefined && this.#activityBridge !== undefined) {
+      await this.#activityBridge
+        .finishRuntimeActivity({
+          activityId: record.activityId,
+          status: failed ? "failed" : "completed",
+          phase: "closed",
+          reasonCode: reason,
+          summary: "session browser process closed",
+        })
+        .catch(() => undefined);
+    }
     this.#sessions.delete(sessionId);
   }
 

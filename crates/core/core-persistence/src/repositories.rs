@@ -270,6 +270,16 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         ],
     },
     RepositoryGroupDescriptor {
+        group_id: "runtime_activities",
+        label: "Runtime Activities",
+        correctness_sensitive: true,
+        backend_requirements: &[TXN, JSON, SIZE],
+        notes: &[
+            "Owns bounded runtime activity lifecycle records and restart interruption markers.",
+            "Live progress age is diagnostic only and never authorizes automatic cancellation.",
+        ],
+    },
+    RepositoryGroupDescriptor {
         group_id: "runtime_counters",
         label: "Runtime Counters",
         correctness_sensitive: false,

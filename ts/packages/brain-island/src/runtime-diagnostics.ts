@@ -2,6 +2,7 @@ import type {
   BrainImplementationId,
   DelegatedSessionRuntimeStatus,
   ProfileId,
+  RuntimeActivityCensus,
   SessionId,
   SessionState,
 } from "@rusty-crew/contracts";
@@ -29,6 +30,7 @@ export type DiagnosticsReasonCode =
   | "observation_unavailable"
   | "blocked_dependency"
   | "recent_runtime_error"
+  | "runtime_activity_finding"
   | "diagnostics_missing";
 
 export interface RuntimeCounterSummary {
@@ -130,6 +132,7 @@ export interface RuntimeDiagnosticsInput {
   providerStates?: readonly RuntimeProviderStateSessionDiagnostics[];
   responsesWakeMetrics?: readonly RuntimeResponsesWakeMetrics[];
   bufferedBrainRuns?: RuntimeBufferedBrainRunDiagnostics;
+  runtimeActivities?: RuntimeActivityCensus;
   runtimePauses?: readonly RuntimePauseDiagnostics[];
   recentErrors?: readonly RuntimeDiagnosticError[];
   staleSessionMs?: number;
@@ -166,6 +169,7 @@ export interface RuntimeDiagnosticsProjection {
     brainModules: RuntimeBrainModuleDiagnostics[];
     responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
     bufferedBrainRuns?: RuntimeBufferedBrainRunDiagnostics;
+    activities?: RuntimeActivityCensus;
     sessions: RuntimeSessionDiagnostics[];
     delegatedSessions: RuntimeDelegationDiagnostics[];
     runtimePauses: RuntimePauseDiagnostics[];
@@ -582,6 +586,7 @@ export function buildRuntimeDiagnosticsProjection(
     ...toolIssues(tools),
     ...observationIssues(observation),
     ...runtimeErrorIssues(input.recentErrors ?? []),
+    ...runtimeActivityIssues(input.runtimeActivities),
     ...missingInputIssues(input),
   ];
   const health = summarizeHealth(issues);
@@ -618,6 +623,9 @@ export function buildRuntimeDiagnosticsProjection(
       ...(input.bufferedBrainRuns === undefined
         ? {}
         : { bufferedBrainRuns: input.bufferedBrainRuns }),
+      ...(input.runtimeActivities === undefined
+        ? {}
+        : { activities: input.runtimeActivities }),
       sessions,
       delegatedSessions,
       runtimePauses: [...(input.runtimePauses ?? [])],
@@ -659,6 +667,12 @@ function diagnosticsOwnership(
         "rust_coordination",
         "native_bridge.buffered_brain_run_diagnostics",
         input.bufferedBrainRuns !== undefined,
+      ),
+      sectionOwnership(
+        "runtime.activities",
+        "rust_coordination",
+        "native_bridge.runtime_activity_census",
+        input.runtimeActivities !== undefined,
       ),
       sectionOwnership(
         "runtime.pauses",
@@ -1113,6 +1127,26 @@ function runtimeErrorIssues(
     source: error.source,
     message: error.message,
   }));
+}
+
+function runtimeActivityIssues(
+  census: RuntimeActivityCensus | undefined,
+): DiagnosticsIssue[] {
+  if (census === undefined) return [];
+  return census.findings.map((finding) => {
+    const activity = census.active.find(
+      (view) => view.activity.activityId === finding.activityId,
+    )?.activity;
+    return {
+      code: "runtime_activity_finding" as const,
+      severity: "degraded" as const,
+      source: `runtime.activities.${finding.code}`,
+      message: finding.message,
+      ...(activity?.sessionId == null
+        ? {}
+        : { sessionId: activity.sessionId as SessionId }),
+    };
+  });
 }
 
 function missingInputIssues(

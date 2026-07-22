@@ -11,6 +11,7 @@ pub(crate) mod roleplay_lore;
 pub(crate) mod roleplay_mechanic;
 pub(crate) mod roleplay_proposals;
 pub(crate) mod roleplay_records;
+pub(crate) mod runtime_activities;
 pub(crate) mod runtime_counters;
 pub(crate) mod scheduler;
 pub(crate) mod service_config;

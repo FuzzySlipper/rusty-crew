@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 55;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 56;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -293,6 +293,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 55,
         description: "add requested address to durable agent delivery history",
         apply: repos::agent_routes::migrate_v55_add_agent_delivery_requested_address,
+    },
+    SchemaMigration {
+        version: 56,
+        description: "add typed runtime activity accounting",
+        apply: repos::runtime_activities::migrate_v56_add_runtime_activities,
     },
 ];
 
@@ -1008,6 +1013,7 @@ fn reject_unsupported_unversioned_schema(conn: &Connection) -> CoreResult<()> {
                 | "completion_packets"
                 | "tool_call_history"
                 | "runtime_counters"
+                | "runtime_activities"
                 | "queued_messages"
                 | "runtime_search_fts"
                 | "runtime_import_batches"
@@ -2643,6 +2649,7 @@ mod tests {
             "event_agent_index",
             "runtime_search_fts",
             "runtime_counters",
+            "runtime_activities",
             "queued_messages",
             "runtime_import_batches",
             "legacy_id_mappings",

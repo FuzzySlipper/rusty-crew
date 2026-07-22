@@ -30,8 +30,19 @@ impl CoreEngine {
         );
         let sessions = SessionRegistry::from_states(persisted_sessions);
 
+        let handle = EngineHandle::new(NEXT_ENGINE_HANDLE.fetch_add(1, Ordering::Relaxed));
+        let service_instance_id = format!("service-{}-{}", std::process::id(), handle.get());
+        let now = match &config.clock {
+            ClockConfig::System => OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .expect("formatting current UTC timestamp as RFC3339 should not fail"),
+            ClockConfig::Fixed { at } => at.clone(),
+        };
+        store.interrupt_runtime_activities_from_other_instances(&service_instance_id, &now)?;
+
         let engine = Self {
-            handle: EngineHandle::new(NEXT_ENGINE_HANDLE.fetch_add(1, Ordering::Relaxed)),
+            handle,
+            service_instance_id,
             config,
             body_projector: BodyProjector::new(bus.clone(), sessions.clone()),
             action_executor: BrainActionExecutor::new(bus.clone(), sessions.clone()),
@@ -115,6 +126,10 @@ impl CoreEngine {
 
     pub fn diagnostic_now(&self) -> IsoTimestamp {
         self.now()
+    }
+
+    pub fn service_instance_id(&self) -> &str {
+        &self.service_instance_id
     }
 
     pub(crate) fn now(&self) -> IsoTimestamp {

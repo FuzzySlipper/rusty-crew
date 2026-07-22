@@ -2453,6 +2453,42 @@ summary = "Persist an explicit memory governance decision for audit and curator 
 # Observability/event projection.
 
 [[operation]]
+name = "begin_runtime_activity"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeActivityBegin"
+output = "core_protocol::RuntimeActivityRecord"
+errors = "core_protocol::CoreError"
+summary = "Register a bounded runtime activity transition in the Rust-owned activity ledger."
+
+[[operation]]
+name = "progress_runtime_activity"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeActivityProgress"
+output = "core_protocol::RuntimeActivityRecord"
+errors = "core_protocol::CoreError"
+summary = "Update bounded phase and diagnostic metadata for an active runtime activity."
+
+[[operation]]
+name = "finish_runtime_activity"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeActivityFinish"
+output = "core_protocol::RuntimeActivityRecord"
+errors = "core_protocol::CoreError"
+summary = "Terminalize a runtime activity without introducing timeout-based cancellation."
+
+[[operation]]
+name = "runtime_activity_census"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeActivityCensusQuery"
+output = "core_protocol::RuntimeActivityCensus"
+errors = "core_protocol::CoreError"
+summary = "Reconcile durable activity, live runtime evidence, sessions, external turns, and service descendants."
+
+[[operation]]
 name = "subscribe_events"
 surface = "stable"
 direction = "ts_to_rust"

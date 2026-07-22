@@ -2,8 +2,11 @@ import { spawn } from "node:child_process";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import type { BrainTool } from "./brain-tool.js";
-import type { ResourceLimits } from "@rusty-crew/contracts";
-import type { NativeLocalCodeResourcePolicyPlan } from "@rusty-crew/native-bridge";
+import type { ResourceLimits, SessionState } from "@rusty-crew/contracts";
+import type {
+  NativeBridgeModule,
+  NativeLocalCodeResourcePolicyPlan,
+} from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
 import { patchTool } from "./patch-tool.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
@@ -149,6 +152,14 @@ export interface LocalToolContext {
   commandTimeoutMs: number;
   maxDurationMs?: number;
   resourcePolicy: NativeLocalCodeResourcePolicyPlan;
+  runtimeActivity?: {
+    bridge: Pick<
+      NativeBridgeModule,
+      "beginRuntimeActivity" | "finishRuntimeActivity"
+    >;
+    wakeId: string;
+    session: Pick<SessionState, "agentId" | "profileId" | "sessionId">;
+  };
 }
 
 type FilesystemScope = "unrestricted" | "workdir";
@@ -166,6 +177,10 @@ export interface LocalToolProcessResult {
 export function createLocalCodeToolResolver(
   input: {
     resourcePolicy?: NativeLocalCodeResourcePolicyPlan;
+    bridge?: Pick<
+      NativeBridgeModule,
+      "beginRuntimeActivity" | "finishRuntimeActivity"
+    >;
   } = {},
 ): BrainToolResolver {
   return ({ wake }) => {
@@ -173,6 +188,13 @@ export function createLocalCodeToolResolver(
       input.resourcePolicy ?? defaultLocalCodeResourcePolicy,
       wake.state.session.resourceLimits,
     );
+    if (input.bridge !== undefined) {
+      context.runtimeActivity = {
+        bridge: input.bridge,
+        wakeId: wake.wakeId,
+        session: wake.state.session,
+      };
+    }
     return [
       readFileTool(context),
       writeFileTool(context),
@@ -308,7 +330,7 @@ export function terminalTool(
     label: "Terminal",
     parameters: terminalParameters,
     executionMode: "sequential",
-    execute: async (_toolCallId, params: TerminalParams, signal) => {
+    execute: async (toolCallId, params: TerminalParams, signal) => {
       const timeoutMs = Math.min(
         params.timeoutMs ?? context.maxDurationMs ?? context.commandTimeoutMs,
         context.maxDurationMs ?? context.commandTimeoutMs,
@@ -317,6 +339,11 @@ export function terminalTool(
         signal,
         timeoutMs,
         maxOutputBytes: params.maxOutputBytes ?? context.maxCommandOutputBytes,
+        runtimeActivity: processRuntimeActivity(
+          context,
+          toolCallId,
+          "terminal",
+        ),
       });
       return {
         content: [{ type: "text", text: formatProcessResult(result) }],
@@ -335,7 +362,7 @@ export function gitStatusTool(
       "Return concise git working tree status for the session workdir.",
     label: "Git status",
     parameters: gitStatusParameters,
-    execute: async (_toolCallId, _params, signal) => {
+    execute: async (toolCallId, _params, signal) => {
       const result = await runProcess(
         "git",
         ["status", "--short"],
@@ -344,6 +371,11 @@ export function gitStatusTool(
           signal,
           timeoutMs: context.maxDurationMs ?? context.commandTimeoutMs,
           maxOutputBytes: context.maxCommandOutputBytes,
+          runtimeActivity: processRuntimeActivity(
+            context,
+            toolCallId,
+            "git_status",
+          ),
         },
       );
       return {
@@ -362,7 +394,7 @@ export function gitDiffTool(
     description: "Return a git diff from the session workdir.",
     label: "Git diff",
     parameters: gitDiffParameters,
-    execute: async (_toolCallId, params: GitDiffParams, signal) => {
+    execute: async (toolCallId, params: GitDiffParams, signal) => {
       const scopedDiffPath = params.path
         ? relative(
             context.workdir,
@@ -374,6 +406,11 @@ export function gitDiffTool(
         signal,
         timeoutMs: context.maxDurationMs ?? context.commandTimeoutMs,
         maxOutputBytes: context.maxCommandOutputBytes,
+        runtimeActivity: processRuntimeActivity(
+          context,
+          toolCallId,
+          "git_diff",
+        ),
       });
       return {
         content: [{ type: "text", text: formatProcessResult(result) }],
@@ -615,6 +652,7 @@ function runShellCommand(
     signal: AbortSignal | undefined;
     timeoutMs: number;
     maxOutputBytes: number;
+    runtimeActivity?: ProcessRuntimeActivity;
   },
 ): Promise<LocalToolProcessResult> {
   return runProcess(command, [], cwd, {
@@ -632,6 +670,7 @@ function runProcess(
     timeoutMs: number;
     maxOutputBytes: number;
     shell?: boolean;
+    runtimeActivity?: ProcessRuntimeActivity;
   },
 ): Promise<LocalToolProcessResult> {
   if (command.includes("\0")) {
@@ -644,6 +683,34 @@ function runProcess(
       shell: options.shell ?? false,
       signal: options.signal,
     });
+    const processId = child.pid;
+    const runtimeActivity = options.runtimeActivity;
+    const activityId =
+      processId === undefined || runtimeActivity === undefined
+        ? undefined
+        : `subprocess:${runtimeActivity.wakeId}:${runtimeActivity.callId}:${processId}`;
+    const activityStarted =
+      activityId === undefined ||
+      processId === undefined ||
+      runtimeActivity === undefined
+        ? Promise.resolve(false)
+        : runtimeActivity.bridge
+            .beginRuntimeActivity({
+              activityId,
+              parentActivityId: `tool:${runtimeActivity.wakeId}:${runtimeActivity.callId}`,
+              kind: "subprocess",
+              owner: "type_script_host",
+              agentId: runtimeActivity.session.agentId,
+              profileId: runtimeActivity.session.profileId,
+              sessionId: runtimeActivity.session.sessionId,
+              wakeId: runtimeActivity.wakeId,
+              phase: "running",
+              summary: `${runtimeActivity.toolName} child process`,
+              toolName: runtimeActivity.toolName,
+              processId,
+            })
+            .then(() => true)
+            .catch(() => false);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -667,7 +734,14 @@ function runProcess(
       }
       settled = true;
       clearTimeout(timeout);
-      reject(error);
+      void finishProcessActivity(
+        runtimeActivity,
+        activityId,
+        activityStarted,
+        "failed",
+        "process_spawn_failed",
+        "tool child process failed to start",
+      ).finally(() => reject(error));
     });
     child.on("close", (exitCode, signal) => {
       if (settled) {
@@ -675,7 +749,7 @@ function runProcess(
       }
       settled = true;
       clearTimeout(timeout);
-      resolvePromise({
+      const result = {
         command: [command, ...args].join(" "),
         cwd,
         exitCode,
@@ -683,9 +757,62 @@ function runProcess(
         stdout,
         stderr,
         timedOut,
-      });
+      };
+      const failed = timedOut || exitCode !== 0;
+      void finishProcessActivity(
+        runtimeActivity,
+        activityId,
+        activityStarted,
+        failed ? "failed" : "completed",
+        timedOut ? "command_timeout" : failed ? "command_failed" : undefined,
+        failed
+          ? "tool child process exited unsuccessfully"
+          : "tool child process completed",
+      ).finally(() => resolvePromise(result));
     });
   });
+}
+
+interface ProcessRuntimeActivity {
+  bridge: Pick<
+    NativeBridgeModule,
+    "beginRuntimeActivity" | "finishRuntimeActivity"
+  >;
+  wakeId: string;
+  callId: string;
+  toolName: string;
+  session: Pick<SessionState, "agentId" | "profileId" | "sessionId">;
+}
+
+function processRuntimeActivity(
+  context: LocalToolContext,
+  callId: string,
+  toolName: string,
+): ProcessRuntimeActivity | undefined {
+  if (context.runtimeActivity === undefined) return undefined;
+  return { ...context.runtimeActivity, callId, toolName };
+}
+
+async function finishProcessActivity(
+  activity: ProcessRuntimeActivity | undefined,
+  activityId: string | undefined,
+  started: Promise<boolean>,
+  status: "completed" | "failed",
+  reasonCode: string | undefined,
+  summary: string,
+): Promise<void> {
+  if (activity === undefined || activityId === undefined || !(await started)) {
+    return;
+  }
+  await activity.bridge
+    .finishRuntimeActivity({
+      activityId,
+      status,
+      phase: status,
+      reasonCode,
+      summary,
+    })
+    .catch(() => undefined);
 }
 
 function boundedAppend(

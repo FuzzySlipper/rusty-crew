@@ -1884,6 +1884,14 @@ export const API_CAPABILITIES = [
     ["diagnostics"],
   ),
   readCapability(
+    "admin.diagnostics.activities",
+    "GET",
+    "/v1/admin/diagnostics/activities",
+    "Read the Rust-owned runtime activity census and reconciliation findings.",
+    "admin",
+    ["diagnostics"],
+  ),
+  readCapability(
     "admin.diagnostics.observation",
     "GET",
     "/v1/admin/diagnostics/observation",

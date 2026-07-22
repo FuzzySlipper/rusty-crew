@@ -167,6 +167,7 @@ notes = "Dense/profile memory, typed memory spaces, roleplay lore, module regist
 id = "telemetry_search"
 label = "Telemetry And Search"
 owns = [
+  "runtime_activities",
   "runtime_counters",
   "runtime_search_fts",
   "runtime_search_entries",
@@ -174,7 +175,7 @@ owns = [
   "session_activity_digests",
   "context_compaction_artifacts",
 ]
-notes = "Runtime counters, runtime search/read models, tool telemetry, context artifacts, and query catalog support."
+notes = "Runtime activity accounting, counters, runtime search/read models, tool telemetry, context artifacts, and query catalog support."
 
 [rules]
 sql_outside_core_persistence = "forbidden"

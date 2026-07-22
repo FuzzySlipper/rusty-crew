@@ -16,6 +16,7 @@ mod profile_config;
 mod roleplay_mechanic;
 mod roleplay_proposals;
 mod roleplay_records;
+mod runtime_activities;
 mod runtime_counters;
 mod schema_migrations;
 mod session_event_queue;
@@ -91,19 +92,19 @@ use crate::{
     RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
     RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
     RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
-    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
-    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageConnectionHealth, RuntimeStorageTableCount, ScheduledJobQuery,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
-    ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
-    ServiceCredentialWrite, SessionConfig, SessionConfigRecord, SessionId, SessionIdentityRecord,
-    SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport, SessionMemoryPromptContext,
-    SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeActivityId,
+    RuntimeActivityRecord, RuntimeActivityStatus, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
+    RuntimeStorageCapability, RuntimeStorageConnectionHealth, RuntimeStorageTableCount,
+    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, ServiceCredentialDelete, ServiceCredentialQuery,
+    ServiceCredentialRecord, ServiceCredentialWrite, SessionConfig, SessionConfigRecord, SessionId,
+    SessionIdentityRecord, SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport,
+    SessionMemoryPromptContext, SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
     SessionMemoryPromptExcludedCounts, SessionMemoryQuery, SessionMemoryRecord,
     SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionMessageVariantPageQuery,
@@ -1473,7 +1474,7 @@ impl PostgresBackendStore {
             backend_label: "PostgreSQL durable backend".to_string(),
             schema: self.schema.clone(),
             repository_coverage:
-                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers,external_agent_runtime"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,runtime_activities,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers,external_agent_runtime"
                     .to_string(),
             schema_version: self.schema_version()?,
             supported_schema_version: POSTGRES_SCHEMA_VERSION,
@@ -1542,6 +1543,10 @@ impl PostgresBackendStore {
                 RuntimeStorageTableCount {
                     table: "runtime_counters".to_string(),
                     rows: self.runtime_counter_rows()?,
+                },
+                RuntimeStorageTableCount {
+                    table: "runtime_activities".to_string(),
+                    rows: self.table_rows("runtime_activities")?,
                 },
                 RuntimeStorageTableCount {
                     table: "module_simple_kv_entries".to_string(),
@@ -10980,6 +10985,59 @@ mod tests {
         let schema = unique_schema("rusty_crew_session_event_backend");
         let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         session_event_conformance(&store);
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_runtime_activity_lifecycle_matches_sqlite_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_runtime_activities");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let record = RuntimeActivityRecord {
+            activity_id: RuntimeActivityId::new("wake:postgres-test"),
+            service_instance_id: "postgres-instance".into(),
+            parent_activity_id: Some(RuntimeActivityId::new("dispatch:postgres-test")),
+            kind: rusty_crew_core_protocol::RuntimeActivityKind::Wake,
+            owner: rusty_crew_core_protocol::RuntimeActivityOwner::RustBrain,
+            status: RuntimeActivityStatus::Active,
+            agent_id: None,
+            profile_id: None,
+            session_id: None,
+            wake_id: Some("postgres-test".into()),
+            phase: "running".into(),
+            summary: None,
+            provider_alias: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+            reason_code: None,
+            started_at: "2026-07-22T00:00:00Z".into(),
+            last_progress_at: "2026-07-22T00:00:00Z".into(),
+            terminal_at: None,
+            revision: 1,
+        };
+        store.insert_runtime_activity(&record).unwrap();
+        let mut progressed = record.clone();
+        progressed.phase = "provider_stream".into();
+        progressed.last_progress_at = "2026-07-22T00:00:01Z".into();
+        progressed.revision = 2;
+        store.update_runtime_activity(&progressed, 1).unwrap();
+        let interrupted = store
+            .interrupt_runtime_activities_from_other_instances(
+                "new-postgres-instance",
+                &"2026-07-22T00:00:02Z".into(),
+            )
+            .unwrap();
+        assert_eq!(interrupted.len(), 1);
+        assert_eq!(interrupted[0].status, RuntimeActivityStatus::Interrupted);
+        assert!(store
+            .list_runtime_activities(Some(RuntimeActivityStatus::Active), None)
+            .unwrap()
+            .is_empty());
         store.drop_schema_for_test().unwrap();
     }
 

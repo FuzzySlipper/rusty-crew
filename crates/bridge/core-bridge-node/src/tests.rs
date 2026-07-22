@@ -688,6 +688,22 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
             storage: None,
         })
         .unwrap();
+    bridge
+        .create_session(SessionConfig {
+            session_id: SessionId::new("shutdown-buffered-session"),
+            agent_id: AgentId::new("shutdown-buffered-agent"),
+            profile_id: ProfileId::new("shutdown-buffered-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile { tools: vec![] },
+            history_window: None,
+        })
+        .unwrap();
 
     let mut coordinator = rusty_crew_brain_runtime::BufferedBrainTurnCoordinator::new(
         "chat-completions",
@@ -709,6 +725,16 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
     assert_eq!(active.active_run_count, 1);
     assert_eq!(active.runs[0].module_label, "chat-completions");
     assert_eq!(active.runs[0].wake_id, "shutdown-buffered-wake");
+    assert_eq!(active.runs[0].session_id, "shutdown-buffered-session");
+    assert_eq!(
+        active.runs[0].agent_id.as_deref(),
+        Some("shutdown-buffered-agent")
+    );
+    assert_eq!(
+        active.runs[0].profile_id.as_deref(),
+        Some("shutdown-buffered-profile")
+    );
+    assert_eq!(active.runs[0].phase, "running");
 
     bridge
         .shutdown_engine(ShutdownRequest {
@@ -931,6 +957,147 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
             .count(),
         1
     );
+}
+
+#[test]
+fn binding_runtime_census_tracks_native_wake_provider_and_tool_topology() {
+    let binding = NativeBridgeBinding::new();
+    let data_dir = std::env::temp_dir().join(format!(
+        "rusty-crew-native-activity-{}-{}",
+        std::process::id(),
+        time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+    ));
+    binding
+        .initialize_engine(JsEngineConfig {
+            engine_data_dir: data_dir.to_string_lossy().into_owned(),
+            fixed_clock: None,
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1_000,
+            storage_backend: None,
+            postgres_database_url: None,
+            postgres_schema: None,
+            postgres_max_connections: None,
+            postgres_statement_timeout_ms: None,
+        })
+        .unwrap();
+    binding
+        .create_session(JsSessionConfig {
+            session_id: "activity-native-session".into(),
+            agent_id: "activity-native-agent".into(),
+            profile_id: "activity-native-profile".into(),
+            kind: "full".into(),
+            resource_limits: None,
+            tool_profile: None,
+            history_window: None,
+        })
+        .unwrap();
+
+    let wake_id = "activity-native-wake";
+    binding
+        .start_brain_run_json(
+            "chat-completions".into(),
+            serde_json::json!({
+                "wakeId": wake_id,
+                "sessionId": "activity-native-session",
+                "messages": [{ "role": "user", "content": "use the tool" }],
+                "tools": [{
+                    "name": "read_file",
+                    "description": "Read one file",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                    }
+                }],
+                "config": { "model": "fake-chat-model" }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let tool_request = (0..100)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &binding
+                    .drain_brain_run_json("chat-completions".into(), wake_id.into(), Some(64))
+                    .unwrap(),
+            )
+            .unwrap();
+            let request = drain["tool_requests"].as_array().unwrap().first().cloned();
+            if request.is_none() {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            request
+        })
+        .expect("fake chat-completions provider should request a host tool");
+    let call_id = tool_request["call_id"].as_str().unwrap();
+
+    let census: RuntimeActivityCensus =
+        serde_json::from_str(&binding.runtime_activity_census_json("{}".into()).unwrap()).unwrap();
+    let wake = census
+        .active
+        .iter()
+        .find(|view| view.activity.activity_id.0 == format!("wake:{wake_id}"))
+        .expect("native wake activity");
+    assert_eq!(
+        wake.activity.agent_id.as_ref().unwrap().0,
+        "activity-native-agent"
+    );
+    let provider = census
+        .active
+        .iter()
+        .find(|view| view.activity.activity_id.0 == format!("provider:{wake_id}"))
+        .expect("provider activity");
+    assert_eq!(
+        provider.activity.parent_activity_id.as_ref().unwrap().0,
+        format!("wake:{wake_id}")
+    );
+    let tool = census
+        .active
+        .iter()
+        .find(|view| view.activity.tool_name.as_deref() == Some("read_file"))
+        .expect("tool activity");
+    assert_eq!(
+        tool.activity.parent_activity_id.as_ref().unwrap().0,
+        format!("provider:{wake_id}")
+    );
+
+    binding
+        .submit_brain_host_result_json(
+            "chat-completions".into(),
+            serde_json::json!({
+                "wakeId": wake_id,
+                "callId": call_id,
+                "output": "file contents",
+                "status": "succeeded",
+                "retryable": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let terminal = (0..100).any(|_| {
+        let drain: serde_json::Value = serde_json::from_str(
+            &binding
+                .drain_brain_run_json("chat-completions".into(), wake_id.into(), Some(64))
+                .unwrap(),
+        )
+        .unwrap();
+        if drain["terminal"].as_bool() == Some(true) {
+            true
+        } else {
+            thread::sleep(std::time::Duration::from_millis(5));
+            false
+        }
+    });
+    assert!(terminal);
+    let after: RuntimeActivityCensus =
+        serde_json::from_str(&binding.runtime_activity_census_json("{}".into()).unwrap()).unwrap();
+    assert!(!after.active.iter().any(|view| {
+        view.activity.wake_id.as_deref() == Some(wake_id)
+            && view.activity.kind != RuntimeActivityKind::Dispatch
+    }));
+
+    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 fn brain_registration(

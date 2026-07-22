@@ -1,5 +1,8 @@
 import type { SessionId } from "@rusty-crew/contracts";
-import type { NativeWebBrowserResourcePolicyPlan } from "@rusty-crew/native-bridge";
+import type {
+  NativeBridgeModule,
+  NativeWebBrowserResourcePolicyPlan,
+} from "@rusty-crew/native-bridge";
 import {
   BrowserSessionManager,
   type BrowserCleanupSummary,
@@ -28,6 +31,10 @@ export function createServiceBrowserResources(
     manager?: BrowserSessionManager;
     screenshotStore?: BrowserScreenshotStore;
     resourcePolicy?: NativeWebBrowserResourcePolicyPlan;
+    bridge?: Pick<
+      NativeBridgeModule,
+      "beginRuntimeActivity" | "finishRuntimeActivity"
+    >;
   } = {},
 ): ServiceBrowserResources {
   const resourcePolicy =
@@ -37,6 +44,7 @@ export function createServiceBrowserResources(
       input.manager ??
       new BrowserSessionManager({
         limits: browserSessionLimitsFromPolicy(resourcePolicy),
+        activityBridge: input.bridge,
       }),
     screenshotStore:
       input.screenshotStore ?? new MemoryBrowserScreenshotStore(),

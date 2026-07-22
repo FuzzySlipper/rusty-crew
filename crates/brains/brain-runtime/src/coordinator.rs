@@ -1045,6 +1045,10 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
                 BufferedBrainTurnDiagnostic {
                     module_label: self.module_label.to_string(),
                     wake_id: coordinator.wake_id().to_string(),
+                    session_id: coordinator.session_id().0.clone(),
+                    agent_id: None,
+                    profile_id: None,
+                    phase: buffered_brain_turn_phase_name(coordinator.phase()).to_string(),
                     queued_stream_item_count: coordinator.queued_stream_item_count(),
                     stream_retention_metrics: coordinator.stream_retention_metrics(),
                     pending_tool_request_count: coordinator.pending_tool_request_count(),
@@ -1102,6 +1106,18 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
             .map_err(|_| BrainRuntimeError::RegistryPoisoned {
                 module_label: self.module_label,
             })
+    }
+}
+
+fn buffered_brain_turn_phase_name(phase: BufferedBrainTurnPhase) -> &'static str {
+    match phase {
+        BufferedBrainTurnPhase::Created => "created",
+        BufferedBrainTurnPhase::Running => "running",
+        BufferedBrainTurnPhase::AwaitingHostTools => "awaiting_host_tools",
+        BufferedBrainTurnPhase::Completed => "completed",
+        BufferedBrainTurnPhase::Failed => "failed",
+        BufferedBrainTurnPhase::Cancelled => "cancelled",
+        BufferedBrainTurnPhase::TimedOut => "timed_out",
     }
 }
 

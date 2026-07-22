@@ -176,6 +176,70 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn get_runtime_activity(
+        &self,
+        activity_id: &RuntimeActivityId,
+    ) -> CoreResult<Option<RuntimeActivityRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_runtime_activity(activity_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_runtime_activity(activity_id),
+        }
+    }
+
+    pub fn insert_runtime_activity(
+        &self,
+        record: &RuntimeActivityRecord,
+    ) -> CoreResult<RuntimeActivityRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.insert_runtime_activity(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.insert_runtime_activity(record),
+        }
+    }
+
+    pub fn update_runtime_activity(
+        &self,
+        record: &RuntimeActivityRecord,
+        expected_revision: u64,
+    ) -> CoreResult<RuntimeActivityRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.update_runtime_activity(record, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.update_runtime_activity(record, expected_revision),
+        }
+    }
+
+    pub fn list_runtime_activities(
+        &self,
+        status: Option<RuntimeActivityStatus>,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<RuntimeActivityRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_runtime_activities(status, limit),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_runtime_activities(status, limit),
+        }
+    }
+
+    pub fn interrupt_runtime_activities_from_other_instances(
+        &self,
+        current_service_instance_id: &str,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<RuntimeActivityRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.interrupt_runtime_activities_from_other_instances(
+                current_service_instance_id,
+                now,
+            ),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.interrupt_runtime_activities_from_other_instances(
+                current_service_instance_id,
+                now,
+            ),
+        }
+    }
+
     pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
         match self {
             Self::Sqlite(sqlite) => sqlite.save_queued_message(record),

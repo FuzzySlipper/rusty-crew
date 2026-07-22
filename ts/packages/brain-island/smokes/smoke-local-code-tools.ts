@@ -12,6 +12,8 @@ import { join } from "node:path";
 import type {
   AgentId,
   ProfileId,
+  RuntimeActivityBegin,
+  RuntimeActivityFinish,
   SessionHandle,
   SessionId,
 } from "@rusty-crew/contracts";
@@ -145,12 +147,24 @@ class ToolCallingFakeAgent {
 }
 
 const toolResults: Record<string, AgentToolResult<unknown>> = {};
+const activityBegins: RuntimeActivityBegin[] = [];
+const activityFinishes: RuntimeActivityFinish[] = [];
 const policyBackedResolver = createLocalCodeToolResolver({
   resourcePolicy: {
     ...defaultLocalCodeResourcePolicy,
     maxReadBytes: 64,
     maxSearchFileBytes: 1_024,
     maxCommandOutputBytes: 64,
+  },
+  bridge: {
+    beginRuntimeActivity: async (input) => {
+      activityBegins.push(input);
+      return input as never;
+    },
+    finishRuntimeActivity: async (input) => {
+      activityFinishes.push(input);
+      return input as never;
+    },
   },
 });
 const brain = createChatCompletionsBrain({
@@ -235,6 +249,23 @@ try {
     (toolResults.terminal.details as { exitCode: number }).exitCode,
     0,
   );
+  const terminalProcess = activityBegins.find(
+    (activity) => activity.toolName === "terminal",
+  );
+  assert.ok(terminalProcess);
+  assert.equal(terminalProcess.kind, "subprocess");
+  assert.equal(terminalProcess.sessionId, sessionId);
+  assert.equal(
+    terminalProcess.parentActivityId,
+    "tool:wake-local-tools:terminal-call",
+  );
+  assert.equal(terminalProcess.summary, "terminal child process");
+  assert.equal(
+    activityFinishes.find(
+      (activity) => activity.activityId === terminalProcess.activityId,
+    )?.status,
+    "completed",
+  );
 
   console.log(
     JSON.stringify(
@@ -250,6 +281,7 @@ try {
         ),
         terminalExit: (toolResults.terminal.details as { exitCode: number })
           .exitCode,
+        runtimeActivity: terminalProcess.activityId,
       },
       null,
       2,

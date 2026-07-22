@@ -5242,6 +5242,558 @@
       },
       "type": "object"
     },
+    "RuntimeActivityBegin": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debugDetailId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeActivityKind"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/RuntimeActivityOwner"
+        },
+        "parentActivityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "processId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "providerAlias": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wakeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "activityId",
+        "kind",
+        "owner",
+        "phase"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityCensus": {
+      "properties": {
+        "active": {
+          "items": {
+            "$ref": "#/$defs/RuntimeActivityView"
+          },
+          "type": "array"
+        },
+        "automaticCancellationEnabled": {
+          "type": "boolean"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/RuntimeActivityFinding"
+          },
+          "type": "array"
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "recentlyAbnormal": {
+          "items": {
+            "$ref": "#/$defs/RuntimeActivityView"
+          },
+          "type": "array"
+        },
+        "serviceInstanceId": {
+          "type": "string"
+        },
+        "summary": {
+          "$ref": "#/$defs/RuntimeActivityCensusSummary"
+        }
+      },
+      "required": [
+        "generatedAt",
+        "serviceInstanceId",
+        "active",
+        "recentlyAbnormal",
+        "findings",
+        "summary",
+        "automaticCancellationEnabled"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityCensusQuery": {
+      "properties": {
+        "liveEvidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RuntimeActivityLiveEvidence"
+          },
+          "type": "array"
+        },
+        "recentAbnormalLimit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stallAfterMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeActivityCensusSummary": {
+      "properties": {
+        "active": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "findings": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recentlyAbnormal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "untrackedProcesses": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "active",
+        "recentlyAbnormal",
+        "findings",
+        "untrackedProcesses"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityFinding": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/RuntimeActivityFindingCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "relatedActivityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "activityId",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityFindingCode": {
+      "enum": [
+        "session_projection_mismatch",
+        "untracked_native_run",
+        "detached_dispatch",
+        "orphan_tool_execution",
+        "stale_ledger_entry",
+        "stalled",
+        "restart_interrupted",
+        "untracked_service_process"
+      ],
+      "type": "string"
+    },
+    "RuntimeActivityFinish": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeActivityStatus"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "activityId",
+        "status",
+        "phase"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityKind": {
+      "enum": [
+        "dispatch",
+        "wake",
+        "provider_request",
+        "tool_call",
+        "subprocess",
+        "browser",
+        "external_turn"
+      ],
+      "type": "string"
+    },
+    "RuntimeActivityLiveEvidence": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeActivityKind"
+        },
+        "lastProgressAt": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/RuntimeActivityOwner"
+        },
+        "parentActivityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "processId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wakeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "activityId",
+        "kind",
+        "owner",
+        "phase",
+        "startedAt",
+        "lastProgressAt"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityOwner": {
+      "enum": [
+        "rust_coordination",
+        "rust_brain",
+        "type_script_host",
+        "external_runtime"
+      ],
+      "type": "string"
+    },
+    "RuntimeActivityProgress": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "debugDetailId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "processId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "activityId",
+        "phase"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityRecord": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debugDetailId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeActivityKind"
+        },
+        "lastProgressAt": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/RuntimeActivityOwner"
+        },
+        "parentActivityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "processId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "providerAlias": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "serviceInstanceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeActivityStatus"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wakeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "activityId",
+        "serviceInstanceId",
+        "kind",
+        "owner",
+        "status",
+        "phase",
+        "startedAt",
+        "lastProgressAt",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "RuntimeActivityStatus": {
+      "enum": [
+        "active",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "RuntimeActivityView": {
+      "properties": {
+        "activity": {
+          "$ref": "#/$defs/RuntimeActivityRecord"
+        },
+        "elapsedMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sinceProgressMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "activity",
+        "elapsedMs",
+        "sinceProgressMs"
+      ],
+      "type": "object"
+    },
     "SessionActivityDigest": {
       "description": "Bounded per-wake activity digest used by the post-wake capture producer.\n\nThe digest is intentionally not a raw transcript. TypeScript builds it from\nthe warm post-wake event stream, then Rust persists it for scheduled\nbackground review. Capture Phase 1 validates `profile_dense` proposals first;\n`session_memory` and `roleplay_lore` remain gated expansion targets.",
       "properties": {
@@ -6019,6 +6571,27 @@
     "run_id": {
       "type": "string"
     },
+    "runtime_activity_begin": {
+      "$ref": "#/$defs/RuntimeActivityBegin"
+    },
+    "runtime_activity_census": {
+      "$ref": "#/$defs/RuntimeActivityCensus"
+    },
+    "runtime_activity_census_query": {
+      "$ref": "#/$defs/RuntimeActivityCensusQuery"
+    },
+    "runtime_activity_finish": {
+      "$ref": "#/$defs/RuntimeActivityFinish"
+    },
+    "runtime_activity_live_evidence": {
+      "$ref": "#/$defs/RuntimeActivityLiveEvidence"
+    },
+    "runtime_activity_progress": {
+      "$ref": "#/$defs/RuntimeActivityProgress"
+    },
+    "runtime_activity_record": {
+      "$ref": "#/$defs/RuntimeActivityRecord"
+    },
     "runtime_buffer_handle": {
       "format": "uint64",
       "minimum": 0,
@@ -6098,6 +6671,13 @@
     "session_activity_digest_query",
     "context_compaction_artifact",
     "context_compaction_artifact_query",
+    "runtime_activity_begin",
+    "runtime_activity_progress",
+    "runtime_activity_finish",
+    "runtime_activity_record",
+    "runtime_activity_live_evidence",
+    "runtime_activity_census_query",
+    "runtime_activity_census",
     "memory_governance_decision_input",
     "memory_governance_decision_record",
     "agent_directory_entry",

@@ -44,6 +44,8 @@ Operator setup references:
   profile assignment, and refresh guide.
 - `local-service-runbook.md` — detailed current-machine operation and recovery.
 - `local-service-topology.md` — concise live-versus-debug service map.
+- `runtime-activity-census.md` — Rust-owned active-work ledger, topology,
+  reconciliation findings, restart semantics, and diagnostics privacy rules.
 - `review-agent-inbox-and-prompt-guidance.md` — copy-ready reviewer and
   requester prompts plus the durable serial inbox contract.
 

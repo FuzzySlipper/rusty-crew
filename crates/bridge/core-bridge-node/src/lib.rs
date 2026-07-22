@@ -15,8 +15,11 @@ use rusty_crew_core_bridge_api::{
     BridgeManifestSummary, CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate,
     EngineConfig, EngineHandle, EngineStorageConfig, EventReceipt, EventSubscription,
     ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration, ProfileId,
-    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
-    ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
+    RuntimeActivityBegin, RuntimeActivityCensus, RuntimeActivityCensusQuery, RuntimeActivityFinish,
+    RuntimeActivityId, RuntimeActivityKind, RuntimeActivityLiveEvidence, RuntimeActivityOwner,
+    RuntimeActivityProgress, RuntimeActivityRecord, RuntimeActivityStatus, RuntimeBufferHandle,
+    RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest, ShutdownSummary,
+    SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
     plan_channel_ingress_route, plan_create_profile, plan_delegated_role_lifecycle,
@@ -154,6 +157,7 @@ mod binding_manifest;
 mod binding_memory;
 mod binding_responses;
 mod binding_roleplay;
+mod binding_runtime_activity;
 mod binding_scheduler;
 mod binding_sessions;
 mod binding_storage;
@@ -263,14 +267,16 @@ impl NativeBridge {
     ) -> Result<BufferedBrainRunDiagnostics, BrainRuntimeError> {
         let mut runs = Vec::new();
         let mut modules = Vec::new();
-        let responses = self.openai_responses_buffered_runs.diagnostics()?;
+        let mut responses = self.openai_responses_buffered_runs.diagnostics()?;
+        self.attach_buffered_brain_identities(&mut responses);
         modules.push(BufferedBrainRunModuleDiagnostics {
             module_label: "OpenAI Responses".to_string(),
             active_run_count: responses.len(),
         });
         runs.extend(responses);
 
-        let chat_completions = self.chat_completions_buffered_runs.diagnostics()?;
+        let mut chat_completions = self.chat_completions_buffered_runs.diagnostics()?;
+        self.attach_buffered_brain_identities(&mut chat_completions);
         modules.push(BufferedBrainRunModuleDiagnostics {
             module_label: "chat-completions".to_string(),
             active_run_count: chat_completions.len(),
@@ -287,6 +293,18 @@ impl NativeBridge {
             modules,
             runs,
         })
+    }
+
+    fn attach_buffered_brain_identities(&self, runs: &mut [BufferedBrainTurnDiagnostic]) {
+        let Some(engine) = self.engine.as_ref() else {
+            return;
+        };
+        for run in runs {
+            if let Ok(session) = engine.get_session(&SessionId::new(run.session_id.clone())) {
+                run.agent_id = Some(session.agent_id.0);
+                run.profile_id = Some(session.profile_id.0);
+            }
+        }
     }
 
     fn cleanup_buffered_brain_runs(

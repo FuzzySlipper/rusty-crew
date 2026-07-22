@@ -31,6 +31,7 @@ const RESERVED_IDENTIFIERS: &[&str] = &[
     "provider_wire_states",
     "queued_messages",
     "runtime_counters",
+    "runtime_activities",
     "runtime_import_batches",
     "runtime_search_fts",
     "schema_migrations",

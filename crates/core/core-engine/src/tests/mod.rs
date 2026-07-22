@@ -46,6 +46,7 @@ mod external_serial_inbox;
 mod profile_admin;
 mod restart_hydration;
 mod roleplay_proposals;
+mod runtime_activity;
 mod scheduler;
 
 fn test_engine() -> CoreEngine {

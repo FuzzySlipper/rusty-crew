@@ -811,6 +811,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
     input.browserResources ??
     createServiceBrowserResources({
       resourcePolicy: await input.bridge.planWebBrowserResourcePolicy({}),
+      bridge: input.bridge,
     });
   const localCodeResourcePolicy =
     await input.bridge.planLocalCodeResourcePolicy({});
@@ -1095,6 +1096,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
     input.browserResources ??
     createServiceBrowserResources({
       resourcePolicy: await input.bridge.planWebBrowserResourcePolicy({}),
+      bridge: input.bridge,
     });
   const localCodeResourcePolicy =
     await input.bridge.planLocalCodeResourcePolicy({});
@@ -1508,6 +1510,7 @@ function createServiceToolResolver(
   return combineResolvers(
     createLocalCodeToolResolver({
       resourcePolicy: options.localCodeResourcePolicy,
+      bridge: options.bridge,
     }),
     createWebToolResolver({
       searchDefaultLimit:

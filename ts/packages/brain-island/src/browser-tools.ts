@@ -12,6 +12,7 @@ import { assertSafePublicUrl, type ResolveHostAddresses } from "./web-tools.js";
 export interface BrowserToolContext {
   manager: BrowserSessionManager;
   session: Pick<SessionState, "sessionId" | "agentId" | "profileId">;
+  wakeId: string;
   pageLoadTimeoutMs?: number;
   allowPrivateNet?: boolean;
   resolveHostAddresses?: ResolveHostAddresses;
@@ -149,6 +150,7 @@ export function createBrowserToolResolver(
     resolveBrowserTools({
       manager: context.manager,
       session: wake.state.session,
+      wakeId: wake.wakeId,
       pageLoadTimeoutMs: context.pageLoadTimeoutMs,
       allowPrivateNet: context.allowPrivateNet,
       resolveHostAddresses: context.resolveHostAddresses,
@@ -171,6 +173,13 @@ export function resolveBrowserTools(context: BrowserToolContext): BrainTool[] {
   ];
 }
 
+function openBrowser(context: BrowserToolContext, signal?: AbortSignal) {
+  return context.manager.open(
+    { ...context.session, wakeId: context.wakeId },
+    signal,
+  );
+}
+
 export function browserNavigateTool(
   context: BrowserToolContext,
 ): BrainTool<typeof browserNavigateParameters, BrowserActionDetails> {
@@ -185,7 +194,7 @@ export function browserNavigateTool(
         allowPrivateNet: context.allowPrivateNet,
         resolveHostAddresses: context.resolveHostAddresses,
       });
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       await handle.cdp.call("Page.navigate", { url: params.url });
       await handle.cdp
         .call("Page.loadEventFired", {}, context.pageLoadTimeoutMs ?? 8_000)
@@ -211,7 +220,7 @@ export function browserSnapshotTool(
       "Return a bounded accessibility and interactive-element snapshot for the session-scoped browser page.",
     parameters: browserSnapshotParameters,
     execute: async (_toolCallId, _params, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       const title = await evalJson<string>(handle.cdp, "document.title");
       const url = await evalJson<string>(handle.cdp, "location.href");
       const refs = await evalJson<readonly DomRef[]>(handle.cdp, domRefScript);
@@ -247,7 +256,7 @@ export function browserClickTool(
     description: "Click a ref from the current browser snapshot.",
     parameters: browserRefParameters,
     execute: async (_toolCallId, params: BrowserRefParams, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       const target = currentRefTarget(context, params.ref);
       await handle.cdp.call("Runtime.evaluate", {
         expression: clickScript(target),
@@ -275,7 +284,7 @@ export function browserTypeTool(
       "Type bounded text into a ref from the current browser snapshot.",
     parameters: browserTypeParameters,
     execute: async (_toolCallId, params: BrowserTypeParams, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       const target = currentRefTarget(context, params.ref);
       await handle.cdp.call("Runtime.evaluate", {
         expression: typeScript(target, params.text),
@@ -303,7 +312,7 @@ export function browserScrollTool(
     description: "Scroll the current browser page up or down.",
     parameters: browserScrollParameters,
     execute: async (_toolCallId, params: BrowserScrollParams, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       const distance = params.direction === "up" ? -700 : 700;
       await handle.cdp.call("Runtime.evaluate", {
         expression: `window.scrollBy(0, ${distance})`,
@@ -328,7 +337,7 @@ export function browserBackTool(
     description: "Navigate back in the current browser history.",
     parameters: browserBackParameters,
     execute: async (_toolCallId, _params, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       await handle.cdp.call("Runtime.evaluate", {
         expression: "history.back()",
       });
@@ -351,7 +360,7 @@ export function browserPressTool(
     description: "Press a bounded keyboard key on the current browser page.",
     parameters: browserPressParameters,
     execute: async (_toolCallId, params: BrowserPressParams, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       await handle.cdp.call("Input.dispatchKeyEvent", {
         type: "keyDown",
         key: params.key,
@@ -381,7 +390,7 @@ export function browserConsoleTool(
       "Run one bounded page diagnostic expression and return a JSON-serializable result.",
     parameters: browserConsoleParameters,
     execute: async (_toolCallId, params: BrowserConsoleParams, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       const expression = params.expression ?? "document.title";
       const result = await evalJson<unknown>(handle.cdp, expression);
       const details = {
@@ -408,7 +417,7 @@ export function browserVisionTool(
       "Capture a bounded PNG screenshot and return an artifact reference for later vision analysis.",
     parameters: browserVisionParameters,
     execute: async (_toolCallId, _params, signal) => {
-      const handle = await context.manager.open(context.session, signal);
+      const handle = await openBrowser(context, signal);
       const result = (await handle.cdp.call("Page.captureScreenshot", {
         format: "png",
       })) as { data?: string };

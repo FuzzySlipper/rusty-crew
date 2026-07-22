@@ -21817,6 +21817,587 @@ export const bridgeWireSchemaArtifact = {
       "title": "MemoryProposalRecord",
       "type": "object"
     },
+    "rusty_crew_core_protocol::runtime_activity::RuntimeActivityCensus": {
+      "properties": {
+        "active": {
+          "items": {
+            "properties": {
+              "activity": {
+                "properties": {
+                  "activityId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "debugDetailId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "dispatch",
+                      "wake",
+                      "provider_request",
+                      "tool_call",
+                      "subprocess",
+                      "browser",
+                      "external_turn"
+                    ],
+                    "type": "string"
+                  },
+                  "lastProgressAt": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "owner": {
+                    "enum": [
+                      "rust_coordination",
+                      "rust_brain",
+                      "type_script_host",
+                      "external_runtime"
+                    ],
+                    "type": "string"
+                  },
+                  "parentActivityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phase": {
+                    "type": "string"
+                  },
+                  "processId": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "profileId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "providerAlias": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reasonCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "revision": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "serviceInstanceId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "completed",
+                      "failed",
+                      "cancelled",
+                      "interrupted"
+                    ],
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "terminalAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "toolName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "wakeId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "activityId",
+                  "serviceInstanceId",
+                  "kind",
+                  "owner",
+                  "status",
+                  "phase",
+                  "startedAt",
+                  "lastProgressAt",
+                  "revision"
+                ],
+                "type": "object"
+              },
+              "elapsedMs": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sinceProgressMs": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "activity",
+              "elapsedMs",
+              "sinceProgressMs"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "automaticCancellationEnabled": {
+          "type": "boolean"
+        },
+        "findings": {
+          "items": {
+            "properties": {
+              "activityId": {
+                "type": "string"
+              },
+              "code": {
+                "enum": [
+                  "session_projection_mismatch",
+                  "untracked_native_run",
+                  "detached_dispatch",
+                  "orphan_tool_execution",
+                  "stale_ledger_entry",
+                  "stalled",
+                  "restart_interrupted",
+                  "untracked_service_process"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "relatedActivityId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "activityId",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "recentlyAbnormal": {
+          "items": {
+            "properties": {
+              "activity": {
+                "properties": {
+                  "activityId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "debugDetailId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "dispatch",
+                      "wake",
+                      "provider_request",
+                      "tool_call",
+                      "subprocess",
+                      "browser",
+                      "external_turn"
+                    ],
+                    "type": "string"
+                  },
+                  "lastProgressAt": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "owner": {
+                    "enum": [
+                      "rust_coordination",
+                      "rust_brain",
+                      "type_script_host",
+                      "external_runtime"
+                    ],
+                    "type": "string"
+                  },
+                  "parentActivityId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phase": {
+                    "type": "string"
+                  },
+                  "processId": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "profileId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "providerAlias": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reasonCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "revision": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "serviceInstanceId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "completed",
+                      "failed",
+                      "cancelled",
+                      "interrupted"
+                    ],
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "terminalAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "toolName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "wakeId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "activityId",
+                  "serviceInstanceId",
+                  "kind",
+                  "owner",
+                  "status",
+                  "phase",
+                  "startedAt",
+                  "lastProgressAt",
+                  "revision"
+                ],
+                "type": "object"
+              },
+              "elapsedMs": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sinceProgressMs": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "activity",
+              "elapsedMs",
+              "sinceProgressMs"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "serviceInstanceId": {
+          "type": "string"
+        },
+        "summary": {
+          "properties": {
+            "active": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "findings": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "recentlyAbnormal": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "untrackedProcesses": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "active",
+            "recentlyAbnormal",
+            "findings",
+            "untrackedProcesses"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "generatedAt",
+        "serviceInstanceId",
+        "active",
+        "recentlyAbnormal",
+        "findings",
+        "summary",
+        "automaticCancellationEnabled"
+      ],
+      "title": "RuntimeActivityCensus",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord": {
+      "properties": {
+        "activityId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debugDetailId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "dispatch",
+            "wake",
+            "provider_request",
+            "tool_call",
+            "subprocess",
+            "browser",
+            "external_turn"
+          ],
+          "type": "string"
+        },
+        "lastProgressAt": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "enum": [
+            "rust_coordination",
+            "rust_brain",
+            "type_script_host",
+            "external_runtime"
+          ],
+          "type": "string"
+        },
+        "parentActivityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "processId": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "providerAlias": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "serviceInstanceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wakeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "activityId",
+        "serviceInstanceId",
+        "kind",
+        "owner",
+        "status",
+        "phase",
+        "startedAt",
+        "lastProgressAt",
+        "revision"
+      ],
+      "title": "RuntimeActivityRecord",
+      "type": "object"
+    },
     "rusty_crew_core_tool_registry::LocalCodeResourcePolicyPlan": {
       "properties": {
         "commandTimeoutMs": {
@@ -24214,6 +24795,7 @@ export const bridgeWireSchemaArtifact = {
     "archive_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "authorize_external_runtime_handshake": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeHandshakeDecision",
     "begin_agent_round": "rusty_crew_core_protocol::external_runtime::AgentRoundStartReceipt",
+    "begin_runtime_activity": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord",
     "bind_external_agent": "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding",
     "brain_catalog": "rusty_crew_brain_runtime::catalog::BrainCatalog",
     "build_roleplay_prompt_context": "rusty_crew_roleplay_core::RoleplayPromptContextOutput",
@@ -24242,6 +24824,7 @@ export const bridgeWireSchemaArtifact = {
     "deliver_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "ensure_active_chat_conversation_branch": "rusty_crew_core_persistence::contracts::EnsureActiveChatConversationBranchResult",
     "expire_external_turn_dispatches": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
+    "finish_runtime_activity": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord",
     "get_agent_message_delivery": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt>",
     "get_agent_round": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentCorrelatedRound>",
     "get_agent_route_resolution": "core::option::Option<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>",
@@ -24311,6 +24894,7 @@ export const bridgeWireSchemaArtifact = {
     "plan_tool_availability": "rusty_crew_core_tool_registry::ToolAvailabilityPlan",
     "plan_web_browser_resource_policy": "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan",
     "prepare_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
+    "progress_runtime_activity": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord",
     "promote_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "put_agent_route": "rusty_crew_core_protocol::external_runtime::AgentRouteRecord",
     "put_roleplay_character": "rusty_crew_core_persistence::contracts::RoleplayCharacterRecord",
@@ -24359,6 +24943,7 @@ export const bridgeWireSchemaArtifact = {
     "resolve_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
     "roleplay_speaker_identity": "rusty_crew_roleplay_core::RoleplaySpeakerIdentitySnapshot",
     "run_scheduler_tick": "rusty_crew_core_bridge_api::scheduler_wire::SchedulerTickWireOutput",
+    "runtime_activity_census": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityCensus",
     "save_attachment": "rusty_crew_core_persistence::contracts::AttachmentRecord",
     "save_conversation_branch": "rusty_crew_core_persistence::contracts::ConversationBranchRecord",
     "save_conversation_snapshot": "rusty_crew_core_persistence::contracts::ConversationSnapshotRecord",

@@ -1870,6 +1870,17 @@
         "public": true
       },
       {
+        "id": "admin.diagnostics.activities",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/activities",
+        "description": "Read the Rust-owned runtime activity census and reconciliation findings.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics"],
+        "public": true
+      },
+      {
         "id": "admin.diagnostics.observation",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/observation",
@@ -3614,6 +3625,13 @@
         "capability_id": "admin.diagnostics.buffered_brain_runs",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/buffered-brain-runs",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.activities",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/activities",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

@@ -179,6 +179,10 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
       {
         module_label: "chat-completions",
         wake_id: "wake-active",
+        session_id: "session-alpha",
+        agent_id: "agent-alpha",
+        profile_id: "prime",
+        phase: "running",
         queued_stream_item_count: 2,
         stream_retention_metrics: {
           raw_stream_item_count: 5,
@@ -202,6 +206,20 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
         last_transition_at: now,
       },
     ],
+  },
+  runtimeActivities: {
+    generatedAt: now,
+    serviceInstanceId: "service-test",
+    active: [],
+    recentlyAbnormal: [],
+    findings: [],
+    summary: {
+      active: 0,
+      recentlyAbnormal: 0,
+      findings: 0,
+      untrackedProcesses: 0,
+    },
+    automaticCancellationEnabled: false,
   },
 });
 const background = buildBackgroundServiceDiagnosticsProjection({
@@ -585,6 +603,17 @@ assert.equal(bufferedRunsData.runs[0]?.wake_id, "wake-active");
 assert.equal(bufferedRunsData.runs[0]?.pending_tool_request_count, 1);
 assert.equal(bufferedRunsData.runs[0]?.arguments_json, undefined);
 assert.equal(bufferedRunsData.runs[0]?.output, undefined);
+
+const activities = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/activities" },
+  { diagnostics },
+);
+assert.equal(activities.status, 200);
+assert.equal(
+  okData<{ automaticCancellationEnabled: boolean }>(activities)
+    .automaticCancellationEnabled,
+  false,
+);
 
 const storageRoute = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics/storage" },

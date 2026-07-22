@@ -1,8 +1,9 @@
 //! PostgreSQL schema migration catalog and application logic.
 
+use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 39;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 40;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -209,6 +210,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 39,
         description: "add requested address to durable agent delivery history",
         apply: Some(apply_postgres_agent_delivery_requested_address),
+    },
+    PostgresSchemaMigration {
+        version: 40,
+        description: "add typed runtime activity accounting",
+        apply: Some(apply_postgres_runtime_activities),
     },
 ];
 

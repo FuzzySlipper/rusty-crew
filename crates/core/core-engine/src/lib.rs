@@ -30,6 +30,7 @@ mod roleplay_lore_store;
 mod roleplay_mechanic;
 mod roleplay_proposals;
 mod roleplay_records_store;
+mod runtime_activity;
 mod runtime_admin;
 mod runtime_admin_store;
 mod scheduler;
@@ -132,7 +133,7 @@ use rusty_crew_core_protocol::{
     CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
-    FanOutFailurePolicy, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
+    ExternalTurnPhase, FanOutFailurePolicy, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
     GitHubGateTerminalReceipt, GitHubGateWaitPhase, GitHubGateWaitRecord, GitHubGateWakeResult,
     IsoTimestamp, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
     MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor,
@@ -142,8 +143,12 @@ use rusty_crew_core_protocol::{
     ModelProviderRefreshMode, ModelProviderRefreshPlan, ModelProviderRefreshPlanRequest,
     ModelProviderRefreshProfileAction, ModelProviderWrite, ParentConsumptionPolicy, ProfileId,
     ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, ServiceCredentialDelete,
-    ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, RuntimeActivityBegin,
+    RuntimeActivityCensus, RuntimeActivityCensusQuery, RuntimeActivityCensusSummary,
+    RuntimeActivityFinding, RuntimeActivityFindingCode, RuntimeActivityFinish, RuntimeActivityId,
+    RuntimeActivityKind, RuntimeActivityOwner, RuntimeActivityProgress, RuntimeActivityRecord,
+    RuntimeActivityStatus, RuntimeActivityView, ServiceCredentialDelete, ServiceCredentialQuery,
+    ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
     SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
     ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
@@ -178,6 +183,7 @@ pub struct ProviderStateHydration {
 #[derive(Debug, Clone)]
 pub struct CoreEngine {
     handle: EngineHandle,
+    service_instance_id: String,
     config: EngineConfig,
     bus: CoreBus,
     sessions: SessionRegistry,

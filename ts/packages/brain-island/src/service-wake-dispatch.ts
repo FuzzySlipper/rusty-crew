@@ -4,6 +4,7 @@ import type {
   CompletionPacket,
   CoreEvent,
   ProfileId,
+  RuntimeActivityFinish,
   SessionId,
   SessionState,
   SubscriptionHandle,
@@ -76,6 +77,8 @@ export interface ServiceWakeDispatchContext {
     | "drainSubscriptionEvents"
     | "listSessions"
     | "planRoleplayMechanicProfile"
+    | "beginRuntimeActivity"
+    | "finishRuntimeActivity"
     | "subscribeEvents"
     | "unsubscribeEvents"
     | "wakeBrain"
@@ -158,6 +161,8 @@ export async function dispatchWake(
         wakeId: string;
       }
     | undefined;
+  let dispatchActivityStarted = false;
+  let dispatchFinish: RuntimeActivityFinish | undefined;
   if (context.inFlightWakes.has(sessionId)) {
     return {
       sessionId,
@@ -205,6 +210,29 @@ export async function dispatchWake(
 
     const wakeId = context.nextWakeId(session);
     activeWake = { session, wakeId };
+    await context.bridge
+      .beginRuntimeActivity({
+        activityId: `dispatch:${wakeId}`,
+        kind: "dispatch",
+        owner: "type_script_host",
+        agentId: session.agentId,
+        profileId: session.profileId,
+        sessionId: session.sessionId,
+        wakeId,
+        phase: "preparing",
+        summary: `${source} wake dispatch`,
+      })
+      .then(() => {
+        dispatchActivityStarted = true;
+      })
+      .catch((error: unknown) => {
+        context.recordEvent({
+          source: "service-host",
+          eventType: "runtime_activity_record_failed",
+          severity: "warning",
+          summary: errorMessage(error, "wake dispatch activity begin failed"),
+        });
+      });
     const profileContext = await context.loadProfileContext(session.profileId);
     const configured = context.configuredSessionForRuntimeSession(session);
     const contextStrategy = await context.prepareContextStrategy({
@@ -349,6 +377,7 @@ export async function dispatchWake(
         completionSummary: report.summary,
       });
     }
+    dispatchFinish = runtimeDispatchFinish(report);
     return report;
   } catch (error) {
     if (error instanceof WakeDispatchTimeoutError) {
@@ -384,6 +413,7 @@ export async function dispatchWake(
         severity: "error",
         summary: `${report.summary} (${source}).`,
       });
+      dispatchFinish = runtimeDispatchFinish(report);
       return report;
     }
     if (error instanceof BufferedBrainWakeError) {
@@ -419,6 +449,7 @@ export async function dispatchWake(
         severity: "error",
         summary: report.summary,
       });
+      dispatchFinish = runtimeDispatchFinish(report);
       return report;
     }
     const report: ServiceWakeDispatchReport = {
@@ -453,10 +484,41 @@ export async function dispatchWake(
       severity: "error",
       summary: report.summary,
     });
+    dispatchFinish = runtimeDispatchFinish(report);
     return report;
   } finally {
+    if (dispatchActivityStarted && dispatchFinish !== undefined) {
+      await context.bridge
+        .finishRuntimeActivity(dispatchFinish)
+        .catch((error: unknown) => {
+          context.recordEvent({
+            source: "service-host",
+            eventType: "runtime_activity_record_failed",
+            severity: "warning",
+            summary: errorMessage(
+              error,
+              "wake dispatch activity finish failed",
+            ),
+          });
+        });
+    }
     context.inFlightWakes.delete(sessionId);
   }
+}
+
+function runtimeDispatchFinish(
+  report: ServiceWakeDispatchReport,
+): RuntimeActivityFinish | undefined {
+  if (report.wakeId === undefined) {
+    return undefined;
+  }
+  return {
+    activityId: `dispatch:${report.wakeId}`,
+    status: report.status === "completed" ? "completed" : "failed",
+    phase: report.status,
+    reasonCode: report.reasonCode,
+    summary: `wake dispatch ${report.status}`,
+  };
 }
 
 export async function appendCoreEventsToChatLog(

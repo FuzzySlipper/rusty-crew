@@ -215,6 +215,10 @@ const rawBufferedBrainRunDiagnosticSchema = Type.Object(
   {
     module_label: Type.String(),
     wake_id: Type.String(),
+    session_id: Type.String(),
+    agent_id: nullableString,
+    profile_id: nullableString,
+    phase: Type.String(),
     queued_stream_item_count: Type.Number({ minimum: 0 }),
     stream_retention_metrics: Type.Object(
       {

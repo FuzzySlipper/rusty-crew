@@ -1249,6 +1249,125 @@ export type ResourceLimits = {
   workdir?: string | null;
 };
 
+export type RuntimeActivityBegin = {
+  activityId: string;
+  agentId?: string | null;
+  debugDetailId?: string | null;
+  kind: RuntimeActivityKind;
+  model?: string | null;
+  owner: RuntimeActivityOwner;
+  parentActivityId?: string | null;
+  phase: string;
+  processId?: number | null;
+  profileId?: string | null;
+  providerAlias?: string | null;
+  sessionId?: string | null;
+  summary?: string | null;
+  toolName?: string | null;
+  wakeId?: string | null;
+};
+
+export type RuntimeActivityCensus = {
+  active: Array<RuntimeActivityView>;
+  automaticCancellationEnabled: boolean;
+  findings: Array<RuntimeActivityFinding>;
+  generatedAt: string;
+  recentlyAbnormal: Array<RuntimeActivityView>;
+  serviceInstanceId: string;
+  summary: RuntimeActivityCensusSummary;
+};
+
+export type RuntimeActivityCensusQuery = {
+  liveEvidence?: Array<RuntimeActivityLiveEvidence>;
+  recentAbnormalLimit?: number | null;
+  stallAfterMs?: number | null;
+};
+
+export type RuntimeActivityCensusSummary = {
+  active: number;
+  findings: number;
+  recentlyAbnormal: number;
+  untrackedProcesses: number;
+};
+
+export type RuntimeActivityFinding = {
+  activityId: string;
+  code: RuntimeActivityFindingCode;
+  message: string;
+  relatedActivityId?: string | null;
+};
+
+export type RuntimeActivityFindingCode = "session_projection_mismatch" | "untracked_native_run" | "detached_dispatch" | "orphan_tool_execution" | "stale_ledger_entry" | "stalled" | "restart_interrupted" | "untracked_service_process";
+
+export type RuntimeActivityFinish = {
+  activityId: string;
+  phase: string;
+  reasonCode?: string | null;
+  status: RuntimeActivityStatus;
+  summary?: string | null;
+};
+
+export type RuntimeActivityKind = "dispatch" | "wake" | "provider_request" | "tool_call" | "subprocess" | "browser" | "external_turn";
+
+export type RuntimeActivityLiveEvidence = {
+  activityId: string;
+  agentId?: string | null;
+  kind: RuntimeActivityKind;
+  lastProgressAt: string;
+  owner: RuntimeActivityOwner;
+  parentActivityId?: string | null;
+  phase: string;
+  processId?: number | null;
+  profileId?: string | null;
+  sessionId?: string | null;
+  startedAt: string;
+  summary?: string | null;
+  wakeId?: string | null;
+};
+
+export type RuntimeActivityOwner = "rust_coordination" | "rust_brain" | "type_script_host" | "external_runtime";
+
+export type RuntimeActivityProgress = {
+  activityId: string;
+  debugDetailId?: string | null;
+  phase: string;
+  processId?: number | null;
+  summary?: string | null;
+};
+
+export type RuntimeActivityRecord = {
+  activityId: string;
+  agentId?: string | null;
+  debugDetailId?: string | null;
+  kind: RuntimeActivityKind;
+  lastProgressAt: string;
+  model?: string | null;
+  owner: RuntimeActivityOwner;
+  parentActivityId?: string | null;
+  phase: string;
+  processId?: number | null;
+  profileId?: string | null;
+  providerAlias?: string | null;
+  reasonCode?: string | null;
+  revision: number;
+  serviceInstanceId: string;
+  sessionId?: string | null;
+  startedAt: string;
+  status: RuntimeActivityStatus;
+  summary?: string | null;
+  terminalAt?: string | null;
+  toolName?: string | null;
+  wakeId?: string | null;
+};
+
+export type RuntimeActivityStatus = "active" | "completed" | "failed" | "cancelled" | "interrupted";
+
+export type RuntimeActivityView = {
+  activity: RuntimeActivityRecord;
+  elapsedMs: number;
+  sinceProgressMs: number;
+};
+
 export type SessionActivityDigest = {
   allowed_capture_spaces: Array<MemorySpaceId>;
   completion_summary?: string | null;
