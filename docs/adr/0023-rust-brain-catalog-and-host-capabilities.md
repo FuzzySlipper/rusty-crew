@@ -94,7 +94,7 @@ dispatches those calls to the canonical provider implementation.
 - provider-state mode, rebuild policy, fingerprints, and invalidation reasons;
 - legal buffered-turn transitions and terminality;
 - pending tool request identity and submitted-result correlation;
-- tool failure counters, stop decisions, and output bounds;
+- tool failure counters, provider-facing recovery guidance, and output bounds;
 - cancellation, timeout, bounded buffering, and cleanup;
 - OpenAI Responses and Chat Completions provider loops;
 - roleplay narrator phase/FSM hosting;
@@ -259,7 +259,13 @@ Rules:
 - provider-specific metrics and credential updates are terminal attachments,
   not alternate lifecycle branches.
 
-Task 5378 adds the tool failure and output-bound policy to this state machine.
+Task 5378 added tool failure classification and output bounds to this state
+machine. Task 6084 corrected its terminal policy: ordinary host-tool failures
+remain error results visible to the provider. Repeated or consecutive failures
+add bounded guidance to correct the call, choose an alternative, or report the
+problem; they do not make the coordinator terminal. Explicit cancellation,
+provider/runtime failures, malformed provider calls, and per-brain continuation
+round ceilings remain separate terminal paths.
 
 ## Bridge Operation Plan
 

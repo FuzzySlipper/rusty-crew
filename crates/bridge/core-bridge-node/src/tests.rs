@@ -960,6 +960,145 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
 }
 
 #[test]
+fn native_brain_host_result_bridges_keep_repeated_tool_failures_recoverable() {
+    fn coordinator(
+        module_id: &str,
+        wake_id: &str,
+        session_id: &str,
+    ) -> rusty_crew_brain_runtime::BufferedBrainTurnCoordinator {
+        let mut coordinator = rusty_crew_brain_runtime::BufferedBrainTurnCoordinator::new(
+            module_id,
+            wake_id,
+            SessionId::new(session_id),
+            None,
+            rusty_crew_brain_runtime::BufferedBrainTurnLimits::default(),
+        )
+        .expect("coordinator");
+        coordinator.start().expect("start coordinator");
+        coordinator
+    }
+
+    fn request(call_id: &str) -> rusty_crew_brain_runtime::BufferedNeutralPendingToolRequest {
+        rusty_crew_brain_runtime::BufferedNeutralPendingToolRequest {
+            call_id: call_id.to_string(),
+            provider_item_id: None,
+            name: "patch".to_string(),
+            arguments_json: format!(r#"{{"attempt":"{call_id}"}}"#),
+        }
+    }
+
+    fn failed_input(wake_id: &str, call_id: &str) -> String {
+        serde_json::json!({
+            "wakeId": wake_id,
+            "callId": call_id,
+            "output": "patch target did not match",
+            "status": "failed",
+            "reasonCode": "tool_reported_unsuccessful_result",
+            "retryable": true,
+            "action": "failed"
+        })
+        .to_string()
+    }
+
+    let chat_registry = Arc::new(rusty_crew_brain_runtime::BufferedBrainTurnRegistry::new(
+        "chat-completions",
+    ));
+    let mut chat_coordinator = coordinator("chat-completions", "chat-recovery", "chat-session");
+    chat_coordinator
+        .queue_tool_request(request("chat-call-1"))
+        .expect("first chat request");
+    chat_registry
+        .insert(rusty_crew_brain_runtime::BufferedBrainTurnRun::new(
+            chat_coordinator,
+            crate::chat_completions::ChatCompletionsBufferedRunPayload::default(),
+        ))
+        .expect("insert chat run");
+    crate::chat_completions::submit_chat_completions_tool_output_json(
+        &chat_registry,
+        failed_input("chat-recovery", "chat-call-1"),
+    )
+    .expect("first chat failure");
+    chat_registry
+        .with_run_mut("chat-recovery", |run| {
+            run.coordinator.queue_tool_request(request("chat-call-2"))
+        })
+        .expect("chat run")
+        .expect("second chat request");
+    let chat_second: serde_json::Value = serde_json::from_str(
+        &crate::chat_completions::submit_chat_completions_tool_output_json(
+            &chat_registry,
+            failed_input("chat-recovery", "chat-call-2"),
+        )
+        .expect("second chat failure"),
+    )
+    .expect("chat receipt");
+    assert_eq!(
+        chat_second["decision"]["recovery_guidance"]["reason_code"],
+        "repeated_tool_failure_guidance"
+    );
+    chat_registry
+        .with_run_mut("chat-recovery", |run| {
+            assert_eq!(
+                run.coordinator.phase(),
+                rusty_crew_brain_runtime::BufferedBrainTurnPhase::Running
+            );
+            assert!(run.coordinator.terminal().is_none());
+        })
+        .expect("inspect chat run");
+
+    let responses_registry = Arc::new(rusty_crew_brain_runtime::BufferedBrainTurnRegistry::new(
+        "OpenAI Responses",
+    ));
+    let mut responses_coordinator = coordinator(
+        "openai-responses",
+        "responses-recovery",
+        "responses-session",
+    );
+    responses_coordinator
+        .queue_tool_request(request("responses-call-1"))
+        .expect("first Responses request");
+    responses_registry
+        .insert(rusty_crew_brain_runtime::BufferedBrainTurnRun::new(
+            responses_coordinator,
+            crate::responses::OpenAiResponsesBufferedRunPayload::default(),
+        ))
+        .expect("insert Responses run");
+    crate::responses::submit_openai_responses_tool_output_json(
+        &responses_registry,
+        failed_input("responses-recovery", "responses-call-1"),
+    )
+    .expect("first Responses failure");
+    responses_registry
+        .with_run_mut("responses-recovery", |run| {
+            run.coordinator
+                .queue_tool_request(request("responses-call-2"))
+        })
+        .expect("Responses run")
+        .expect("second Responses request");
+    let responses_second: serde_json::Value = serde_json::from_str(
+        &crate::responses::submit_openai_responses_tool_output_json(
+            &responses_registry,
+            failed_input("responses-recovery", "responses-call-2"),
+        )
+        .expect("second Responses failure"),
+    )
+    .expect("Responses receipt");
+    assert_eq!(
+        responses_second["decision"]["recovery_guidance"]["reason_code"],
+        "repeated_tool_failure_guidance"
+    );
+    responses_registry
+        .with_run_mut("responses-recovery", |run| {
+            assert_eq!(
+                run.coordinator.phase(),
+                rusty_crew_brain_runtime::BufferedBrainTurnPhase::Running
+            );
+            assert!(run.coordinator.terminal().is_none());
+        })
+        .expect("inspect Responses run");
+}
+
+#[test]
 fn binding_runtime_census_tracks_native_wake_provider_and_tool_topology() {
     let binding = NativeBridgeBinding::new();
     let data_dir = std::env::temp_dir().join(format!(

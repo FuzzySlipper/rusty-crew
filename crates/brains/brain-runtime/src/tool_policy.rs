@@ -73,12 +73,12 @@ pub struct BufferedBrainToolFailure {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct BufferedBrainToolStopReport {
+pub struct BufferedBrainToolRecoveryGuidance {
     pub reason_code: String,
     pub reason: String,
     pub total_failures: usize,
     pub recent_failures: Vec<BufferedBrainToolFailure>,
-    pub report: String,
+    pub guidance: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -93,15 +93,15 @@ pub struct BufferedBrainToolOutputTruncation {
 pub struct BufferedBrainToolPolicyDecision {
     pub provider_output: BufferedNeutralToolOutput,
     pub failure: Option<BufferedBrainToolFailure>,
-    pub stop: Option<BufferedBrainToolStopReport>,
+    pub recovery_guidance: Option<BufferedBrainToolRecoveryGuidance>,
     pub truncation: Option<BufferedBrainToolOutputTruncation>,
     pub debug_detail_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BufferedBrainToolFailurePolicyConfig {
-    pub repeated_failure_limit: usize,
-    pub consecutive_failure_limit: usize,
+    pub repeated_failure_guidance_threshold: usize,
+    pub consecutive_failure_guidance_threshold: usize,
     pub recent_failure_limit: usize,
     pub max_output_chars: usize,
 }
@@ -109,8 +109,8 @@ pub struct BufferedBrainToolFailurePolicyConfig {
 impl Default for BufferedBrainToolFailurePolicyConfig {
     fn default() -> Self {
         Self {
-            repeated_failure_limit: 2,
-            consecutive_failure_limit: 3,
+            repeated_failure_guidance_threshold: 2,
+            consecutive_failure_guidance_threshold: 3,
             recent_failure_limit: 5,
             max_output_chars: 20_000,
         }
@@ -134,8 +134,8 @@ impl Default for BufferedBrainToolFailurePolicy {
 
 impl BufferedBrainToolFailurePolicy {
     pub fn new(config: BufferedBrainToolFailurePolicyConfig) -> Self {
-        assert!(config.repeated_failure_limit > 0);
-        assert!(config.consecutive_failure_limit > 0);
+        assert!(config.repeated_failure_guidance_threshold > 0);
+        assert!(config.consecutive_failure_guidance_threshold > 0);
         assert!(config.recent_failure_limit > 0);
         assert!(config.max_output_chars > 0);
         Self {
@@ -161,20 +161,21 @@ impl BufferedBrainToolFailurePolicy {
         result: &BufferedBrainHostToolResult,
         max_output_bytes: usize,
     ) -> BufferedBrainToolPolicyDecision {
-        let (output, truncation) = bound_tool_output(
+        let failure = self.failure_from_result(tool_name, result);
+        let recovery_guidance = self.record_failure(failure.as_ref());
+        let (output, truncation) = bound_tool_output_with_guidance(
             &result.output_text,
+            recovery_guidance.as_ref(),
             self.config.max_output_chars,
             max_output_bytes,
         );
-        let failure = self.failure_from_result(tool_name, result);
-        let stop = self.record_failure(failure.as_ref());
         BufferedBrainToolPolicyDecision {
             provider_output: BufferedNeutralToolOutput {
                 output,
                 is_error: failure.is_some(),
             },
             failure,
-            stop,
+            recovery_guidance,
             truncation,
             debug_detail_id: result.debug_detail_id.clone(),
         }
@@ -222,7 +223,7 @@ impl BufferedBrainToolFailurePolicy {
     fn record_failure(
         &mut self,
         failure: Option<&BufferedBrainToolFailure>,
-    ) -> Option<BufferedBrainToolStopReport> {
+    ) -> Option<BufferedBrainToolRecoveryGuidance> {
         let Some(failure) = failure else {
             self.consecutive_failures = 0;
             return None;
@@ -237,25 +238,29 @@ impl BufferedBrainToolFailurePolicy {
         let key_count = self.failures_by_key.entry(key).or_default();
         *key_count += 1;
 
-        if *key_count >= self.config.repeated_failure_limit {
-            return Some(self.stop_report(
-                "repeated_tool_failure",
+        if *key_count >= self.config.repeated_failure_guidance_threshold {
+            return Some(self.recovery_guidance(
+                "repeated_tool_failure_guidance",
                 format!(
                     "repeated {} failure ({})",
                     failure.tool_name, failure.reason_code
                 ),
             ));
         }
-        if self.consecutive_failures >= self.config.consecutive_failure_limit {
-            return Some(self.stop_report(
-                "consecutive_tool_failures",
+        if self.consecutive_failures >= self.config.consecutive_failure_guidance_threshold {
+            return Some(self.recovery_guidance(
+                "consecutive_tool_failure_guidance",
                 format!("{} consecutive tool failures", self.consecutive_failures),
             ));
         }
         None
     }
 
-    fn stop_report(&self, reason_code: &str, reason: String) -> BufferedBrainToolStopReport {
+    fn recovery_guidance(
+        &self,
+        reason_code: &str,
+        reason: String,
+    ) -> BufferedBrainToolRecoveryGuidance {
         let recent_failures = self.recent_failures.iter().cloned().collect::<Vec<_>>();
         let recent = recent_failures
             .iter()
@@ -267,15 +272,15 @@ impl BufferedBrainToolFailurePolicy {
             })
             .collect::<Vec<_>>()
             .join("; ");
-        let report = [
-            Some(format!("Stopping assistant turn after {reason}.")),
+        let guidance = [
+            Some(format!("Crew observed {reason}.")),
             Some(format!(
                 "Tool failure count this turn: {}.",
                 self.total_failures
             )),
             (!recent.is_empty()).then(|| format!("Recent tool failures: {recent}.")),
             Some(
-                "The assistant should report the unavailable tool/dependency instead of continuing unrelated tool attempts."
+                "Do not repeat an unchanged call. Correct the arguments, choose an alternative, or explain the unavailable operation to the user. Continue the turn with the best useful result available."
                     .to_string(),
             ),
         ]
@@ -283,12 +288,12 @@ impl BufferedBrainToolFailurePolicy {
         .flatten()
         .collect::<Vec<_>>()
         .join("\n");
-        BufferedBrainToolStopReport {
+        BufferedBrainToolRecoveryGuidance {
             reason_code: reason_code.to_string(),
             reason,
             total_failures: self.total_failures,
             recent_failures,
-            report,
+            guidance,
         }
     }
 }
@@ -330,6 +335,56 @@ fn bound_tool_output(
     (kept, Some(truncation))
 }
 
+fn bound_tool_output_with_guidance(
+    input: &str,
+    guidance: Option<&BufferedBrainToolRecoveryGuidance>,
+    max_chars: usize,
+    max_bytes: usize,
+) -> (String, Option<BufferedBrainToolOutputTruncation>) {
+    let Some(guidance) = guidance else {
+        return bound_tool_output(input, max_chars, max_bytes);
+    };
+    let suffix = format!("\n\n[Rusty Crew recovery guidance]\n{}", guidance.guidance);
+    let suffix_chars = suffix.chars().count();
+    if input.chars().count() + suffix_chars <= max_chars && input.len() + suffix.len() <= max_bytes
+    {
+        return (format!("{input}{suffix}"), None);
+    }
+    let marker = "\n[tool output truncated]";
+    let reserved_chars = suffix_chars + marker.chars().count();
+    let reserved_bytes = suffix.len() + marker.len();
+    if reserved_chars >= max_chars || reserved_bytes >= max_bytes {
+        let (output, _) = bound_tool_output(&suffix, max_chars, max_bytes);
+        return (
+            output.clone(),
+            Some(BufferedBrainToolOutputTruncation {
+                original_chars: input.chars().count(),
+                original_bytes: input.len(),
+                output_chars: output.chars().count(),
+                output_bytes: output.len(),
+            }),
+        );
+    }
+    let body_max_chars = max_chars - reserved_chars;
+    let body_max_bytes = max_bytes - reserved_bytes;
+    let mut output = String::new();
+    for (output_chars, character) in input.chars().enumerate() {
+        if output_chars >= body_max_chars || output.len() + character.len_utf8() > body_max_bytes {
+            break;
+        }
+        output.push(character);
+    }
+    output.push_str(marker);
+    output.push_str(&suffix);
+    let truncation = BufferedBrainToolOutputTruncation {
+        original_chars: input.chars().count(),
+        original_bytes: input.len(),
+        output_chars: output.chars().count(),
+        output_bytes: output.len(),
+    };
+    (output, Some(truncation))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,7 +398,7 @@ mod tests {
             64 * 1_024,
         );
         assert!(missing.failure.is_some());
-        assert!(missing.stop.is_none());
+        assert!(missing.recovery_guidance.is_none());
 
         let manual_review = policy.record_result(
             "memory_store",
@@ -354,32 +409,40 @@ mod tests {
             64 * 1_024,
         );
         assert!(manual_review.failure.is_some());
-        assert!(manual_review.stop.is_none());
+        assert!(manual_review.recovery_guidance.is_none());
     }
 
     #[test]
-    fn repeated_failure_key_stops_on_second_occurrence() {
+    fn repeated_failure_key_adds_recovery_guidance_without_stopping() {
         let mut policy = BufferedBrainToolFailurePolicy::default();
         let unavailable =
             BufferedBrainHostToolResult::failed("not available", "tool_unavailable", false);
         assert!(policy
             .record_result("den_get_document", &unavailable, 64 * 1_024)
-            .stop
+            .recovery_guidance
             .is_none());
         let second = policy.record_result("den_get_document", &unavailable, 64 * 1_024);
         assert_eq!(
-            second.stop.as_ref().map(|stop| stop.reason_code.as_str()),
-            Some("repeated_tool_failure")
+            second
+                .recovery_guidance
+                .as_ref()
+                .map(|guidance| guidance.reason_code.as_str()),
+            Some("repeated_tool_failure_guidance")
         );
         assert!(second
-            .stop
-            .expect("stop")
-            .report
+            .recovery_guidance
+            .expect("recovery guidance")
+            .guidance
             .contains("den_get_document: tool_unavailable"));
+        assert!(second.provider_output.is_error);
+        assert!(second
+            .provider_output
+            .output
+            .contains("Do not repeat an unchanged call"));
     }
 
     #[test]
-    fn three_distinct_consecutive_failures_stop() {
+    fn three_distinct_consecutive_failures_add_recovery_guidance() {
         let mut policy = BufferedBrainToolFailurePolicy::default();
         for (index, reason) in ["bad_args", "tool_exception", "dependency_down"]
             .into_iter()
@@ -391,11 +454,13 @@ mod tests {
                 64 * 1_024,
             );
             if index < 2 {
-                assert!(decision.stop.is_none());
+                assert!(decision.recovery_guidance.is_none());
             } else {
                 assert_eq!(
-                    decision.stop.map(|stop| stop.reason_code),
-                    Some("consecutive_tool_failures".to_string())
+                    decision
+                        .recovery_guidance
+                        .map(|guidance| guidance.reason_code),
+                    Some("consecutive_tool_failure_guidance".to_string())
                 );
             }
         }
@@ -461,5 +526,31 @@ mod tests {
         );
         assert!(unicode.provider_output.output.len() <= 12);
         assert!(unicode.truncation.is_some());
+    }
+
+    #[test]
+    fn repeated_failure_guidance_survives_output_truncation() {
+        let mut policy =
+            BufferedBrainToolFailurePolicy::new(BufferedBrainToolFailurePolicyConfig {
+                max_output_chars: 1_024,
+                ..BufferedBrainToolFailurePolicyConfig::default()
+            });
+        let failure = BufferedBrainHostToolResult::failed(
+            "x".repeat(2_000),
+            "tool_reported_unsuccessful_result",
+            true,
+        );
+        policy.record_result("patch", &failure, 4_096);
+        let second = policy.record_result("patch", &failure, 4_096);
+        assert!(second.truncation.is_some());
+        assert!(second.provider_output.output.chars().count() <= 1_024);
+        assert!(second
+            .provider_output
+            .output
+            .contains("[Rusty Crew recovery guidance]"));
+        assert!(second
+            .provider_output
+            .output
+            .contains("Do not repeat an unchanged call"));
     }
 }

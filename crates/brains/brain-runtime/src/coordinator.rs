@@ -680,14 +680,6 @@ impl BufferedBrainTurnCoordinator {
             .insert(call_id.to_string(), result);
         self.accepted_host_tool_decisions
             .insert(call_id.to_string(), decision.clone());
-        if let Some(stop) = &decision.stop {
-            self.transition_terminal(
-                BufferedBrainTurnPhase::Failed,
-                stop.reason_code.clone(),
-                stop.report.clone(),
-                now,
-            );
-        }
         Ok(BufferedBrainHostToolSubmission {
             receipt: BufferedBrainToolResultReceipt::Accepted,
             decision,
@@ -1401,7 +1393,7 @@ mod tests {
             .expect("submit denial");
         assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
         assert!(submission.decision.provider_output.is_error);
-        assert!(submission.decision.stop.is_none());
+        assert!(submission.decision.recovery_guidance.is_none());
         assert_eq!(
             turn.take_submitted_tool_output("call-1"),
             Some(submission.decision.provider_output)
@@ -1409,7 +1401,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_host_failure_stops_once_with_user_facing_report() {
+    fn repeated_host_failure_returns_guidance_and_later_success_can_complete() {
         let mut turn = coordinator();
         turn.start().expect("start");
         let failure = BufferedBrainHostToolResult::failed(
@@ -1423,7 +1415,7 @@ mod tests {
         let first = turn
             .submit_host_tool_result("call-1", failure.clone())
             .expect("first failure");
-        assert!(first.decision.stop.is_none());
+        assert!(first.decision.recovery_guidance.is_none());
         assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
 
         turn.queue_tool_request(tool_request("call-2"))
@@ -1431,21 +1423,47 @@ mod tests {
         let second = turn
             .submit_host_tool_result("call-2", failure.clone())
             .expect("second failure");
-        let stop = second.decision.stop.expect("stop report");
-        assert_eq!(stop.reason_code, "repeated_tool_failure");
-        assert!(stop.report.contains("Tool failure count this turn: 2."));
-        assert!(stop.report.contains("read_file: tool_unavailable"));
-        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Failed);
-        assert_eq!(
-            turn.terminal().map(|terminal| terminal.summary.as_str()),
-            Some(stop.report.as_str())
-        );
+        let guidance = second
+            .decision
+            .recovery_guidance
+            .as_ref()
+            .expect("recovery guidance");
+        assert_eq!(guidance.reason_code, "repeated_tool_failure_guidance");
+        assert!(guidance
+            .guidance
+            .contains("Tool failure count this turn: 2."));
+        assert!(guidance.guidance.contains("read_file: tool_unavailable"));
+        assert!(second
+            .decision
+            .provider_output
+            .output
+            .contains("Correct the arguments"));
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
+        assert!(turn.terminal().is_none());
 
         let duplicate = turn
             .submit_host_tool_result("call-2", failure)
             .expect("idempotent duplicate after terminal");
         assert_eq!(duplicate.receipt, BufferedBrainToolResultReceipt::Duplicate);
         assert_eq!(turn.tool_failure_policy().total_failures(), 2);
+
+        turn.queue_tool_request(tool_request("call-3"))
+            .expect("corrected request");
+        let success = turn
+            .submit_host_tool_result(
+                "call-3",
+                BufferedBrainHostToolResult::succeeded("corrected call succeeded"),
+            )
+            .expect("corrected success");
+        assert!(success.decision.recovery_guidance.is_none());
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
+        assert_eq!(
+            turn.take_submitted_tool_output("call-3"),
+            Some(success.decision.provider_output)
+        );
+        turn.enqueue_stream_item(actions_item())
+            .expect("assistant can finish after recovery");
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Completed);
     }
 
     #[test]
