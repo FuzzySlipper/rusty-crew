@@ -45,6 +45,7 @@ export async function reconcileInterruptedChatTurns(input: {
         limit: EVENT_LIMIT,
         include_alternates: false,
       });
+      if (read.source !== "event_log") continue;
       const events = read.events.map(nativeChatEventToChatEvent);
       const repair = interruptedTurnRepair(events, facts.session.sessionId);
       if (repair === undefined) continue;

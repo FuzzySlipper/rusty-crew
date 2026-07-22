@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionId } from "@rusty-crew/contracts";
 import type { ChatEvent } from "../src/rusty-view-chat-api.js";
-import { interruptedTurnRepair } from "../src/service-chat-restart-reconciliation.js";
+import {
+  interruptedTurnRepair,
+  reconcileInterruptedChatTurns,
+} from "../src/service-chat-restart-reconciliation.js";
 
 const sessionId = "session-restart" as SessionId;
 
@@ -75,6 +78,112 @@ test("leaves a completed turn unchanged", () => {
 
   assert.equal(repair, undefined);
 });
+
+test("restart reconciliation ignores pending-message read-model fallback", async () => {
+  const appended: Array<{ kind: string; payload: Record<string, unknown> }> =
+    [];
+  const bridge = reconciliationBridge(
+    "pending_messages",
+    [
+      event(1, "message_created", {
+        role: "user",
+        source: "pending_body_state",
+      }),
+    ],
+    appended,
+  );
+
+  const report = await reconcileInterruptedChatTurns({
+    bridge,
+    now: () => "2026-07-22T00:00:01.000Z",
+  });
+
+  assert.equal(report.sessionsScanned, 1);
+  assert.deepEqual(report.sessionsReconciled, []);
+  assert.equal(report.eventsAppended, 0);
+  assert.deepEqual(appended, []);
+});
+
+test("restart reconciliation repairs only authoritative event-log turns", async () => {
+  const appended: Array<{ kind: string; payload: Record<string, unknown> }> =
+    [];
+  const bridge = reconciliationBridge(
+    "event_log",
+    [
+      event(1, "message_created", { role: "user" }),
+      event(2, "assistant_turn_started", { wake_id: "wake-event-log" }),
+      event(3, "assistant_message_completed", {
+        wake_id: "wake-event-log",
+        status: "failed",
+      }),
+    ],
+    appended,
+  );
+
+  const report = await reconcileInterruptedChatTurns({
+    bridge,
+    now: () => "2026-07-22T00:00:01.000Z",
+  });
+
+  assert.deepEqual(report.sessionsReconciled, [sessionId]);
+  assert.equal(report.eventsAppended, 1);
+  assert.equal(appended[0]?.kind, "assistant_turn_finished");
+  assert.equal(appended[0]?.payload.wake_id, "wake-event-log");
+});
+
+function reconciliationBridge(
+  source: "event_log" | "pending_messages",
+  events: ChatEvent[],
+  appended: Array<{ kind: string; payload: Record<string, unknown> }>,
+): Parameters<typeof reconcileInterruptedChatTurns>[0]["bridge"] {
+  return {
+    async queryChatSessionSummaries() {
+      return {
+        page: {
+          items: [
+            {
+              session: { sessionId, status: "idle" },
+              message_count: events.length,
+              latest_cursor: `${sessionId}:${events.length}`,
+              source,
+            },
+          ],
+          total: 1,
+          limit: 500,
+          offset: 0,
+          next_offset: null,
+        },
+      } as never;
+    },
+    async readChatSession() {
+      return {
+        session: { sessionId, status: "idle" },
+        events,
+        latest_cursor: `${sessionId}:${events.length}`,
+        has_more: false,
+        has_more_before: false,
+        total: events.length,
+        message_count: events.length,
+        source,
+        message_slots: {
+          items: [],
+          total: 0,
+          limit: 1_000,
+          offset: 0,
+          next_offset: null,
+        },
+      } as never;
+    },
+    async appendChatEvent(input) {
+      const event = input as {
+        kind: string;
+        payload: Record<string, unknown>;
+      };
+      appended.push({ kind: event.kind, payload: event.payload });
+      return {} as never;
+    },
+  };
+}
 
 function event(
   sequence: number,
