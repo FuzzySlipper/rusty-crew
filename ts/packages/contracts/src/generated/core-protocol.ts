@@ -1279,6 +1279,7 @@ export type RuntimeActivityCensus = {
 
 export type RuntimeActivityCensusQuery = {
   liveEvidence?: Array<RuntimeActivityLiveEvidence>;
+  projectedActiveSessionIds?: Array<string> | null;
   recentAbnormalLimit?: number | null;
   stallAfterMs?: number | null;
 };

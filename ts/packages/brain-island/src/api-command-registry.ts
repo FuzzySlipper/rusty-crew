@@ -1887,7 +1887,7 @@ export const API_CAPABILITIES = [
     "admin.diagnostics.activities",
     "GET",
     "/v1/admin/diagnostics/activities",
-    "Read the Rust-owned runtime activity census and reconciliation findings.",
+    "Read the Rust-owned runtime activity census and reconciliation findings; use sessionProjection=durable to compare against persisted session state.",
     "admin",
     ["diagnostics"],
   ),

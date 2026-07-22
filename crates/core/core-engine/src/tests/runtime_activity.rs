@@ -40,6 +40,7 @@ fn census_reports_stable_runtime_mismatch_and_orphan_reason_codes() {
         .runtime_activity_census(RuntimeActivityCensusQuery {
             stall_after_ms: Some(1_000),
             recent_abnormal_limit: Some(10),
+            projected_active_session_ids: Some(vec![session.session_id.clone()]),
             live_evidence: vec![
                 RuntimeActivityLiveEvidence {
                     activity_id: RuntimeActivityId::new("tool:orphan"),
@@ -91,6 +92,62 @@ fn census_reports_stable_runtime_mismatch_and_orphan_reason_codes() {
         .active
         .iter()
         .all(|view| view.elapsed_ms >= view.since_progress_ms));
+}
+
+#[test]
+fn census_reports_idle_execution_projection_but_accepts_active_projection() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "projection-session",
+            "projection-agent",
+            "projection-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    assert_eq!(session.status, SessionStatus::Idle);
+    engine
+        .begin_runtime_activity(RuntimeActivityBegin {
+            activity_id: RuntimeActivityId::new("wake:projection"),
+            parent_activity_id: None,
+            kind: RuntimeActivityKind::Wake,
+            owner: RuntimeActivityOwner::RustBrain,
+            agent_id: Some(session.agent_id.clone()),
+            profile_id: Some(session.profile_id.clone()),
+            session_id: Some(session.session_id.clone()),
+            wake_id: Some("projection".into()),
+            phase: "provider_stream".into(),
+            summary: None,
+            provider_alias: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+        })
+        .unwrap();
+
+    let stale = engine
+        .runtime_activity_census(RuntimeActivityCensusQuery {
+            projected_active_session_ids: Some(vec![]),
+            ..RuntimeActivityCensusQuery::default()
+        })
+        .unwrap();
+    assert!(stale.findings.iter().any(|finding| {
+        finding.code == RuntimeActivityFindingCode::SessionProjectionMismatch
+            && finding.activity_id.0 == "wake:projection"
+            && finding.message.contains("session projection is idle")
+    }));
+
+    let healthy = engine
+        .runtime_activity_census(RuntimeActivityCensusQuery {
+            projected_active_session_ids: Some(vec![session.session_id]),
+            ..RuntimeActivityCensusQuery::default()
+        })
+        .unwrap();
+    assert!(!healthy.findings.iter().any(|finding| {
+        finding.code == RuntimeActivityFindingCode::SessionProjectionMismatch
+            && finding.activity_id.0 == "wake:projection"
+    }));
 }
 
 #[test]

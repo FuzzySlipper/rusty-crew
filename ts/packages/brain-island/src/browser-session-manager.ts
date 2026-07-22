@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,11 +7,7 @@ import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 export type BrowserSessionState =
-  | "starting"
-  | "ready"
-  | "closing"
-  | "closed"
-  | "crashed";
+  "starting" | "ready" | "closing" | "closed" | "crashed";
 
 export type BrowserCloseReason =
   | "session_archived"
@@ -27,6 +24,7 @@ export interface BrowserOpenInput {
   agentId: AgentId;
   profileId: ProfileId;
   wakeId?: string;
+  parentActivityId?: string;
   now?: Date;
 }
 
@@ -50,6 +48,7 @@ export interface BrowserManagerOptions {
     NativeBridgeModule,
     "beginRuntimeActivity" | "finishRuntimeActivity"
   >;
+  activityIdFactory?: (input: BrowserOpenInput) => string;
 }
 
 export interface BrowserProcessHandle {
@@ -209,6 +208,7 @@ export class BrowserSessionManager {
     NativeBridgeModule,
     "beginRuntimeActivity" | "finishRuntimeActivity"
   >;
+  readonly #activityIdFactory: (input: BrowserOpenInput) => string;
   readonly #sessions = new Map<SessionId, BrowserSessionRecord>();
 
   constructor(options: BrowserManagerOptions = {}) {
@@ -216,6 +216,9 @@ export class BrowserSessionManager {
     this.#limits = { ...defaultLimits, ...options.limits };
     this.#now = options.now ?? (() => new Date());
     this.#activityBridge = options.activityBridge;
+    this.#activityIdFactory =
+      options.activityIdFactory ??
+      ((input) => `browser:${input.sessionId}:${randomUUID()}`);
   }
 
   async open(
@@ -261,10 +264,11 @@ export class BrowserSessionManager {
       pending.state = "ready";
       pending.lastUsedAt = this.#now();
       if (this.#activityBridge !== undefined) {
-        pending.activityId = `browser:${pending.sessionId}`;
-        await this.#activityBridge
-          .beginRuntimeActivity({
-            activityId: pending.activityId,
+        const activityId = this.#activityIdFactory(input);
+        try {
+          await this.#activityBridge.beginRuntimeActivity({
+            activityId,
+            parentActivityId: input.parentActivityId,
             kind: "browser",
             owner: "type_script_host",
             agentId: pending.agentId,
@@ -275,8 +279,11 @@ export class BrowserSessionManager {
             summary: "session browser process",
             toolName: "browser",
             processId: pending.process.pid,
-          })
-          .catch(() => undefined);
+          });
+          pending.activityId = activityId;
+        } catch {
+          // Observability remains degraded rather than blocking the browser.
+        }
       }
       return toHandle(pending);
     } catch (error) {

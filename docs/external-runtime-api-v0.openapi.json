@@ -4470,6 +4470,12 @@
             },
             "type": "array"
           },
+          "projectedActiveSessionIds": {
+            "default": null,
+            "description": "Transitional service projection of sessions currently executing a\nwake. Rust compares it with durable activity; it never treats it as\nexecution authority.",
+            "items": { "type": "string" },
+            "type": ["array", "null"]
+          },
           "recentAbnormalLimit": {
             "format": "uint32",
             "minimum": 0,

@@ -76,9 +76,7 @@ export interface BrowserActionDetails {
 }
 
 export type BrowserConsoleExpression =
-  | "document.title"
-  | "location.href"
-  | "document.readyState";
+  "document.title" | "location.href" | "document.readyState";
 
 const browserSnapshotParameters = Type.Object({});
 const browserNavigateParameters = Type.Object({
@@ -173,9 +171,17 @@ export function resolveBrowserTools(context: BrowserToolContext): BrainTool[] {
   ];
 }
 
-function openBrowser(context: BrowserToolContext, signal?: AbortSignal) {
+function openBrowser(
+  context: BrowserToolContext,
+  toolCallId: string,
+  signal?: AbortSignal,
+) {
   return context.manager.open(
-    { ...context.session, wakeId: context.wakeId },
+    {
+      ...context.session,
+      wakeId: context.wakeId,
+      parentActivityId: `tool:${context.wakeId}:${toolCallId}`,
+    },
     signal,
   );
 }
@@ -189,12 +195,12 @@ export function browserNavigateTool(
     description:
       "Navigate the session-scoped browser to an allowed public HTTP(S) URL.",
     parameters: browserNavigateParameters,
-    execute: async (_toolCallId, params: BrowserNavigateParams, signal) => {
+    execute: async (toolCallId, params: BrowserNavigateParams, signal) => {
       await assertSafePublicUrl(params.url, {
         allowPrivateNet: context.allowPrivateNet,
         resolveHostAddresses: context.resolveHostAddresses,
       });
-      const handle = await openBrowser(context, signal);
+      const handle = await openBrowser(context, toolCallId, signal);
       await handle.cdp.call("Page.navigate", { url: params.url });
       await handle.cdp
         .call("Page.loadEventFired", {}, context.pageLoadTimeoutMs ?? 8_000)
@@ -219,8 +225,8 @@ export function browserSnapshotTool(
     description:
       "Return a bounded accessibility and interactive-element snapshot for the session-scoped browser page.",
     parameters: browserSnapshotParameters,
-    execute: async (_toolCallId, _params, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, _params, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       const title = await evalJson<string>(handle.cdp, "document.title");
       const url = await evalJson<string>(handle.cdp, "location.href");
       const refs = await evalJson<readonly DomRef[]>(handle.cdp, domRefScript);
@@ -255,8 +261,8 @@ export function browserClickTool(
     label: "Browser click",
     description: "Click a ref from the current browser snapshot.",
     parameters: browserRefParameters,
-    execute: async (_toolCallId, params: BrowserRefParams, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, params: BrowserRefParams, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       const target = currentRefTarget(context, params.ref);
       await handle.cdp.call("Runtime.evaluate", {
         expression: clickScript(target),
@@ -283,8 +289,8 @@ export function browserTypeTool(
     description:
       "Type bounded text into a ref from the current browser snapshot.",
     parameters: browserTypeParameters,
-    execute: async (_toolCallId, params: BrowserTypeParams, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, params: BrowserTypeParams, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       const target = currentRefTarget(context, params.ref);
       await handle.cdp.call("Runtime.evaluate", {
         expression: typeScript(target, params.text),
@@ -311,8 +317,8 @@ export function browserScrollTool(
     label: "Browser scroll",
     description: "Scroll the current browser page up or down.",
     parameters: browserScrollParameters,
-    execute: async (_toolCallId, params: BrowserScrollParams, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, params: BrowserScrollParams, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       const distance = params.direction === "up" ? -700 : 700;
       await handle.cdp.call("Runtime.evaluate", {
         expression: `window.scrollBy(0, ${distance})`,
@@ -336,8 +342,8 @@ export function browserBackTool(
     label: "Browser back",
     description: "Navigate back in the current browser history.",
     parameters: browserBackParameters,
-    execute: async (_toolCallId, _params, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, _params, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       await handle.cdp.call("Runtime.evaluate", {
         expression: "history.back()",
       });
@@ -359,8 +365,8 @@ export function browserPressTool(
     label: "Browser press",
     description: "Press a bounded keyboard key on the current browser page.",
     parameters: browserPressParameters,
-    execute: async (_toolCallId, params: BrowserPressParams, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, params: BrowserPressParams, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       await handle.cdp.call("Input.dispatchKeyEvent", {
         type: "keyDown",
         key: params.key,
@@ -389,8 +395,8 @@ export function browserConsoleTool(
     description:
       "Run one bounded page diagnostic expression and return a JSON-serializable result.",
     parameters: browserConsoleParameters,
-    execute: async (_toolCallId, params: BrowserConsoleParams, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, params: BrowserConsoleParams, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       const expression = params.expression ?? "document.title";
       const result = await evalJson<unknown>(handle.cdp, expression);
       const details = {
@@ -416,8 +422,8 @@ export function browserVisionTool(
     description:
       "Capture a bounded PNG screenshot and return an artifact reference for later vision analysis.",
     parameters: browserVisionParameters,
-    execute: async (_toolCallId, _params, signal) => {
-      const handle = await openBrowser(context, signal);
+    execute: async (toolCallId, _params, signal) => {
+      const handle = await openBrowser(context, toolCallId, signal);
       const result = (await handle.cdp.call("Page.captureScreenshot", {
         format: "png",
       })) as { data?: string };

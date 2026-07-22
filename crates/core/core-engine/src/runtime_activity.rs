@@ -138,6 +138,9 @@ impl CoreEngine {
             Some(MAX_CENSUS_RECORDS),
         )?;
         let mut findings = Vec::new();
+        let projected_active_session_ids = query
+            .projected_active_session_ids
+            .map(|session_ids| session_ids.into_iter().collect::<HashSet<_>>());
         let live_ids = query
             .live_evidence
             .iter()
@@ -230,21 +233,34 @@ impl CoreEngine {
         for record in &active {
             if let Some(session_id) = record.session_id.as_ref() {
                 match self.get_session(session_id) {
-                    Ok(session)
-                        if record
+                    Ok(session) => {
+                        let identity_mismatch = record
                             .agent_id
                             .as_ref()
                             .is_some_and(|agent_id| agent_id != &session.agent_id)
                             || record
                                 .profile_id
                                 .as_ref()
-                                .is_some_and(|profile_id| profile_id != &session.profile_id) =>
-                    {
-                        findings.push(activity_finding(
-                            RuntimeActivityFindingCode::SessionProjectionMismatch,
-                            record,
-                            "runtime activity identity does not match the session projection",
-                        ));
+                                .is_some_and(|profile_id| profile_id != &session.profile_id);
+                        if identity_mismatch {
+                            findings.push(activity_finding(
+                                RuntimeActivityFindingCode::SessionProjectionMismatch,
+                                record,
+                                "runtime activity identity does not match the session projection",
+                            ));
+                        } else if activity_requires_active_session_projection(record.kind) {
+                            let projected_active = projected_active_session_ids
+                                .as_ref()
+                                .map(|session_ids| session_ids.contains(session_id))
+                                .unwrap_or(session.status == SessionStatus::Active);
+                            if !projected_active {
+                                findings.push(activity_finding(
+                                    RuntimeActivityFindingCode::SessionProjectionMismatch,
+                                    record,
+                                    "runtime activity is active while the session projection is idle",
+                                ));
+                            }
+                        }
                     }
                     Err(error) if error.kind == CoreErrorKind::NotFound => {
                         findings.push(activity_finding(
@@ -253,7 +269,6 @@ impl CoreEngine {
                             "runtime activity references a missing session",
                         ));
                     }
-                    Ok(_) => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -431,6 +446,17 @@ impl CoreEngine {
             })
             .collect()
     }
+}
+
+fn activity_requires_active_session_projection(kind: RuntimeActivityKind) -> bool {
+    matches!(
+        kind,
+        RuntimeActivityKind::Dispatch
+            | RuntimeActivityKind::Wake
+            | RuntimeActivityKind::ProviderRequest
+            | RuntimeActivityKind::ToolCall
+            | RuntimeActivityKind::Subprocess
+    )
 }
 
 fn runtime_activity_view(

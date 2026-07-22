@@ -1656,6 +1656,11 @@ async function handleHttpRequest(
       await buildDiagnosticsContext(state, {
         includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
         curatorUrl: isCuratorAdminReadRoute(url.pathname) ? url : undefined,
+        activitySessionProjection:
+          url.pathname === "/v1/admin/diagnostics/activities" &&
+          url.searchParams.get("sessionProjection") === "durable"
+            ? "durable"
+            : "service",
       }),
     );
   }
@@ -1856,9 +1861,24 @@ function modelProviderRefreshCommandName(
 
 async function buildDiagnosticsContext(
   state: ServiceState,
-  options: { includeProfileRegistry?: boolean; curatorUrl?: URL } = {},
+  options: {
+    includeProfileRegistry?: boolean;
+    curatorUrl?: URL;
+    activitySessionProjection?: "service" | "durable";
+  } = {},
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
+  const projectedActiveSessionIds =
+    options.activitySessionProjection === "durable"
+      ? await state.bridge
+          .listSessions()
+          .then((sessions) =>
+            sessions
+              .filter((session) => session.status === "active")
+              .map((session) => session.sessionId),
+          )
+          .catch(() => [])
+      : [...state.inFlightWakes];
   const [
     runtimeSummary,
     sessions,
@@ -1883,7 +1903,11 @@ async function buildDiagnosticsContext(
       .catch(() => undefined),
     state.bridge.providerStateDiagnostics().catch(() => []),
     state.bridge.bufferedBrainRunDiagnostics().catch(() => undefined),
-    state.bridge.runtimeActivityCensus({}).catch(() => undefined),
+    state.bridge
+      .runtimeActivityCensus({
+        projectedActiveSessionIds,
+      })
+      .catch(() => undefined),
     buildMemorySpaceDiagnostics(state).catch(() => undefined),
   ]);
   const profileRegistry = options.includeProfileRegistry

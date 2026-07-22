@@ -1,5 +1,7 @@
 use super::*;
-use crate::repos::runtime_activities::runtime_activity_status_as_str;
+use crate::repos::runtime_activities::{
+    interrupt_runtime_activity_record, runtime_activity_status_as_str,
+};
 
 const DEFAULT_ACTIVITY_LIMIT: u32 = 500;
 const MAX_ACTIVITY_LIMIT: u32 = 5_000;
@@ -190,22 +192,77 @@ impl PostgresBackendStore {
         current_service_instance_id: &str,
         now: &IsoTimestamp,
     ) -> CoreResult<Vec<RuntimeActivityRecord>> {
-        let active = self.list_runtime_activities(Some(RuntimeActivityStatus::Active), None)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("begin PostgreSQL runtime activity interruption", error)
+        })?;
+        let active_status = runtime_activity_status_as_str(RuntimeActivityStatus::Active);
+        let active = tx
+            .query(
+                &format!(
+                    "SELECT record_json FROM {schema}.runtime_activities
+                     WHERE status = $1 AND service_instance_id <> $2
+                     ORDER BY last_progress_at DESC, activity_id ASC
+                     FOR UPDATE"
+                ),
+                &[&active_status, &current_service_instance_id],
+            )
+            .map_err(|error| {
+                postgres_error("query PostgreSQL runtime activities to interrupt", error)
+            })?
+            .iter()
+            .map(|row| {
+                from_json_text::<RuntimeActivityRecord>(row.get(0)).map_err(|error| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        format!("decode PostgreSQL runtime activity to interrupt: {error}"),
+                    )
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
         let mut interrupted = Vec::new();
         for mut record in active {
-            if record.service_instance_id == current_service_instance_id {
-                continue;
-            }
             let expected_revision = record.revision;
-            record.status = RuntimeActivityStatus::Interrupted;
-            record.phase = "restart_interrupted".to_string();
-            record.reason_code = Some("restart_interrupted".to_string());
-            record.summary = Some("service restart interrupted unfinished runtime activity".into());
-            record.last_progress_at = now.clone();
-            record.terminal_at = Some(now.clone());
-            record.revision += 1;
-            interrupted.push(self.update_runtime_activity(&record, expected_revision)?);
+            interrupt_runtime_activity_record(&mut record, now);
+            let status = runtime_activity_status_as_str(record.status);
+            let revision = record.revision as i64;
+            let expected_revision = expected_revision as i64;
+            let record_json = to_json_text(&record)?;
+            let changed = tx
+                .execute(
+                    &format!(
+                        "UPDATE {schema}.runtime_activities
+                         SET status = $1, last_progress_at = $2, terminal_at = $3,
+                             revision = $4, record_json = $5
+                         WHERE activity_id = $6 AND revision = $7 AND status = $8"
+                    ),
+                    &[
+                        &status,
+                        &record.last_progress_at,
+                        &record.terminal_at,
+                        &revision,
+                        &record_json,
+                        &record.activity_id.0,
+                        &expected_revision,
+                        &active_status,
+                    ],
+                )
+                .map_err(|error| postgres_error("interrupt PostgreSQL runtime activity", error))?;
+            if changed != 1 {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    format!(
+                        "runtime activity {} changed during restart interruption",
+                        record.activity_id.0
+                    ),
+                ));
+            }
+            interrupted.push(record);
         }
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL runtime activity interruption", error)
+        })?;
         Ok(interrupted)
     }
 }

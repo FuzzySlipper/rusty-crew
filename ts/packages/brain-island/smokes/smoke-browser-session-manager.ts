@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
-import { BrowserSessionManager } from "../src/index.js";
+import { BrowserSessionManager, browserNavigateTool } from "../src/index.js";
 import type {
   BrowserLaunchInput,
   BrowserLaunchResult,
@@ -40,6 +40,8 @@ class FakeCdp implements CdpConnection {
 const launched: BrowserLaunchInput[] = [];
 const processes: FakeProcess[] = [];
 const cdps: FakeCdp[] = [];
+const activityBegins: Array<Record<string, unknown>> = [];
+const activityFinishes: Array<Record<string, unknown>> = [];
 const launcher: BrowserLauncher = {
   async launch(input): Promise<BrowserLaunchResult> {
     launched.push(input);
@@ -67,6 +69,16 @@ const manager = new BrowserSessionManager({
     hardLifetimeMs: 10_000,
     maxRefs: 2,
     consoleRingSize: 2,
+  },
+  activityBridge: {
+    async beginRuntimeActivity(input) {
+      activityBegins.push(input as unknown as Record<string, unknown>);
+      return {} as never;
+    },
+    async finishRuntimeActivity(input) {
+      activityFinishes.push(input as unknown as Record<string, unknown>);
+      return {} as never;
+    },
   },
 });
 
@@ -127,6 +139,84 @@ assert.equal(processes[0]?.killed, true);
 assert.equal(cdps[0]?.closed, true);
 assert.equal(manager.diagnostics().activeSessions, 0);
 
+const toolSession = {
+  sessionId: "tool-browser" as SessionId,
+  agentId: "agent-tool" as AgentId,
+  profileId: "profile-tool" as ProfileId,
+};
+const firstNavigate = browserNavigateTool({
+  manager,
+  session: toolSession,
+  wakeId: "wake-browser-one",
+  allowPrivateNet: true,
+});
+await firstNavigate.execute(
+  "call-browser-one",
+  { url: "https://example.com/one" },
+  new AbortController().signal,
+);
+await manager.close(toolSession.sessionId, "manual");
+const secondNavigate = browserNavigateTool({
+  manager,
+  session: toolSession,
+  wakeId: "wake-browser-two",
+  allowPrivateNet: true,
+});
+await secondNavigate.execute(
+  "call-browser-two",
+  { url: "https://example.com/two" },
+  new AbortController().signal,
+);
+await manager.close(toolSession.sessionId, "manual");
+
+const browserBegins = activityBegins.filter(
+  (activity) => activity.sessionId === toolSession.sessionId,
+);
+assert.equal(browserBegins.length, 2);
+assert.notEqual(browserBegins[0]?.activityId, browserBegins[1]?.activityId);
+assert.equal(
+  browserBegins[0]?.parentActivityId,
+  "tool:wake-browser-one:call-browser-one",
+);
+assert.equal(
+  browserBegins[1]?.parentActivityId,
+  "tool:wake-browser-two:call-browser-two",
+);
+assert.deepEqual(
+  activityFinishes
+    .filter((activity) =>
+      browserBegins.some((begin) => begin.activityId === activity.activityId),
+    )
+    .map((activity) => activity.activityId),
+  browserBegins.map((activity) => activity.activityId),
+);
+
+const rejectedBeginFinishes: Array<Record<string, unknown>> = [];
+const degradedActivityManager = new BrowserSessionManager({
+  launcher,
+  activityBridge: {
+    async beginRuntimeActivity() {
+      throw new Error("activity ledger unavailable");
+    },
+    async finishRuntimeActivity(input) {
+      rejectedBeginFinishes.push(input as unknown as Record<string, unknown>);
+      return {} as never;
+    },
+  },
+});
+const degradedInput = openInput(
+  "activity-degraded",
+  "agent-activity-degraded",
+  "profile-activity-degraded",
+);
+await degradedActivityManager.open(degradedInput);
+await degradedActivityManager.close(degradedInput.sessionId, "manual");
+assert.deepEqual(
+  rejectedBeginFinishes,
+  [],
+  "a rejected activity begin must not leave an id for close to finish",
+);
+
 await manager.open(openInput("delta", "agent-d", "profile-d"));
 await manager.open(openInput("epsilon", "agent-d", "profile-d"));
 await manager.closeAllForAgent("agent-d" as AgentId, "agent_closed");
@@ -147,6 +237,7 @@ console.log(
       closedCdp: cdps.filter((cdp) => cdp.closed).length,
       cleanup,
       shutdownCleanup,
+      browserActivityRelaunches: browserBegins.length,
     },
     null,
     2,

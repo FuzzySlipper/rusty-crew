@@ -10997,7 +10997,7 @@ mod tests {
         let schema = unique_schema("rusty_crew_runtime_activities");
         let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         let record = RuntimeActivityRecord {
-            activity_id: RuntimeActivityId::new("wake:postgres-test"),
+            activity_id: RuntimeActivityId::new("wake:postgres-test-0"),
             service_instance_id: "postgres-instance".into(),
             parent_activity_id: Some(RuntimeActivityId::new("dispatch:postgres-test")),
             kind: rusty_crew_core_protocol::RuntimeActivityKind::Wake,
@@ -11021,6 +11021,17 @@ mod tests {
             revision: 1,
         };
         store.insert_runtime_activity(&record).unwrap();
+        for index in 1..=500 {
+            let mut additional = record.clone();
+            additional.activity_id = RuntimeActivityId::new(format!("wake:postgres-test-{index}"));
+            additional.wake_id = Some(format!("postgres-test-{index}"));
+            store.insert_runtime_activity(&additional).unwrap();
+        }
+        let mut current = record.clone();
+        current.activity_id = RuntimeActivityId::new("wake:postgres-current");
+        current.wake_id = Some("postgres-current".into());
+        current.service_instance_id = "new-postgres-instance".into();
+        store.insert_runtime_activity(&current).unwrap();
         let mut progressed = record.clone();
         progressed.phase = "provider_stream".into();
         progressed.last_progress_at = "2026-07-22T00:00:01Z".into();
@@ -11032,12 +11043,16 @@ mod tests {
                 &"2026-07-22T00:00:02Z".into(),
             )
             .unwrap();
-        assert_eq!(interrupted.len(), 1);
-        assert_eq!(interrupted[0].status, RuntimeActivityStatus::Interrupted);
-        assert!(store
+        assert_eq!(interrupted.len(), 501);
+        assert!(interrupted.iter().all(|record| {
+            record.status == RuntimeActivityStatus::Interrupted
+                && record.reason_code.as_deref() == Some("restart_interrupted")
+        }));
+        let active = store
             .list_runtime_activities(Some(RuntimeActivityStatus::Active), None)
-            .unwrap()
-            .is_empty());
+            .unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].activity_id.0, "wake:postgres-current");
         store.drop_schema_for_test().unwrap();
     }
 

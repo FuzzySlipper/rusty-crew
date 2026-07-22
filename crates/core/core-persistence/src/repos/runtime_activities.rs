@@ -171,24 +171,91 @@ impl CoordinationStore {
         current_service_instance_id: &str,
         now: &IsoTimestamp,
     ) -> CoreResult<Vec<RuntimeActivityRecord>> {
-        let active = self.list_runtime_activities(Some(RuntimeActivityStatus::Active), None)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("begin runtime activity interruption", error))?;
+        let mut stmt = tx
+            .prepare(
+                "SELECT record_json FROM runtime_activities
+                 WHERE status = ?1 AND service_instance_id <> ?2
+                 ORDER BY last_progress_at DESC, activity_id ASC",
+            )
+            .map_err(|error| {
+                persistence_error("prepare runtime activity interruption query", error)
+            })?;
+        let active = stmt
+            .query_map(
+                params![
+                    runtime_activity_status_as_str(RuntimeActivityStatus::Active),
+                    current_service_instance_id
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| persistence_error("query runtime activities to interrupt", error))?
+            .map(|row| {
+                row.map_err(|error| persistence_error("read runtime activity to interrupt", error))
+                    .and_then(|raw| {
+                        from_json_text(&raw).map_err(|error| {
+                            CoreError::new(
+                                CoreErrorKind::PersistenceFailure,
+                                format!("decode runtime activity to interrupt: {error}"),
+                            )
+                        })
+                    })
+            })
+            .collect::<CoreResult<Vec<RuntimeActivityRecord>>>()?;
+        drop(stmt);
         let mut interrupted = Vec::new();
         for mut record in active {
-            if record.service_instance_id == current_service_instance_id {
-                continue;
-            }
             let expected_revision = record.revision;
-            record.status = RuntimeActivityStatus::Interrupted;
-            record.phase = "restart_interrupted".to_string();
-            record.reason_code = Some("restart_interrupted".to_string());
-            record.summary = Some("service restart interrupted unfinished runtime activity".into());
-            record.last_progress_at = now.clone();
-            record.terminal_at = Some(now.clone());
-            record.revision += 1;
-            interrupted.push(self.update_runtime_activity(&record, expected_revision)?);
+            interrupt_runtime_activity_record(&mut record, now);
+            let changed = tx
+                .execute(
+                    "UPDATE runtime_activities
+                     SET status = ?1, last_progress_at = ?2, terminal_at = ?3,
+                         revision = ?4, record_json = ?5
+                     WHERE activity_id = ?6 AND revision = ?7 AND status = ?8",
+                    params![
+                        runtime_activity_status_as_str(record.status),
+                        record.last_progress_at,
+                        record.terminal_at,
+                        record.revision as i64,
+                        to_json_text(&record)?,
+                        record.activity_id.0,
+                        expected_revision as i64,
+                        runtime_activity_status_as_str(RuntimeActivityStatus::Active),
+                    ],
+                )
+                .map_err(|error| persistence_error("interrupt runtime activity", error))?;
+            if changed != 1 {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    format!(
+                        "runtime activity {} changed during restart interruption",
+                        record.activity_id.0
+                    ),
+                ));
+            }
+            interrupted.push(record);
         }
+        tx.commit()
+            .map_err(|error| persistence_error("commit runtime activity interruption", error))?;
         Ok(interrupted)
     }
+}
+
+pub(crate) fn interrupt_runtime_activity_record(
+    record: &mut RuntimeActivityRecord,
+    now: &IsoTimestamp,
+) {
+    record.status = RuntimeActivityStatus::Interrupted;
+    record.phase = "restart_interrupted".to_string();
+    record.reason_code = Some("restart_interrupted".to_string());
+    record.summary = Some("service restart interrupted unfinished runtime activity".into());
+    record.last_progress_at = now.clone();
+    record.terminal_at = Some(now.clone());
+    record.revision += 1;
 }
 
 pub(crate) fn runtime_activity_kind_as_str(kind: RuntimeActivityKind) -> &'static str {
@@ -261,9 +328,49 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[test]
+    fn sqlite_restart_interruption_exhausts_more_than_default_query_limit() {
+        let path = temp_db_path();
+        let store = CoordinationStore::open_file(&path).unwrap();
+        for index in 0..=DEFAULT_ACTIVITY_LIMIT {
+            store
+                .insert_runtime_activity(&test_record_with_id(
+                    "old-instance",
+                    &format!("wake:old-{index}"),
+                ))
+                .unwrap();
+        }
+        store
+            .insert_runtime_activity(&test_record_with_id("current-instance", "wake:current"))
+            .unwrap();
+
+        let interrupted = store
+            .interrupt_runtime_activities_from_other_instances(
+                "current-instance",
+                &"2026-07-22T00:00:02Z".into(),
+            )
+            .unwrap();
+        assert_eq!(interrupted.len(), DEFAULT_ACTIVITY_LIMIT as usize + 1);
+        assert!(interrupted.iter().all(|record| {
+            record.status == RuntimeActivityStatus::Interrupted
+                && record.reason_code.as_deref() == Some("restart_interrupted")
+        }));
+        let active = store
+            .list_runtime_activities(Some(RuntimeActivityStatus::Active), None)
+            .unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].activity_id.0, "wake:current");
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
+
     fn test_record(service_instance_id: &str) -> RuntimeActivityRecord {
+        test_record_with_id(service_instance_id, "wake:test")
+    }
+
+    fn test_record_with_id(service_instance_id: &str, activity_id: &str) -> RuntimeActivityRecord {
         RuntimeActivityRecord {
-            activity_id: RuntimeActivityId::new("wake:test"),
+            activity_id: RuntimeActivityId::new(activity_id),
             service_instance_id: service_instance_id.into(),
             parent_activity_id: Some(RuntimeActivityId::new("dispatch:test")),
             kind: RuntimeActivityKind::Wake,

@@ -12,6 +12,17 @@ The public admin read is:
 GET /v1/admin/diagnostics/activities
 ```
 
+The default census compares activity with the service's transitional session
+projection, including in-flight wakes. Operators can independently compare
+against only the persisted Rust session state with:
+
+```text
+GET /v1/admin/diagnostics/activities?sessionProjection=durable
+```
+
+This read-only comparison is useful when the visible service projection and
+durable session state disagree. It does not mutate either projection.
+
 It is also embedded at `runtime.activities` in the aggregate admin diagnostics
 response. The capability is discoverable through the generated admin
 capability catalog and OpenAPI artifact.
@@ -42,7 +53,7 @@ dispatch:<wake-id>
     provider:<wake-id>
     tool:<wake-id>:<call-id>
       subprocess:<wake-id>:<call-id>:<pid>
-      browser:<session-id>
+      browser:<session-id>:<launch-id>
 ```
 
 External runtime turns use `external:<request-id>`. Every durable record also
@@ -67,7 +78,7 @@ Current finding codes are:
 
 | Code | Meaning |
 | --- | --- |
-| `session_projection_mismatch` | Activity identity disagrees with the referenced session, or the session is missing. |
+| `session_projection_mismatch` | Activity identity disagrees with the referenced session, the session is missing, or execution is active while the selected session projection is idle. |
 | `untracked_native_run` | Native live evidence exists without a durable ledger entry. |
 | `detached_dispatch` | A dispatch has no active child wake, or an activity has lost its parent. |
 | `orphan_tool_execution` | A tool, process, or browser remains active without its parent activity. |
@@ -94,8 +105,10 @@ decides work must end. Do not turn a census finding into an implicit kill path.
 At bootstrap, Rust gives the process a new service-instance id and atomically
 marks active records from prior instances as `interrupted` with reason
 `restart_interrupted`. SQLite and PostgreSQL implement the same typed
-repository contract. This preserves evidence that work ended at restart while
-preventing stale rows from masquerading as live execution.
+repository contract. The restart operation scans the complete active set in a
+single transaction rather than inheriting the bounded diagnostics page size.
+This preserves evidence that work ended at restart while preventing stale rows
+from masquerading as live execution.
 
 ## Privacy Boundary
 
@@ -124,4 +137,3 @@ During a tool-using turn, use the parent ids to confirm that dispatch, brain,
 provider, tool, and process activity form one coherent tree. A session that
 looks idle while this endpoint reports an active wake is a
 `session_projection_mismatch`, not evidence that no work is running.
-

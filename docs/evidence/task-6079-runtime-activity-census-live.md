@@ -31,6 +31,39 @@ The preceding 12-second probe also left five terminal SQLite rows with the
 same topology and `completed` status, proving durable lifecycle closeout rather
 than only an in-memory projection.
 
+## Session Projection Reconciliation
+
+After the review fix was deployed, profile `tester` ran a second real
+Chat Completions turn whose terminal tool executed `sleep 30`. While it was
+running, the default activity endpoint reported this five-node active tree:
+
+```text
+dispatch -> wake -> provider_request -> tool_call -> subprocess
+```
+
+All records shared session `tester-session` and wake
+`service-tester-session-1784724691370-2`. The normal service projection had no
+`session_projection_mismatch`, because the transitional in-flight projection
+correctly marked the session active.
+
+During the same live subprocess, the independent read
+`GET /v1/admin/diagnostics/activities?sessionProjection=durable` compared that
+tree with the persisted Rust session state, which was still idle. It emitted
+one stable `session_projection_mismatch` for each of dispatch, wake, provider,
+tool, and subprocess, each with message `runtime activity is active while the
+session projection is idle`. This proves the positive stale-projection path
+against live provider and tool execution. The default endpoint simultaneously
+proved the active-projection negative case.
+
+## Browser Relaunch Identity
+
+The browser lifecycle smoke now opens, closes, and reopens a browser through
+the real browser tool surface for one session. The two launches receive
+distinct `browser:<session-id>:<launch-id>` identities, each points to its
+exact `tool:<wake-id>:<call-id>` parent, and each close finishes only its own
+accepted begin. A degraded-ledger case also proves that a rejected begin is
+not retained and therefore cannot produce a false finish during cleanup.
+
 ## OpenAI Responses
 
 A temporary profile used direct OpenAI OAuth provider alias `gpt-5.6-luna` and
@@ -85,11 +118,14 @@ No activity was resurrected.
 ## Backend And Gate Evidence
 
 - SQLite lifecycle, revision, and restart tests passed in the normal workspace
-  suite.
+  suite, including atomic interruption of 501 prior-instance rows.
 - `postgres_runtime_activity_lifecycle_matches_sqlite_contract` passed against
-  the configured real PostgreSQL service.
-- `npm run verify:offline` passed after protocol, bridge, OpenAPI, native
-  surface, storage ownership, and validation artifacts were regenerated.
+  the configured real PostgreSQL service with the same 501-row exhaustive
+  interruption proof.
+- `npm run verify:offline` passed every Rust workspace gate and all TypeScript
+  unit suites, then stopped at the repository's existing 98-file Prettier
+  baseline. Focused formatting, typecheck, generated-contract, API-capability,
+  browser, and diagnostics checks passed for this change.
 - Native bridge topology, local process lifecycle, browser manager lifecycle,
   admin diagnostics, and runtime diagnostics focused checks passed.
 

@@ -1873,7 +1873,7 @@
         "id": "admin.diagnostics.activities",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/activities",
-        "description": "Read the Rust-owned runtime activity census and reconciliation findings.",
+        "description": "Read the Rust-owned runtime activity census and reconciliation findings; use sessionProjection=durable to compare against persisted session state.",
         "auth": "admin",
         "mutation": "read",
         "stability": "stable",
