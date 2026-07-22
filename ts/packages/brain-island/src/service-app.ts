@@ -229,6 +229,11 @@ import {
   nativeChatEventToChatEvent,
   type ChatEventLogContext,
 } from "./service-chat-event-log.js";
+import { reconcileInterruptedChatTurns } from "./service-chat-restart-reconciliation.js";
+import {
+  listProjectedServiceSessions as listProjectedServiceSessionsFromModule,
+  projectInFlightSessionState,
+} from "./service-session-state-projection.js";
 import {
   createRustyViewAttachment,
   createRustyViewConversationBranch,
@@ -697,6 +702,8 @@ function rustyViewChatOperationsContext(
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     now: state.now,
+    projectSessionState: (session) =>
+      projectInFlightSessionState(session, state.inFlightWakes),
     appendChatEvent: (sessionId, event) =>
       appendChatEventFromModule(chatEventLogContext(state), sessionId, event),
     listChatEventsAfterCursor: (session, cursor, limit) =>
@@ -711,6 +718,15 @@ function rustyViewChatOperationsContext(
     resolveModelProviderForBrain: (alias) =>
       resolveModelProviderForBrain(state.bridge, alias),
   };
+}
+
+async function listProjectedServiceSessions(
+  state: ServiceState,
+): Promise<SessionState[]> {
+  return listProjectedServiceSessionsFromModule({
+    bridge: state.bridge,
+    inFlightWakes: state.inFlightWakes,
+  });
 }
 
 function rustyViewSlashCommandContext(
@@ -1003,6 +1019,22 @@ export async function createRustyCrewServiceApp(
       stopping: false,
     };
     liveState = state;
+    const chatRestartReconciliation = await reconcileInterruptedChatTurns({
+      bridge: state.bridge,
+      now: state.now,
+    });
+    if (chatRestartReconciliation.sessionsReconciled.length > 0) {
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "interrupted_chat_turns_reconciled",
+        severity: "warning",
+        summary: `Reconciled ${chatRestartReconciliation.sessionsReconciled.length} interrupted chat turn(s) after service restart.`,
+        resultRef: {
+          sessionIds: chatRestartReconciliation.sessionsReconciled,
+          eventsAppended: chatRestartReconciliation.eventsAppended,
+        },
+      });
+    }
     await state.externalRuntimeController.start();
     state.denGatewayStartupReport = await connectDenSuccessorGatewayFromModule(
       adapterLifecycleContext(state),
@@ -1218,7 +1250,7 @@ async function handleHttpRequest(
     const chatOperations = rustyViewChatOperationsContext(state);
     return handleRustyViewChatRouteRequest(request, url, {
       stream: {
-        listSessions: () => state.bridge.listSessions(),
+        listSessions: () => listProjectedServiceSessions(state),
         streamReplayEvents: (session, cursor, streamUrl) =>
           streamReplayEvents(chatOperations, session, cursor, streamUrl),
         subscribersForSession: (sessionId) =>
@@ -1229,7 +1261,7 @@ async function handleHttpRequest(
         corsHeaders: (corsRequest) => chatCorsHeaders(corsRequest),
       },
       chat: {
-        listSessions: () => state.bridge.listSessions(),
+        listSessions: () => listProjectedServiceSessions(state),
         effectiveSessionDefaults: effectiveDefaultsForChatSession,
         querySessionSummaries: (input) =>
           queryRustyViewChatSessionSummaries(chatOperations, input),
@@ -1336,7 +1368,7 @@ async function handleHttpRequest(
     return handleServiceDirectDebugRequest(request, url, {
       requestId,
       readJsonBody,
-      listSessions: () => state.bridge.listSessions(),
+      listSessions: () => listProjectedServiceSessions(state),
       buildDirectDebugContext: () => buildDirectDebugContext(state),
       emitContextCompactionDebugEvents: (session, input) =>
         emitContextCompactionDebugEvents(state, session, input),
@@ -1837,7 +1869,7 @@ async function buildDiagnosticsContext(
     state.bridge
       .runtimeSummary({ scopeType: "runtime" })
       .catch(() => undefined),
-    state.bridge.listSessions().catch(() => []),
+    listProjectedServiceSessions(state).catch(() => []),
     state.bridge
       .storageDiagnostics()
       .then((diagnostics) =>

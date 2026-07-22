@@ -103,6 +103,7 @@ export interface RustyViewChatOperationsContext {
   toolCallDebugStore: ToolCallDebugStore;
   providerRequestDebugStore: ProviderRequestDebugStore;
   now(): string;
+  projectSessionState?(session: SessionState): SessionState;
   appendChatEvent(
     sessionId: SessionId,
     event: Pick<ChatEvent, "kind" | "payload">,
@@ -834,12 +835,53 @@ export async function queryRustyViewChatSessionSummaries(
   context: RustyViewChatOperationsContext,
   input: ChatSessionSummaryQuery,
 ): Promise<ChatSessionReadFactsPage> {
-  const result = await context.bridge.queryChatSessionSummaries({
-    profile_id: input.profileId,
-    status: input.status,
-    page: { limit: input.limit, offset: input.offset },
-  });
-  return publicExactPage(result.page);
+  if (input.status === undefined) {
+    const result = await context.bridge.queryChatSessionSummaries({
+      profile_id: input.profileId,
+      page: { limit: input.limit, offset: input.offset },
+    });
+    const page = publicExactPage(result.page);
+    return {
+      ...page,
+      items: page.items.map((facts) => ({
+        ...facts,
+        session: context.projectSessionState?.(facts.session) ?? facts.session,
+      })),
+    };
+  }
+
+  const matching: ChatSessionReadFactsPage["items"] = [];
+  let sourceOffset = 0;
+  for (;;) {
+    const result = await context.bridge.queryChatSessionSummaries({
+      profile_id: input.profileId,
+      page: { limit: 500, offset: sourceOffset },
+    });
+    const page = publicExactPage(result.page);
+    matching.push(
+      ...page.items
+        .map((facts) => ({
+          ...facts,
+          session:
+            context.projectSessionState?.(facts.session) ?? facts.session,
+        }))
+        .filter((facts) => facts.session.status === input.status),
+    );
+    if (page.nextOffset === undefined) break;
+    sourceOffset = page.nextOffset;
+  }
+  const items = matching.slice(input.offset, input.offset + input.limit);
+  const nextOffset =
+    input.offset + items.length < matching.length
+      ? input.offset + items.length
+      : undefined;
+  return {
+    items,
+    total: matching.length,
+    limit: input.limit,
+    offset: input.offset,
+    ...(nextOffset === undefined ? {} : { nextOffset }),
+  };
 }
 
 export async function readRustyViewChatSession(
@@ -853,7 +895,7 @@ export async function readRustyViewChatSession(
     include_alternates: input.includeAlternates,
   });
   return {
-    session: result.session,
+    session: context.projectSessionState?.(result.session) ?? result.session,
     events: result.events as ChatEvent[],
     latest_cursor: result.latest_cursor,
     has_more: result.has_more,

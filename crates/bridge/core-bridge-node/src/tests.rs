@@ -833,6 +833,106 @@ fn chat_completions_reasoning_compacts_past_stream_item_limit_without_losing_bou
     ));
 }
 
+#[test]
+fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_completion() {
+    let bridge = NativeBridge::new();
+    let registry = bridge.chat_completions_buffered_runs();
+    let wake_id = "live-buffered-chat-wake";
+    crate::chat_completions::start_chat_completions_brain_json(
+        Arc::clone(&registry),
+        serde_json::json!({
+            "wakeId": wake_id,
+            "sessionId": "live-buffered-chat-session",
+            "messages": [{ "role": "user", "content": "use the tool" }],
+            "tools": [{
+                "name": "read_file",
+                "description": "Read one file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }
+            }],
+            "config": { "model": "fake-chat-model" }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut pre_tool_items = Vec::new();
+    let tool_request = (0..100)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &crate::chat_completions::drain_chat_completions_brain_stream_json(
+                    &registry,
+                    wake_id.to_string(),
+                    Some(64),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            pre_tool_items.extend(drain["items"].as_array().unwrap().iter().cloned());
+            let request = drain["tool_requests"].as_array().unwrap().first().cloned();
+            if request.is_none() {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            request
+        })
+        .expect("fake provider should request its host tool");
+
+    assert!(pre_tool_items
+        .iter()
+        .any(|item| { item["type"] == "event" && item["event"]["event"]["type"] == "started" }));
+    assert!(pre_tool_items.iter().any(|item| {
+        item["type"] == "event" && item["event"]["event"]["type"] == "tool_call_started"
+    }));
+    assert!(!pre_tool_items
+        .iter()
+        .any(|item| { item["type"] == "actions" || item["type"] == "wake_failed" }));
+
+    crate::chat_completions::submit_chat_completions_tool_output_json(
+        &registry,
+        serde_json::json!({
+            "wakeId": wake_id,
+            "callId": tool_request["call_id"],
+            "output": "file contents",
+            "status": "succeeded",
+            "retryable": false
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let terminal = (0..100)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &crate::chat_completions::drain_chat_completions_brain_stream_json(
+                    &registry,
+                    wake_id.to_string(),
+                    Some(64),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            if drain["terminal"] == true {
+                Some(drain)
+            } else {
+                thread::sleep(std::time::Duration::from_millis(5));
+                None
+            }
+        })
+        .expect("fake provider should finish after host tool output");
+    assert_eq!(
+        terminal["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["type"] == "actions")
+            .count(),
+        1
+    );
+}
+
 fn brain_registration(
     implementation_id: &str,
     profile_id: &str,

@@ -327,23 +327,36 @@ fn run_chat_completions_brain_buffered(
     wake_id: String,
     input_json: String,
 ) {
+    let sink_wake_id = wake_id.clone();
+    let sink_buffered_runs = Arc::clone(&buffered_runs);
+    let mut sink = move |item: BrainWakeStreamItem| {
+        if let Err(error) = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
+            if run.coordinator.phase().is_terminal() {
+                return;
+            }
+            if let Err(error) = run.coordinator.enqueue_provider_stream_item(item) {
+                eprintln!(
+                    "chat-completions wake {} could not enqueue a live stream item: {}",
+                    sink_wake_id, error
+                );
+            }
+        }) {
+            eprintln!(
+                "chat-completions wake {} could not access its buffered run while streaming: {}",
+                sink_wake_id, error
+            );
+        }
+    };
     let result = run_chat_completions_brain_with_buffered_tools(
         Arc::clone(&buffered_runs),
         wake_id.clone(),
         input_json,
+        &mut sink,
     );
     let _ = buffered_runs.with_run_mut(&wake_id, |run| {
         if !run.coordinator.is_cancelled() {
             match result {
                 Ok(output) => {
-                    for item in output.stream {
-                        if run.coordinator.phase().is_terminal() {
-                            break;
-                        }
-                        if run.coordinator.enqueue_provider_stream_item(item).is_err() {
-                            break;
-                        }
-                    }
                     run.payload.transport_metrics = Some(ChatCompletionsTransportMetrics {
                         provider_request_count: output.provider_request_count,
                         tool_round_count: output.tool_round_count,
@@ -375,6 +388,7 @@ fn run_chat_completions_brain_with_buffered_tools(
     buffered_runs: Arc<ChatCompletionsBufferedRunRegistry>,
     wake_id: String,
     input_json: String,
+    sink: &mut dyn FnMut(BrainWakeStreamItem),
 ) -> napi::Result<rusty_crew_chat_completions_brain::ChatCompletionsBrainLoopOutput> {
     let input: JsChatCompletionsBrainRunInput =
         serde_json::from_str(&input_json).map_err(|error| {
@@ -448,7 +462,7 @@ fn run_chat_completions_brain_with_buffered_tools(
                 descriptors,
             )
             .with_loop_config(loop_config);
-            Ok(brain.wake(loop_input))
+            Ok(brain.wake_with_stream_sink(loop_input, sink))
         }
         JsChatCompletionsClientConfig::Live { base_url, api_key } => {
             let client = LiveChatCompletionsClient::new(
@@ -468,7 +482,7 @@ fn run_chat_completions_brain_with_buffered_tools(
                 descriptors,
             )
             .with_loop_config(loop_config);
-            Ok(brain.wake(loop_input))
+            Ok(brain.wake_with_stream_sink(loop_input, sink))
         }
     }
 }

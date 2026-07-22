@@ -907,6 +907,29 @@ pub struct ChatCompletionsBrainLoopOutput {
     pub provider_state: Option<BrainWakeProviderStateOutput>,
 }
 
+type BrainWakeItemSink<'a> = Option<&'a mut dyn FnMut(BrainWakeStreamItem)>;
+
+fn push_stream_item(
+    stream: &mut Vec<BrainWakeStreamItem>,
+    item: BrainWakeStreamItem,
+    sink: &mut BrainWakeItemSink<'_>,
+) {
+    if let Some(sink) = sink.as_deref_mut() {
+        sink(item.clone());
+    }
+    stream.push(item);
+}
+
+fn extend_stream_items(
+    stream: &mut Vec<BrainWakeStreamItem>,
+    items: impl IntoIterator<Item = BrainWakeStreamItem>,
+    sink: &mut BrainWakeItemSink<'_>,
+) {
+    for item in items {
+        push_stream_item(stream, item, sink);
+    }
+}
+
 pub struct ChatCompletionsBrainLoop<C, T> {
     client: C,
     tools: T,
@@ -952,8 +975,25 @@ where
     }
 
     pub fn wake(&mut self, input: ChatCompletionsBrainLoopInput) -> ChatCompletionsBrainLoopOutput {
+        self.wake_internal(input, None)
+    }
+
+    pub fn wake_with_stream_sink(
+        &mut self,
+        input: ChatCompletionsBrainLoopInput,
+        sink: &mut dyn FnMut(BrainWakeStreamItem),
+    ) -> ChatCompletionsBrainLoopOutput {
+        self.wake_internal(input, Some(sink))
+    }
+
+    fn wake_internal(
+        &mut self,
+        input: ChatCompletionsBrainLoopInput,
+        mut sink: BrainWakeItemSink<'_>,
+    ) -> ChatCompletionsBrainLoopOutput {
         let mut mapper = ChatCompletionsEventMapper::new();
-        let mut stream = mapper.map_started(&input.context);
+        let mut stream = Vec::new();
+        extend_stream_items(&mut stream, mapper.map_started(&input.context), &mut sink);
         let mut messages = match chat_completions_messages_with_provider_state(
             &self.request_builder.config,
             input.provider_state.as_ref(),
@@ -961,12 +1001,16 @@ where
         ) {
             Ok(messages) => messages,
             Err(message) => {
-                stream.push(wake_failed_item_with_reason(
-                    &input.context,
-                    CoreErrorKind::InvalidInput,
-                    "chat_completions_provider_state_invalid",
-                    message,
-                ));
+                push_stream_item(
+                    &mut stream,
+                    wake_failed_item_with_reason(
+                        &input.context,
+                        CoreErrorKind::InvalidInput,
+                        "chat_completions_provider_state_invalid",
+                        message,
+                    ),
+                    &mut sink,
+                );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
@@ -1022,15 +1066,23 @@ where
                 {
                     return;
                 }
-                stream.extend(mapper.map_provider_event(&input.context, event));
+                extend_stream_items(
+                    &mut stream,
+                    mapper.map_provider_event(&input.context, event),
+                    &mut sink,
+                );
             });
 
             if let Err(error) = result {
-                stream.push(wake_failed_item(
-                    &input.context,
-                    CoreErrorKind::BrainUnavailable,
-                    format!("chat-completions provider stream failed: {error}"),
-                ));
+                push_stream_item(
+                    &mut stream,
+                    wake_failed_item(
+                        &input.context,
+                        CoreErrorKind::BrainUnavailable,
+                        format!("chat-completions provider stream failed: {error}"),
+                    ),
+                    &mut sink,
+                );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
@@ -1071,13 +1123,17 @@ where
                             self.config.max_malformed_tool_call_recoveries,
                         ),
                     ));
-                    stream.push(malformed_tool_call_recovery_status(
-                        &input.context,
-                        reason_code,
-                        malformed_tool_call_recovery_count,
-                        self.config.max_malformed_tool_call_recoveries,
-                        &malformed_tool_calls,
-                    ));
+                    push_stream_item(
+                        &mut stream,
+                        malformed_tool_call_recovery_status(
+                            &input.context,
+                            reason_code,
+                            malformed_tool_call_recovery_count,
+                            self.config.max_malformed_tool_call_recoveries,
+                            &malformed_tool_calls,
+                        ),
+                        &mut sink,
+                    );
                     continue;
                 }
                 let message = if reason_code == OUTPUT_LIMIT_EXCEEDED_REASON_CODE {
@@ -1095,12 +1151,16 @@ where
                         self.config.max_malformed_tool_call_recoveries
                     )
                 };
-                stream.push(wake_failed_item_with_reason(
-                    &input.context,
-                    CoreErrorKind::BrainUnavailable,
-                    reason_code,
-                    message,
-                ));
+                push_stream_item(
+                    &mut stream,
+                    wake_failed_item_with_reason(
+                        &input.context,
+                        CoreErrorKind::BrainUnavailable,
+                        reason_code,
+                        message,
+                    ),
+                    &mut sink,
+                );
                 let provider_state = if tool_round_count > 0 {
                     chat_completions_provider_state_output(
                         &input.context,
@@ -1124,12 +1184,16 @@ where
 
             if finish_reason.as_deref() == Some("length") && !tool_calls_are_actionable(&tool_calls)
             {
-                stream.push(wake_failed_item_with_reason(
-                    &input.context,
-                    CoreErrorKind::BrainUnavailable,
-                    OUTPUT_LIMIT_EXCEEDED_REASON_CODE,
-                    "chat-completions provider reached finish_reason length before completing the turn",
-                ));
+                push_stream_item(
+                    &mut stream,
+                    wake_failed_item_with_reason(
+                        &input.context,
+                        CoreErrorKind::BrainUnavailable,
+                        OUTPUT_LIMIT_EXCEEDED_REASON_CODE,
+                        "chat-completions provider reached finish_reason length before completing the turn",
+                    ),
+                    &mut sink,
+                );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
@@ -1157,10 +1221,14 @@ where
                 }
                 if assistant_text.trim().is_empty() {
                     if let Some(fallback) = input.final_message_fallback {
-                        stream.extend(mapper.map_final_message(&input.context, fallback));
+                        extend_stream_items(
+                            &mut stream,
+                            mapper.map_final_message(&input.context, fallback),
+                            &mut sink,
+                        );
                     }
                 }
-                stream.push(success_actions_item(&input.context));
+                push_stream_item(&mut stream, success_actions_item(&input.context), &mut sink);
                 let provider_state = chat_completions_provider_state_output(
                     &input.context,
                     &self.request_builder.config,
@@ -1179,15 +1247,19 @@ where
             }
 
             if tool_round_count >= self.config.max_tool_rounds {
-                stream.push(wake_failed_item_with_reason(
-                    &input.context,
-                    CoreErrorKind::BrainUnavailable,
-                    "chat_completions_continuation_limit_exceeded",
-                    format!(
-                        "chat-completions exceeded {} tool continuation rounds",
-                        self.config.max_tool_rounds
+                push_stream_item(
+                    &mut stream,
+                    wake_failed_item_with_reason(
+                        &input.context,
+                        CoreErrorKind::BrainUnavailable,
+                        "chat_completions_continuation_limit_exceeded",
+                        format!(
+                            "chat-completions exceeded {} tool continuation rounds",
+                            self.config.max_tool_rounds
+                        ),
                     ),
-                ));
+                    &mut sink,
+                );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
@@ -1209,14 +1281,18 @@ where
                 let count = repeated_calls.entry(repeated_key).or_insert(0);
                 *count += 1;
                 if *count > self.config.repeated_tool_call_limit {
-                    stream.push(wake_failed_item(
-                        &input.context,
-                        CoreErrorKind::BrainUnavailable,
-                        format!(
-                            "chat-completions repeated tool call {} with unchanged arguments more than {} times",
-                            call.name, self.config.repeated_tool_call_limit
+                    push_stream_item(
+                        &mut stream,
+                        wake_failed_item(
+                            &input.context,
+                            CoreErrorKind::BrainUnavailable,
+                            format!(
+                                "chat-completions repeated tool call {} with unchanged arguments more than {} times",
+                                call.name, self.config.repeated_tool_call_limit
+                            ),
                         ),
-                    ));
+                        &mut sink,
+                    );
                     return ChatCompletionsBrainLoopOutput {
                         stream,
                         completed: false,
@@ -1228,29 +1304,41 @@ where
                     };
                 }
 
-                stream.push(brain_event_item(
-                    &input.context,
-                    BrainEvent::ToolCallStarted {
-                        tool_name: call.name.clone(),
-                        metadata: None,
-                    },
-                ));
+                push_stream_item(
+                    &mut stream,
+                    brain_event_item(
+                        &input.context,
+                        BrainEvent::ToolCallStarted {
+                            tool_name: call.name.clone(),
+                            metadata: None,
+                        },
+                    ),
+                    &mut sink,
+                );
                 let output = self.tools.execute(&call);
-                stream.push(brain_event_item(
-                    &input.context,
-                    BrainEvent::ToolCallFinished {
-                        tool_name: call.name.clone(),
-                        is_error: output.is_error,
-                        metadata: None,
-                    },
-                ));
+                push_stream_item(
+                    &mut stream,
+                    brain_event_item(
+                        &input.context,
+                        BrainEvent::ToolCallFinished {
+                            tool_name: call.name.clone(),
+                            is_error: output.is_error,
+                            metadata: None,
+                        },
+                    ),
+                    &mut sink,
+                );
                 if output.cancelled || output.timed_out {
                     let kind = if output.timed_out {
                         CoreErrorKind::TimeoutExpired
                     } else {
                         CoreErrorKind::BrainUnavailable
                     };
-                    stream.push(wake_failed_item(&input.context, kind, output.output));
+                    push_stream_item(
+                        &mut stream,
+                        wake_failed_item(&input.context, kind, output.output),
+                        &mut sink,
+                    );
                     return ChatCompletionsBrainLoopOutput {
                         stream,
                         completed: false,
@@ -3239,6 +3327,80 @@ mod tests {
                 input_schema: json!({"type": "object"}),
             }],
         )
+    }
+
+    #[test]
+    fn stream_sink_receives_started_deltas_and_tool_lifecycle_before_wake_returns() {
+        #[derive(Debug)]
+        struct SinkAwareToolExecutor {
+            streamed: std::sync::Arc<std::sync::Mutex<Vec<BrainWakeStreamItem>>>,
+        }
+
+        impl ChatCompletionsNeutralToolExecutor for SinkAwareToolExecutor {
+            fn execute(&self, _call: &PendingChatFunctionCall) -> ChatCompletionsToolOutput {
+                let streamed = self.streamed.lock().expect("stream sink mutex");
+                let observed = events(&streamed);
+                assert!(observed.contains(&BrainEvent::Started));
+                assert!(observed.contains(&BrainEvent::ReasoningDelta {
+                    text: "planning".to_string(),
+                    format: Some(CANONICAL_REASONING_FORMAT.to_string()),
+                }));
+                assert!(observed.iter().any(|event| matches!(
+                    event,
+                    BrainEvent::ToolCallStarted { tool_name, .. } if tool_name == "lookup"
+                )));
+                ChatCompletionsToolOutput::ok("tool output")
+            }
+        }
+
+        let streamed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut brain = ChatCompletionsBrainLoop::new(
+            FakeChatCompletionsClient::new([
+                Ok(vec![
+                    ChatCompletionsEvent::ReasoningDelta {
+                        text: "planning".to_string(),
+                        field: "reasoning_content".to_string(),
+                    },
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("done".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ]),
+            SinkAwareToolExecutor {
+                streamed: std::sync::Arc::clone(&streamed),
+            },
+            ChatCompletionsChatConfig::new("test-model"),
+            vec![NeutralBrainTool {
+                name: "lookup".to_string(),
+                description: "Look up".to_string(),
+                input_schema: json!({"type": "object"}),
+            }],
+        );
+        let sink_items = std::sync::Arc::clone(&streamed);
+        let mut sink = move |item| sink_items.lock().expect("stream sink mutex").push(item);
+
+        let output = brain.wake_with_stream_sink(
+            ChatCompletionsBrainLoopInput {
+                context: context(),
+                messages: vec![ChatCompletionMessage::user("use a tool")],
+                provider_state: None,
+                final_message_fallback: None,
+            },
+            &mut sink,
+        );
+
+        assert_eq!(
+            streamed.lock().expect("stream sink mutex").as_slice(),
+            output.stream.as_slice()
+        );
+        assert_eq!(terminal_kind(&output.stream), "actions");
     }
 
     fn kimi_preserved_config() -> ChatCompletionsChatConfig {
