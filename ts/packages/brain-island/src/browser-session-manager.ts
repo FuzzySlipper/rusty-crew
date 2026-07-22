@@ -7,7 +7,11 @@ import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 export type BrowserSessionState =
-  "starting" | "ready" | "closing" | "closed" | "crashed";
+  | "starting"
+  | "ready"
+  | "closing"
+  | "closed"
+  | "crashed";
 
 export type BrowserCloseReason =
   | "session_archived"

@@ -76,7 +76,9 @@ export interface BrowserActionDetails {
 }
 
 export type BrowserConsoleExpression =
-  "document.title" | "location.href" | "document.readyState";
+  | "document.title"
+  | "location.href"
+  | "document.readyState";
 
 const browserSnapshotParameters = Type.Object({});
 const browserNavigateParameters = Type.Object({
