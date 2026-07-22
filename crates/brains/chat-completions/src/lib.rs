@@ -1083,6 +1083,16 @@ where
                     ),
                     &mut sink,
                 );
+                let provider_state = if tool_round_count > 0 {
+                    chat_completions_provider_state_output(
+                        &input.context,
+                        &self.request_builder.config,
+                        input.provider_state.as_ref(),
+                        durable_messages,
+                    )
+                } else {
+                    None
+                };
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
@@ -1090,7 +1100,7 @@ where
                     tool_round_count,
                     provider_event_counts,
                     provider_request_debug_samples,
-                    provider_state: None,
+                    provider_state,
                 };
             }
 
@@ -2323,7 +2333,7 @@ impl ChatCompletionsSseParser {
         let data = self.data_lines.join("\n");
         self.data_lines.clear();
         if data == "[DONE]" {
-            self.accumulator.saw_terminal = true;
+            self.accumulator.finish_at_done(on_event);
             return Ok(());
         }
         let value: Value = serde_json::from_str(&data).map_err(|error| {
@@ -2338,6 +2348,7 @@ struct ChatCompletionsAccumulator {
     pending_tool_calls: BTreeMap<u32, PendingToolCallBuilder>,
     events: Vec<ChatCompletionsEvent>,
     saw_terminal: bool,
+    synthetic_tool_call_count: u32,
 }
 
 impl ChatCompletionsAccumulator {
@@ -2423,9 +2434,26 @@ impl ChatCompletionsAccumulator {
             return Ok(());
         };
         for raw_call in tool_calls {
-            let index = raw_call.get("index").and_then(Value::as_u64).ok_or(
-                ChatCompletionsStreamError::MissingField("choices[].delta.tool_calls[].index"),
-            )? as u32;
+            let index = match raw_call.get("index").and_then(Value::as_u64) {
+                Some(index) if u32::try_from(index).is_ok() => index as u32,
+                _ => {
+                    let diagnostic = match raw_call.get("index") {
+                        None => "tool call index is missing".to_string(),
+                        Some(value) => format!(
+                            "tool call index must be an unsigned 32-bit integer, found {}",
+                            json_value_kind(value)
+                        ),
+                    };
+                    let index = u32::MAX.saturating_sub(self.synthetic_tool_call_count);
+                    self.synthetic_tool_call_count =
+                        self.synthetic_tool_call_count.saturating_add(1);
+                    self.push(
+                        malformed_tool_call_from_raw(index, raw_call, diagnostic),
+                        on_event,
+                    );
+                    continue;
+                }
+            };
             let id = raw_call
                 .get("id")
                 .and_then(Value::as_str)
@@ -2435,8 +2463,8 @@ impl ChatCompletionsAccumulator {
                 .and_then(|value| value.get("name"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            let arguments_delta = function
-                .and_then(|value| value.get("arguments"))
+            let arguments_value = function.and_then(|value| value.get("arguments"));
+            let arguments_delta = arguments_value
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
@@ -2448,7 +2476,17 @@ impl ChatCompletionsAccumulator {
             if let Some(name) = &name {
                 builder.name = Some(name.clone());
             }
-            builder.arguments_json.push_str(&arguments_delta);
+            if let Some(arguments_value) = arguments_value {
+                if arguments_value.is_string() {
+                    builder.arguments_observed = true;
+                    builder.arguments_json.push_str(&arguments_delta);
+                } else {
+                    builder.argument_diagnostics.push(format!(
+                        "function.arguments must be a string, found {}",
+                        json_value_kind(arguments_value)
+                    ));
+                }
+            }
 
             self.push(
                 ChatCompletionsEvent::ToolCallDelta {
@@ -2471,6 +2509,28 @@ impl ChatCompletionsAccumulator {
             .collect()
     }
 
+    fn finish_at_done(&mut self, on_event: &mut dyn FnMut(&ChatCompletionsEvent)) {
+        for call in self.flush_tool_calls() {
+            match call {
+                ClassifiedToolCall::Actionable(call) => {
+                    self.push(ChatCompletionsEvent::ToolCallFinished(call), on_event);
+                }
+                ClassifiedToolCall::Malformed(call) => {
+                    self.push(ChatCompletionsEvent::ToolCallMalformed(call), on_event);
+                }
+            }
+        }
+        if !self.saw_terminal {
+            self.saw_terminal = true;
+            self.push(
+                ChatCompletionsEvent::Finished {
+                    finish_reason: None,
+                },
+                on_event,
+            );
+        }
+    }
+
     fn push(
         &mut self,
         event: ChatCompletionsEvent,
@@ -2486,6 +2546,8 @@ struct PendingToolCallBuilder {
     id: Option<String>,
     name: Option<String>,
     arguments_json: String,
+    arguments_observed: bool,
+    argument_diagnostics: Vec<String>,
 }
 
 enum ClassifiedToolCall {
@@ -2494,23 +2556,25 @@ enum ClassifiedToolCall {
 }
 
 fn classify_tool_call(index: u32, builder: PendingToolCallBuilder) -> ClassifiedToolCall {
-    let arguments_json = if builder.arguments_json.trim().is_empty() {
-        "{}".to_string()
-    } else {
-        builder.arguments_json
-    };
-    let mut diagnostics = Vec::new();
+    let arguments_json = builder.arguments_json;
+    let mut diagnostics = builder.argument_diagnostics;
     let name = builder.name.filter(|name| !name.trim().is_empty());
     if name.is_none() {
         diagnostics.push("function.name is missing or empty".to_string());
     }
-    match serde_json::from_str::<Value>(&arguments_json) {
-        Ok(Value::Object(_)) => {}
-        Ok(value) => diagnostics.push(format!(
-            "function.arguments must decode to a JSON object, found {}",
-            json_value_kind(&value)
-        )),
-        Err(error) => diagnostics.push(format!("function.arguments is invalid JSON: {error}")),
+    if !builder.arguments_observed {
+        diagnostics.push("function.arguments is missing".to_string());
+    } else if arguments_json.trim().is_empty() {
+        diagnostics.push("function.arguments is empty".to_string());
+    } else {
+        match serde_json::from_str::<Value>(&arguments_json) {
+            Ok(Value::Object(_)) => {}
+            Ok(value) => diagnostics.push(format!(
+                "function.arguments must decode to a JSON object, found {}",
+                json_value_kind(&value)
+            )),
+            Err(error) => diagnostics.push(format!("function.arguments is invalid JSON: {error}")),
+        }
     }
 
     if diagnostics.is_empty() {
@@ -2529,6 +2593,35 @@ fn classify_tool_call(index: u32, builder: PendingToolCallBuilder) -> Classified
             diagnostics,
         })
     }
+}
+
+fn malformed_tool_call_from_raw(
+    index: u32,
+    raw_call: &Value,
+    diagnostic: String,
+) -> ChatCompletionsEvent {
+    let function = raw_call.get("function");
+    let arguments_json = function
+        .and_then(|value| value.get("arguments"))
+        .map(|value| match value {
+            Value::String(value) => value.clone(),
+            value => value.to_string(),
+        })
+        .unwrap_or_default();
+    ChatCompletionsEvent::ToolCallMalformed(MalformedChatFunctionCall {
+        index,
+        id: raw_call
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        name: function
+            .and_then(|value| value.get("name"))
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_string),
+        arguments_json,
+        diagnostics: vec![diagnostic],
+    })
 }
 
 fn json_value_kind(value: &Value) -> &'static str {
@@ -2966,6 +3059,80 @@ mod tests {
                 finish_reason: Some(reason)
             }) if reason == "tool_calls"
         ));
+    }
+
+    #[test]
+    fn missing_or_non_string_tool_arguments_remain_malformed() {
+        for (label, arguments, expected_diagnostic) in [
+            ("missing", "", "function.arguments is missing"),
+            (
+                "null",
+                ",\"arguments\":null",
+                "function.arguments must be a string, found null",
+            ),
+            (
+                "object",
+                ",\"arguments\":{\"query\":\"den\"}",
+                "function.arguments must be a string, found object",
+            ),
+        ] {
+            let input = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":\"call_{label}\",\"function\":{{\"name\":\"lookup\"{arguments}}}}}]}},\"finish_reason\":\"length\"}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let events = parse(&input).expect("classify missing or wrong-type arguments");
+            assert!(events.iter().any(|event| matches!(
+                event,
+                ChatCompletionsEvent::ToolCallMalformed(call)
+                    if call.name.as_deref() == Some("lookup")
+                        && call.diagnostics.iter().any(|diagnostic| diagnostic == expected_diagnostic)
+            )));
+            assert!(!events
+                .iter()
+                .any(|event| matches!(event, ChatCompletionsEvent::ToolCallFinished(_))));
+        }
+    }
+
+    #[test]
+    fn done_flushes_pending_tool_fragments_instead_of_hiding_them() {
+        let input = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_partial\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let events = parse(input).expect("classify pending call at done");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::ToolCallMalformed(call)
+                if call.name.as_deref() == Some("lookup")
+                    && call.diagnostics.iter().any(|diagnostic|
+                        diagnostic.starts_with("function.arguments is invalid JSON:"))
+        )));
+        assert!(matches!(
+            events.last(),
+            Some(ChatCompletionsEvent::Finished {
+                finish_reason: None
+            })
+        ));
+    }
+
+    #[test]
+    fn malformed_tool_call_index_is_recoverable_provider_output() {
+        let input = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_no_index\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let events = parse(input).expect("retain malformed index as an event");
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::ToolCallMalformed(call)
+                if call.id.as_deref() == Some("call_no_index")
+                    && call.name.as_deref() == Some("lookup")
+                    && call.diagnostics == ["tool call index is missing"]
+        )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, ChatCompletionsEvent::ToolCallFinished(_))));
     }
 
     #[test]
@@ -4424,6 +4591,120 @@ mod tests {
             "stop",
             MALFORMED_PROVIDER_STREAM_REASON_CODE,
         );
+    }
+
+    #[test]
+    fn minimal_loop_recovers_missing_arguments_without_executing_them() {
+        let missing_arguments_stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_missing\",\"function\":{\"name\":\"lookup\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let corrected_stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_corrected\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"den\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut brain = loop_with(
+            vec![
+                Ok(parse(missing_arguments_stream).expect("parse missing arguments")),
+                Ok(parse(corrected_stream).expect("parse corrected arguments")),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("recovered".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok("found")],
+        );
+
+        let output =
+            brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
+
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 3);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(
+            events(&output.stream)
+                .iter()
+                .filter(|event| matches!(event, BrainEvent::ToolCallStarted { .. }))
+                .count(),
+            1,
+            "the malformed call must not execute",
+        );
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ProviderStatus {
+                level: BrainProviderStatusLevel::Degraded,
+                metadata_json: Some(metadata),
+                ..
+            } if metadata.contains(MALFORMED_PROVIDER_STREAM_REASON_CODE)
+        )));
+    }
+
+    #[test]
+    fn provider_error_during_recovery_preserves_completed_tool_history() {
+        let malformed = MalformedChatFunctionCall {
+            index: 0,
+            id: Some("call_bad".to_string()),
+            name: Some("lookup".to_string()),
+            arguments_json: "".to_string(),
+            diagnostics: vec!["function.arguments is missing".to_string()],
+        };
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        r#"{"query":"commit once"}"#,
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallMalformed(malformed),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Err(ChatCompletionsStreamError::ProviderError(
+                    "recovery request rejected".to_string(),
+                )),
+            ],
+            vec![ChatCompletionsToolOutput::ok("side effect committed")],
+        );
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("commit once, then continue")],
+        );
+
+        assert!(!output.completed);
+        assert_eq!(output.provider_request_count, 3);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(
+            events(&output.stream)
+                .iter()
+                .filter(|event| matches!(event, BrainEvent::ToolCallStarted { .. }))
+                .count(),
+            1,
+        );
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = output.provider_state else {
+            panic!("completed tool history must survive a recovery provider error");
+        };
+        let persisted: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload).expect("persisted completed tool history");
+        assert!(persisted.messages.iter().any(|message| {
+            message.role == ChatMessageRole::Tool
+                && message.content.as_deref() == Some("side effect committed")
+        }));
+        assert!(persisted.messages.iter().all(|message| {
+            !message
+                .content
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Rusty Crew tool-call recovery")
+        }));
     }
 
     #[test]

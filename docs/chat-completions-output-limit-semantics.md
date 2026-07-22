@@ -10,12 +10,19 @@ success signals. Rust owns their interpretation in the native
   fragment still terminates with `chat_completions_output_limit_exceeded` when
   no fully parsed tool call is available.
 - A tool call remains actionable when the provider reports `length` only when
-  its complete arguments parse as a JSON object. The bounded tool loop may then
-  execute it and request the next provider turn.
+  the provider supplied an argument string and its complete contents parse as
+  a JSON object. Missing, null, non-string, empty, and whitespace-only argument
+  values are malformed; Crew never substitutes `{}` or otherwise repairs them.
+  The bounded tool loop may execute only the validated call and then request
+  the next provider turn.
 - Pending tool-call fragments are classified only after the provider's terminal
   chunk is read. A missing/empty function name, invalid argument JSON, or
   non-object argument value is retained as a diagnostic rather than aborting
-  parsing before the finish reason is observed.
+  parsing before the finish reason is observed. `[DONE]` is also a terminal
+  boundary: pending fragments are classified before it can complete a stream.
+  Missing or invalid tool-call indices become malformed-call diagnostics and
+  enter the same bounded recovery path instead of becoming generic transport
+  failures.
 - A malformed response never executes any call from that provider round. The
   Rust brain instead supplies deterministic model-visible feedback and permits
   one provider recovery attempt by default. The feedback says that no tool ran,
@@ -23,8 +30,10 @@ success signals. Rust owns their interpretation in the native
 - Recovery is temporary wake-local context. The malformed assistant fragment
   and runtime-generated feedback are sent to the next provider request but are
   excluded from durable provider history. Successful tool rounds before and
-  after recovery remain durable, including when recovery is exhausted and the
-  wake terminates as failed.
+  after recovery remain durable, including when recovery is exhausted or the
+  recovery provider request itself fails. A persisted replacement contains
+  only completed assistant tool-call and tool-result messages, never malformed
+  fragments or synthetic recovery feedback.
 - A partial assistant message is replayed only when it contains visible text.
   Reasoning-only fragments remain observable but are not placed in recovery
   request history because some OpenAI-compatible providers reject assistant
