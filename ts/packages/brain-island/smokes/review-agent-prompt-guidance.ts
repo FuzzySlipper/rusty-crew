@@ -167,7 +167,7 @@ assert.equal(codexSendResult?.success, true);
 assert.equal(codexSendResult?.contentItems[0]?.type, "inputText");
 assert.equal(
   codexSendResult?.contentItems[0]?.text,
-  "message accepted for @reviewer",
+  "message accepted; address=@reviewer; addressKind=raw_agent; agent=@reviewer; session=reviewer-session; runtime=direct_brain; activation=none",
 );
 assert.doesNotMatch(codexSendResult?.contentItems[0]?.text ?? "", /Id=/);
 
@@ -198,7 +198,7 @@ assert.equal(
   builtInResult?.content[0]?.type === "text"
     ? builtInResult.content[0].text
     : undefined,
-  "message routed to @reviewer",
+  "message routed; address=@reviewer; concrete_target=unavailable",
 );
 
 console.log(
