@@ -138,11 +138,15 @@ export async function resolveCodexCoordinationToolCall(input: {
     const receipt = input.onDelivery
       ? await input.onDelivery(initialReceipt)
       : initialReceipt;
+    const agents =
+      receipt.request.routing == null
+        ? await input.port.listAgentDirectory().catch(() => [])
+        : [];
     return receipt.status === "accepted"
       ? succeeded(
           receipt.activation?.type === "queued_for_next_turn"
-            ? `message queued for ${args.recipient}'s next turn; ${formatDeliveryTarget(receipt)}`
-            : `message accepted; ${formatDeliveryTarget(receipt)}`,
+            ? `message queued for ${args.recipient}'s next turn; ${formatDeliveryTarget(receipt, agents)}`
+            : `message accepted; ${formatDeliveryTarget(receipt, agents)}`,
         )
       : failed(receipt.reasonCode ?? `message ${receipt.status}`);
   }

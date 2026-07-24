@@ -149,6 +149,53 @@ test("Codex coordination reports the exact curated delivery target", async () =>
   assert.match(text, /activation=external_turn_requested/);
 });
 
+test("Codex coordination reports queued raw Codex and raw direct runtimes from directory identity", async () => {
+  const port = new RecordingPort();
+  const binding = {
+    runtimeId: "codex-local",
+    bindingId: "binding-raw-targets",
+    controllerInstanceId: "controller-raw-targets",
+    controllerGeneration: 7,
+  };
+  const codexResult = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-raw-codex",
+      turnId: "turn-raw-codex",
+      callId: "call-raw-codex",
+      namespace: "rusty_crew",
+      tool: "send_agent_message",
+      arguments: { recipient: "unrouted-codex", body: "continue later" },
+    },
+    binding,
+    port,
+  });
+  const codexContent = codexResult?.contentItems[0];
+  const codexText = codexContent?.type === "inputText" ? codexContent.text : "";
+  assert.match(codexText, /addressKind=raw_agent/);
+  assert.match(codexText, /session=unrouted-codex-session/);
+  assert.match(codexText, /runtime=codex_app_server/);
+  assert.match(codexText, /activation=queued_for_next_turn/);
+
+  const directResult = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-raw-direct",
+      turnId: "turn-raw-direct",
+      callId: "call-raw-direct",
+      namespace: "rusty_crew",
+      tool: "send_agent_message",
+      arguments: { recipient: "worker", body: "work now" },
+    },
+    binding,
+    port,
+  });
+  const directContent = directResult?.contentItems[0];
+  const directText =
+    directContent?.type === "inputText" ? directContent.text : "";
+  assert.match(directText, /session=worker-session/);
+  assert.match(directText, /runtime=direct_brain/);
+  assert.match(directText, /activation=direct_brain_wake_requested/);
+});
+
 test("Codex coordination round returns the durable Rust reply", async () => {
   const port = new RecordingPort();
   const delivered: AgentMessageDeliveryReceipt[] = [];
@@ -254,6 +301,19 @@ class RecordingPort implements CodexCoordinationPort {
         sessionKind: "full",
         sessionStatus: "idle",
         runtimeKind: "direct_brain",
+        routable: true,
+      },
+      {
+        agentId: "unrouted-codex",
+        sessionId: "unrouted-codex-session" as SessionId,
+        profileId: "unrouted-codex-profile",
+        displayLabel: "Unrouted Codex",
+        sessionKind: "full",
+        sessionStatus: "active",
+        runtimeKind: "codex_app_server",
+        runtimeId: "codex-local",
+        bindingId: "unrouted-codex-binding",
+        bindingStatus: "active",
         routable: true,
       },
     ];
@@ -373,6 +433,32 @@ function deliveryReceipt(
   command: AgentMessageCommand,
 ): AgentMessageDeliveryReceipt {
   const routed = command.toAddress === "@reviewer";
+  const targetSessionId = routed
+    ? "planner-session"
+    : command.toAddress === "unrouted-codex"
+      ? "unrouted-codex-session"
+      : command.toAddress === "worker"
+        ? "worker-session"
+        : "planner-session";
+  const activation =
+    command.toAddress === "unrouted-codex"
+      ? {
+          type: "queued_for_next_turn" as const,
+          sessionId: targetSessionId as SessionId,
+          queueId: "unrouted-codex-queue",
+        }
+      : command.toAddress === "worker"
+        ? {
+            type: "direct_brain_wake_requested" as const,
+            sessionId: targetSessionId as SessionId,
+            wakeId: "worker-wake",
+          }
+        : {
+            type: "external_turn_requested" as const,
+            sessionId: targetSessionId as SessionId,
+            requestId: "external-request-1",
+            bindingId: "recipient-binding",
+          };
   return {
     request: {
       deliveryId: command.deliveryId,
@@ -382,9 +468,7 @@ function deliveryReceipt(
       fromSessionId: "codex-session" as SessionId,
       requestedAddress: command.toAddress,
       toAgentId: routed ? "planner" : command.toAddress,
-      toSessionId: (routed
-        ? "planner-session"
-        : "recipient-session") as SessionId,
+      toSessionId: targetSessionId as SessionId,
       routing: routed
         ? {
             address: "@reviewer",
@@ -408,12 +492,7 @@ function deliveryReceipt(
     },
     status: "accepted",
     sequence: 7,
-    activation: {
-      type: "external_turn_requested",
-      sessionId: "recipient-session" as SessionId,
-      requestId: "external-request-1",
-      bindingId: "recipient-binding",
-    },
+    activation,
     terminalAt: command.createdAt,
     revision: 2,
   };

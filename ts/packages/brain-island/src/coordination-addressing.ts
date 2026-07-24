@@ -74,16 +74,34 @@ export function formatModelAgentDirectory(
 
 export function formatDeliveryTarget(
   receipt: AgentMessageDeliveryReceipt,
+  agents: readonly AgentDirectoryEntry[] = [],
 ): string {
   const activation = receipt.activation?.type ?? "none";
   const runtime =
     receipt.request.routing?.resolvedTarget.runtimeKind ??
-    (activation.startsWith("external_turn")
-      ? "codex_app_server"
-      : "direct_brain");
+    resolveRawDeliveryTarget(receipt, agents)?.runtimeKind ??
+    "unresolved";
   const addressKind =
     receipt.request.routing === undefined || receipt.request.routing === null
       ? "raw_agent"
       : `curated_route:${receipt.request.routing.address}`;
   return `address=${receipt.request.requestedAddress}; addressKind=${addressKind}; agent=${receipt.request.toAgentId}; session=${receipt.request.toSessionId ?? "none"}; runtime=${runtime}; activation=${activation}`;
+}
+
+export function resolveRawDeliveryTarget(
+  receipt: AgentMessageDeliveryReceipt,
+  agents: readonly AgentDirectoryEntry[],
+): AgentDirectoryEntry | undefined {
+  const targetSessionId = receipt.request.toSessionId;
+  if (targetSessionId !== undefined && targetSessionId !== null) {
+    return agents.find(
+      (agent) =>
+        agent.sessionId === targetSessionId &&
+        agent.agentId === receipt.request.toAgentId,
+    );
+  }
+  const matches = agents.filter(
+    (agent) => agent.agentId === receipt.request.toAgentId,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }

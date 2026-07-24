@@ -55,7 +55,7 @@ export interface AgentMessageRouteResult {
     addressKind: "curated_route" | "raw_agent";
     agentId: string;
     sessionId?: string;
-    runtimeKind: "direct_brain" | "codex_app_server";
+    runtimeKind: "direct_brain" | "codex_app_server" | "unresolved";
     activation: string;
   };
 }

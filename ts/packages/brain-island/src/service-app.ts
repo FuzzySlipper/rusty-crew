@@ -52,6 +52,7 @@ import {
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
 import type { CoordinationToolRuntime } from "./coordination-tools.js";
+import { resolveRawDeliveryTarget } from "./coordination-addressing.js";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -5214,11 +5215,15 @@ function createServiceCoordinationRuntime(
         );
       const activation = receipt.activation;
       const resolvedTarget = receipt.request.routing?.resolvedTarget;
+      const rawTarget =
+        resolvedTarget == null
+          ? resolveRawDeliveryTarget(
+              receipt,
+              await state.bridge.listAgentDirectory().catch(() => []),
+            )
+          : undefined;
       const runtimeKind =
-        resolvedTarget?.runtimeKind ??
-        (activation?.type.startsWith("external_turn")
-          ? "codex_app_server"
-          : "direct_brain");
+        resolvedTarget?.runtimeKind ?? rawTarget?.runtimeKind ?? "unresolved";
       return {
         accepted: receipt.status === "accepted",
         sequence: receipt.sequence ?? undefined,

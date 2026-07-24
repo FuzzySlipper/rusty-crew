@@ -239,7 +239,18 @@ function assertSchema(
 
 function acceptedCodexPort(): CodexCoordinationPort {
   return {
-    listAgentDirectory: async () => [],
+    listAgentDirectory: async () => [
+      {
+        agentId: "@reviewer",
+        sessionId: "reviewer-session" as SessionId,
+        profileId: "reviewer-profile",
+        displayLabel: "Reviewer",
+        sessionKind: "full",
+        sessionStatus: "idle",
+        runtimeKind: "direct_brain",
+        routable: true,
+      },
+    ],
     listAgentRouteResolutions: async () => [],
     deliverAgentMessage: async (command) => acceptedDelivery(command),
     replyAgentMessage: async () => {
