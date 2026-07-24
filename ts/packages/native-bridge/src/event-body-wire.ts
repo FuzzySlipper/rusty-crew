@@ -20,6 +20,11 @@ import type {
   ToolCallMetadata,
 } from "@rusty-crew/contracts";
 
+import {
+  toCoordinationObservedCoreEvent,
+  toNativeCoordinationObservedCoreEvent,
+  type RawCoordinationObservedCoreEvent,
+} from "./coordination-event-wire.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
 
 export function toNativeBodyState(state: BodyState): unknown {
@@ -122,9 +127,8 @@ export function toNativeCoreEvent(event: CoreEvent): unknown {
     case "agent_message_routed":
       return { type: event.type, message: toNativeAgentMessage(event.message) };
     case "agent_message_delivery_observed":
-      return { type: event.type, receipt: event.receipt };
     case "agent_round_observed":
-      return { type: event.type, round: event.round };
+      return toNativeCoordinationObservedCoreEvent(event);
     case "delegation_lifecycle_observed":
       return {
         type: event.type,
@@ -385,9 +389,8 @@ export function toCoreEvent(event: RawCoreEvent): CoreEvent {
     case "agent_message_routed":
       return { type: event.type, message: toAgentMessage(event.message) };
     case "agent_message_delivery_observed":
-      return { type: event.type, receipt: event.receipt };
     case "agent_round_observed":
-      return { type: event.type, round: event.round };
+      return toCoordinationObservedCoreEvent(event);
     case "delegation_lifecycle_observed":
       return {
         type: event.type,
@@ -645,17 +648,7 @@ export type RawCoreEvent =
   | { type: "session_created"; state: RawSessionState }
   | { type: "session_archived"; session_id: SessionId }
   | { type: "agent_message_routed"; message: RawAgentMessage }
-  | {
-      type: "agent_message_delivery_observed";
-      receipt: Extract<
-        CoreEvent,
-        { type: "agent_message_delivery_observed" }
-      >["receipt"];
-    }
-  | {
-      type: "agent_round_observed";
-      round: Extract<CoreEvent, { type: "agent_round_observed" }>["round"];
-    }
+  | RawCoordinationObservedCoreEvent
   | {
       type: "delegation_lifecycle_observed";
       lifecycle: RawDelegationLifecycleEvent;
