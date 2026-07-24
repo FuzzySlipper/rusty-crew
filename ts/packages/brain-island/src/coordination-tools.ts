@@ -9,6 +9,10 @@ import type {
   BrainActionCollector,
   BrainToolResolver,
 } from "./tool-session-selection.js";
+import {
+  ambiguousBareRouteMessage,
+  formatModelAgentDirectory,
+} from "./coordination-addressing.js";
 
 const sendAgentMessageParameters = Type.Object({
   toAddress: Type.String({ minLength: 1 }),
@@ -45,6 +49,14 @@ export interface AgentMessageRouteResult {
     wakeId?: string;
     summary: string;
     reasonCode?: string;
+  };
+  destination?: {
+    requestedAddress: string;
+    addressKind: "curated_route" | "raw_agent";
+    agentId: string;
+    sessionId?: string;
+    runtimeKind: "direct_brain" | "codex_app_server";
+    activation: string;
   };
 }
 
@@ -249,6 +261,19 @@ export function agentRoundTool(
           text: "agent_round requires the Rusty Crew service coordination runtime.",
         });
       }
+      const routeError = ambiguousBareRouteMessage(
+        params.toAddress,
+        await context.runtime.listRoutes(),
+      );
+      if (routeError !== undefined) {
+        return coordinationResult({
+          ok: false,
+          operation: "agent_round",
+          reasonCode: "ambiguous_agent_route_address",
+          queuedActions: 0,
+          text: routeError,
+        });
+      }
       const correlationId =
         params.correlationId ??
         `${toolContext.sessionId}:${toolContext.callId}:agent-round`;
@@ -320,6 +345,19 @@ async function sendAgentMessage(
   }
 
   if (context.runtime !== undefined) {
+    const routeError = ambiguousBareRouteMessage(
+      input.params.toAddress,
+      await context.runtime.listRoutes(),
+    );
+    if (routeError !== undefined) {
+      return coordinationResult({
+        ok: false,
+        operation: "send_agent_message",
+        reasonCode: "ambiguous_agent_route_address",
+        queuedActions: 0,
+        text: routeError,
+      });
+    }
     const routed = await context.runtime.routeMessage({
       fromAgentId,
       fromSessionId: input.fromSessionId,
@@ -341,8 +379,8 @@ async function sendAgentMessage(
       routed,
       queuedActions: 0,
       text: routed.wake
-        ? `message routed to ${input.params.toAddress}; wake ${routed.wake.status}`
-        : `message routed to ${input.params.toAddress}`,
+        ? `message routed; ${formatRouteResultTarget(input.params.toAddress, routed)}; wake=${routed.wake.status}`
+        : `message routed; ${formatRouteResultTarget(input.params.toAddress, routed)}`,
     });
   }
 
@@ -451,34 +489,15 @@ function formatAgentDirectory(
   routes: readonly AgentRouteResolution[],
   agents: readonly AgentDirectoryEntry[],
 ): string {
-  const routeLines =
-    routes.length === 0
-      ? ["- none configured"]
-      : routes.map((resolution) => {
-          const route = resolution.route;
-          const target = resolution.resolvedTarget;
-          const status = resolution.routable
-            ? "routable"
-            : `unavailable (${resolution.reasonCode ?? "unknown_reason"})`;
-          return `- ${resolution.address}: ${route?.label ?? "unknown route"}; target=${target?.agentId ?? "unresolved"}; runtime=${target?.runtimeKind ?? route?.requiredRuntimeKind ?? "unresolved"}; status=${status}`;
-        });
-  const agentLines =
-    agents.length === 0
-      ? ["- no non-archived agents registered"]
-      : agents.map((agent) => {
-          const status = agent.routable
-            ? "routable"
-            : `unavailable (${agent.routabilityReasonCode ?? "unknown_reason"})`;
-          const task = agent.taskRef?.projectId
-            ? `; project=${agent.taskRef.projectId}`
-            : "";
-          return `- ${agent.displayLabel}: recipient=${agent.agentId}; profile=${agent.profileId}; runtime=${agent.runtimeKind}; status=${status}${task}`;
-        });
-  return [
-    "Switchboard routes (preferred addresses):",
-    ...routeLines,
-    "",
-    "Raw agent directory (diagnostics):",
-    ...agentLines,
-  ].join("\n");
+  return formatModelAgentDirectory(routes, agents);
+}
+
+function formatRouteResultTarget(
+  requestedAddress: string,
+  routed: AgentMessageRouteResult,
+): string {
+  const destination = routed.destination;
+  return destination === undefined
+    ? `address=${requestedAddress}; concrete_target=unavailable`
+    : `address=${destination.requestedAddress}; addressKind=${destination.addressKind}; agent=${destination.agentId}; session=${destination.sessionId ?? "none"}; runtime=${destination.runtimeKind}; activation=${destination.activation}`;
 }

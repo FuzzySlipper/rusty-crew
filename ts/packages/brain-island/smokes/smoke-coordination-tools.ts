@@ -97,6 +97,16 @@ const runtime: CoordinationToolRuntime = {
         wakeId: "wake-target",
         summary: `woke ${input.toAddress}`,
       },
+      destination: {
+        requestedAddress: input.toAddress,
+        addressKind: input.toAddress.startsWith("@")
+          ? "curated_route"
+          : "raw_agent",
+        agentId: "coordination-target",
+        sessionId: "coordination-target-session",
+        runtimeKind: "direct_brain",
+        activation: "direct_brain_wake_requested",
+      },
     };
   },
   async replyMessage(input) {
@@ -139,7 +149,30 @@ assert.equal(
 );
 assert.equal(directoryResult?.details.routes?.[0]?.address, "@reviewer");
 assert.match(directoryResult?.content[0]?.text ?? "", /Switchboard routes/);
-assert.match(directoryResult?.content[0]?.text ?? "", /Raw agent directory/);
+assert.match(directoryResult?.content[0]?.text ?? "", /Unrouted raw agents/);
+assert.doesNotMatch(
+  directoryResult?.content[0]?.text ?? "",
+  /recipient=coordination-target(?:;|\n)/,
+);
+
+const ambiguousSend = await sendAgentMessageTool({
+  runtime,
+}).executeWithContext?.(
+  { toAddress: "reviewer", body: "ambiguous" },
+  {
+    wake,
+    wakeId: wake.wakeId,
+    sessionId: wake.sessionId,
+    callId: "ambiguous-send-call",
+    signal: new AbortController().signal,
+  },
+);
+assert.equal(ambiguousSend?.details.ok, false);
+assert.equal(
+  ambiguousSend?.details.reasonCode,
+  "ambiguous_agent_route_address",
+);
+assert.match(ambiguousSend?.content[0]?.text ?? "", /use @reviewer/);
 
 const sendTool = sendAgentMessageTool({ runtime });
 const sendResult = await sendTool.executeWithContext?.(
@@ -157,6 +190,11 @@ const sendResult = await sendTool.executeWithContext?.(
   },
 );
 assert.equal(sendResult?.details.ok, true);
+assert.match(sendResult?.content[0]?.text ?? "", /agent=coordination-target/);
+assert.match(
+  sendResult?.content[0]?.text ?? "",
+  /session=coordination-target-session/,
+);
 assert.deepEqual(
   calls.find((call) => call.kind === "route"),
   {

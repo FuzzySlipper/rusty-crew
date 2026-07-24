@@ -1237,8 +1237,7 @@ async function handleHttpRequest(
 
   if (route?.id === "chat") {
     let chatEffectiveDefaults:
-      | Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>>
-      | undefined;
+      Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>> | undefined;
     const effectiveDefaultsForChatSession = async (session: SessionState) => {
       chatEffectiveDefaults ??= state.bridge
         .listSessions()
@@ -5213,9 +5212,27 @@ function createServiceCoordinationRuntime(
           initialReceipt,
         );
       const activation = receipt.activation;
+      const resolvedTarget = receipt.request.routing?.resolvedTarget;
+      const runtimeKind =
+        resolvedTarget?.runtimeKind ??
+        (activation?.type.startsWith("external_turn")
+          ? "codex_app_server"
+          : "direct_brain");
       return {
         accepted: receipt.status === "accepted",
         sequence: receipt.sequence ?? undefined,
+        destination: {
+          requestedAddress: receipt.request.requestedAddress,
+          addressKind:
+            receipt.request.routing === undefined ||
+            receipt.request.routing === null
+              ? "raw_agent"
+              : "curated_route",
+          agentId: receipt.request.toAgentId,
+          sessionId: receipt.request.toSessionId ?? undefined,
+          runtimeKind,
+          activation: activation?.type ?? "none",
+        },
         wake:
           activation?.type === "rejected" ||
           receipt.status === "rejected" ||

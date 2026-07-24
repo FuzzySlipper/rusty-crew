@@ -77,10 +77,76 @@ test("Codex coordination lists routes separately from raw same-service diagnosti
   assert.equal(content?.type, "inputText");
   assert.match(
     content?.type === "inputText" ? content.text : "",
-    /recipient=planner/,
+    /recipient=worker/,
   );
   assert.match(content?.type === "inputText" ? content.text : "", /@reviewer/);
+  assert.doesNotMatch(
+    content?.type === "inputText" ? content.text : "",
+    /recipient=reviewer(?:;|\n)/,
+  );
+  assert.doesNotMatch(
+    content?.type === "inputText" ? content.text : "",
+    /recipient=planner(?:;|\n)/,
+  );
   assert.equal(port.directoryReads, 1);
+});
+
+test("Codex coordination rejects a bare raw address reserved by a curated route", async () => {
+  const port = new RecordingPort();
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-ambiguous",
+      turnId: "turn-ambiguous",
+      callId: "call-ambiguous",
+      namespace: "rusty_crew",
+      tool: "send_agent_message",
+      arguments: { recipient: "reviewer", body: "review this" },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-ambiguous",
+      controllerInstanceId: "controller-ambiguous",
+      controllerGeneration: 7,
+    },
+    port,
+  });
+  assert.equal(result?.success, false);
+  const content = result?.contentItems[0];
+  assert.match(
+    content?.type === "inputText" ? content.text : "",
+    /use @reviewer/,
+  );
+  assert.equal(port.deliveries.length, 0);
+});
+
+test("Codex coordination reports the exact curated delivery target", async () => {
+  const port = new RecordingPort();
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-route",
+      turnId: "turn-route",
+      callId: "call-route",
+      namespace: "rusty_crew",
+      tool: "send_agent_message",
+      arguments: { recipient: "@reviewer", body: "review this" },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-route",
+      controllerInstanceId: "controller-route",
+      controllerGeneration: 7,
+    },
+    port,
+  });
+  assert.equal(result?.success, true);
+  const content = result?.contentItems[0];
+  const text = content?.type === "inputText" ? content.text : "";
+  assert.match(text, /address=@reviewer/);
+  assert.match(text, /addressKind=curated_route:@reviewer/);
+  assert.match(text, /agent=planner/);
+  assert.match(text, /session=planner-session/);
+  assert.match(text, /runtime=direct_brain/);
+  assert.match(text, /activation=external_turn_requested/);
 });
 
 test("Codex coordination round returns the durable Rust reply", async () => {
@@ -165,6 +231,26 @@ class RecordingPort implements CodexCoordinationPort {
         sessionId: "planner-session" as SessionId,
         profileId: "planner-profile",
         displayLabel: "Planner",
+        sessionKind: "full",
+        sessionStatus: "idle",
+        runtimeKind: "direct_brain",
+        routable: true,
+      },
+      {
+        agentId: "reviewer",
+        sessionId: "reviewer-raw-session" as SessionId,
+        profileId: "reviewer-profile",
+        displayLabel: "Reviewer raw twin",
+        sessionKind: "full",
+        sessionStatus: "idle",
+        runtimeKind: "direct_brain",
+        routable: true,
+      },
+      {
+        agentId: "worker",
+        sessionId: "worker-session" as SessionId,
+        profileId: "worker-profile",
+        displayLabel: "Worker",
         sessionKind: "full",
         sessionStatus: "idle",
         runtimeKind: "direct_brain",
@@ -286,6 +372,7 @@ class RecordingPort implements CodexCoordinationPort {
 function deliveryReceipt(
   command: AgentMessageCommand,
 ): AgentMessageDeliveryReceipt {
+  const routed = command.toAddress === "@reviewer";
   return {
     request: {
       deliveryId: command.deliveryId,
@@ -294,8 +381,24 @@ function deliveryReceipt(
       fromAgentId: "codex-agent",
       fromSessionId: "codex-session" as SessionId,
       requestedAddress: command.toAddress,
-      toAgentId: command.toAddress,
-      toSessionId: "recipient-session" as SessionId,
+      toAgentId: routed ? "planner" : command.toAddress,
+      toSessionId: (routed
+        ? "planner-session"
+        : "recipient-session") as SessionId,
+      routing: routed
+        ? {
+            address: "@reviewer",
+            routeKey: "reviewer" as AgentRouteKey,
+            routeRevision: 1,
+            resolvedTarget: {
+              agentId: "planner" as AgentId,
+              sessionId: "planner-session" as SessionId,
+              profileId: "planner-profile" as ProfileId,
+              displayLabel: "Planner",
+              runtimeKind: "direct_brain",
+            },
+          }
+        : undefined,
       replyToMessageId: null,
       inputKind: command.inputKind,
       body: command.body,

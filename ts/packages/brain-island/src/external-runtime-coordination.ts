@@ -12,6 +12,11 @@ import type {
   DynamicToolCallParams,
   DynamicToolCallResponse,
 } from "@rusty-crew/external-runtime-codex";
+import {
+  ambiguousBareRouteMessage,
+  formatDeliveryTarget,
+  formatModelAgentDirectory,
+} from "./coordination-addressing.js";
 
 const COORDINATION_NAMESPACE = "rusty_crew";
 const MAX_ROUND_TIMEOUT_MS = 300_000;
@@ -111,6 +116,8 @@ export async function resolveCodexCoordinationToolCall(input: {
   const args = parseArguments(params.arguments);
   if (typeof args === "string") return failed(args);
   if (params.tool === "send_agent_message") {
+    const routeError = await modelAddressError(args.recipient, input.port);
+    if (routeError !== undefined) return failed(routeError);
     const ttlMs = boundedMessageTtlMs(args.ttlSeconds);
     const command: AgentMessageCommand = {
       caller,
@@ -134,11 +141,14 @@ export async function resolveCodexCoordinationToolCall(input: {
     return receipt.status === "accepted"
       ? succeeded(
           receipt.activation?.type === "queued_for_next_turn"
-            ? `message queued for ${args.recipient}'s next turn`
-            : `message accepted for ${args.recipient}`,
+            ? `message queued for ${args.recipient}'s next turn; ${formatDeliveryTarget(receipt)}`
+            : `message accepted; ${formatDeliveryTarget(receipt)}`,
         )
       : failed(receipt.reasonCode ?? `message ${receipt.status}`);
   }
+
+  const routeError = await modelAddressError(args.recipient, input.port);
+  if (routeError !== undefined) return failed(routeError);
 
   const timeoutMs = Math.min(
     Math.max(args.timeoutMs ?? DEFAULT_ROUND_TIMEOUT_MS, 1),
@@ -287,28 +297,16 @@ function formatAgentDirectory(
   routes: readonly AgentRouteResolution[],
   agents: readonly AgentDirectoryEntry[],
 ): string {
-  return [
-    "Switchboard routes (preferred addresses):",
-    ...(routes.length === 0
-      ? ["- none configured"]
-      : routes.map((resolution) => {
-          const target = resolution.resolvedTarget;
-          const status = resolution.routable
-            ? "routable"
-            : `unavailable (${resolution.reasonCode ?? "unknown_reason"})`;
-          return `- ${resolution.address}: ${resolution.route?.label ?? "unknown route"}; target=${target?.agentId ?? "unresolved"}; runtime=${target?.runtimeKind ?? resolution.route?.requiredRuntimeKind ?? "unresolved"}; status=${status}`;
-        })),
-    "",
-    "Raw agent directory (diagnostics):",
-    ...(agents.length === 0 ? ["- no non-archived agents registered"] : []),
-    ...agents.map((agent) => {
-      const status = agent.routable
-        ? "routable"
-        : `unavailable (${agent.routabilityReasonCode ?? "unknown_reason"})`;
-      const task = agent.taskRef?.projectId
-        ? `; project=${agent.taskRef.projectId}`
-        : "";
-      return `- ${agent.displayLabel}: recipient=${agent.agentId}; profile=${agent.profileId}; runtime=${agent.runtimeKind}; status=${status}${task}`;
-    }),
-  ].join("\n");
+  return formatModelAgentDirectory(routes, agents);
+}
+
+async function modelAddressError(
+  address: string,
+  port: CodexCoordinationPort,
+): Promise<string | undefined> {
+  if (address.startsWith("@")) return undefined;
+  return ambiguousBareRouteMessage(
+    address,
+    await port.listAgentRouteResolutions(),
+  );
 }
