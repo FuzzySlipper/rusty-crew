@@ -12,6 +12,7 @@ import type {
   TaskId,
   Unit,
 } from "@rusty-crew/contracts";
+import { rustCoreEventValidationError } from "./bridge-core-event-validation.js";
 import type {
   BrainHostExecutor,
   BrainRoleAssembly,
@@ -194,17 +195,23 @@ function toAgentMessage(message: RustAgentMessageJson): AgentMessage {
 }
 
 function toCoreEvent(event: unknown, index: number): CoreEvent | undefined {
-  if (
-    event === null ||
-    typeof event !== "object" ||
-    !("type" in event) ||
-    typeof event.type !== "string"
-  ) {
-    reportOmittedRecentEvent(index, "missing event object or type");
+  const validationError = rustCoreEventValidationError(event);
+  if (validationError !== undefined) {
+    reportOmittedRecentEvent(index, validationError);
     return undefined;
   }
-  const eventType = event.type;
-  const typedEvent = event as RustCoreEventJson;
+  try {
+    return convertCoreEvent(event as RustCoreEventJson);
+  } catch (error) {
+    reportOmittedRecentEvent(
+      index,
+      `conversion failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
+
+function convertCoreEvent(typedEvent: RustCoreEventJson): CoreEvent {
   switch (typedEvent.type) {
     case "session_created":
       return {
@@ -276,9 +283,6 @@ function toCoreEvent(event: unknown, index: number): CoreEvent | undefined {
           summary: typedEvent.packet.summary,
         },
       };
-    default:
-      reportOmittedRecentEvent(index, `unsupported type ${eventType}`);
-      return undefined;
   }
 }
 
