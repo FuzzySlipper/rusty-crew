@@ -561,7 +561,8 @@ interface RustToolDescriptorJson {
   name: string;
   description: string;
   input_schema?:
-    BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"] | null;
+    | BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"]
+    | null;
 }
 
 type ToolEventMetadata = Extract<

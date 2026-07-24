@@ -1237,7 +1237,8 @@ async function handleHttpRequest(
 
   if (route?.id === "chat") {
     let chatEffectiveDefaults:
-      Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>> | undefined;
+      | Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>>
+      | undefined;
     const effectiveDefaultsForChatSession = async (session: SessionState) => {
       chatEffectiveDefaults ??= state.bridge
         .listSessions()
