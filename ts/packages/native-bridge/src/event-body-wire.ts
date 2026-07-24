@@ -121,6 +121,10 @@ export function toNativeCoreEvent(event: CoreEvent): unknown {
       return { type: event.type, session_id: event.sessionId };
     case "agent_message_routed":
       return { type: event.type, message: toNativeAgentMessage(event.message) };
+    case "agent_message_delivery_observed":
+      return { type: event.type, receipt: event.receipt };
+    case "agent_round_observed":
+      return { type: event.type, round: event.round };
     case "delegation_lifecycle_observed":
       return {
         type: event.type,
@@ -380,6 +384,10 @@ export function toCoreEvent(event: RawCoreEvent): CoreEvent {
       return { type: event.type, sessionId: event.session_id };
     case "agent_message_routed":
       return { type: event.type, message: toAgentMessage(event.message) };
+    case "agent_message_delivery_observed":
+      return { type: event.type, receipt: event.receipt };
+    case "agent_round_observed":
+      return { type: event.type, round: event.round };
     case "delegation_lifecycle_observed":
       return {
         type: event.type,
@@ -637,6 +645,17 @@ export type RawCoreEvent =
   | { type: "session_created"; state: RawSessionState }
   | { type: "session_archived"; session_id: SessionId }
   | { type: "agent_message_routed"; message: RawAgentMessage }
+  | {
+      type: "agent_message_delivery_observed";
+      receipt: Extract<
+        CoreEvent,
+        { type: "agent_message_delivery_observed" }
+      >["receipt"];
+    }
+  | {
+      type: "agent_round_observed";
+      round: Extract<CoreEvent, { type: "agent_round_observed" }>["round"];
+    }
   | {
       type: "delegation_lifecycle_observed";
       lifecycle: RawDelegationLifecycleEvent;

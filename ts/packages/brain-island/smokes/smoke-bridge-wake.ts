@@ -64,7 +64,17 @@ const request: BrainWakeRequest = {
         body: "large body state ".repeat(4096),
       },
     ],
-    recent_events: [],
+    recent_events: [
+      null,
+      {
+        type: "agent_message_delivery_observed",
+        receipt: { marker: "delivery-preserved" },
+      },
+      {
+        type: "agent_round_observed",
+        round: { marker: "round-preserved" },
+      },
+    ],
     child_completions: [],
     fan_out_groups: [],
     delta_policy: {
@@ -89,6 +99,10 @@ const result = await wakeBrainFromBridgeRequest(
       assert.equal(
         wake.state.session.inferenceOverrides?.reasoningEffort,
         "high",
+      );
+      assert.deepEqual(
+        wake.state.recentEvents.map((event) => event.type),
+        ["agent_message_delivery_observed", "agent_round_observed"],
       );
       return localBrain.wake(wake, options);
     },

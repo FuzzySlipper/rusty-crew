@@ -123,7 +123,10 @@ function toBodyState(value: unknown): BodyState {
       lastActiveAt: state.session.last_active_at,
     },
     pendingMessages: state.pending_messages.map(toAgentMessage),
-    recentEvents: state.recent_events.map(toCoreEvent),
+    recentEvents: state.recent_events.flatMap((event, index) => {
+      const converted = toCoreEvent(event, index);
+      return converted === undefined ? [] : [converted];
+    }),
     childCompletions: state.child_completions.map(toDelegatedCompletion),
     fanOutGroups: state.fan_out_groups.map(toDelegatedFanOutGroup),
     deltaPolicy: {
@@ -190,69 +193,100 @@ function toAgentMessage(message: RustAgentMessageJson): AgentMessage {
   };
 }
 
-function toCoreEvent(event: RustCoreEventJson): CoreEvent {
-  switch (event.type) {
+function toCoreEvent(event: unknown, index: number): CoreEvent | undefined {
+  if (
+    event === null ||
+    typeof event !== "object" ||
+    !("type" in event) ||
+    typeof event.type !== "string"
+  ) {
+    reportOmittedRecentEvent(index, "missing event object or type");
+    return undefined;
+  }
+  const eventType = event.type;
+  const typedEvent = event as RustCoreEventJson;
+  switch (typedEvent.type) {
     case "session_created":
-      return { type: event.type, state: toBodyStateSession(event.state) };
+      return {
+        type: typedEvent.type,
+        state: toBodyStateSession(typedEvent.state),
+      };
     case "session_archived":
-      return { type: event.type, sessionId: event.session_id };
+      return { type: typedEvent.type, sessionId: typedEvent.session_id };
     case "agent_message_routed":
-      return { type: event.type, message: toAgentMessage(event.message) };
+      return {
+        type: typedEvent.type,
+        message: toAgentMessage(typedEvent.message),
+      };
+    case "agent_message_delivery_observed":
+      return { type: typedEvent.type, receipt: typedEvent.receipt };
+    case "agent_round_observed":
+      return { type: typedEvent.type, round: typedEvent.round };
     case "delegation_lifecycle_observed":
       return {
-        type: event.type,
+        type: typedEvent.type,
         lifecycle: {
-          parentSessionId: event.lifecycle.parent_session_id,
-          delegatedSessionId: event.lifecycle.delegated_session_id,
-          runId: event.lifecycle.run_id,
-          phase: event.lifecycle.phase,
-          detail: event.lifecycle.detail,
+          parentSessionId: typedEvent.lifecycle.parent_session_id,
+          delegatedSessionId: typedEvent.lifecycle.delegated_session_id,
+          runId: typedEvent.lifecycle.run_id,
+          phase: typedEvent.lifecycle.phase,
+          detail: typedEvent.lifecycle.detail,
         },
       };
     case "external_event_injected":
       return {
-        type: event.type,
+        type: typedEvent.type,
         event: {
-          adapterId: event.event.adapter_id,
-          source: event.event.source,
-          payload: event.event.payload,
+          adapterId: typedEvent.event.adapter_id,
+          source: typedEvent.event.source,
+          payload: typedEvent.event.payload,
         },
       };
     case "den_data_updated":
       return {
-        type: event.type,
+        type: typedEvent.type,
         update: {
-          projectId: event.update.project_id,
-          entityKind: event.update.entity_kind,
-          entityId: event.update.entity_id,
-          revision: event.update.revision,
+          projectId: typedEvent.update.project_id,
+          entityKind: typedEvent.update.entity_kind,
+          entityId: typedEvent.update.entity_id,
+          revision: typedEvent.update.revision,
         },
       };
     case "brain_wake_requested":
-      return { type: event.type, sessionId: event.session_id };
+      return { type: typedEvent.type, sessionId: typedEvent.session_id };
     case "brain_event_observed":
       return {
-        type: event.type,
-        sessionId: event.session_id,
-        wakeId: event.wake_id,
-        event: toBrainEvent(event.event),
+        type: typedEvent.type,
+        sessionId: typedEvent.session_id,
+        wakeId: typedEvent.wake_id,
+        event: toBrainEvent(typedEvent.event),
       };
     case "brain_actions_accepted":
       return {
-        type: event.type,
-        sessionId: event.session_id,
-        count: event.count,
+        type: typedEvent.type,
+        sessionId: typedEvent.session_id,
+        count: typedEvent.count,
       };
     case "completion_packet_delivered":
       return {
-        type: event.type,
+        type: typedEvent.type,
         packet: {
-          sessionId: event.packet.session_id,
-          status: event.packet.status,
-          summary: event.packet.summary,
+          sessionId: typedEvent.packet.session_id,
+          status: typedEvent.packet.status,
+          summary: typedEvent.packet.summary,
         },
       };
+    default:
+      reportOmittedRecentEvent(index, `unsupported type ${eventType}`);
+      return undefined;
   }
+}
+
+function reportOmittedRecentEvent(index: number, reason: string): void {
+  process.emitWarning(
+    `omitted malformed body-state recent event at index ${index}: ${reason}`,
+    { code: "RUSTY_CREW_BODY_STATE_RECENT_EVENT_OMITTED" },
+  );
 }
 
 function toBodyStateSession(
@@ -353,7 +387,7 @@ function toDelegationLineage(
 interface RustBodyStateJson {
   session: RustSessionStateJson;
   pending_messages: RustAgentMessageJson[];
-  recent_events: RustCoreEventJson[];
+  recent_events: unknown[];
   child_completions: RustDelegatedCompletionJson[];
   fan_out_groups: RustDelegatedFanOutGroupJson[];
   delta_policy: {
@@ -456,6 +490,17 @@ type RustCoreEventJson =
   | { type: "session_archived"; session_id: BodyState["session"]["sessionId"] }
   | { type: "agent_message_routed"; message: RustAgentMessageJson }
   | {
+      type: "agent_message_delivery_observed";
+      receipt: Extract<
+        CoreEvent,
+        { type: "agent_message_delivery_observed" }
+      >["receipt"];
+    }
+  | {
+      type: "agent_round_observed";
+      round: Extract<CoreEvent, { type: "agent_round_observed" }>["round"];
+    }
+  | {
       type: "delegation_lifecycle_observed";
       lifecycle: {
         parent_session_id: BodyState["session"]["sessionId"];
@@ -516,8 +561,7 @@ interface RustToolDescriptorJson {
   name: string;
   description: string;
   input_schema?:
-    | BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"]
-    | null;
+    BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"] | null;
 }
 
 type ToolEventMetadata = Extract<

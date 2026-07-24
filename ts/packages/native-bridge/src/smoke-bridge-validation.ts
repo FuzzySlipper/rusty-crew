@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import type { BodyState } from "@rusty-crew/contracts";
+import type { BodyState, CoreEvent } from "@rusty-crew/contracts";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
@@ -39,8 +39,38 @@ import {
   type NativeBridgeRoundTripFixtureName,
   type OpenAiResponsesBrainRunInput,
 } from "./index.js";
+import {
+  toCoreEvent,
+  toNativeCoreEvent,
+  type RawCoreEvent,
+} from "./event-body-wire.js";
 
 const validationEnv = { RUSTY_CREW_BRIDGE_VALIDATE: "1" };
+
+const coordinationEvents: CoreEvent[] = [
+  {
+    type: "agent_message_delivery_observed",
+    receipt: { marker: "delivery" } as unknown as Extract<
+      CoreEvent,
+      { type: "agent_message_delivery_observed" }
+    >["receipt"],
+  },
+  {
+    type: "agent_round_observed",
+    round: { marker: "round" } as unknown as Extract<
+      CoreEvent,
+      { type: "agent_round_observed" }
+    >["round"],
+  },
+];
+for (const event of coordinationEvents) {
+  const roundTripped = toCoreEvent(toNativeCoreEvent(event) as RawCoreEvent);
+  if (roundTripped.type !== event.type) {
+    throw new Error(
+      `coordination event wire round trip changed ${event.type} to ${roundTripped.type}`,
+    );
+  }
+}
 
 interface RustBridgeValidationFixtureFile {
   manifest_version: number;
