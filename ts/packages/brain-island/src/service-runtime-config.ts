@@ -22,10 +22,7 @@ import type {
   SessionKind,
   ToolProfile,
 } from "@rusty-crew/contracts";
-import type {
-  DenMemoryClient,
-  ServiceAdapterFactories,
-} from "./service-adapter-ports.js";
+import type { ServiceAdapterFactories } from "./service-adapter-ports.js";
 import type {
   NativeBridgeModule,
   NativeBrainConfigDraft,
@@ -126,6 +123,11 @@ import {
 } from "./tool-session-selection.js";
 import { createWebToolResolver } from "./web-tools.js";
 import type { RuntimeBrainModuleDiagnostics } from "./runtime-diagnostics.js";
+import { type ExternalMemoryReadiness } from "./external-memory-readiness.js";
+import {
+  createServiceDenMemoryClient,
+  createServiceExternalMemoryReadiness,
+} from "./service-external-memory-readiness.js";
 import {
   DEFAULT_DEN_OBSERVATION_EVENT_FILTERS,
   type DenObservationEventFilter,
@@ -797,6 +799,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
+  externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
@@ -815,6 +818,13 @@ export async function applyRustyCrewRuntimeConfig(input: {
     });
   const localCodeResourcePolicy =
     await input.bridge.planLocalCodeResourcePolicy({});
+  const externalMemoryReadiness =
+    input.externalMemoryReadiness ??
+    createServiceExternalMemoryReadiness(
+      input.serviceConfig,
+      input.adapterFactories,
+    );
+  await externalMemoryReadiness.refresh();
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
     bridge: input.bridge,
@@ -844,10 +854,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           : undefined,
       toolAvailabilityPlanner: (request) =>
         input.bridge.planToolAvailability(request),
-      externalMemoryAvailability: serviceExternalMemoryAvailability(
-        input.serviceConfig,
-        input.adapterFactories,
-      ),
+      externalMemoryAvailability: externalMemoryReadiness.current(),
     });
     profileContexts.set(profileId, profile);
     return profile;
@@ -904,6 +911,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             mcpToolCatalog,
             mcpToolExecutorFactory: input.mcpToolExecutorFactory,
             adapterFactories: input.adapterFactories,
+            externalMemoryReadiness,
             coordinationRuntime: input.coordinationRuntime,
             toolCallDebugStore: input.toolCallDebugStore,
             providerRequestDebugStore: input.providerRequestDebugStore,
@@ -1082,6 +1090,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
+  externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
@@ -1100,6 +1109,13 @@ export async function rebuildConfiguredBrainRuntime(input: {
     });
   const localCodeResourcePolicy =
     await input.bridge.planLocalCodeResourcePolicy({});
+  const externalMemoryReadiness =
+    input.externalMemoryReadiness ??
+    createServiceExternalMemoryReadiness(
+      input.serviceConfig,
+      input.adapterFactories,
+    );
+  await externalMemoryReadiness.refresh();
   const brain = runtimeConfig.brains.find(
     (candidate) => candidate.profileId === input.profileId,
   );
@@ -1128,10 +1144,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         : undefined,
     toolAvailabilityPlanner: (request) =>
       input.bridge.planToolAvailability(request),
-    externalMemoryAvailability: serviceExternalMemoryAvailability(
-      input.serviceConfig,
-      input.adapterFactories,
-    ),
+    externalMemoryAvailability: externalMemoryReadiness.current(),
   });
   const resolvedBrain = await resolveBrainCatalogSelection(
     input.bridge,
@@ -1162,6 +1175,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         mcpToolCatalog,
         mcpToolExecutorFactory: input.mcpToolExecutorFactory,
         adapterFactories: input.adapterFactories,
+        externalMemoryReadiness,
         coordinationRuntime: input.coordinationRuntime,
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
@@ -1462,6 +1476,7 @@ async function createConfiguredBrain(
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
+    externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
     toolCallDebugStore?: ToolCallDebugStore;
     providerRequestDebugStore?: ProviderRequestDebugStore;
@@ -1469,6 +1484,9 @@ async function createConfiguredBrain(
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
 ): Promise<BrainHostExecutor> {
+  const usesExternalMemory = profile.toolSelection.toolProfile.tools.some(
+    (tool) => EXTERNAL_MEMORY_TOOL_NAMES.has(tool.name),
+  );
   return createBuiltInBrainHost(selection, {
     profile,
     bridge: options.bridge,
@@ -1476,12 +1494,27 @@ async function createConfiguredBrain(
     runtimeConfig: options.runtimeConfig,
     serviceConfig: options.serviceConfig,
     toolResolver: createServiceToolResolver(profile, options),
+    ...(usesExternalMemory
+      ? {
+          prepareToolResolution: async () => {
+            await options.externalMemoryReadiness.refresh();
+          },
+        }
+      : {}),
     planActions: completionActionFromEvents,
     maxTokens: effectiveModelMaxTokens(profile),
     toolCallDebugStore: options.toolCallDebugStore,
     providerRequestDebugStore: options.providerRequestDebugStore,
   });
 }
+
+const EXTERNAL_MEMORY_TOOL_NAMES = new Set([
+  "memory_recall",
+  "memory_read",
+  "memory_search",
+  "memory_store",
+  "memory_propose",
+]);
 
 function effectiveModelMaxTokens(
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
@@ -1502,6 +1535,7 @@ function createServiceToolResolver(
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
+    externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
     browserResources: ServiceBrowserResources;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
@@ -1591,6 +1625,7 @@ function createMemoryToolResolver(
     bridge?: NativeBridgeModule;
     serviceConfig?: RustyCrewServiceConfig;
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
+    externalMemoryReadiness: ExternalMemoryReadiness;
   },
 ): BrainToolResolver {
   const denMemoryClient = createServiceDenMemoryClient(
@@ -1602,17 +1637,19 @@ function createMemoryToolResolver(
     : undefined;
   return (input) => [
     ...(memorySpaceResolver?.(input) ?? []),
-    ...resolveDenMemoryTools({
-      client: denMemoryClient,
-      policy: {
-        mode: "metadata",
-        defaultAudience: [profile.profile.profileId],
-      },
-      runtimeContext: {
-        projectId: options.serviceConfig?.denConversationProjectId,
-      },
-      session: input.wake.state.session,
-    }),
+    ...(options.externalMemoryReadiness.current().clientAvailable
+      ? resolveDenMemoryTools({
+          client: denMemoryClient,
+          policy: {
+            mode: "metadata",
+            defaultAudience: [profile.profile.profileId],
+          },
+          runtimeContext: {
+            projectId: options.serviceConfig?.denConversationProjectId,
+          },
+          session: input.wake.state.session,
+        })
+      : []),
     denseProfileMemoryTool({
       client: options.bridge,
       mode: denseProfileMemoryMode(profile),
@@ -1627,48 +1664,6 @@ function createMemoryToolResolver(
       session: input.wake.state.session,
     }),
   ];
-}
-
-function createServiceDenMemoryClient(
-  serviceConfig: RustyCrewServiceConfig | undefined,
-  adapterFactories:
-    | Pick<ServiceAdapterFactories, "createDenMemoryClient">
-    | undefined,
-): DenMemoryClient | undefined {
-  const config = serviceConfig?.denMemory;
-  if (!config?.baseUrl || adapterFactories === undefined) return undefined;
-  return adapterFactories.createDenMemoryClient({
-    baseUrl: config.baseUrl,
-    bearerToken: config.bearerToken,
-    apiMode: config.apiMode,
-    timeoutMs: config.timeoutMs,
-    paths: config.paths,
-  });
-}
-
-export function serviceExternalMemoryAvailability(
-  serviceConfig: RustyCrewServiceConfig | undefined,
-  adapterFactories:
-    | Pick<ServiceAdapterFactories, "createDenMemoryClient">
-    | undefined,
-): {
-  configured: boolean;
-  clientAvailable: boolean;
-  mode: "metadata";
-  lastError?: string;
-} {
-  const configured = Boolean(serviceConfig?.denMemory.baseUrl);
-  const clientAvailable = configured && adapterFactories !== undefined;
-  return {
-    configured,
-    clientAvailable,
-    mode: "metadata",
-    ...(!configured
-      ? { lastError: "den memory baseUrl is not configured" }
-      : !clientAvailable
-        ? { lastError: "den memory adapter factory is unavailable" }
-        : {}),
-  };
 }
 
 function denseProfileMemoryMode(

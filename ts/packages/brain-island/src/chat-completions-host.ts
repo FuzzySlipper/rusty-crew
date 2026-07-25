@@ -373,6 +373,7 @@ async function runRustChatCompletionsBrainWithIncrementalDrain(
     wake,
     wakeOptions: options,
     toolResolver: runOptions.toolResolver ?? context.toolResolver,
+    prepareToolResolution: context.prepareToolResolution,
     toolProfile:
       runOptions.toolProfile ?? context.profile.toolSelection.toolProfile,
     toolCallDebugStore: context.toolCallDebugStore,

@@ -80,12 +80,14 @@ export async function runBufferedBrainHost(options: {
   wake: BrainWakeInput;
   wakeOptions?: BrainWakeOptions;
   toolResolver?: BrainToolResolver;
+  prepareToolResolution?: () => Promise<void>;
   toolProfile: ToolProfile;
   toolCallDebugStore?: ToolCallDebugStore;
   events?: BrainEventEnvelope[];
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   planActions?: BrainActionPlanner;
 }): Promise<BufferedBrainHostRunResult> {
+  await options.prepareToolResolution?.();
   const selectionActions = createBrainActionCollector();
   const toolSelection = resolveToolSession({
     wake: options.wake,

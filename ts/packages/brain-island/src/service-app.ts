@@ -338,13 +338,14 @@ import {
   preflightRustyCrewRuntimeConfig,
   rebuildConfiguredBrainRuntime,
   registerConfiguredScheduledJobs,
-  serviceExternalMemoryAvailability,
   ensureConfiguredSessionForChannelBinding,
   type RustyCrewConfiguredSession,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
   type ServiceBrainWakeResultObservation,
 } from "./service-runtime-config.js";
+import type { ExternalMemoryReadiness } from "./external-memory-readiness.js";
+import { createServiceExternalMemoryReadiness } from "./service-external-memory-readiness.js";
 import {
   executeScheduledHostRun,
   runScheduledHostExecutors,
@@ -430,6 +431,7 @@ interface ServiceState {
   readonly runtimeConfigMutationQueue: AsyncMutationQueue;
   readonly auditSink: ReturnType<typeof createMemoryAdminControlAuditSink>;
   readonly adapterFactories: ServiceAdapterFactories;
+  readonly externalMemoryReadiness: ExternalMemoryReadiness;
   runtimeConfig: RustyCrewRuntimeConfig;
   runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
   denGatewayClient?: DenSuccessorGatewayClient;
@@ -951,6 +953,10 @@ export async function createRustyCrewServiceApp(
         return settled;
       },
     });
+    const externalMemoryReadiness = createServiceExternalMemoryReadiness(
+      config,
+      options.adapterFactories,
+    );
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
@@ -958,6 +964,7 @@ export async function createRustyCrewServiceApp(
       curatorExecutor: curator.executor,
       mcpSurfaceDiagnostics: mcpManager.diagnostics(),
       adapterFactories: options.adapterFactories,
+      externalMemoryReadiness,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
       toolCallDebugStore,
       providerRequestDebugStore,
@@ -980,6 +987,7 @@ export async function createRustyCrewServiceApp(
       runtimeConfigMutationQueue: createAsyncMutationQueue(),
       auditSink: createMemoryAdminControlAuditSink(),
       adapterFactories: options.adapterFactories,
+      externalMemoryReadiness,
       runtimeConfig,
       runtimeConfigApplyResult,
       denGatewayClient:
@@ -1964,10 +1972,7 @@ async function buildDiagnosticsContext(
     memorySpaceDescriptors:
       memorySpaces?.items.map((item) => item.descriptor) ?? [],
     storageSearchHealthy: storage?.searchHealthy ?? false,
-    externalMemory: serviceExternalMemoryAvailability(
-      state.config,
-      state.adapterFactories,
-    ),
+    externalMemory: state.externalMemoryReadiness.current(),
     mcpSurfaces: state.mcpManager.diagnostics(),
     denPlanningToolNames: [
       ...new Set(
@@ -3288,6 +3293,7 @@ async function applyServiceRuntimeConfigFromDisk(
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),
     adapterFactories: state.adapterFactories,
+    externalMemoryReadiness: state.externalMemoryReadiness,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
@@ -3326,6 +3332,7 @@ async function rebuildServiceBrainRuntime(
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     adapterFactories: state.adapterFactories,
+    externalMemoryReadiness: state.externalMemoryReadiness,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,

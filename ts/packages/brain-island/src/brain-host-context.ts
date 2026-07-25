@@ -15,6 +15,7 @@ export interface BrainHostContext {
   bridge?: NativeBridgeModule;
   providerStateScope?: BrainProviderStateScope;
   toolResolver?: BrainToolResolver;
+  prepareToolResolution?: () => Promise<void>;
   planActions?: BrainActionPlanner;
   maxTokens?: number;
   toolCallDebugStore?: ToolCallDebugStore;

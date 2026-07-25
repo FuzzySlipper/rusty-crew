@@ -64,6 +64,7 @@
     "smoke:memory-proposals": "tsx smokes/smoke-memory-proposals.ts",
     "smoke:capture-memory-proposals": "tsx smokes/smoke-capture-memory-proposals.ts",
     "smoke:memory-document-boundary": "tsx ../../smokes/brain-island/smoke-memory-document-boundary.ts",
+    "smoke:external-memory-readiness": "tsx ../../smokes/brain-island/smoke-external-memory-readiness.ts",
     "smoke:capture-producer-provider": "tsx smokes/smoke-capture-producer-provider.ts",
     "smoke:capture-producer-e2e": "tsx smokes/smoke-capture-producer-e2e.ts",
     "smoke:session-activity-digest": "tsx smokes/smoke-session-activity-digest.ts",

@@ -191,6 +191,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
     wake,
     wakeOptions: options,
     toolResolver: context.toolResolver,
+    prepareToolResolution: context.prepareToolResolution,
     toolProfile: context.profile.toolSelection.toolProfile,
     toolCallDebugStore: context.toolCallDebugStore,
     submitEvent: async (event) => {
