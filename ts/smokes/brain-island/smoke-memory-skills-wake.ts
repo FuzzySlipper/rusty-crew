@@ -31,7 +31,7 @@ import {
   denseProfileMemoryTool,
   loadProfileContext,
   registerBrainHostRuntime,
-  renderDenMemoryContext,
+  renderExternalMemoryContext,
   renderDenseProfileMemoryContext,
   resolveDenMemoryTools,
   resolveSkillsTools,
@@ -192,7 +192,7 @@ try {
         },
         toolPolicy: {
           requestedToolsets: [
-            "memory_den_read",
+            "memory_external_read",
             "memory_profile",
             "skills_read",
           ],
@@ -239,7 +239,7 @@ Use Den memory for product/project facts and dense profile memory for stable pro
     profileId,
   });
   const assembled = buildProfileRoleAssembly(profileContext, {
-    denMemoryContext: renderDenMemoryContext({
+    externalMemoryContext: renderExternalMemoryContext({
       mode: "metadata",
       projectId: "rusty-crew",
       profileId,
@@ -323,7 +323,11 @@ Use Den memory for product/project facts and dense profile memory for stable pro
   const toolDiagnostics = buildToolRegistryDiagnostics({
     catalogId: "memory-skills-proof",
     inventoryRequest: {
-      requestedToolsets: ["memory_den_read", "memory_profile", "skills_read"],
+      requestedToolsets: [
+        "memory_external_read",
+        "memory_profile",
+        "skills_read",
+      ],
     },
   });
   const contextDiagnostics = buildToolContextDiagnosticsReport({

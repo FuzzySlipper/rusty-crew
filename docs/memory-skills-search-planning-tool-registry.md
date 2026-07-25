@@ -9,7 +9,7 @@ before profiles should select them in production.
 
 ## Registered Tools
 
-Den Memories:
+Configured external memory:
 
 - `memory_recall`
 - `memory_read`
@@ -38,8 +38,8 @@ Planning/search/counters/governance:
 
 The new entries use explicit toolsets so profiles can request narrow slices:
 
-- `memory_den_read`
-- `memory_den_write`
+- `memory_external_read`
+- `memory_external_write`
 - `memory_profile`
 - `skills_read`
 - `skills_manage`
@@ -54,8 +54,8 @@ accidentally included in read-only toolsets.
 
 ## Safety And Authority
 
-Read-only Den memory and skills tools are marked read-only. Den memory access is
-also marked `network_access`; Den memory write/propose tools are
+Read-only external memory and skills tools are marked read-only. External memory access is
+also marked `network_access`; external memory write/propose tools are
 `external_write`.
 
 Dense profile memory, todo, session search, counter reset, and curator execute
@@ -74,7 +74,7 @@ and resource denials:
 
 This lets future loaders explain disabled states such as:
 
-- Den Memories endpoint unavailable;
+- configured external memory endpoint unavailable;
 - dense profile memory persistence unavailable;
 - runtime search unavailable;
 - counter service unavailable;

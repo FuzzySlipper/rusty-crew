@@ -1,8 +1,8 @@
-# Den Memory Brain Tools
+# External Memory Brain Tools
 
 Task: Den `2899`
 
-Rusty Crew now has brain-island tool factories for the Den Memories tool family:
+Rusty Crew exposes model-callable tools for a configured external memory service:
 
 - `memory_recall`
 - `memory_read`
@@ -10,14 +10,15 @@ Rusty Crew now has brain-island tool factories for the Den Memories tool family:
 - `memory_store`
 - `memory_propose`
 
-These tools wrap the `@rusty-crew/adapter-den` Den Memories client. They do not
-make Rusty Crew the owner of Den memory data.
+The current backend adapter is Den-owned and remains visible in diagnostics and
+evidence. Model-facing prompts and descriptions deliberately call this surface
+external memory: it is not Den documents, tasks, projects, or guidance.
 
 ## Policy Modes
 
 The tool context takes an explicit `DenMemoryToolPolicy.mode`:
 
-- `off`: all Den memory tools return policy-denied results.
+- `off`: all external memory tools return policy-denied results.
 - `metadata`: read/search/recall are allowed; store/propose are denied.
 - `candidate`: store requests are routed to `propose`.
 - `manual`: store is denied with a manual-review reason; propose remains

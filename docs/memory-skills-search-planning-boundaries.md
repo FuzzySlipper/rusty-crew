@@ -11,7 +11,7 @@ model-callable tool expression, adapter clients, and profile/role assembly.
 
 | Surface | Authority | Tool execution | Durable store |
 | --- | --- | --- | --- |
-| Den Memories | Den | TypeScript adapter/tool client | Den Memories service |
+| External memory (current Den backend) | Den | TypeScript adapter/tool client | Configured external memory service |
 | Dense profile memory | Rusty Crew runtime/profile state | TypeScript tool wrapper over Rust APIs | Rust coordination persistence, if durable |
 | Skills | Profile/skill package state | TypeScript profile/tool layer | Filesystem or profile package store |
 | Session search | Rusty Crew runtime history | TypeScript tool wrapper over Rust query APIs | Rust coordination persistence/search index |
@@ -23,10 +23,11 @@ No tool in this slice should inspect SQLite files, bypass the canonical tool
 registry, mutate Den product data as if it were runtime state, or use Den
 observability as lifecycle authority.
 
-## Den Memories
+## External Memory
 
-Den Memories are Den-owned external memory. Rusty Crew may call them, but it
-does not own their source of truth.
+The configured memory service is external to Rusty Crew. The current adapter is
+Den-owned, but model-facing language stays backend-neutral and does not imply
+that memory tools read Den documents, tasks, projects, or guidance.
 
 Implementation boundary:
 
@@ -191,7 +192,7 @@ registry before it is injected into a brain. Tool diagnostics should explain:
 - selected versus denied tools;
 - read-only/resource denials;
 - external-write/governance requirements;
-- missing Den Memory client configuration;
+- missing configured external memory client configuration;
 - unavailable Rust search/counter APIs;
 - skill root write protections;
 - todo durability mode.
@@ -202,8 +203,8 @@ memory, skill, search, or planning capability.
 ## Implementation Order
 
 1. Define this boundary note.
-2. Add Den Memories client in `adapter-den`.
-3. Add read/write Den memory tools in `brain-island`.
+2. Add the current external memory client in `adapter-den`.
+3. Add read/write external memory tools in `brain-island`.
 4. Register all memory/skill/search/planning tools through the canonical
    registry.
 5. Add dense profile memory, session search, todo, and counter APIs behind Rust

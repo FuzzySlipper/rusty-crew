@@ -61,15 +61,15 @@ export {
 } from "../runtime-config-validation.js";
 export {
   buildProfileRoleAssembly,
-  renderDenMemoryContext,
+  renderExternalMemoryContext,
   renderDenseProfileMemoryContext,
   renderSessionMemoryContext,
   renderPlanningContext,
 } from "../profile-role-assembly.js";
 export type {
   BuildProfileRoleAssemblyOptions,
-  DenMemoryPromptContext,
-  DenMemoryPromptMode,
+  ExternalMemoryPromptContext,
+  ExternalMemoryPromptMode,
   DenseProfileMemoryPromptRecord,
   PlanningPromptContext,
   ProfileRoleAssemblyResult,

@@ -16,7 +16,7 @@ import type {
 import {
   buildProfileRoleAssembly,
   loadProfileContext,
-  renderDenMemoryContext,
+  renderExternalMemoryContext,
   renderDenseProfileMemoryContext,
   renderPlanningContext,
   renderSessionTodoContext,
@@ -90,7 +90,7 @@ Look for concrete regressions and cite evidence.
   });
   const assembled = buildProfileRoleAssembly(context, {
     additionalInstructions: ["Do not invent findings."],
-    denMemoryContext: renderDenMemoryContext({
+    externalMemoryContext: renderExternalMemoryContext({
       mode: "metadata",
       projectId: "rusty-crew",
       profileId: "reviewer",
@@ -132,7 +132,7 @@ Look for concrete regressions and cite evidence.
     "# Profile Soul",
     "# Profile Memory",
     "# Profile Instructions",
-    "# Den Memory",
+    "# External Memory",
     "# Dense Profile Memory",
     "# Selected Skills",
     "# Tool Inventory",
@@ -143,7 +143,8 @@ Look for concrete regressions and cite evidence.
   assert.match(instructions, /Review Rubric/);
   assert.match(instructions, /careful reviewer/);
   assert.match(instructions, /concrete evidence/);
-  assert.match(instructions, /Den-owned memory/);
+  assert.match(instructions, /configured external memory/i);
+  assert.match(instructions, /configured Den MCP planning tools/i);
   assert.match(instructions, /review-style/);
   assert.match(instructions, /Session Search/);
   assert.match(instructions, /Session Todo/);
@@ -210,7 +211,7 @@ Look for concrete regressions and cite evidence.
         sections: [
           "Profile",
           "Profile Instructions",
-          "Den Memory",
+          "External Memory",
           "Dense Profile Memory",
           "Selected Skills",
           "Tool Inventory",

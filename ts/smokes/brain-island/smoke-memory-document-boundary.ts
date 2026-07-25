@@ -166,8 +166,8 @@ const mergedRegistry = await integrateMcpToolsWithRegistry({
   metadataPolicyValidator,
   inventoryRequest: {
     requestedToolsets: [
-      "memory_den_read",
-      "memory_den_write",
+      "memory_external_read",
+      "memory_external_write",
       "memory_profile",
       "planning_session",
       "roleplay_lore_read",

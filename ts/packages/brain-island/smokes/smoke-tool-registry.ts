@@ -85,8 +85,8 @@ assert.equal(
 
 const memoryInventory = defaultToolRegistry.buildInventory({
   requestedToolsets: [
-    "memory_den_read",
-    "memory_den_write",
+    "memory_external_read",
+    "memory_external_write",
     "memory_profile",
     "skills_read",
     "planning_session",

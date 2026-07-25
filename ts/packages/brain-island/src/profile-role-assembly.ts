@@ -5,15 +5,15 @@ import type {
 } from "@rusty-crew/native-bridge";
 import type { LoadedProfileContext } from "./profile-loading.js";
 
-export type DenMemoryPromptMode =
+export type ExternalMemoryPromptMode =
   | "off"
   | "metadata"
   | "candidate"
   | "manual"
   | "permissive";
 
-export interface DenMemoryPromptContext {
-  mode: DenMemoryPromptMode;
+export interface ExternalMemoryPromptContext {
+  mode: ExternalMemoryPromptMode;
   guidance?: string;
   projectId?: string;
   profileId?: string;
@@ -43,7 +43,7 @@ export interface BuildProfileRoleAssemblyOptions {
   additionalInstructions?: readonly string[];
   includeToolInventory?: boolean;
   includeSkillBodies?: boolean;
-  denMemoryContext?: string;
+  externalMemoryContext?: string;
   denseProfileMemoryContext?: string;
   sessionMemoryContext?: string;
   planningContext?: string;
@@ -69,7 +69,7 @@ export function buildProfileRoleAssembly(
     markdownSection("Profile Soul", context.profile.prompt?.soulMarkdown),
     markdownSection("Profile Memory", context.profile.prompt?.memoryMarkdown),
     instructionSection(context.profile.prompt?.instructions ?? []),
-    options.denMemoryContext,
+    options.externalMemoryContext,
     options.denseProfileMemoryContext,
     options.sessionMemoryContext,
     skillSection(context, options.includeSkillBodies ?? true),
@@ -95,15 +95,15 @@ export function buildProfileRoleAssembly(
   };
 }
 
-export function renderDenMemoryContext(
-  context: DenMemoryPromptContext,
+export function renderExternalMemoryContext(
+  context: ExternalMemoryPromptContext,
 ): string | undefined {
   if (context.mode === "off") {
     return undefined;
   }
   return [
-    "# Den Memory",
-    "Den Memories are external Den-owned memory. Use memory tools for source records; do not treat this prompt section as authoritative project state.",
+    "# External Memory",
+    "Configured external memory provides remembered reference context through memory_* tools. It is not Den documents, tasks, projects, or guidance; use the configured Den MCP planning tools for those surfaces.",
     `Mode: ${context.mode}`,
     context.projectId ? `Project: ${context.projectId}` : undefined,
     context.profileId ? `Profile: ${context.profileId}` : undefined,

@@ -117,7 +117,7 @@ export function denMemoryRecallTool(
     name: "memory_recall",
     label: "Recall memory",
     description:
-      "Recall relevant memory summaries for the current profile or work context. This is not a Den document, task, project, or guidance lookup tool.",
+      "Recall relevant summaries from the configured external memory service for the current profile or work context. This is not a Den document, task, project, or guidance lookup tool; use Den MCP planning tools for those surfaces.",
     parameters: recallParameters,
     execute: async (_toolCallId, params: RecallParams) =>
       withMemoryClient(context, "recall", async (client) => {
@@ -139,7 +139,7 @@ export function denMemoryReadTool(
     name: "memory_read",
     label: "Read memory",
     description:
-      "Read a specific memory entry by stable reference. This is not a Den document, task, project, or guidance lookup tool.",
+      "Read a specific entry from the configured external memory service by stable reference. This is not a Den document, task, project, or guidance lookup tool; use Den MCP planning tools for those surfaces.",
     parameters: readParameters,
     execute: async (_toolCallId, params: ReadParams) => {
       if (!params.id && !params.slug) {
@@ -164,7 +164,7 @@ export function denMemorySearchTool(
     name: "memory_search",
     label: "Search memory",
     description:
-      "Search memory entries through the configured memory service. This is not a Den document, task, project, or guidance lookup tool.",
+      "Search entries through the configured external memory service. This is not a Den document, task, project, or guidance lookup tool; use Den MCP planning tools for those surfaces.",
     parameters: searchParameters,
     execute: async (_toolCallId, params: SearchParams) =>
       withMemoryClient(context, "search", async (client) => {
@@ -186,7 +186,7 @@ export function denMemoryStoreTool(
     name: "memory_store",
     label: "Store memory",
     description:
-      "Store a new memory entry or route it to proposal depending on policy. This is not a Den document, task, project, or guidance update tool.",
+      "Store an entry through the configured external memory service or route it to proposal according to policy. This is not a Den document, task, project, or guidance update tool; use Den MCP planning tools for those surfaces.",
     parameters: storeParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: StoreParams) =>
@@ -238,7 +238,7 @@ export function denMemoryProposeTool(
     name: "memory_propose",
     label: "Propose memory",
     description:
-      "Propose a memory change for review without direct storage. This is not a Den document, task, project, or guidance update tool.",
+      "Propose a change to the configured external memory service for review without direct storage. This is not a Den document, task, project, or guidance update tool; use Den MCP planning tools for those surfaces.",
     parameters: proposeParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: ProposeParams) =>

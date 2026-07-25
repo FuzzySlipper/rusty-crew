@@ -114,7 +114,9 @@ Examples:
 - `review_readonly`: read-only local and web tools.
 - `delegation_basic`: action-producing helpers that emit structured
   `BrainAction::RequestDelegation`, not direct TS spawning.
-- `memory_den`: Den memory tools backed by the Den adapter.
+- `memory_external_read` / `memory_external_write`: configured external memory
+  tools. Backend ownership stays in diagnostics rather than the model-facing
+  toolset name.
 - `mcp_project`: tools imported from project MCP servers.
 
 Profiles request toolsets or explicit tool names. Session constraints may

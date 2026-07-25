@@ -10,7 +10,7 @@ Memory, skills, and planning tools are model-callable utilities, but they also
 need a coherent prompt surface. `buildProfileRoleAssembly` now accepts selected
 context sections for:
 
-- Den Memories guidance;
+- configured external memory guidance;
 - dense profile memory records;
 - planning guidance, including session-local todos, session search, and runtime
   counter guidance;
@@ -18,7 +18,8 @@ context sections for:
 
 The assembly function remains synchronous. Callers fetch Den or runtime memory
 through the relevant adapter/native bridge first, select what should be prompt
-visible, and pass the rendered context into assembly.
+visible, and pass the rendered context into assembly. Den document, task,
+project, and guidance lookup remains a separate MCP planning surface.
 
 ## Section Order
 
@@ -26,7 +27,7 @@ The deterministic role instruction order is:
 
 1. Profile
 2. Profile Instructions
-3. Den Memory
+3. External Memory
 4. Dense Profile Memory
 5. Selected Skills
 6. Tool Inventory
@@ -41,7 +42,7 @@ context, not project truth.
 
 `profile-role-assembly` exports:
 
-- `renderDenMemoryContext`
+- `renderExternalMemoryContext`
 - `renderDenseProfileMemoryContext`
 - `renderPlanningContext`
 
