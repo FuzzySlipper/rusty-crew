@@ -4,11 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { SessionId } from "@rusty-crew/contracts";
+import { Type } from "typebox";
+import type { BrainTool } from "../src/brain-tool.js";
 import type {
   AttachmentRecord,
   ChatEvent,
 } from "../src/rusty-view-chat-api.js";
-import { brainToolResultToHostOutput } from "../src/tool-execution-host.js";
+import { rustyViewToolCallDebugDetail } from "../src/service-rusty-view-chat-operations.js";
+import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
+import {
+  brainToolResultToHostOutput,
+  executePreparedBrainHostToolRequest,
+  prepareBrainHostToolRequest,
+} from "../src/tool-execution-host.js";
 import {
   ToolMediaAttachmentError,
   ToolMediaAttachmentStore,
@@ -228,4 +236,89 @@ test("MCP image content remains typed for the durable media sink", () => {
   assert.deepEqual(result.content, [
     { type: "image", data: image, mimeType: "image/png" },
   ]);
+});
+
+test("production tool debug projection redacts large image bytes and retains attachment references", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-tool-media-debug-"));
+  const testHarness = harness(root);
+  const marker = "RAW_IMAGE_BODY_MUST_NOT_LEAK";
+  const imageData = Buffer.concat([
+    png(2, 3),
+    Buffer.from(marker.repeat(2_000)),
+  ]).toString("base64");
+  const debugStore = new MemoryToolCallDebugStore({
+    maxJsonChars: 1_000,
+    now: () => "2026-07-25T12:00:00.000Z",
+  });
+  const result = {
+    content: [
+      {
+        type: "image" as const,
+        data: imageData,
+        mimeType: "image/png",
+      },
+    ],
+    details: { status: "completed", padding: "x".repeat(3_000) },
+  };
+  const tool: BrainTool = {
+    name: "image_debug_probe",
+    label: "Image debug probe",
+    description: "Returns a large typed image for debug projection testing.",
+    parameters: Type.Object({}),
+    async execute(_callId, _params, _signal, onUpdate) {
+      onUpdate?.({
+        content: result.content,
+        details: { status: "running", padding: "x".repeat(3_000) },
+      });
+      return result;
+    },
+  };
+  const wake = {
+    wakeId: "wake-debug",
+    sessionId: "session-debug",
+  } as never;
+  const prepared = prepareBrainHostToolRequest(
+    wake,
+    {
+      wakeId: "wake-debug",
+      callId: "call-debug",
+      name: tool.name,
+      argumentsJson: "{}",
+    },
+    new Map([[tool.name, tool]]),
+    debugStore,
+  );
+
+  const execution = await executePreparedBrainHostToolRequest(
+    wake,
+    prepared,
+    debugStore,
+    testHarness.createStore(),
+  );
+  assert.equal(execution.failure, undefined);
+  assert.equal(execution.output.includes(imageData), false);
+
+  const attachment = [...testHarness.attachments.values()][0];
+  assert.ok(attachment);
+  const detail = await rustyViewToolCallDebugDetail(
+    { toolCallDebugStore: debugStore } as never,
+    {
+      session: { sessionId: "session-debug" } as never,
+      debugDetailId: prepared.debugDetailId!,
+      requestId: "request-debug",
+    },
+  );
+  assert.ok(detail);
+  const serialized = JSON.stringify(detail);
+  assert.equal(serialized.includes(imageData.slice(0, 160)), false);
+  assert.equal(serialized.includes(marker), false);
+  assert.match(serialized, /\[redacted media bytes\]/);
+  assert.match(serialized, new RegExp(attachment.attachment_id));
+  const debugValues = detail as unknown as {
+    partial_updates: Array<{ partial_result: { redacted: boolean } }>;
+    final_result?: { redacted: boolean; truncated: boolean };
+  };
+  assert.equal(debugValues.partial_updates[0]?.partial_result.redacted, true);
+  assert.equal(debugValues.final_result?.redacted, true);
+  assert.equal(debugValues.final_result?.truncated, true);
 });

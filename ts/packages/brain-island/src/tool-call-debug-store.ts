@@ -358,6 +358,18 @@ function redactValue(value: unknown): { value: unknown; redacted: boolean } {
     return { value: mapped, redacted };
   }
   if (value && typeof value === "object") {
+    if (isTypedImageValue(value)) {
+      const output: Record<string, unknown> = {};
+      for (const [key, nested] of Object.entries(value)) {
+        if (key === "data") {
+          output[key] = "[redacted media bytes]";
+          continue;
+        }
+        const next = redactValue(nested);
+        output[key] = next.value;
+      }
+      return { value: output, redacted: true };
+    }
     let redacted = false;
     const output: Record<string, unknown> = {};
     for (const [key, nested] of Object.entries(value)) {
@@ -373,6 +385,13 @@ function redactValue(value: unknown): { value: unknown; redacted: boolean } {
     return { value: output, redacted };
   }
   return { value, redacted: false };
+}
+
+function isTypedImageValue(
+  value: object,
+): value is Record<string, unknown> & { type: "image"; data: string } {
+  const record = value as Record<string, unknown>;
+  return record.type === "image" && typeof record.data === "string";
 }
 
 function safeJson(value: unknown): string {

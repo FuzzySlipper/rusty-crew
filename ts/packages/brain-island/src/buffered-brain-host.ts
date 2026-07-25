@@ -209,6 +209,7 @@ export async function runBufferedBrainHost(options: {
               projectToolUpdate(options, request, partialResult, events),
             );
           },
+          options.wakeOptions?.signal,
         );
         await toolUpdateProjection;
         await options.bridge.submitBrainHostResult({

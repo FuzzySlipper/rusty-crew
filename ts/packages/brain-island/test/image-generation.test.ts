@@ -94,16 +94,26 @@ function rawConfig(endpointUrl: string) {
 }
 
 async function fakeComfy(
-  mode: "success" | "queue-error" | "node-error" | "pending" = "success",
+  mode:
+    | "success"
+    | "queue-error"
+    | "node-error"
+    | "pending"
+    | "blocked-poll" = "success",
 ): Promise<{
   endpointUrl: string;
   close(): Promise<void>;
   submitted(): Record<string, unknown> | undefined;
   cancelled(): boolean;
+  historyStarted: Promise<void>;
 }> {
   let submittedWorkflow: Record<string, unknown> | undefined;
   let historyReads = 0;
   let wasCancelled = false;
+  let resolveHistoryStarted!: () => void;
+  const historyStarted = new Promise<void>((resolve) => {
+    resolveHistoryStarted = resolve;
+  });
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://fake-comfy");
     if (request.method === "POST" && url.pathname === "/prompt") {
@@ -123,6 +133,11 @@ async function fakeComfy(
     }
     if (request.method === "GET" && url.pathname === "/history/job-1") {
       historyReads += 1;
+      resolveHistoryStarted();
+      if (mode === "blocked-poll") {
+        request.once("close", () => response.destroy());
+        return;
+      }
       if (mode === "node-error") {
         return json(response, {
           "job-1": {
@@ -174,6 +189,7 @@ async function fakeComfy(
     close: () => closeServer(server),
     submitted: () => submittedWorkflow,
     cancelled: () => wasCancelled,
+    historyStarted,
   };
 }
 
@@ -661,6 +677,155 @@ test("buffered brain host projects image job status into durable provider events
     ),
     ["queued", "running", "completed"],
   );
+});
+
+test("buffered wake cancellation aborts an active Comfy poll and deletes the queued job", async () => {
+  const fake = await fakeComfy("blocked-poll");
+  try {
+    const config = imageGenerationConfigFromUnknown(
+      rawConfig(fake.endpointUrl),
+    );
+    const runtime = createImageGenerationRuntime(config, {
+      env: { COMFY_TOKEN: "test-token" },
+    });
+    let drainCount = 0;
+    let nativeCancelCount = 0;
+    let attachmentPersistCount = 0;
+    const submitted: Array<Record<string, unknown>> = [];
+    const bridge = {
+      startBrainRun: async () => ({
+        moduleId: "openai-responses" as const,
+        wakeId: "cancel-image-wake",
+      }),
+      drainBrainRun: async () => {
+        drainCount += 1;
+        return drainCount === 1
+          ? {
+              moduleId: "openai-responses" as const,
+              wakeId: "cancel-image-wake",
+              items: [],
+              toolRequests: [
+                {
+                  wakeId: "cancel-image-wake",
+                  callId: "cancel-image-call",
+                  name: "image_generate",
+                  argumentsJson: JSON.stringify({
+                    preset: "portrait",
+                    prompt: "cancel this active poll",
+                  }),
+                },
+              ],
+              terminal: false,
+            }
+          : {
+              moduleId: "openai-responses" as const,
+              wakeId: "cancel-image-wake",
+              items: [],
+              toolRequests: [],
+              terminal: true,
+            };
+      },
+      submitBrainHostResult: async (input: Record<string, unknown>) => {
+        submitted.push(input);
+        return {
+          moduleId: "openai-responses",
+          wakeId: "cancel-image-wake",
+          callId: "cancel-image-call",
+        };
+      },
+      cancelBrainRun: async () => {
+        nativeCancelCount += 1;
+        return {
+          moduleId: "openai-responses",
+          wakeId: "cancel-image-wake",
+        };
+      },
+    } as unknown as NativeBridgeModule;
+    const events: BrainEventEnvelope[] = [];
+    const sessionId = "cancel-image-session" as SessionId;
+    const wake = {
+      wakeId: "cancel-image-wake",
+      sessionId,
+      systemPrompt: "system",
+      roleAssembly: { instructions: "instructions" },
+      state: {
+        session: {
+          handle: 2 as SessionHandle,
+          sessionId,
+          agentId: "cancel-image-agent" as AgentId,
+          profileId: "cancel-image-profile" as ProfileId,
+          kind: "full" as const,
+          resourceLimits: {},
+          toolProfile: {
+            tools: [{ name: "image_generate", description: "Generate" }],
+          },
+          status: "idle" as const,
+          brainTurnCount: 0,
+          createdAt: "2026-07-25T00:00:00Z",
+          lastActiveAt: "2026-07-25T00:00:00Z",
+        },
+        pendingMessages: [],
+        recentEvents: [],
+        childCompletions: [],
+        fanOutGroups: [],
+        deltaPolicy: {
+          mode: "frozen_snapshot_next_wake" as const,
+          queueOwner: "body" as const,
+          queuedMessageTtlMs: 5_000,
+          maxQueuedMessages: 32,
+        },
+      },
+    };
+    const controller = new AbortController();
+    const run = runBufferedBrainHost({
+      bridge,
+      moduleLabel: "OpenAI Responses",
+      run: {
+        moduleId: "openai-responses",
+        providerInput: {
+          wakeId: wake.wakeId,
+          sessionId,
+          bodyState: wake.state,
+          config: { model: "test" },
+          client: { mode: "fake" },
+        },
+      },
+      wake,
+      wakeOptions: { signal: controller.signal },
+      toolProfile: wake.state.session.toolProfile,
+      toolResolver: () => [imageGenerationTool(runtime)],
+      toolMediaSink: {
+        async persistImages() {
+          attachmentPersistCount += 1;
+          return [];
+        },
+      },
+      submitEvent: async (event) => {
+        events.push(event);
+      },
+    });
+
+    await fake.historyStarted;
+    controller.abort();
+    await run;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    assert.equal(fake.cancelled(), true);
+    assert.equal(nativeCancelCount, 1);
+    assert.equal(attachmentPersistCount, 0);
+    assert.equal(submitted.length, 1);
+    assert.equal(submitted[0]?.status, "failed");
+    assert.equal(submitted[0]?.reasonCode, "image_generation_cancelled");
+    assert.equal(JSON.stringify(submitted).includes("attachment"), false);
+    const statuses = events.map(
+      (event) =>
+        JSON.parse((event.event as { metadataJson: string }).metadataJson)
+          .status,
+    );
+    assert.deepEqual(statuses, ["queued", "cancelled"]);
+  } finally {
+    await fake.close();
+  }
 });
 
 function json(

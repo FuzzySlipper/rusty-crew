@@ -418,6 +418,21 @@ export class ComfyUiImageGenerationProvider implements ImageGenerationProvider {
       }
     } catch (error) {
       if (
+        options.signal?.aborted &&
+        !(
+          error instanceof ImageGenerationError &&
+          error.reasonCode === "image_generation_cancelled"
+        )
+      ) {
+        await this.cancel(jobId).catch(() => undefined);
+        report("cancelled", `Image generation ${jobId} cancelled.`);
+        throw new ImageGenerationError(
+          "image_generation_cancelled",
+          `image generation ${jobId} was cancelled`,
+          false,
+        );
+      }
+      if (
         !(error instanceof ImageGenerationError) ||
         error.reasonCode !== "image_generation_cancelled"
       ) {

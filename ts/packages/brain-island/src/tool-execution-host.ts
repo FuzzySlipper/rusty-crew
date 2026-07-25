@@ -134,6 +134,7 @@ export async function executePreparedBrainHostToolRequest(
   toolCallDebugStore: ToolCallDebugStore | undefined,
   toolMediaSink?: BrainToolMediaSink,
   onUpdate?: (partialResult: BrainToolResult) => void,
+  signal?: AbortSignal,
 ): Promise<BrainHostToolExecutionResult> {
   const failDebugRecord = (error: unknown) => {
     if (prepared.debugDetailId) {
@@ -172,20 +173,32 @@ export async function executePreparedBrainHostToolRequest(
   }
   try {
     const controller = new AbortController();
+    const executionSignal = signal
+      ? AbortSignal.any([controller.signal, signal])
+      : controller.signal;
+    const recordAndForwardUpdate = (partialResult: BrainToolResult) => {
+      if (prepared.debugDetailId) {
+        toolCallDebugStore?.recordUpdate({
+          debugDetailId: prepared.debugDetailId,
+          partialResult: brainToolResultToDebugValue(partialResult),
+        });
+      }
+      onUpdate?.(partialResult);
+    };
     const result = prepared.tool.executeWithContext
       ? await prepared.tool.executeWithContext(prepared.params as never, {
           wake,
           wakeId: wake.wakeId,
           sessionId: wake.sessionId,
           callId: prepared.request.callId,
-          signal: controller.signal,
-          onUpdate,
+          signal: executionSignal,
+          onUpdate: recordAndForwardUpdate,
         })
       : await prepared.tool.execute(
           prepared.request.callId,
           prepared.params as never,
-          controller.signal,
-          onUpdate,
+          executionSignal,
+          recordAndForwardUpdate,
         );
     const failure = brainHostToolFailureFromResult(
       prepared.request.name,
@@ -225,7 +238,7 @@ export async function executePreparedBrainHostToolRequest(
     if (prepared.debugDetailId) {
       toolCallDebugStore?.finish({
         debugDetailId: prepared.debugDetailId,
-        finalResult: result,
+        finalResult: brainToolResultToDebugValue(result, mediaReferences),
       });
       if (failure) {
         toolCallDebugStore?.fail({
@@ -260,6 +273,38 @@ export async function executePreparedBrainHostToolRequest(
       },
     };
   }
+}
+
+export function brainToolResultToDebugValue(
+  result: BrainToolResult,
+  mediaReferences: readonly BrainToolMediaReference[] = [],
+): BrainToolResult {
+  let imageIndex = 0;
+  return {
+    ...result,
+    content: result.content.map((item) => {
+      if (item.type === "text") return item;
+      const reference = mediaReferences[imageIndex++];
+      return {
+        type: "image" as const,
+        mimeType: item.mimeType,
+        data: "[redacted media bytes]",
+        ...(reference === undefined
+          ? {}
+          : {
+              attachment: {
+                attachment_id: reference.attachmentId,
+                filename: reference.filename,
+                mime_type: reference.mimeType,
+                byte_size: reference.byteSize,
+                width: reference.width,
+                height: reference.height,
+                download_url: reference.downloadUrl,
+              },
+            }),
+      };
+    }),
+  };
 }
 
 function brainHostToolFailureFromResult(
