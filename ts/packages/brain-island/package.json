@@ -32,6 +32,8 @@
     "smoke:mid-turn": "tsx smokes/smoke-mid-turn-delta.ts",
     "smoke:delegated-slice": "tsx ../../smokes/brain-island/smoke-delegated-slice.ts",
     "smoke:tool-registry": "tsx smokes/smoke-tool-registry.ts",
+    "smoke:image-generation": "node --import tsx --test test/image-generation.test.ts test/tool-media-attachments.test.ts",
+    "smoke:image-generation-live": "tsx smokes/image-generation-live.ts",
     "smoke:tool-registry-parity": "tsx smokes/tool-registry-parity.ts",
     "smoke:tool-registry-diagnostics": "tsx smokes/tool-registry-diagnostics.ts",
     "smoke:local-tool-profile-policy": "tsx smokes/local-tool-profile-policy.ts",

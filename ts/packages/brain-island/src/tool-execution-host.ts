@@ -133,6 +133,7 @@ export async function executePreparedBrainHostToolRequest(
   prepared: PreparedBrainHostToolRequest,
   toolCallDebugStore: ToolCallDebugStore | undefined,
   toolMediaSink?: BrainToolMediaSink,
+  onUpdate?: (partialResult: BrainToolResult) => void,
 ): Promise<BrainHostToolExecutionResult> {
   const failDebugRecord = (error: unknown) => {
     if (prepared.debugDetailId) {
@@ -178,11 +179,13 @@ export async function executePreparedBrainHostToolRequest(
           sessionId: wake.sessionId,
           callId: prepared.request.callId,
           signal: controller.signal,
+          onUpdate,
         })
       : await prepared.tool.execute(
           prepared.request.callId,
           prepared.params as never,
           controller.signal,
+          onUpdate,
         );
     const failure = brainHostToolFailureFromResult(
       prepared.request.name,

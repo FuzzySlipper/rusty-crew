@@ -8,6 +8,7 @@ export type ToolCategory =
   | "patch"
   | "web"
   | "browser"
+  | "media"
   | "memory"
   | "skills"
   | "mcp"
@@ -565,6 +566,11 @@ export const defaultToolExecutableBindings = [
     name: "curator_execute",
     implementationModule: "./planning-tools.js#curatorExecuteTool",
     inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "image_generate",
+    implementationModule: "./image-generation.js#imageGenerationTool",
+    inventoryTest: "smoke:image-generation",
   },
 ] satisfies readonly ToolExecutableBinding[];
 

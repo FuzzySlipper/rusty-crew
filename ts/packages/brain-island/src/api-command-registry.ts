@@ -32,6 +32,7 @@ export type ApiCapabilityScope =
   | "prompt"
   | "governance"
   | "maintenance"
+  | "media"
   | "memory"
   | "scheduler"
   | "search"
@@ -1597,6 +1598,26 @@ export const API_CAPABILITIES = [
     mutation: "write",
     stability: "experimental",
     tags: ["tool", "profile", "config"],
+    public: true,
+  },
+  readCapability(
+    "admin.image_generation.presets",
+    "GET",
+    "/v1/admin/image-generation/presets",
+    "List approved image generation presets without provider secrets or workflow graphs.",
+    "admin",
+    ["tool", "media", "config"],
+  ),
+  {
+    id: "admin.image_generation.generate",
+    method: "POST",
+    path_template: "/v1/admin/image-generation/generate",
+    description:
+      "Generate an image for a session through an approved server-side preset.",
+    auth: "admin",
+    mutation: "write",
+    stability: "experimental",
+    tags: ["tool", "media"],
     public: true,
   },
   readCapability(

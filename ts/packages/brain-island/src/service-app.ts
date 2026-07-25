@@ -273,6 +273,8 @@ import {
 } from "./service-route-table.js";
 import { ServiceExternalRuntimeController } from "./service-external-runtime.js";
 import { ToolMediaAttachmentStore } from "./tool-media-attachments.js";
+import { handleServiceImageGenerationRequest } from "./service-image-generation-routes.js";
+import { createImageGenerationRuntime } from "./image-generation.js";
 import { handleExternalRuntimeRequest } from "./service-external-runtime-routes.js";
 import { handleCoordinationOperatorRequest } from "./service-coordination-operator-routes.js";
 import {
@@ -1361,6 +1363,29 @@ async function handleHttpRequest(
       requestId,
       headers,
     });
+  }
+
+  if (route?.id === "admin.image_generation") {
+    const method = (request.method ?? "GET").toUpperCase();
+    return handleServiceImageGenerationRequest(
+      {
+        method,
+        url,
+        body: method === "POST" ? await readJsonBody(request) : undefined,
+        requestId: requestId(request),
+      },
+      {
+        runtime: () =>
+          createImageGenerationRuntime(
+            state.runtimeConfig.imageGeneration ?? {
+              providers: [],
+              presets: [],
+            },
+          ),
+        listSessions: () => state.bridge.listSessions(),
+        toolMediaAttachments: state.toolMediaAttachments,
+      },
+    );
   }
 
   if (route?.id === "external_runtime") {

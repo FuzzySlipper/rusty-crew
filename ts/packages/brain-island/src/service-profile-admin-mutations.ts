@@ -1256,6 +1256,9 @@ function runtimeConfigDraftFromCommand(
           runtimeConfigMcpServerDraft(server),
         )
       : context.runtimeConfig.mcpServers,
+    imageGeneration: Object.hasOwn(draft, "imageGeneration")
+      ? (draft.imageGeneration as RustyCrewRuntimeConfig["imageGeneration"])
+      : context.runtimeConfig.imageGeneration,
     mcpBindings: arrayValue(
       draft.mcpBindings,
     ) as RustyCrewRuntimeConfig["mcpBindings"],
@@ -1277,6 +1280,9 @@ function runtimeConfigDraftFromFileValue(
     wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
       ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
       : context.runtimeConfig.wakeTimeout,
+    imageGeneration: Object.hasOwn(draft, "imageGeneration")
+      ? (draft.imageGeneration as RustyCrewRuntimeConfig["imageGeneration"])
+      : context.runtimeConfig.imageGeneration,
     brains: arrayValue(draft.brains).map((brain, index) =>
       runtimeConfigBrainDraft(brain, index),
     ),

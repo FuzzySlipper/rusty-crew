@@ -663,6 +663,16 @@
       "safety": ["coordination_action", "external_write"],
       "output_shape": "governance.curator_execute_result.v1",
       "version": "0.1.0"
+    },
+    {
+      "name": "image_generate",
+      "description": "Generate images through an approved server-side provider and versioned workflow preset.",
+      "category": "media",
+      "toolsets": ["image_generation"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["network_access", "external_write"],
+      "output_shape": "media.image_generation_result.v1",
+      "version": "0.1.0"
     }
   ]
 }

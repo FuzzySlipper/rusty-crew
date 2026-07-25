@@ -31,8 +31,10 @@ import {
   executePreparedBrainHostToolRequest,
   prepareBrainHostToolRequest,
   withBrainHostToolDebugReference,
+  type PreparedBrainHostToolRequest,
 } from "./tool-execution-host.js";
 import type { BrainToolMediaSink } from "./brain-tool-media.js";
+import type { BrainToolResult } from "./brain-tool.js";
 
 export type BufferedBrainProviderRun =
   | {
@@ -150,6 +152,7 @@ export async function runBufferedBrainHost(options: {
     | { reasonCode: string; source: string; message: string }
     | undefined;
   const toolDebugReferences = createBrainHostToolDebugReferences();
+  let toolUpdateProjection = Promise.resolve();
   try {
     for (;;) {
       if (options.wakeOptions?.signal?.aborted) {
@@ -201,7 +204,13 @@ export async function runBufferedBrainHost(options: {
           request,
           options.toolCallDebugStore,
           options.toolMediaSink,
+          (partialResult) => {
+            toolUpdateProjection = toolUpdateProjection.then(() =>
+              projectToolUpdate(options, request, partialResult, events),
+            );
+          },
         );
+        await toolUpdateProjection;
         await options.bridge.submitBrainHostResult({
           moduleId: options.run.moduleId,
           wakeId: started.wakeId,
@@ -288,6 +297,62 @@ export async function runBufferedBrainHost(options: {
   } finally {
     options.wakeOptions?.signal?.removeEventListener("abort", abortListener);
   }
+}
+
+async function projectToolUpdate(
+  options: Parameters<typeof runBufferedBrainHost>[0],
+  request: PreparedBrainHostToolRequest,
+  partialResult: BrainToolResult,
+  events: BrainEventEnvelope[],
+): Promise<void> {
+  const details = recordValue(partialResult.details);
+  const status = stringValue(details.status) ?? "update";
+  const message =
+    partialResult.content
+      .filter(
+        (
+          item,
+        ): item is Extract<
+          (typeof partialResult.content)[number],
+          { type: "text" }
+        > => item.type === "text",
+      )
+      .map((item) => item.text)
+      .join("\n")
+      .trim()
+      .slice(0, 2_000) || `Tool ${request.request.name} reported ${status}.`;
+  const event: BrainEventEnvelope = {
+    wakeId: options.wake.wakeId,
+    sessionId: options.wake.sessionId,
+    event: {
+      type: "provider_status",
+      level: status === "failed" ? "error" : "info",
+      message,
+      metadataJson: JSON.stringify({
+        source: "tool_status",
+        tool_name: request.request.name,
+        tool_call_id: request.request.callId,
+        status,
+        provider_id: stringValue(details.providerId),
+        provider_job_id: stringValue(details.jobId),
+      }),
+    },
+  };
+  if (options.submitEvent) {
+    await options.submitEvent(event);
+  } else {
+    events.push(event);
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function createBrainActionCollector(): BrainActionCollector {

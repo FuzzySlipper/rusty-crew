@@ -1485,6 +1485,28 @@
         "public": true
       },
       {
+        "id": "admin.image_generation.presets",
+        "method": "GET",
+        "path_template": "/v1/admin/image-generation/presets",
+        "description": "List approved image generation presets without provider secrets or workflow graphs.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["tool", "media", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.image_generation.generate",
+        "method": "POST",
+        "path_template": "/v1/admin/image-generation/generate",
+        "description": "Generate an image for a session through an approved server-side preset.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["tool", "media"],
+        "public": true
+      },
+      {
         "id": "admin.healthz",
         "method": "GET",
         "path_template": "/v1/admin/healthz",
@@ -3403,6 +3425,20 @@
         "method": "DELETE",
         "path_template": "/v1/admin/local-tool-profiles/{profile_id}",
         "route_id": "admin.local_tool_profiles",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.image_generation.presets",
+        "method": "GET",
+        "path_template": "/v1/admin/image-generation/presets",
+        "route_id": "admin.image_generation",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.image_generation.generate",
+        "method": "POST",
+        "path_template": "/v1/admin/image-generation/generate",
+        "route_id": "admin.image_generation",
         "auth_phase": "after_auth"
       },
       {

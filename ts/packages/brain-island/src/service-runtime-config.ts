@@ -123,6 +123,12 @@ import {
   type BrainToolResolver,
 } from "./tool-session-selection.js";
 import { createWebToolResolver } from "./web-tools.js";
+import {
+  createImageGenerationRuntime,
+  createImageGenerationToolResolver,
+  imageGenerationConfigFromUnknown,
+  type ImageGenerationConfig,
+} from "./image-generation.js";
 import type { RuntimeBrainModuleDiagnostics } from "./runtime-diagnostics.js";
 import { type ExternalMemoryReadiness } from "./external-memory-readiness.js";
 import {
@@ -182,6 +188,7 @@ export interface ServiceRuntimeEnvelope {
   denObservation?: RustyCrewDenObservationConfig;
   wakeTimeout?: RustyCrewWakeTimeoutConfig;
   mcpServers?: RustyCrewMcpServerConfig[];
+  imageGeneration?: ImageGenerationConfig;
 }
 
 export interface RustyCrewRuntimeGraphDraft {
@@ -421,6 +428,7 @@ interface RuntimeGraphAuthoredSource {
   denObservation: RustyCrewDenObservationConfig;
   wakeTimeout: RustyCrewWakeTimeoutConfig;
   mcpServers: RustyCrewMcpServerConfig[];
+  imageGeneration: ImageGenerationConfig;
 }
 
 function runtimeGraphAuthoredSource(
@@ -455,6 +463,7 @@ function runtimeGraphAuthoredSource(
       parsed.mcpServers,
       serviceConfig.mcp.servers,
     ).map((item, index) => configuredMcpServer(item, index)),
+    imageGeneration: imageGenerationConfigFromUnknown(parsed.imageGeneration),
   };
 }
 
@@ -688,6 +697,7 @@ function runtimeConfigFromGraphPlan(
           }
         : { mode: "disabled" },
     mcpServers: source.mcpServers,
+    imageGeneration: source.imageGeneration,
     brains: effective.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
       profileId: brain.profileId as ProfileId,
@@ -776,6 +786,7 @@ function runtimeGraphSourceFromEffective(
     denObservation: runtimeConfig.denObservation,
     wakeTimeout: runtimeConfig.wakeTimeout,
     mcpServers: runtimeConfig.mcpServers,
+    imageGeneration: runtimeConfig.imageGeneration,
     brains: runtimeConfig.brains,
     sessions: runtimeConfig.sessions,
     scheduledJobs: runtimeConfig.scheduledJobs,
@@ -1581,6 +1592,14 @@ function createServiceToolResolver(
       maxScreenshotBytes:
         options.browserResources.resourcePolicy.browser.maxScreenshotBytes,
     }),
+    createImageGenerationToolResolver(
+      createImageGenerationRuntime(
+        options.runtimeConfig?.imageGeneration ?? {
+          providers: [],
+          presets: [],
+        },
+      ),
+    ),
     createMemoryToolResolver(profile, options),
     createRoleplayMechanicToolResolver({
       bridge: options.bridge,

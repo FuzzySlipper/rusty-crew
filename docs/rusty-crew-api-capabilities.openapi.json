@@ -16,6 +16,7 @@
     { "name": "governance" },
     { "name": "maintenance" },
     { "name": "mcp" },
+    { "name": "media" },
     { "name": "memory" },
     { "name": "profile" },
     { "name": "prompt" },
@@ -1759,6 +1760,42 @@
         },
         "x-rusty-crew-capability-id": "admin.healthz",
         "x-rusty-crew-auth": "none",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/image-generation/generate": {
+      "post": {
+        "operationId": "adminImageGenerationGenerate",
+        "summary": "Generate an image for a session through an approved server-side preset.",
+        "tags": ["tool", "media"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.image_generation.generate",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/image-generation/presets": {
+      "get": {
+        "operationId": "adminImageGenerationPresets",
+        "summary": "List approved image generation presets without provider secrets or workflow graphs.",
+        "tags": ["tool", "media", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.image_generation.presets",
+        "x-rusty-crew-auth": "admin",
         "x-rusty-crew-mutation": "read",
         "x-rusty-crew-stability": "stable",
         "x-rusty-crew-contract-detail": "capability"
@@ -5178,6 +5215,7 @@
                 "governance",
                 "maintenance",
                 "mcp",
+                "media",
                 "memory",
                 "profile",
                 "prompt",
@@ -5343,7 +5381,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 214,
+    "capability_count": 216,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

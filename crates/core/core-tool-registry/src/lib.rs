@@ -38,6 +38,7 @@ pub enum ToolCategory {
     Patch,
     Web,
     Browser,
+    Media,
     Memory,
     Storage,
     Skills,
@@ -1802,7 +1803,7 @@ mod tests {
 
         assert_eq!(artifact.schema_version, 1);
         assert_eq!(artifact.catalog_id, "default-local-tools");
-        assert_eq!(artifact.tools.len(), 66);
+        assert_eq!(artifact.tools.len(), 67);
 
         let result = validate_tool_metadata_list(&artifact.tools);
 

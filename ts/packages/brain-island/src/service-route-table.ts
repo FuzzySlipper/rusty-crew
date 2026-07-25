@@ -3,6 +3,7 @@ import { isProfileRegistryWriteRoute } from "./service-profile-registry-routes.j
 import { isRoleplayBrowserRoute } from "./service-roleplay-routes.js";
 import { isExternalRuntimeRoute } from "./service-external-runtime-routes.js";
 import { isCoordinationOperatorRoute } from "./service-coordination-operator-routes.js";
+import { isServiceImageGenerationRoute } from "./service-image-generation-routes.js";
 
 export type ServiceApiRouteId =
   | "admin.healthz"
@@ -19,6 +20,7 @@ export type ServiceApiRouteId =
   | "admin.brain_catalog"
   | "admin.context_strategies"
   | "admin.local_tool_profiles"
+  | "admin.image_generation"
   | "roleplay"
   | "admin.storage"
   | "admin.model_providers"
@@ -134,6 +136,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     (path) =>
       path === "/v1/admin/local-tool-profiles" ||
       path.startsWith("/v1/admin/local-tool-profiles/"),
+  ),
+  route(
+    "admin.image_generation",
+    185,
+    "after_auth",
+    "Configured image generation routes",
+    isServiceImageGenerationRoute,
   ),
   route(
     "roleplay",
