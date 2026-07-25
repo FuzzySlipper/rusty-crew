@@ -3325,6 +3325,7 @@ async function rebuildServiceBrainRuntime(
     bridge: state.bridge,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
+    adapterFactories: state.adapterFactories,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
