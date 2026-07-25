@@ -286,7 +286,7 @@
       "rust_type": "rusty_crew_core_protocol::MemorySpaceDescriptor",
       "value": {
         "conflict_policy": "supersession",
-        "description": "Crew-owned session and branch memory; not Den memory and not transcript storage.",
+        "description": "Branch-aware Crew-owned session memory with bounded prompt-selection diagnostics; distinct from runtime search, transcript storage, external memory, and Den planning data.",
         "diagnostics": {
           "expose_catalog": true,
           "expose_policy_decisions": true,
