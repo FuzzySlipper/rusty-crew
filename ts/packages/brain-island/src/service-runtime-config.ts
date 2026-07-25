@@ -1161,6 +1161,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         curatorExecutor: input.curatorExecutor,
         mcpToolCatalog,
         mcpToolExecutorFactory: input.mcpToolExecutorFactory,
+        adapterFactories: input.adapterFactories,
         coordinationRuntime: input.coordinationRuntime,
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
