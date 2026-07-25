@@ -1056,6 +1056,17 @@
         "public": true
       },
       {
+        "id": "chat.sessions.attachments.content",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments/{attachment_id}/content",
+        "description": "Read authenticated Crew-owned attachment bytes.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
         "id": "chat.sessions.data_bank.scopes.list",
         "method": "GET",
         "path_template": "/v1/chat/sessions/{session_id}/data-bank/scopes",
@@ -3118,6 +3129,13 @@
         "capability_id": "chat.sessions.attachments.remove",
         "method": "DELETE",
         "path_template": "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.attachments.content",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments/{attachment_id}/content",
         "route_id": "chat",
         "auth_phase": "after_auth"
       },

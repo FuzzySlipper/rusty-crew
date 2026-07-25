@@ -31,6 +31,8 @@ export const RUSTY_VIEW_CHAT_PATHS = {
   snapshots: "/v1/chat/sessions/{session_id}/snapshots",
   attachments: "/v1/chat/sessions/{session_id}/attachments",
   attachment: "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+  attachmentContent:
+    "/v1/chat/sessions/{session_id}/attachments/{attachment_id}/content",
   dataBankScopes: "/v1/chat/sessions/{session_id}/data-bank/scopes",
   dataBankScope: "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
   dataBankScopeAttachments:

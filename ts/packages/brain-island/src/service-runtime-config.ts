@@ -67,6 +67,7 @@ import { createLocalCodeToolResolver } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
+import type { BrainToolMediaSink } from "./brain-tool-media.js";
 import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
 import {
   channelReadbackTool,
@@ -804,6 +805,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
+  toolMediaSink?: BrainToolMediaSink;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
@@ -916,6 +918,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             toolCallDebugStore: input.toolCallDebugStore,
             providerRequestDebugStore: input.providerRequestDebugStore,
             browserResources,
+            toolMediaSink: input.toolMediaSink,
             localCodeResourcePolicy,
           }),
           {
@@ -1095,6 +1098,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
+  toolMediaSink?: BrainToolMediaSink;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
@@ -1180,6 +1184,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
         browserResources,
+        toolMediaSink: input.toolMediaSink,
         localCodeResourcePolicy,
       }),
       {
@@ -1481,6 +1486,7 @@ async function createConfiguredBrain(
     toolCallDebugStore?: ToolCallDebugStore;
     providerRequestDebugStore?: ProviderRequestDebugStore;
     browserResources: ServiceBrowserResources;
+    toolMediaSink?: BrainToolMediaSink;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
 ): Promise<BrainHostExecutor> {
@@ -1505,6 +1511,7 @@ async function createConfiguredBrain(
     maxTokens: effectiveModelMaxTokens(profile),
     toolCallDebugStore: options.toolCallDebugStore,
     providerRequestDebugStore: options.providerRequestDebugStore,
+    toolMediaSink: options.toolMediaSink,
   });
 }
 

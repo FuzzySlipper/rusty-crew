@@ -373,7 +373,10 @@ export interface McpToolExecutor {
 export interface McpToolExecutionResult {
   content:
     | string
-    | Array<{ type: "text"; text: string } | { type: "image"; image: unknown }>;
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "image"; data: string; mimeType: string }
+      >;
   details?: unknown;
   isError?: boolean;
 }

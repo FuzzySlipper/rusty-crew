@@ -6,6 +6,10 @@ import {
   type ToolCallDebugStore,
 } from "./tool-call-debug-store.js";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
+import type {
+  BrainToolMediaReference,
+  BrainToolMediaSink,
+} from "./brain-tool-media.js";
 
 export interface BrainHostToolRequest {
   wakeId: string;
@@ -128,6 +132,7 @@ export async function executePreparedBrainHostToolRequest(
   wake: BrainWakeInput,
   prepared: PreparedBrainHostToolRequest,
   toolCallDebugStore: ToolCallDebugStore | undefined,
+  toolMediaSink?: BrainToolMediaSink,
 ): Promise<BrainHostToolExecutionResult> {
   const failDebugRecord = (error: unknown) => {
     if (prepared.debugDetailId) {
@@ -183,6 +188,37 @@ export async function executePreparedBrainHostToolRequest(
       prepared.request.name,
       result,
     );
+    let mediaReferences: readonly BrainToolMediaReference[] = [];
+    if (
+      failure === undefined &&
+      toolMediaSink !== undefined &&
+      result.content.some((item) => item.type === "image")
+    ) {
+      try {
+        mediaReferences = await toolMediaSink.persistImages({
+          sessionId: wake.sessionId,
+          wakeId: wake.wakeId,
+          callId: prepared.request.callId,
+          toolName: prepared.request.name,
+          result,
+        });
+      } catch (error) {
+        const detail = `Tool ${prepared.request.name} media persistence failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        failDebugRecord(detail);
+        return {
+          output: detail,
+          failure: {
+            toolName: prepared.request.name,
+            reasonCode: "tool_media_persistence_failed",
+            retryable: false,
+            action: "failed",
+            detail,
+          },
+        };
+      }
+    }
     if (prepared.debugDetailId) {
       toolCallDebugStore?.finish({
         debugDetailId: prepared.debugDetailId,
@@ -196,7 +232,7 @@ export async function executePreparedBrainHostToolRequest(
       }
     }
     return {
-      output: brainToolResultToHostOutput(result),
+      output: brainToolResultToHostOutput(result, mediaReferences),
       ...(result.terminate === true ? { suspend: true } : {}),
       ...(failure === undefined ? {} : { failure }),
     };
@@ -347,11 +383,18 @@ export function withBrainHostToolDebugReference(
   };
 }
 
-function brainToolResultToHostOutput(result: BrainToolResult): string {
+export function brainToolResultToHostOutput(
+  result: BrainToolResult,
+  mediaReferences: readonly BrainToolMediaReference[] = [],
+): string {
+  let imageIndex = 0;
   const content = result.content
     .map((item) => {
       if (item.type === "text") return item.text;
-      return `[image:${item.mimeType};${item.data.length} bytes]`;
+      const reference = mediaReferences[imageIndex++];
+      return reference === undefined
+        ? `[image:${item.mimeType};unavailable]`
+        : `[image attachment_id=${reference.attachmentId} filename=${reference.filename} mime_type=${reference.mimeType} byte_size=${reference.byteSize} width=${reference.width} height=${reference.height} download_url=${reference.downloadUrl}]`;
     })
     .filter((text) => text.length > 0)
     .join("\n");

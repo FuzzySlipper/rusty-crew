@@ -1269,6 +1269,14 @@ export const API_CAPABILITIES = [
     public: true,
   },
   readCapability(
+    "chat.sessions.attachments.content",
+    "GET",
+    RUSTY_VIEW_CHAT_PATHS.attachmentContent,
+    "Read authenticated Crew-owned attachment bytes.",
+    "chat",
+    ["chat", "session", "attachment"],
+  ),
+  readCapability(
     "chat.sessions.data_bank.scopes.list",
     "GET",
     RUSTY_VIEW_CHAT_PATHS.dataBankScopes,

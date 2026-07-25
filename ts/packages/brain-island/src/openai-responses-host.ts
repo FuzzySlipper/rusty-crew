@@ -194,6 +194,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
     prepareToolResolution: context.prepareToolResolution,
     toolProfile: context.profile.toolSelection.toolProfile,
     toolCallDebugStore: context.toolCallDebugStore,
+    toolMediaSink: context.toolMediaSink,
     submitEvent: async (event) => {
       await bridge.submitBrainEvent(event);
     },

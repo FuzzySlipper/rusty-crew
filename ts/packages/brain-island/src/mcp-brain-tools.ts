@@ -10,9 +10,10 @@ import type {
   McpToolExecutionResult,
   McpToolExecutor,
 } from "./service-adapter-ports.js";
+import type { BrainToolContent } from "./brain-tool.js";
 
 export interface BrainCompatibleToolResult<TDetails = unknown> {
-  content: Array<{ type: "text"; text: string }>;
+  content: BrainToolContent[];
   details: TDetails;
   terminate?: boolean;
 }
@@ -134,7 +135,7 @@ export function createMcpBrainTool(
         toolCallId,
         signal,
       });
-      return toBrainToolResult(result);
+      return mcpToolExecutionResultToBrainResult(result);
     },
   };
 }
@@ -450,7 +451,7 @@ function outputShapeForTool(
   return `mcp.${server}.${tool.name.replace(/[^A-Za-z0-9]+/g, "_").toLowerCase()}.result.v1`;
 }
 
-function toBrainToolResult(
+export function mcpToolExecutionResultToBrainResult(
   result: McpToolExecutionResult,
 ): BrainCompatibleToolResult<McpToolExecutionResult["details"]> {
   return {
@@ -461,8 +462,9 @@ function toBrainToolResult(
             item.type === "text"
               ? item
               : {
-                  type: "text",
-                  text: "[image content returned by MCP tool]",
+                  type: "image",
+                  data: item.data,
+                  mimeType: item.mimeType,
                 },
           ),
     details:

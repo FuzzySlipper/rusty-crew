@@ -1458,6 +1458,46 @@ test("Rusty View chat stream route validates, replays once, and cleans subscribe
   );
   assert.equal(notStream, undefined);
 
+  context.readAttachmentContent = async (sessionId, attachmentId) => {
+    assert.equal(sessionId, "field-session");
+    assert.equal(attachmentId, "attachment-1");
+    return {
+      attachment: {
+        attachment_id: attachmentId,
+        session_id: sessionId,
+        status: "active",
+        filename: "generated.png",
+        mime_type: "image/png",
+        byte_size: 3,
+        extracted_text_truncated: false,
+        metadata_json: {},
+        created_at: "2026-07-05T00:00:00.000Z",
+        updated_at: "2026-07-05T00:00:00.000Z",
+        links: [],
+      },
+      bytes: Buffer.from("png"),
+    };
+  };
+  const attachmentContent = await handleRustyViewChatStreamRequest(
+    requestLike("GET", { origin: "http://view.test" }),
+    new URL(
+      "http://local/v1/chat/sessions/field-session/attachments/attachment-1/content",
+    ),
+    context,
+  );
+  assert.equal(attachmentContent && "kind" in attachmentContent, true);
+  const attachmentResponse = fakeResponse();
+  if (attachmentContent && "kind" in attachmentContent) {
+    attachmentContent.write(attachmentResponse);
+  }
+  assert.equal(attachmentResponse.statusCode, 200);
+  assert.equal(attachmentResponse.headers["content-type"], "image/png");
+  assert.equal(
+    attachmentResponse.headers["access-control-allow-origin"],
+    "http://view.test",
+  );
+  assert.equal(attachmentResponse.body, "png");
+
   const methodFailure = await handleRustyViewChatStreamRequest(
     requestLike("POST", { "x-request-id": "req-chat-stream" }),
     new URL("http://local/v1/chat/sessions/field-session/stream"),
@@ -1871,6 +1911,11 @@ function chatStreamContext() {
             ? request.headers.origin
             : "*",
       };
+    },
+    async readAttachmentContent() {
+      throw new Error(
+        "attachment content is not configured in this route fixture",
+      );
     },
   };
   return context;

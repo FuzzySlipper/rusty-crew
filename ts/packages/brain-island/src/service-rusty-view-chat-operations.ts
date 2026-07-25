@@ -20,6 +20,7 @@ import { defaultProfileBrainForModelProvider } from "./service-profile-admin-mut
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
+import type { ToolMediaAttachmentStore } from "./tool-media-attachments.js";
 import type {
   RoleplayRouteContext,
   RoleplayAssistantAlternativeGenerationInput,
@@ -102,6 +103,7 @@ export interface RustyViewChatOperationsContext {
   get runtimeConfig(): RustyCrewRuntimeConfig;
   toolCallDebugStore: ToolCallDebugStore;
   providerRequestDebugStore: ProviderRequestDebugStore;
+  toolMediaAttachments: ToolMediaAttachmentStore;
   now(): string;
   projectSessionState?(session: SessionState): SessionState;
   appendChatEvent(
@@ -280,12 +282,18 @@ async function persistCompletedAssistantTurn(
     wakeReport: RustyViewChatWakeReport;
   },
 ): Promise<void> {
-  const body = assistantTextFromCoreEvents(
-    input.wakeReport.observedEvents ?? [],
-  );
+  const stableWakeId = input.wakeReport.wakeId ?? input.correlationId;
+  const attachments = input.wakeReport.wakeId
+    ? await context.toolMediaAttachments.attachmentsForWake(
+        input.session.sessionId,
+        input.wakeReport.wakeId,
+      )
+    : [];
+  const body =
+    assistantTextFromCoreEvents(input.wakeReport.observedEvents ?? []) ??
+    (attachments.length > 0 ? "" : undefined);
   if (body === undefined) return;
   const now = context.now();
-  const stableWakeId = input.wakeReport.wakeId ?? input.correlationId;
   const messageId = stableChatRecordId("assistant-message", stableWakeId);
   const slotId = stableChatRecordId("slot", messageId);
   const variantId = stableChatRecordId("variant", slotId);
@@ -328,6 +336,24 @@ async function persistCompletedAssistantTurn(
       previousMessageId: input.userMessageId,
       metadataJson,
       now,
+      blocks: [
+        ...(body.length > 0
+          ? [{ kind: "text", content_json: { text: body } }]
+          : []),
+        ...attachments.map((attachment) => ({
+          block_id: attachmentBlockId(messageId, attachment.attachment_id),
+          kind: "attachment",
+          content_json: {
+            attachment_id: attachment.attachment_id,
+            filename: attachment.filename,
+            mime_type: attachment.mime_type,
+            byte_size: attachment.byte_size,
+            download_url: attachment.download_url,
+          },
+          render_policy_json: { display: "inline_media" },
+          metadata_json: { source: "brain_tool_media" },
+        })),
+      ],
     }),
     branch_id: input.branch.branch_id,
     expected_branch_head: { type: "any" },
@@ -343,6 +369,39 @@ async function persistCompletedAssistantTurn(
     throw new Error(
       `assistant chat slot persistence conflicted for ${input.session.sessionId}`,
     );
+  }
+  if (input.wakeReport.wakeId && attachments.length > 0) {
+    await context.toolMediaAttachments
+      .linkAttachmentsToMessage({
+        sessionId: input.session.sessionId,
+        wakeId: input.wakeReport.wakeId,
+        messageId,
+        blockIdsByAttachmentId: new Map(
+          attachments.map((attachment) => [
+            attachment.attachment_id,
+            attachmentBlockId(messageId, attachment.attachment_id),
+          ]),
+        ),
+      })
+      .catch(async (error) => {
+        await context.appendChatEvent(input.session.sessionId, {
+          kind: "provider_status",
+          payload: {
+            wake_id: input.wakeReport.wakeId,
+            level: "error",
+            message: errorMessage(
+              error,
+              "tool media attachment link persistence failed",
+            ),
+            metadata_json: JSON.stringify({
+              reason_code: "tool_media_link_persistence_failed",
+              attachment_ids: attachments.map(
+                (attachment) => attachment.attachment_id,
+              ),
+            }),
+          },
+        });
+      });
   }
 }
 
@@ -1198,9 +1257,22 @@ export async function removeRustyViewAttachment(
     attachment_id: input.attachmentId,
     updated_at: context.now(),
   })) as AttachmentRecord;
+  let contentRemovalError: string | undefined;
+  await context.toolMediaAttachments.removeContent(removed).catch((error) => {
+    contentRemovalError = errorMessage(
+      error,
+      "attachment content removal failed",
+    );
+  });
   const event = await context.appendChatEvent(input.session.sessionId, {
     kind: "attachment_removed",
-    payload: { attachment_id: input.attachmentId, attachment: removed },
+    payload: {
+      attachment_id: input.attachmentId,
+      attachment: removed,
+      ...(contentRemovalError === undefined
+        ? {}
+        : { content_removal_error: contentRemovalError }),
+    },
   });
   return {
     status: "removed",
@@ -1568,6 +1640,10 @@ function messageBlockWrites(
 
 function stableChatRecordId(prefix: string, raw: string): string {
   return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
+}
+
+function attachmentBlockId(messageId: string, attachmentId: string): string {
+  return stableChatRecordId("attachment-block", `${messageId}:${attachmentId}`);
 }
 
 interface ExactPageWire<T> {

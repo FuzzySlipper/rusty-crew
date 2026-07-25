@@ -377,6 +377,7 @@ async function runRustChatCompletionsBrainWithIncrementalDrain(
     toolProfile:
       runOptions.toolProfile ?? context.profile.toolSelection.toolProfile,
     toolCallDebugStore: context.toolCallDebugStore,
+    toolMediaSink: context.toolMediaSink,
     events: runOptions.events,
     submitEvent: runOptions.submitEvent,
     planActions: runOptions.planActions,

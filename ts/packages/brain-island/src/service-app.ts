@@ -272,6 +272,7 @@ import {
   matchServiceApiRoute,
 } from "./service-route-table.js";
 import { ServiceExternalRuntimeController } from "./service-external-runtime.js";
+import { ToolMediaAttachmentStore } from "./tool-media-attachments.js";
 import { handleExternalRuntimeRequest } from "./service-external-runtime-routes.js";
 import { handleCoordinationOperatorRequest } from "./service-coordination-operator-routes.js";
 import {
@@ -468,6 +469,7 @@ interface ServiceState {
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly toolCallDebugStore: ToolCallDebugStore;
   readonly providerRequestDebugStore: ProviderRequestDebugStore;
+  readonly toolMediaAttachments: ToolMediaAttachmentStore;
   readonly browserResources: ServiceBrowserResources;
   readonly externalRuntimeController: ServiceExternalRuntimeController;
   readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
@@ -706,6 +708,7 @@ function rustyViewChatOperationsContext(
     },
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
+    toolMediaAttachments: state.toolMediaAttachments,
     now: state.now,
     projectSessionState: (session) =>
       projectInFlightSessionState(session, state.inFlightWakes),
@@ -902,6 +905,21 @@ export async function createRustyCrewServiceApp(
       options.adapterFactories,
     );
     let liveState: ServiceState | undefined;
+    const toolMediaAttachments = new ToolMediaAttachmentStore({
+      artifactDir: config.paths.artifactDir,
+      bridge,
+      now: options.now ?? (() => new Date().toISOString()),
+      appendChatEvent: async (sessionId, event) => {
+        if (liveState === undefined) {
+          throw new Error("service state is not ready for tool media events");
+        }
+        return appendChatEventFromModule(
+          chatEventLogContext(liveState),
+          sessionId,
+          event,
+        );
+      },
+    });
     const curator = await createServiceCuratorRuntime({
       config,
       runtimeConfig,
@@ -969,6 +987,7 @@ export async function createRustyCrewServiceApp(
       toolCallDebugStore,
       providerRequestDebugStore,
       browserResources,
+      toolMediaSink: toolMediaAttachments,
       onBrainWakeResult: (observation) => {
         const state = liveState;
         if (state === undefined) return;
@@ -1016,6 +1035,7 @@ export async function createRustyCrewServiceApp(
       chatSubscribersBySession: new Map(),
       toolCallDebugStore,
       providerRequestDebugStore,
+      toolMediaAttachments,
       browserResources,
       externalRuntimeController,
       responsesWakeMetrics: [],
@@ -1271,6 +1291,8 @@ async function handleHttpRequest(
           state.chatSubscribersBySession.delete(sessionId),
         timers: state.timers,
         corsHeaders: (corsRequest) => chatCorsHeaders(corsRequest),
+        readAttachmentContent: (sessionId, attachmentId) =>
+          state.toolMediaAttachments.readContent(sessionId, attachmentId),
       },
       chat: {
         listSessions: () => listProjectedServiceSessions(state),
@@ -3298,6 +3320,7 @@ async function applyServiceRuntimeConfigFromDisk(
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
+    toolMediaSink: state.toolMediaAttachments,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -3337,6 +3360,7 @@ async function rebuildServiceBrainRuntime(
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
+    toolMediaSink: state.toolMediaAttachments,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });

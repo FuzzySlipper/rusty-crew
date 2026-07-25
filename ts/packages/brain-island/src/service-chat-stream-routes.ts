@@ -7,6 +7,8 @@ import {
 } from "./rusty-view-chat-api.js";
 import type { ServiceRouteResult } from "./service-route-results.js";
 import { failure, isRawServiceRouteResult } from "./service-route-results.js";
+import type { ToolMediaAttachmentContent } from "./tool-media-attachments.js";
+import { ToolMediaAttachmentError } from "./tool-media-attachments.js";
 
 export interface ChatStreamSubscriber {
   write(event: ChatEvent): void;
@@ -23,6 +25,10 @@ export interface RustyViewChatStreamRouteContext {
   deleteSubscribersForSession(sessionId: SessionId): void;
   timers: Set<NodeJS.Timeout>;
   corsHeaders(request: IncomingMessage): Record<string, string>;
+  readAttachmentContent(
+    sessionId: string,
+    attachmentId: string,
+  ): Promise<ToolMediaAttachmentContent>;
 }
 
 export interface RustyViewChatRouteContext {
@@ -69,6 +75,16 @@ export async function handleRustyViewChatStreamRequest(
   context: RustyViewChatStreamRouteContext,
 ): Promise<ServiceRouteResult | undefined> {
   const parts = url.pathname.split("/").filter(Boolean);
+  if (
+    parts.length === 7 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "attachments" &&
+    parts[6] === "content"
+  ) {
+    return handleAttachmentContentRequest(request, context, parts);
+  }
   if (
     parts.length !== 5 ||
     parts[0] !== "v1" ||
@@ -122,6 +138,63 @@ export async function handleRustyViewChatStreamRequest(
       });
     },
   };
+}
+
+async function handleAttachmentContentRequest(
+  request: IncomingMessage,
+  context: RustyViewChatStreamRouteContext,
+  parts: string[],
+): Promise<ServiceRouteResult> {
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "attachment_content_requires_get",
+      message: "attachment content routes only support GET",
+      retryable: false,
+    });
+  }
+  const sessionId = decodeURIComponent(parts[3] ?? "");
+  const attachmentId = decodeURIComponent(parts[5] ?? "");
+  try {
+    const content = await context.readAttachmentContent(
+      sessionId,
+      attachmentId,
+    );
+    const filename = content.attachment.filename.replace(/[\r\n"\\]/g, "_");
+    return {
+      kind: "raw",
+      write(response) {
+        response.writeHead(200, {
+          "content-type": content.attachment.mime_type,
+          "content-length": String(content.bytes.length),
+          "content-disposition": `inline; filename="${filename}"`,
+          "cache-control": "private, max-age=60",
+          "x-content-type-options": "nosniff",
+          ...context.corsHeaders(request),
+        });
+        response.end(content.bytes);
+      },
+    };
+  } catch (error) {
+    const reasonCode =
+      error instanceof ToolMediaAttachmentError
+        ? error.reasonCode
+        : "attachment_content_read_failed";
+    return failure(
+      reasonCode === "attachment_not_found" ? 404 : 410,
+      requestIdValue,
+      {
+        code:
+          reasonCode === "attachment_not_found"
+            ? "not_found"
+            : "failed_precondition",
+        reason_code: reasonCode,
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false,
+      },
+    );
+  }
 }
 
 export function writeRustyViewChatSseStream(input: {

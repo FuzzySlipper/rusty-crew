@@ -7,6 +7,7 @@ import type { RustyCrewServiceConfig } from "./service-config.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
+import type { BrainToolMediaSink } from "./brain-tool-media.js";
 
 export interface BrainHostContext {
   profile: LoadedProfileContext;
@@ -20,4 +21,5 @@ export interface BrainHostContext {
   maxTokens?: number;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
+  toolMediaSink?: BrainToolMediaSink;
 }

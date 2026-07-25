@@ -738,12 +738,15 @@ function isMcpContentArray(
 ): content is McpToolExecutionResult["content"] {
   return (
     Array.isArray(content) &&
-    content.every(
-      (item) =>
-        item &&
-        typeof item === "object" &&
-        ((item as { type?: unknown }).type === "text" ||
-          (item as { type?: unknown }).type === "image"),
-    )
+    content.every((item) => {
+      if (!item || typeof item !== "object") return false;
+      const value = item as Record<string, unknown>;
+      return (
+        (value.type === "text" && typeof value.text === "string") ||
+        (value.type === "image" &&
+          typeof value.data === "string" &&
+          typeof value.mimeType === "string")
+      );
+    })
   );
 }

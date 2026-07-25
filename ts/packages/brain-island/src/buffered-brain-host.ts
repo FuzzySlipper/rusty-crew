@@ -32,6 +32,7 @@ import {
   prepareBrainHostToolRequest,
   withBrainHostToolDebugReference,
 } from "./tool-execution-host.js";
+import type { BrainToolMediaSink } from "./brain-tool-media.js";
 
 export type BufferedBrainProviderRun =
   | {
@@ -83,6 +84,7 @@ export async function runBufferedBrainHost(options: {
   prepareToolResolution?: () => Promise<void>;
   toolProfile: ToolProfile;
   toolCallDebugStore?: ToolCallDebugStore;
+  toolMediaSink?: BrainToolMediaSink;
   events?: BrainEventEnvelope[];
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   planActions?: BrainActionPlanner;
@@ -198,6 +200,7 @@ export async function runBufferedBrainHost(options: {
           options.wake,
           request,
           options.toolCallDebugStore,
+          options.toolMediaSink,
         );
         await options.bridge.submitBrainHostResult({
           moduleId: options.run.moduleId,
