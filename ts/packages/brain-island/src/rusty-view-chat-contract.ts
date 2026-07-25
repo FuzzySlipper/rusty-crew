@@ -37,6 +37,7 @@ export const RUSTY_VIEW_CHAT_PATHS = {
     "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
   commands: "/v1/chat/commands",
   commandAutocomplete: "/v1/chat/commands/{command_name}/autocomplete",
+  memorySurfaces: "/v1/admin/diagnostics/memory-surfaces",
   sessionCommands: "/v1/chat/sessions/{session_id}/commands",
 } as const;
 

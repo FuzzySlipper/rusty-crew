@@ -1168,6 +1168,33 @@
     "/v1/admin/capabilities": {
       "$ref": "./rusty-crew-api-capabilities.openapi.json#/paths/~1v1~1admin~1capabilities"
     },
+    "/v1/admin/diagnostics/memory-surfaces": {
+      "get": {
+        "operationId": "adminDiagnosticsMemorySurfaces",
+        "summary": "Read the operator-facing memory surface catalog",
+        "responses": {
+          "200": {
+            "description": "Memory surface catalog projection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/MemorySurfaceCatalogProjection"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/commands": {
       "post": {
         "operationId": "executeChatCommand",
@@ -1286,6 +1313,65 @@
           "reason_code": { "type": "string" },
           "message": { "type": "string" },
           "retryable": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "MemorySurfaceOwner": {
+        "type": "string",
+        "enum": ["crew", "den", "filesystem"]
+      },
+      "MemorySurfaceAvailability": {
+        "type": "string",
+        "enum": ["available", "degraded", "unavailable", "profile_scoped"]
+      },
+      "MemorySurfaceCatalogItem": {
+        "type": "object",
+        "required": [
+          "surfaceId",
+          "displayName",
+          "owner",
+          "storageHome",
+          "promptPolicy",
+          "modelFacingToolNames",
+          "backendProvenance",
+          "availability",
+          "availabilityReasonCode",
+          "notes"
+        ],
+        "properties": {
+          "surfaceId": { "type": "string" },
+          "displayName": { "type": "string" },
+          "owner": { "$ref": "#/components/schemas/MemorySurfaceOwner" },
+          "storageHome": { "type": "string" },
+          "promptPolicy": { "type": "string" },
+          "modelFacingToolNames": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "backendProvenance": { "type": "string" },
+          "availability": {
+            "$ref": "#/components/schemas/MemorySurfaceAvailability"
+          },
+          "availabilityReasonCode": { "type": "string" },
+          "lastSafeError": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "MemorySurfaceCatalogProjection": {
+        "type": "object",
+        "required": ["generatedAt", "items"],
+        "properties": {
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemorySurfaceCatalogItem"
+            }
+          }
         },
         "additionalProperties": false
       },

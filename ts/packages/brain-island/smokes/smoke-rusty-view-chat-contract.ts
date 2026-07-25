@@ -50,6 +50,38 @@ assert.deepEqual(schema("ChatEventKind").enum, [
   ...RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
 ]);
 
+assert.deepEqual(schema("MemorySurfaceOwner").enum, [
+  "crew",
+  "den",
+  "filesystem",
+]);
+assert.deepEqual(schema("MemorySurfaceAvailability").enum, [
+  "available",
+  "degraded",
+  "unavailable",
+  "profile_scoped",
+]);
+assert.deepEqual(schema("MemorySurfaceCatalogProjection").required, [
+  "generatedAt",
+  "items",
+]);
+assert.deepEqual(schema("MemorySurfaceCatalogItem").required, [
+  "surfaceId",
+  "displayName",
+  "owner",
+  "storageHome",
+  "promptPolicy",
+  "modelFacingToolNames",
+  "backendProvenance",
+  "availability",
+  "availabilityReasonCode",
+  "notes",
+]);
+assert.equal(
+  schema("MemorySurfaceCatalogItem").properties?.lastSafeError?.type,
+  "string",
+);
+
 assert.ok(schema("ChatSessionOpenResult").properties?.message_slots);
 assert.ok(schema("SendChatMessageResult").properties?.slot_id);
 assert.ok(schema("SendChatMessageResult").properties?.primary_variant_id);
