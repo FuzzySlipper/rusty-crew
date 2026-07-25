@@ -131,6 +131,7 @@ pub(crate) use repos::queued_messages::{
     expire_queued_messages_in_tx, load_queued_messages, load_queued_messages_in_tx,
     purge_terminal_queued_messages_in_tx, save_queued_message_in_tx,
 };
+pub use repos::roleplay_lore::roleplay_lore_memory_space_descriptor;
 #[cfg(feature = "postgres")]
 pub(crate) use repos::roleplay_lore::{
     default_lore_layer_config, estimate_lore_tokens, excluded_subject_match, lore_query_overlap,
@@ -139,14 +140,13 @@ pub(crate) use repos::roleplay_lore::{
     parse_roleplay_lore_record_status, parse_roleplay_lore_visibility,
     postgres_lore_recall_tsquery, roleplay_lore_canon_status_as_str,
     roleplay_lore_layer_purpose_as_str, roleplay_lore_layer_write_policy_as_str,
-    roleplay_lore_memory_space_descriptor, roleplay_lore_record_status_as_str,
-    roleplay_lore_visibility_as_str, score_lore_recall_entry, validate_lore_recall_query,
-    validate_lore_recall_trace_query, validate_roleplay_chat_layers_write,
-    validate_roleplay_lore_entry_promotion, validate_roleplay_lore_fact_capture,
-    validate_roleplay_lore_identifier, validate_roleplay_lore_layer_config_write,
-    validate_roleplay_lore_layer_entry_link, validate_roleplay_lore_layer_update,
-    validate_roleplay_lore_layer_write, validate_roleplay_lore_record_id,
-    validate_roleplay_lore_write, validate_unique_roleplay_ids,
+    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, score_lore_recall_entry,
+    validate_lore_recall_query, validate_lore_recall_trace_query,
+    validate_roleplay_chat_layers_write, validate_roleplay_lore_entry_promotion,
+    validate_roleplay_lore_fact_capture, validate_roleplay_lore_identifier,
+    validate_roleplay_lore_layer_config_write, validate_roleplay_lore_layer_entry_link,
+    validate_roleplay_lore_layer_update, validate_roleplay_lore_layer_write,
+    validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_unique_roleplay_ids,
 };
 pub(crate) use repos::runtime_counters::{
     increment_counter_for_scopes_in_tx, increment_event_counters_in_tx, load_runtime_counters,

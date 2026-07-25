@@ -12,6 +12,7 @@ impl CoreEngine {
         Ok(vec![
             memory_spaces::profile_dense_descriptor(&ProfileMemoryCaps::default()),
             session_memory_space_descriptor(),
+            roleplay_lore_memory_space_descriptor(),
         ])
     }
 

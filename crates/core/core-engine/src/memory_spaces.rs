@@ -14,7 +14,7 @@ pub(crate) fn profile_dense_descriptor(caps: &ProfileMemoryCaps) -> MemorySpaceD
         schema_version: 1,
         module_id: Some("runtime_memory".to_string()),
         description:
-            "Compact stable Rusty Crew profile/user memory backed by existing profile_memories."
+            "Compact Crew-owned profile/user memory backed by profile_memories; distinct from external memory and Den planning data."
                 .to_string(),
         record_shapes: vec![MemoryRecordShapeDescriptor {
             shape_id: MemoryRecordShapeId::unchecked("profile_dense_item"),

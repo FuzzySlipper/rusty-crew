@@ -2186,18 +2186,41 @@ async function buildMemorySpaceDiagnostics(
                   "Sibling branch records are excluded from prompt context unless explicitly requested.",
                 ],
               }
-            : {
-                spaceId: descriptor.space_id,
-                status: "degraded",
-                backingStore: "unknown",
-                nativeMethods: [],
-                conflictBehavior: "unknown",
-                promptInjectionBehavior: "unknown",
-                toolModeBehavior: "unknown",
-                notes: [
-                  "No compatibility projection is registered for this space.",
-                ],
-              },
+            : descriptor.space_id === "roleplay_lore"
+              ? {
+                  spaceId: descriptor.space_id,
+                  status: "compatible",
+                  backingStore: "roleplay_lore module tables",
+                  nativeMethods: [
+                    "queryRoleplayLoreRecords",
+                    "recallLore",
+                    "addRoleplayLoreRecord",
+                    "replaceRoleplayLoreRecord",
+                    "supersedeRoleplayLoreRecord",
+                    "tombstoneRoleplayLoreRecord",
+                  ],
+                  conflictBehavior: "expected_revision",
+                  promptInjectionBehavior:
+                    "Lore remains domain-specific and enters narrator/model context only through typed lore recall and explicit roleplay assembly.",
+                  toolModeBehavior:
+                    "Roleplay lore read/write tools follow the descriptor's canon-aware governance, provenance, and expected-revision policies.",
+                  notes: [
+                    "Roleplay lore is Crew-owned domain memory, not a generic memory blob.",
+                    "Runtime search and Den planning tools remain separate surfaces.",
+                  ],
+                }
+              : {
+                  spaceId: descriptor.space_id,
+                  status: "degraded",
+                  backingStore: "unknown",
+                  nativeMethods: [],
+                  conflictBehavior: "unknown",
+                  promptInjectionBehavior: "unknown",
+                  toolModeBehavior: "unknown",
+                  notes: [
+                    "No compatibility projection is registered for this space.",
+                  ],
+                },
     })),
   };
 }

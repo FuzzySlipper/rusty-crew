@@ -44,6 +44,12 @@ surface answers which question.
 | Skill files | Crew filesystem/config | service-wide/profile skill roots | "Skills" | skills tools and prompt assembly |
 | Todo/local planning state | Crew | todo/tool state when enabled | "Session todo state" | todo tools; not durable memory |
 
+The native memory-space catalog exposes `profile_dense`, `session_memory`, and
+`roleplay_lore`. Their descriptors are Rust-owned contracts: compact profile
+memory, branch-aware session memory with prompt-selection diagnostics, and
+domain-specific lore with canon-aware governance/provenance. Runtime search is
+not a memory-space descriptor and remains an explicit runtime read model.
+
 ## Tool Naming Decision
 
 The model-facing external memory tools should remain generic:

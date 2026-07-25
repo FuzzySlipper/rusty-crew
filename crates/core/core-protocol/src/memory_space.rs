@@ -395,7 +395,7 @@ pub fn session_memory_space_descriptor() -> MemorySpaceDescriptor {
         schema_version: 1,
         module_id: Some("runtime_memory".to_string()),
         description:
-            "Crew-owned session and branch memory; not Den memory and not transcript storage."
+            "Branch-aware Crew-owned session memory with bounded prompt-selection diagnostics; distinct from runtime search, transcript storage, external memory, and Den planning data."
                 .to_string(),
         record_shapes: vec![
             MemoryRecordShapeDescriptor {

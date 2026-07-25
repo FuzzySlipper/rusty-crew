@@ -29,6 +29,7 @@ static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(1);
 mod chat_support;
 mod delegation_support;
 mod github_gate;
+mod memory_spaces;
 use chat_support::*;
 use delegation_support::*;
 mod agent_routes;

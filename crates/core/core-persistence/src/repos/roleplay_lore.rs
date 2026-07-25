@@ -1060,12 +1060,14 @@ pub(crate) fn lore_recall_decision(
     }
 }
 
-pub(crate) fn roleplay_lore_memory_space_descriptor() -> MemorySpaceDescriptor {
+pub fn roleplay_lore_memory_space_descriptor() -> MemorySpaceDescriptor {
     MemorySpaceDescriptor {
         space_id: MemorySpaceId::unchecked("roleplay_lore"),
         schema_version: 1,
         module_id: Some("roleplay_lore".to_string()),
-        description: "Crew-owned roleplay lore with canon-aware governance.".to_string(),
+        description:
+            "Domain-specific Crew-owned roleplay lore with canon-aware governance and provenance."
+                .to_string(),
         record_shapes: vec![
             roleplay_lore_shape(
                 "world",
