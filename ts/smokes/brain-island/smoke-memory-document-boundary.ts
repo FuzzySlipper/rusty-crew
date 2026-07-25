@@ -18,6 +18,33 @@ import {
 const native = await loadNativeBridge();
 const metadataPolicyValidator = createBridgeToolMetadataPolicyValidator(native);
 
+const externalMemoryToolNames = [
+  "memory_recall",
+  "memory_read",
+  "memory_search",
+  "memory_store",
+  "memory_propose",
+] as const;
+
+for (const toolName of externalMemoryToolNames) {
+  const description = defaultToolRegistry.get(toolName)?.description;
+  assert.ok(
+    description,
+    `${toolName} must have model-facing registry metadata`,
+  );
+  assert.match(description, /configured external memory/i);
+  assert.match(
+    description,
+    /not (?:a )?Den document, task, project, or guidance/i,
+    `${toolName} must explicitly exclude Den planning surfaces`,
+  );
+  assert.match(
+    description,
+    /Den MCP planning tools/i,
+    `${toolName} must direct Den planning requests to MCP`,
+  );
+}
+
 const denBinding: McpBindingRecord = {
   bindingId: "mcp-den-planning",
   adapterId: "mcp-ts-main" as AdapterId,
@@ -100,13 +127,7 @@ assert.deepEqual(
   unavailableExternalMemoryPlan.omittedTools.map(
     (omission) => omission.toolName,
   ),
-  [
-    "memory_recall",
-    "memory_read",
-    "memory_search",
-    "memory_store",
-    "memory_propose",
-  ],
+  externalMemoryToolNames,
 );
 assert.equal(
   unavailableExternalMemoryPlan.omittedTools[0]?.reasonCode,

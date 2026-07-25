@@ -1,0 +1,72 @@
+US
+USER
+
+Memory-boundary certification, Den planning half.
+Use Den MCP planning tools to read the Den document rusty-crew / memory-surface-boundaries-2026-07-05 and inspect Den task 4279.
+Do not use memory_recall, memory_read, or memory_search for either lookup.
+Reply with the document title and task title after both tool lookups succeed.
+
+AS
+ASSISTANT
+▸
+REASONING
+den_get_document
+COMPLETED
+den_get_document
+Raw debug
+den_get_document
+COMPLETED
+den_get_document
+den_get_task
+COMPLETED
+den_get_task
+Raw debug
+den_get_task
+COMPLETED
+den_get_task
+▸
+REASONING
+
+Both lookups completed successfully.
+
+Document title: Memory Surface Boundaries
+Task title: Live-proof Den document/task lookup is distinct from external memory tools
+
+Raw
+Regenerate
+Continue
+Edit
+Delete
+Branch
+Bookmark
+US
+USER
+
+Memory-boundary certification, external-memory half.
+Use memory_recall or memory_search to retrieve the certification marker stored in the configured external memory service.
+Do not use any den_* document, task, project, or guidance tool for this lookup.
+Return the marker exactly after the external-memory tool succeeds.
+
+AS
+ASSISTANT
+▸
+REASONING
+memory_recall
+COMPLETED
+memory_recall
+Raw debug
+▸
+REASONING
+
+External-memory recall succeeded. The stored certification marker is:
+
+EXTERNAL_MEMORY_BOUNDARY_CERTIFIED: external memory uses memory tools, while Den documents and tasks use Den MCP planning tools.
+Raw
+Regenerate
+Continue
+Edit
+Delete
+Branch
+Bookmark
+↓
+Latest

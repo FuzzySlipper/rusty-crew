@@ -1,0 +1,821 @@
+{
+  "schemaVersion": 1,
+  "test": {
+    "title": "Den planning and external memory remain distinct @live-agent @memory-boundary-cert",
+    "project": "chromium",
+    "status": "passed",
+    "expectedStatus": "passed",
+    "durationMs": 10883,
+    "retry": 0
+  },
+  "environment": {
+    "baseUrl": "http://127.0.0.1:4200",
+    "backendUrl": "http://127.0.0.1:9348",
+    "appUrl": "/?api=http%3A%2F%2F127.0.0.1%3A9348",
+    "renderedBackendUrl": "http://127.0.0.1:9348",
+    "sourceProfile": "asha-planner",
+    "targetProfile": "asha-planner",
+    "profileIsolation": {
+      "enabled": false,
+      "sourceProfile": "asha-planner"
+    },
+    "currentUrl": "http://127.0.0.1:4200/?api=http:%2F%2F127.0.0.1:9348"
+  },
+  "startedAtMs": 1784967650433,
+  "finishedAtMs": 1784967661302,
+  "consoleEntries": [
+    {
+      "type": "debug",
+      "text": "[vite] connecting...",
+      "location": "http://127.0.0.1:4200/@vite/client:732:8"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected.",
+      "location": "http://127.0.0.1:4200/@vite/client:826:11"
+    },
+    {
+      "type": "log",
+      "text": "Angular is running in development mode.",
+      "location": "http://127.0.0.1:4200/@fs/home/dev/rusty-view/.angular/cache/21.2.16/rusty-view/vite/deps/chunk-2BNQ6WYB.js?v=f9a9ebc0:17563:12"
+    }
+  ],
+  "pageErrors": [],
+  "screenshots": [
+    {
+      "name": "00-app-loaded",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/00-app-loaded.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967651194
+    },
+    {
+      "name": "01-profile-selected",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/01-profile-selected.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967651317
+    },
+    {
+      "name": "03-prompt-sent",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/03-prompt-sent.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967651618
+    },
+    {
+      "name": "04-assistant-complete",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/04-assistant-complete.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967656663
+    },
+    {
+      "name": "05-prompt-sent",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/05-prompt-sent.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967656844
+    },
+    {
+      "name": "06-assistant-complete",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/06-assistant-complete.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967661186
+    },
+    {
+      "name": "memory-boundary-both-turns-complete",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/memory-boundary-both-turns-complete.png",
+      "fullPage": true,
+      "capturedAtMs": 1784967661286
+    }
+  ],
+  "debugSnapshots": [
+    {
+      "name": "00-app-loaded",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/00-app-loaded-debug.json",
+      "capturedAtMs": 1784967651199,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 0,
+      "messageCount": 0,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": null,
+      "connectionStatus": "idle",
+      "lastCursor": null
+    },
+    {
+      "name": "01-profile-selected",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/01-profile-selected-debug.json",
+      "capturedAtMs": 1784967651323,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 0,
+      "messageCount": 0,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "idle",
+      "lastCursor": null
+    },
+    {
+      "name": "turn-1-before-send",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-1-before-send-debug.json",
+      "capturedAtMs": 1784967651336,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 0,
+      "messageCount": 0,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "idle",
+      "lastCursor": null
+    },
+    {
+      "name": "turn-1-prompt-sent",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-1-prompt-sent-debug.json",
+      "capturedAtMs": 1784967651622,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 1,
+      "messageCount": 1,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:0"
+    },
+    {
+      "name": "turn-1-assistant-visible",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-1-assistant-visible-debug.json",
+      "capturedAtMs": 1784967652624,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 5,
+      "messageCount": 2,
+      "isStreaming": true,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:4"
+    },
+    {
+      "name": "turn-1-assistant-content",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-1-assistant-content-debug.json",
+      "capturedAtMs": 1784967652645,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 5,
+      "messageCount": 2,
+      "isStreaming": true,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:4"
+    },
+    {
+      "name": "turn-1-assistant-complete",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-1-assistant-complete-debug.json",
+      "capturedAtMs": 1784967656590,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 43,
+      "messageCount": 2,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:42"
+    },
+    {
+      "name": "turn-2-before-send",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-2-before-send-debug.json",
+      "capturedAtMs": 1784967656706,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 43,
+      "messageCount": 2,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:42"
+    },
+    {
+      "name": "turn-2-prompt-sent",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-2-prompt-sent-debug.json",
+      "capturedAtMs": 1784967656854,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 44,
+      "messageCount": 4,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:43"
+    },
+    {
+      "name": "turn-2-assistant-visible",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-2-assistant-visible-debug.json",
+      "capturedAtMs": 1784967658138,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 47,
+      "messageCount": 4,
+      "isStreaming": true,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:46"
+    },
+    {
+      "name": "turn-2-assistant-content",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-2-assistant-content-debug.json",
+      "capturedAtMs": 1784967658158,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 47,
+      "messageCount": 4,
+      "isStreaming": true,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:46"
+    },
+    {
+      "name": "turn-2-assistant-complete",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/turn-2-assistant-complete-debug.json",
+      "capturedAtMs": 1784967661097,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 86,
+      "messageCount": 4,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:85"
+    },
+    {
+      "name": "final",
+      "path": "/home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/final-debug.json",
+      "capturedAtMs": 1784967661301,
+      "backendBaseUrl": "http://127.0.0.1:9348",
+      "streamingCharCount": 0,
+      "rawEventCount": 86,
+      "messageCount": 4,
+      "isStreaming": false,
+      "isGenerating": false,
+      "activeSessionId": "asha-planner-session-20260725T08202534-1",
+      "connectionStatus": "connected",
+      "lastCursor": "asha-planner-session-20260725T08202534-1:85"
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "promptPreview": "Memory-boundary certification, Den planning half. Use Den MCP planning tools to read the Den document rusty-crew / memory-surface-boundaries-2026-07-05 and inspect Den task 4279. Do not use memory_recall, memory_read, or memory_search for either lookup. Reply with the document title and task titl...",
+      "promptLength": 331,
+      "beforeAssistantCount": 0,
+      "rawEventCountAtStart": 0,
+      "messageCountAtStart": 0,
+      "beforeUserCount": 0,
+      "userSentAtMs": 1784967651574,
+      "userMessageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967651573",
+      "assistantStateAtMs": 1784967652618,
+      "assistantVisibleAtMs": 1784967652618,
+      "firstAssistantMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2",
+      "assistantMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2",
+      "assistantContentVisibleAtMs": 1784967652640,
+      "assistantCompletedAtMs": 1784967656576,
+      "completedAssistantMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2",
+      "rawEventCountAtComplete": 43,
+      "messageCountAtComplete": 2,
+      "finalStatus": "completed",
+      "finalBlockKinds": [
+        "reasoning",
+        "tool_call",
+        "tool_call",
+        "tool_call",
+        "tool_call",
+        "reasoning",
+        "text"
+      ],
+      "finalTextPreview": "The user wants me to: 1. Read a Den document with project_id \"rusty-crew\" and slug \"memory-surface-boundaries-2026-07-05\" 2. Inspect Den task 4279 3. Reply with the document title and task title Let me do both lookups in parallel since they're independent. Both lookups succeeded. Let me extract the document title and task title. **Document title:** \"Memory Surface Boundaries\" **Task title:** \"Live-proof Den document/task lookup is distinct from external memory tools\" Both lookups completed su..."
+    },
+    {
+      "index": 2,
+      "promptPreview": "Memory-boundary certification, external-memory half. Use memory_recall or memory_search to retrieve the certification marker stored in the configured external memory service. Do not use any den_* document, task, project, or guidance tool for this lookup. Return the marker exactly after the extern...",
+      "promptLength": 321,
+      "beforeAssistantCount": 1,
+      "rawEventCountAtStart": 43,
+      "messageCountAtStart": 2,
+      "beforeUserCount": 1,
+      "userSentAtMs": 1784967656771,
+      "userMessageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967656770",
+      "assistantStateAtMs": 1784967658128,
+      "assistantVisibleAtMs": 1784967658128,
+      "firstAssistantMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3",
+      "assistantMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3",
+      "assistantContentVisibleAtMs": 1784967658154,
+      "assistantCompletedAtMs": 1784967661082,
+      "completedAssistantMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3",
+      "rawEventCountAtComplete": 86,
+      "messageCountAtComplete": 4,
+      "finalStatus": "completed",
+      "finalBlockKinds": [
+        "reasoning",
+        "tool_call",
+        "reasoning",
+        "text"
+      ],
+      "finalTextPreview": "The user wants me to use `memory_recall` or `memory_search` (external memory tools, not Den tools) to retrieve a certification marker. Let me try `memory_recall` first with a relevant prompt. The memory_recall returned exactly one result with the certification marker. Let me return it exactly. External-memory recall succeeded. The stored certification marker is: > **EXTERNAL_MEMORY_BOUNDARY_CERTIFIED: external memory uses memory tools, while Den documents and tasks use Den MCP planning tools.**"
+    }
+  ],
+  "visualChecks": [],
+  "timeline": [
+    {
+      "name": "fixture:start",
+      "atMs": 1784967650433,
+      "elapsedMs": 0,
+      "details": {
+        "backendUrl": "http://127.0.0.1:9348",
+        "appUrl": "/?api=http%3A%2F%2F127.0.0.1%3A9348",
+        "targetProfile": "asha-planner",
+        "baseUrl": "http://127.0.0.1:4200"
+      }
+    },
+    {
+      "name": "profile:isolation-disabled",
+      "atMs": 1784967650512,
+      "elapsedMs": 79,
+      "details": {
+        "targetProfile": "asha-planner"
+      }
+    },
+    {
+      "name": "app:navigated",
+      "atMs": 1784967651101,
+      "elapsedMs": 668,
+      "details": {
+        "url": "http://127.0.0.1:4200/?api=http:%2F%2F127.0.0.1:9348",
+        "appUrl": "/?api=http%3A%2F%2F127.0.0.1%3A9348",
+        "intendedBackendUrl": "http://127.0.0.1:9348"
+      }
+    },
+    {
+      "name": "app:backend-verified",
+      "atMs": 1784967651149,
+      "elapsedMs": 716,
+      "details": {
+        "backendUrl": "http://127.0.0.1:9348",
+        "renderedQueryBackend": "http://127.0.0.1:9348",
+        "renderedTransportBackend": "http://127.0.0.1:9348",
+        "currentUrl": "http://127.0.0.1:4200/?api=http:%2F%2F127.0.0.1:9348"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967651199,
+      "elapsedMs": 766,
+      "details": {
+        "name": "00-app-loaded",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 0,
+        "streamingCharCount": 0,
+        "messageCount": 0,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967651323,
+      "elapsedMs": 890,
+      "details": {
+        "name": "01-profile-selected",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 0,
+        "streamingCharCount": 0,
+        "messageCount": 0,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "profile:selected",
+      "atMs": 1784967651323,
+      "elapsedMs": 890,
+      "details": {
+        "profile": "asha-planner",
+        "url": "http://127.0.0.1:4200/?api=http:%2F%2F127.0.0.1:9348"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967651336,
+      "elapsedMs": 903,
+      "details": {
+        "name": "turn-1-before-send",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 0,
+        "streamingCharCount": 0,
+        "messageCount": 0,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:user-sent",
+      "atMs": 1784967651574,
+      "elapsedMs": 1141,
+      "details": {
+        "turn": 1,
+        "promptLength": 331,
+        "beforeAssistantCount": 0,
+        "beforeUserCount": 0
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967651622,
+      "elapsedMs": 1189,
+      "details": {
+        "name": "turn-1-prompt-sent",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 1,
+        "streamingCharCount": 0,
+        "messageCount": 1,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:user-message-correlated",
+      "atMs": 1784967651740,
+      "elapsedMs": 1307,
+      "details": {
+        "turn": 1,
+        "messageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967651573"
+      }
+    },
+    {
+      "name": "transcript:assistant-id-replaced",
+      "atMs": 1784967652612,
+      "elapsedMs": 2179,
+      "details": {
+        "userMessageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967651573",
+        "previousMessageId": "assistant-turn-asha-planner-session-20260725T08202534-1:3",
+        "replacementMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2"
+      }
+    },
+    {
+      "name": "turn:assistant-visible",
+      "atMs": 1784967652621,
+      "elapsedMs": 2188,
+      "details": {
+        "turn": 1,
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967652624,
+      "elapsedMs": 2191,
+      "details": {
+        "name": "turn-1-assistant-visible",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 5,
+        "streamingCharCount": 0,
+        "messageCount": 2,
+        "isStreaming": true,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:assistant-content-visible",
+      "atMs": 1784967652640,
+      "elapsedMs": 2207,
+      "details": {
+        "turn": 1,
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967652645,
+      "elapsedMs": 2212,
+      "details": {
+        "name": "turn-1-assistant-content",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 5,
+        "streamingCharCount": 0,
+        "messageCount": 2,
+        "isStreaming": true,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "transcript:scroll-to-message:start",
+      "atMs": 1784967656557,
+      "elapsedMs": 6124,
+      "details": {
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2"
+      }
+    },
+    {
+      "name": "transcript:scroll-to-message:visible",
+      "atMs": 1784967656570,
+      "elapsedMs": 6137,
+      "details": {
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967656590,
+      "elapsedMs": 6157,
+      "details": {
+        "name": "turn-1-assistant-complete",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 43,
+        "streamingCharCount": 0,
+        "messageCount": 2,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:assistant-complete",
+      "atMs": 1784967656591,
+      "elapsedMs": 6158,
+      "details": {
+        "turn": 1,
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2",
+        "rawEventCount": 43,
+        "messageCount": 2,
+        "blockKinds": [
+          "reasoning",
+          "tool_call",
+          "tool_call",
+          "tool_call",
+          "tool_call",
+          "reasoning",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967656706,
+      "elapsedMs": 6273,
+      "details": {
+        "name": "turn-2-before-send",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 43,
+        "streamingCharCount": 0,
+        "messageCount": 2,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:user-sent",
+      "atMs": 1784967656771,
+      "elapsedMs": 6338,
+      "details": {
+        "turn": 2,
+        "promptLength": 321,
+        "beforeAssistantCount": 1,
+        "beforeUserCount": 1
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967656854,
+      "elapsedMs": 6421,
+      "details": {
+        "name": "turn-2-prompt-sent",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 44,
+        "streamingCharCount": 0,
+        "messageCount": 4,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:user-message-correlated",
+      "atMs": 1784967656870,
+      "elapsedMs": 6437,
+      "details": {
+        "turn": 2,
+        "messageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967656770"
+      }
+    },
+    {
+      "name": "transcript:assistant-id-replaced",
+      "atMs": 1784967656889,
+      "elapsedMs": 6456,
+      "details": {
+        "userMessageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967656770",
+        "previousMessageId": "pending-assistant-pending_1784967656768_1",
+        "replacementMessageId": "assistant-turn-asha-planner-session-20260725T08202534-1:45"
+      }
+    },
+    {
+      "name": "transcript:assistant-id-replaced",
+      "atMs": 1784967658118,
+      "elapsedMs": 7685,
+      "details": {
+        "userMessageId": "chat:asha-planner-session-20260725T08202534-1:req_1784967656770",
+        "previousMessageId": "assistant-turn-asha-planner-session-20260725T08202534-1:45",
+        "replacementMessageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3"
+      }
+    },
+    {
+      "name": "turn:assistant-visible",
+      "atMs": 1784967658134,
+      "elapsedMs": 7701,
+      "details": {
+        "turn": 2,
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967658138,
+      "elapsedMs": 7705,
+      "details": {
+        "name": "turn-2-assistant-visible",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 47,
+        "streamingCharCount": 0,
+        "messageCount": 4,
+        "isStreaming": true,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:assistant-content-visible",
+      "atMs": 1784967658154,
+      "elapsedMs": 7721,
+      "details": {
+        "turn": 2,
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967658158,
+      "elapsedMs": 7725,
+      "details": {
+        "name": "turn-2-assistant-content",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 47,
+        "streamingCharCount": 0,
+        "messageCount": 4,
+        "isStreaming": true,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "transcript:scroll-to-message:start",
+      "atMs": 1784967661061,
+      "elapsedMs": 10628,
+      "details": {
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3"
+      }
+    },
+    {
+      "name": "transcript:scroll-to-message:visible",
+      "atMs": 1784967661074,
+      "elapsedMs": 10641,
+      "details": {
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3"
+      }
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967661097,
+      "elapsedMs": 10664,
+      "details": {
+        "name": "turn-2-assistant-complete",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 86,
+        "streamingCharCount": 0,
+        "messageCount": 4,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    },
+    {
+      "name": "turn:assistant-complete",
+      "atMs": 1784967661098,
+      "elapsedMs": 10665,
+      "details": {
+        "turn": 2,
+        "messageId": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3",
+        "rawEventCount": 86,
+        "messageCount": 4,
+        "blockKinds": [
+          "reasoning",
+          "tool_call",
+          "reasoning",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "fixture:finish:start",
+      "atMs": 1784967661287,
+      "elapsedMs": 10854
+    },
+    {
+      "name": "debug-snapshot:captured",
+      "atMs": 1784967661301,
+      "elapsedMs": 10868,
+      "details": {
+        "name": "final",
+        "backendBaseUrl": "http://127.0.0.1:9348",
+        "rawEventCount": 86,
+        "streamingCharCount": 0,
+        "messageCount": 4,
+        "isStreaming": false,
+        "isGenerating": false
+      }
+    }
+  ],
+  "finalDebugSnapshot": {
+    "backendBaseUrl": "http://127.0.0.1:9348",
+    "activeSessionId": "asha-planner-session-20260725T08202534-1",
+    "connectionStatus": "connected",
+    "isGenerating": false,
+    "isStreaming": false,
+    "streamingCharCount": 0,
+    "lastCursor": "asha-planner-session-20260725T08202534-1:85",
+    "messageCount": 4,
+    "rawEventCount": 86,
+    "messages": [
+      {
+        "id": "chat:asha-planner-session-20260725T08202534-1:req_1784967651573",
+        "role": "user",
+        "status": "completed",
+        "blockKinds": [
+          "text"
+        ],
+        "text": "Memory-boundary certification, Den planning half.\nUse Den MCP planning tools to read the Den document rusty-crew / memory-surface-boundaries-2026-07-05 and inspect Den task 4279.\nDo not use memory_recall, memory_read, or memory_search for either lookup.\nReply with the document title and task title after both tool lookups succeed."
+      },
+      {
+        "id": "asst:service-asha-planner-session-20260725T08202534-1-1784967651633-2",
+        "role": "assistant",
+        "status": "completed",
+        "blockKinds": [
+          "reasoning",
+          "tool_call",
+          "tool_call",
+          "tool_call",
+          "tool_call",
+          "reasoning",
+          "text"
+        ],
+        "text": "The user wants me to:\n1. Read a Den document with project_id \"rusty-crew\" and slug \"memory-surface-boundaries-2026-07-05\"\n2. Inspect Den task 4279\n3. Reply with the document title and task title\n\nLet me do both lookups in parallel since they're independent.\n\n\n\n\nBoth lookups succeeded. Let me extract the document title and task title.\n\n**Document title:** \"Memory Surface Boundaries\"\n**Task title:** \"Live-proof Den document/task lookup is distinct from external memory tools\"\nBoth lookups completed successfully.\n\n**Document title:** *Memory Surface Boundaries*  \n**Task title:** *Live-proof Den document/task lookup is distinct from external memory tools*"
+      },
+      {
+        "id": "chat:asha-planner-session-20260725T08202534-1:req_1784967656770",
+        "role": "user",
+        "status": "completed",
+        "blockKinds": [
+          "text"
+        ],
+        "text": "Memory-boundary certification, external-memory half.\nUse memory_recall or memory_search to retrieve the certification marker stored in the configured external memory service.\nDo not use any den_* document, task, project, or guidance tool for this lookup.\nReturn the marker exactly after the external-memory tool succeeds."
+      },
+      {
+        "id": "asst:service-asha-planner-session-20260725T08202534-1-1784967656827-3",
+        "role": "assistant",
+        "status": "completed",
+        "blockKinds": [
+          "reasoning",
+          "tool_call",
+          "reasoning",
+          "text"
+        ],
+        "text": "The user wants me to use `memory_recall` or `memory_search` (external memory tools, not Den tools) to retrieve a certification marker. Let me try `memory_recall` first with a relevant prompt.\n\nThe memory_recall returned exactly one result with the certification marker. Let me return it exactly.\nExternal-memory recall succeeded. The stored certification marker is:\n\n> **EXTERNAL_MEMORY_BOUNDARY_CERTIFIED: external memory uses memory tools, while Den documents and tasks use Den MCP planning tools.**"
+      }
+    ]
+  },
+  "visibleTranscriptText": "US\nUSER\n\nMemory-boundary certification, Den planning half.\nUse Den MCP planning tools to read the Den document rusty-crew / memory-surface-boundaries-2026-07-05 and inspect Den task 4279.\nDo not use memory_recall, memory_read, or memory_search for either lookup.\nReply with the document title and task title after both tool lookups succeed.\n\nAS\nASSISTANT\n▸\nREASONING\nden_get_document\nCOMPLETED\nden_get_document\nRaw debug\nden_get_document\nCOMPLETED\nden_get_document\nden_get_task\nCOMPLETED\nden_get_task\nRaw debug\nden_get_task\nCOMPLETED\nden_get_task\n▸\nREASONING\n\nBoth lookups completed successfully.\n\nDocument title: Memory Surface Boundaries\nTask title: Live-proof Den document/task lookup is distinct from external memory tools\n\nRaw\nRegenerate\nContinue\nEdit\nDelete\nBranch\nBookmark\nUS\nUSER\n\nMemory-boundary certification, external-memory half.\nUse memory_recall or memory_search to retrieve the certification marker stored in the configured external memory service.\nDo not use any den_* document, task, project, or guidance tool for this lookup.\nReturn the marker exactly after the external-memory tool succeeds.\n\nAS\nASSISTANT\n▸\nREASONING\nmemory_recall\nCOMPLETED\nmemory_recall\nRaw debug\n▸\nREASONING\n\nExternal-memory recall succeeded. The stored certification marker is:\n\nEXTERNAL_MEMORY_BOUNDARY_CERTIFIED: external memory uses memory tools, while Den documents and tasks use Den MCP planning tools.\nRaw\nRegenerate\nContinue\nEdit\nDelete\nBranch\nBookmark\n↓\nLatest",
+  "summaryLines": [
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/00-app-loaded.png",
+    "Selected requested live profile: asha-planner",
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/01-profile-selected.png",
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/03-prompt-sent.png",
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/04-assistant-complete.png",
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/05-prompt-sent.png",
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/06-assistant-complete.png",
+    "Screenshot: /home/dev/rusty-view/dist/.playwright/rusty-view-e2e/2765750/live-memory-boundary-cert.-d1b70--agent-memory-boundary-cert-chromium/live-artifacts/memory-boundary-both-turns-complete.png",
+    "Den planning tools observed: den_get_document, den_get_document, den_get_task, den_get_task",
+    "External memory tools observed: memory_recall",
+    "Manual close criterion: inspect the completed transcript screenshot and evidence packet; the first turn must render Den planning calls and the second must render the external-memory marker."
+  ],
+  "humanInspectionRequired": true,
+  "closeCriteria": "Inspect screenshots, visible transcript, trace, and evidence timeline before claiming live UI behavior works. Deterministic assertions are guardrails, not proof."
+}

@@ -1,7 +1,7 @@
 # Memory And Den Document Boundary Live Certification
 
-Status: active certification path for task 4708
-Date: 2026-07-08
+Status: certified for task 4279
+Date: 2026-07-25
 
 This note records the repeatable live path for the `asha-planner` style failure
 mode where an agent asks for Den documents or tasks but reaches for memory tools
@@ -129,3 +129,52 @@ Observed outcome:
 This certifies the debug-service path for the original confusing
 `asha-planner` prompt shape. Rusty View rendered-screenshot certification is
 still the higher-level UI evidence path when the frontend display itself changes.
+
+## 2026-07-25 Rusty View Certification
+
+The full rendered path was rerun through the Rusty View Playwright broker
+against the SQLite debug service and a live `deepseek-flash` provider.
+
+- Backend: `http://127.0.0.1:9348`
+- Profile/session:
+  `asha-planner` / `asha-planner-session-20260725T08202534-1`
+- Brain/provider: `chat-completions` / `deepseek-flash`
+- Den planning binding: profile-scoped `den` MCP server with tool profile
+  `planner`
+- External memory: metadata-mode adapter pointed at a bounded certification
+  endpoint that returned one unique stored marker
+- Broker run:
+  `rusty-view-20260725T082043.011595254Z-2764929`
+- Result: one Chromium scenario passed in 11.8 seconds with no browser console
+  errors or page errors
+
+Observed routing:
+
+| Prompt half | Completed model-callable tools | Excluded route |
+| --- | --- | --- |
+| Den document and task lookup | `den_get_document`, `den_get_task` | no external-memory tool calls |
+| External-memory marker recall | `memory_recall` | no `den_*` tool calls |
+
+The external-memory endpoint received exactly one request at
+`/v1/memories/recall`. The response marker was not present in the prompt, and
+the rendered assistant answer returned it only after the successful tool call.
+
+Durable evidence:
+
+- Rusty View task `#6189`, scenario
+  `apps/rusty-view-e2e/src/live/memory-boundary-cert.live.spec.ts`, committed at
+  `bb1565009284a9a4a2adab9126de7cd89faf8cbf`
+- [`den-planning-turn.png`](evidence/task-4279/den-planning-turn.png)
+- [`memory-boundary-both-turns.png`](evidence/task-4279/memory-boundary-both-turns.png)
+- [`visible-transcript.txt`](evidence/task-4279/visible-transcript.txt)
+- [`evidence-packet.json`](evidence/task-4279/evidence-packet.json)
+
+The certification also found and fixed three real rebuild/configuration gaps:
+
+1. runtime brain rebuilds did not receive service adapter factories;
+2. rebuilt brain executors did not receive those factories when resolving
+   model-callable tools;
+3. explicit `undefined` path overrides erased external-memory default paths.
+
+After those fixes, the profile was hot-swapped again before the passing run so
+the proof covers the rebuild path rather than startup-only behavior.
