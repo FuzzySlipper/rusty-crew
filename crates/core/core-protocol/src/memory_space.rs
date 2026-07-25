@@ -2348,12 +2348,18 @@ mod tests {
 
         assert_eq!(descriptor.space_id.as_str(), "session_memory");
         assert_eq!(descriptor.module_id.as_deref(), Some("runtime_memory"));
-        assert!(
-            descriptor
-                .description
-                .contains("not Den memory and not transcript storage"),
-            "descriptor should document the Crew-memory boundary"
-        );
+        for boundary in [
+            "Crew-owned",
+            "runtime search",
+            "transcript storage",
+            "external memory",
+            "Den planning",
+        ] {
+            assert!(
+                descriptor.description.contains(boundary),
+                "descriptor should document the {boundary} boundary"
+            );
+        }
         assert_eq!(
             descriptor.scope_model.allowed_scopes,
             vec![
