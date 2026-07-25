@@ -170,7 +170,7 @@ class DenMemoryV0Client implements DenMemoryClient {
         search: "/api/memory-entries/search",
         store: "/api/memory-entries",
         propose: "/api/candidates",
-        ...options.paths,
+        ...definedPathOverrides(options.paths),
       },
     });
   }
@@ -282,7 +282,7 @@ class DenMemoryHttpTransport {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 5_000;
     this.bearerToken = options.bearerToken;
-    this.paths = { ...defaultPaths, ...options.paths };
+    this.paths = { ...defaultPaths, ...definedPathOverrides(options.paths) };
   }
 
   async post<T>(
@@ -327,6 +327,18 @@ class DenMemoryHttpTransport {
         : {}),
     };
   }
+}
+
+function definedPathOverrides(
+  paths: Partial<DenMemoryClientPaths> | undefined,
+): Partial<DenMemoryClientPaths> {
+  if (paths === undefined) return {};
+  return Object.fromEntries(
+    Object.entries(paths).filter(
+      (entry): entry is [keyof DenMemoryClientPaths, string] =>
+        typeof entry[1] === "string",
+    ),
+  );
 }
 
 interface DenMemoryV0RecallPacket {

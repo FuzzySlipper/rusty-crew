@@ -25,6 +25,14 @@ const fetchImpl: DenMemoryFetch = async (input, init) => {
   });
 
   switch (url.pathname) {
+    case "/v1/memories/read":
+      return json({
+        ok: true,
+        data: {
+          id: body["id"],
+          title: "Default-path memory",
+        },
+      });
     case "/api/recall":
       return json({
         packet_id: "recall-v0-1",
@@ -180,10 +188,23 @@ const proposal = await client.propose({
 });
 assert.equal(proposal.proposalId, "proposal-1");
 
+const defaultPathClient = createDenMemoryClient({
+  baseUrl: "http://den.local",
+  fetchImpl,
+  paths: { read: undefined },
+});
+const defaultPathRead = await defaultPathClient.read({ id: "default-path" });
+assert.equal(defaultPathRead.id, "default-path");
+assert.equal(
+  calls.some((call) => call.url.endsWith("/v1/memories/read")),
+  true,
+);
+
 const v0Client = createDenMemoryClient({
   baseUrl: "http://den.local",
   fetchImpl,
   apiMode: "den-memories-v0",
+  paths: { recall: undefined },
 });
 const v0Recall = await v0Client.recall({
   prompt: "v0 recall works",
