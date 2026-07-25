@@ -1696,6 +1696,14 @@ export const API_CAPABILITIES = [
     ["diagnostics", "storage"],
   ),
   readCapability(
+    "admin.diagnostics.memory_surfaces",
+    "GET",
+    "/v1/admin/diagnostics/memory-surfaces",
+    "Read the operator catalog of memory-like surfaces, ownership, tools, provenance, and availability.",
+    "admin",
+    ["diagnostics", "memory"],
+  ),
+  readCapability(
     "admin.diagnostics.profiles",
     "GET",
     "/v1/admin/diagnostics/profiles",

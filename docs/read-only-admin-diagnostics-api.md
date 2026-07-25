@@ -39,6 +39,9 @@ Implemented read-only route families:
 - `GET /v1/admin/diagnostics/mcp`
 - `GET /v1/admin/diagnostics/channels`
 - `GET /v1/admin/diagnostics/persistence`
+- `GET /v1/admin/diagnostics/storage`
+- `GET /v1/admin/diagnostics/memory-spaces`
+- `GET /v1/admin/diagnostics/memory-surfaces`
 - `GET /v1/admin/diagnostics/observation`
 - `GET /v1/admin/diagnostics/background`
 - `GET /v1/admin/diagnostics/config`
@@ -46,6 +49,20 @@ Implemented read-only route families:
 - `GET /v1/admin/events/recent`
 
 Unknown routes return a stable `not_found` error envelope. Non-GET methods return `method_not_allowed`.
+
+## Memory Surface Catalog
+
+`GET /v1/admin/diagnostics/memory-surfaces` inventories memory-like surfaces
+without reading their records. Each item reports its stable surface id, owner,
+storage home, prompt policy, model-facing tool names, backend provenance,
+availability reason code, and a safe last error when one is known.
+
+The catalog keeps configured external memory distinct from Den planning MCP
+tools. An unavailable external memory client is reported as unavailable while
+Den documents, tasks, and guidance remain a profile-scoped MCP surface. The
+route also includes Crew profile/session memory, governance, lore, runtime
+search, skills, and session todo state so operators do not need database
+spelunking to understand the available surfaces.
 
 ## Pagination And Filters
 

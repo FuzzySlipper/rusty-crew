@@ -1617,6 +1617,17 @@
         "public": true
       },
       {
+        "id": "admin.diagnostics.memory_surfaces",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/memory-surfaces",
+        "description": "Read the operator catalog of memory-like surfaces, ownership, tools, provenance, and availability.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "memory"],
+        "public": true
+      },
+      {
         "id": "admin.diagnostics.profiles",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/profiles",
@@ -3464,6 +3475,13 @@
         "capability_id": "admin.diagnostics.storage",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/storage",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.memory_surfaces",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/memory-surfaces",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

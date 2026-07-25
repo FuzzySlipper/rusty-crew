@@ -1426,6 +1426,24 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/diagnostics/memory-surfaces": {
+      "get": {
+        "operationId": "adminDiagnosticsMemorySurfaces",
+        "summary": "Read the operator catalog of memory-like surfaces, ownership, tools, provenance, and availability.",
+        "tags": ["diagnostics", "memory"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.diagnostics.memory_surfaces",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/diagnostics/metrics": {
       "get": {
         "operationId": "adminDiagnosticsMetrics",
@@ -5293,7 +5311,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 212,
+    "capability_count": 213,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

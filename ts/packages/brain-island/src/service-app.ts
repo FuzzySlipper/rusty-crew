@@ -71,6 +71,7 @@ import {
   type AdminDiagnosticsContext,
   type MemorySpaceDiagnosticsProjection,
 } from "./admin-diagnostics-api.js";
+import { buildMemorySurfaceCatalog } from "./memory-surface-diagnostics.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
 import { handleAdminBrainCatalogRequest } from "./service-brain-catalog-routes.js";
 import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
@@ -337,6 +338,7 @@ import {
   preflightRustyCrewRuntimeConfig,
   rebuildConfiguredBrainRuntime,
   registerConfiguredScheduledJobs,
+  serviceExternalMemoryAvailability,
   ensureConfiguredSessionForChannelBinding,
   type RustyCrewConfiguredSession,
   type RustyCrewRuntimeConfig,
@@ -1952,10 +1954,36 @@ async function buildDiagnosticsContext(
       : [],
     runtimePauses: runtimePauseDiagnostics(state, sessions),
   });
+  const memorySurfaces = buildMemorySurfaceCatalog({
+    now,
+    dataDir: state.config.paths.dataDir,
+    profilesDir: state.runtimeConfig.profilesDir,
+    ...(state.runtimeConfig.skillsDir === undefined
+      ? {}
+      : { skillsDir: state.runtimeConfig.skillsDir }),
+    memorySpaceDescriptors:
+      memorySpaces?.items.map((item) => item.descriptor) ?? [],
+    storageSearchHealthy: storage?.searchHealthy ?? false,
+    externalMemory: serviceExternalMemoryAvailability(
+      state.config,
+      state.adapterFactories,
+    ),
+    mcpSurfaces: state.mcpManager.diagnostics(),
+    denPlanningToolNames: [
+      ...new Set(
+        sessions.flatMap((session) =>
+          session.toolProfile.tools
+            .map((tool) => tool.name)
+            .filter((toolName) => toolName.startsWith("den_")),
+        ),
+      ),
+    ],
+  });
   return {
     diagnostics,
     storage,
     memorySpaces,
+    memorySurfaces,
     profileRegistry,
     curatorCandidates: curatorReadback?.candidates,
     curatorMutations: curatorReadback?.mutations,

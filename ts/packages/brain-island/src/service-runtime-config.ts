@@ -844,7 +844,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           : undefined,
       toolAvailabilityPlanner: (request) =>
         input.bridge.planToolAvailability(request),
-      externalMemoryAvailability: serviceDenMemoryAvailability(
+      externalMemoryAvailability: serviceExternalMemoryAvailability(
         input.serviceConfig,
         input.adapterFactories,
       ),
@@ -1128,7 +1128,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         : undefined,
     toolAvailabilityPlanner: (request) =>
       input.bridge.planToolAvailability(request),
-    externalMemoryAvailability: serviceDenMemoryAvailability(
+    externalMemoryAvailability: serviceExternalMemoryAvailability(
       input.serviceConfig,
       input.adapterFactories,
     ),
@@ -1645,7 +1645,7 @@ function createServiceDenMemoryClient(
   });
 }
 
-function serviceDenMemoryAvailability(
+export function serviceExternalMemoryAvailability(
   serviceConfig: RustyCrewServiceConfig | undefined,
   adapterFactories:
     | Pick<ServiceAdapterFactories, "createDenMemoryClient">

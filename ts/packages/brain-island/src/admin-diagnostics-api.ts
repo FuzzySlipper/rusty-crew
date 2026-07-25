@@ -9,6 +9,7 @@ import type {
   StorageDiagnosticsProjection,
 } from "./runtime-diagnostics.js";
 import type { BackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
+import type { MemorySurfaceCatalogProjection } from "./memory-surface-diagnostics.js";
 import { apiCapabilityRegistry } from "./api-command-registry.js";
 import type { RuntimeConfigValidationPreflightReport } from "./service-runtime-config.js";
 import {
@@ -83,6 +84,7 @@ export interface AdminDiagnosticsContext {
   configValidation?: RuntimeConfigValidationPreflightReport;
   storage?: StorageDiagnosticsProjection;
   memorySpaces?: MemorySpaceDiagnosticsProjection;
+  memorySurfaces?: MemorySurfaceCatalogProjection;
   profileRegistry?: AdminProfileRegistryDiagnostics;
   curatorCandidates?: unknown;
   curatorMutations?: unknown;
@@ -218,6 +220,8 @@ export function handleAdminDiagnosticsRequest(
       return success(requestId, context.storage ?? null);
     case "/v1/admin/diagnostics/memory-spaces":
       return success(requestId, context.memorySpaces ?? null);
+    case "/v1/admin/diagnostics/memory-surfaces":
+      return success(requestId, context.memorySurfaces ?? null);
     case "/v1/admin/diagnostics/profiles":
       return success(requestId, context.profileRegistry ?? null);
     case "/v1/admin/profiles/registry":

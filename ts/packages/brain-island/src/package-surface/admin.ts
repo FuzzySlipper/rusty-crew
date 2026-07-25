@@ -9,7 +9,16 @@ export type {
   AdminPage,
   AdminRecentEvent,
   AdminRouteResult,
+  MemorySpaceDiagnosticsProjection,
 } from "../admin-diagnostics-api.js";
+export { buildMemorySurfaceCatalog } from "../memory-surface-diagnostics.js";
+export type {
+  MemorySurfaceAvailability,
+  MemorySurfaceCatalogInput,
+  MemorySurfaceCatalogItem,
+  MemorySurfaceCatalogProjection,
+  MemorySurfaceOwner,
+} from "../memory-surface-diagnostics.js";
 export {
   createMemoryAdminControlAuditSink,
   handleAdminControlRequest,

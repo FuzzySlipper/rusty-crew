@@ -10,6 +10,7 @@ import type {
 import {
   buildAdapterDiagnosticsProjection,
   buildBackgroundServiceDiagnosticsProjection,
+  buildMemorySurfaceCatalog,
   buildRuntimeDiagnosticsProjection,
   buildToolRegistryDiagnostics,
   handleAdminDiagnosticsRequest,
@@ -969,6 +970,77 @@ assert.equal(
 assert.equal(
   memorySpaceData.items[0]?.compatibility.conflictBehavior,
   "expected_revision",
+);
+
+const memorySurfaceCatalog = buildMemorySurfaceCatalog({
+  now,
+  dataDir: "/tmp/rusty-crew",
+  profilesDir: "/tmp/rusty-crew/config/profiles",
+  skillsDir: "/tmp/rusty-crew/missing-skills",
+  memorySpaceDescriptors: [profileDenseDescriptor()],
+  storageSearchHealthy: true,
+  externalMemory: {
+    configured: false,
+    clientAvailable: false,
+    mode: "metadata",
+    lastError: "external memory is not configured",
+  },
+  mcpSurfaces: [],
+  denPlanningToolNames: [],
+});
+const memorySurfaces = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/memory-surfaces" },
+  { diagnostics, memorySurfaces: memorySurfaceCatalog },
+);
+assert.equal(memorySurfaces.status, 200);
+const memorySurfaceData = okData<typeof memorySurfaceCatalog>(memorySurfaces);
+assert.deepEqual(
+  memorySurfaceData.items.map((item) => item.surfaceId),
+  [
+    "profile_prompt",
+    "profile_dense",
+    "session_memory",
+    "memory_governance",
+    "roleplay_lore",
+    "runtime_search",
+    "external_memory",
+    "den_planning",
+    "skills",
+    "session_todo",
+  ],
+);
+const externalMemorySurface = memorySurfaceData.items.find(
+  (item) => item.surfaceId === "external_memory",
+);
+assert.equal(externalMemorySurface?.owner, "den");
+assert.equal(externalMemorySurface?.availability, "unavailable");
+assert.equal(
+  externalMemorySurface?.availabilityReasonCode,
+  "memory_external_dependency_missing",
+);
+assert.equal(
+  externalMemorySurface?.lastSafeError,
+  "external memory is not configured",
+);
+assert.deepEqual(externalMemorySurface?.modelFacingToolNames, [
+  "memory_recall",
+  "memory_search",
+  "memory_read",
+  "memory_store",
+  "memory_propose",
+]);
+const denPlanningSurface = memorySurfaceData.items.find(
+  (item) => item.surfaceId === "den_planning",
+);
+assert.equal(denPlanningSurface?.availability, "profile_scoped");
+assert.match(
+  denPlanningSurface?.promptPolicy ?? "",
+  /Never injected as memory/,
+);
+assert.equal(
+  memorySurfaceData.items.find((item) => item.surfaceId === "roleplay_lore")
+    ?.availabilityReasonCode,
+  "memory_space_descriptor_missing",
 );
 
 const rootDiagnostics = handleAdminDiagnosticsRequest(
