@@ -2257,6 +2257,54 @@ mod tests {
     }
 
     #[test]
+    fn tool_availability_omits_external_memory_when_policy_is_off() {
+        let plan = plan_tool_availability(&ToolAvailabilityPlanInput {
+            selected_tools: vec![
+                "memory_recall".to_string(),
+                "memory_store".to_string(),
+                "den_project_list_tasks".to_string(),
+            ],
+            den_memory: ExternalMemoryDependencyPolicy {
+                configured: true,
+                client_available: true,
+                mode: ExternalMemoryToolMode::Off,
+                last_error: None,
+            },
+        });
+
+        assert_eq!(plan.selected_tools, vec!["den_project_list_tasks"]);
+        assert_eq!(plan.omitted_tools.len(), 2);
+        assert!(plan
+            .omitted_tools
+            .iter()
+            .all(|omission| omission.reason_code == "memory_policy_off"));
+    }
+
+    #[test]
+    fn tool_availability_reports_unconfigured_external_memory() {
+        let plan = plan_tool_availability(&ToolAvailabilityPlanInput {
+            selected_tools: vec![
+                "memory_search".to_string(),
+                "memory_propose".to_string(),
+                "den_project_list_tasks".to_string(),
+            ],
+            den_memory: ExternalMemoryDependencyPolicy {
+                configured: false,
+                client_available: false,
+                mode: ExternalMemoryToolMode::Candidate,
+                last_error: None,
+            },
+        });
+
+        assert_eq!(plan.selected_tools, vec!["den_project_list_tasks"]);
+        assert_eq!(plan.omitted_tools.len(), 2);
+        assert!(plan
+            .omitted_tools
+            .iter()
+            .all(|omission| { omission.reason_code == "memory_external_dependency_missing" }));
+    }
+
+    #[test]
     fn tool_availability_metadata_mode_keeps_reads_and_omits_writes() {
         let plan = plan_tool_availability(&ToolAvailabilityPlanInput {
             selected_tools: vec![
