@@ -99,7 +99,9 @@ Built-in Crew brains receive the same capabilities without the namespace:
 
 Both message tools default to a 300-second TTL and accept integer `ttlSeconds`
 values from 1 through 86,400. Review requesters should set the TTL explicitly
-based on expected queue delay.
+based on expected queue delay. The request TTL bounds delivery, claim, and turn
+start; it is not a deadline for completing the review or sending the one
+service-authored reply after the request was accepted. A reply has its own TTL.
 
 The reply tool deliberately accepts no recipient or correlation field. Rust
 loads the original accepted delivery, verifies the replying agent and session,
@@ -118,14 +120,17 @@ include:
 - `agent_message_serial_inbox_full` when the bounded inbox is full;
 - `agent_message_expired` for work whose TTL elapsed;
 - `agent_message_reply_original_not_found`,
-  `agent_message_reply_original_expired`, and
+  `agent_message_reply_original_not_accepted`, and
   `agent_message_reply_wrong_recipient` for invalid reply attempts;
 - `agent_message_recipient_session_changed` when queued work cannot safely
   follow a replaced reviewer session.
 
 Expiry is checked before claim and before native turn start. Expired, rejected,
 and failed requests are terminal; restart and queue repair do not resurrect
-them. Retrying is an explicit new review request with a new durable identity.
+them. An accepted request's reply path instead remains pinned to its stored
+sender agent/session identity. It needs no sender switchboard route and fails
+closed if that exact sender session is archived or replaced. Retrying is an
+explicit new review request with a new durable identity.
 
 ## Operator Readback
 

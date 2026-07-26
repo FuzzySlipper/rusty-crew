@@ -976,12 +976,6 @@ impl CoreEngine {
                 "agent_message_reply_original_not_accepted",
             ));
         }
-        if original.request.expires_at <= self.now() {
-            return Err(CoreError::new(
-                CoreErrorKind::ActionRejected,
-                "agent_message_reply_original_expired",
-            ));
-        }
         if original.request.to_agent_id != replying_agent_id
             || original.request.to_session_id != replying_session_id
         {
@@ -996,9 +990,19 @@ impl CoreEngine {
                 "agent_message_reply_sender_has_no_session",
             )
         })?;
-        let current_reply_session = self
+        let current_reply_session = match self
             .sessions
-            .get_session_by_agent(&original.request.from_agent_id)?;
+            .get_session_by_agent(&original.request.from_agent_id)
+        {
+            Ok(session) => session,
+            Err(error) if error.kind == CoreErrorKind::NotFound => {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "agent_message_reply_sender_session_changed",
+                ));
+            }
+            Err(error) => return Err(error),
+        };
         if current_reply_session.session_id != expected_reply_session
             || current_reply_session.status == SessionStatus::Archived
         {

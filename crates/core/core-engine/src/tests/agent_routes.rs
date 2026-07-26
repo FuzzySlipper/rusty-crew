@@ -2,11 +2,156 @@ use super::external_runtime::{binding, runtime};
 use super::*;
 use rusty_crew_core_protocol::{
     AgentActivation, AgentCoordinationCaller, AgentMessageCommand, AgentMessageDeliveryId,
-    AgentMessageDeliveryStatus, AgentMessageInputKind, AgentRoundCommand, AgentRoundId,
-    AgentRouteDelete, AgentRouteKey, AgentRouteTarget, AgentRouteWrite,
+    AgentMessageDeliveryStatus, AgentMessageInputKind, AgentMessageReplyCommand, AgentRoundCommand,
+    AgentRoundId, AgentRouteDelete, AgentRouteKey, AgentRouteTarget, AgentRouteWrite,
     ExternalAgentBindingMetadataWrite, ExternalMessageDeliveryPolicy, ExternalTurnPhase,
     ExternalTurnRequestId,
 };
+
+#[test]
+fn accepted_switchboard_message_reply_outlives_delivery_ttl_without_sender_route() {
+    let mut engine = test_engine();
+    let sender = engine
+        .create_session(session_config(
+            "unrouted-sender-session",
+            "unrouted-sender",
+            "sender-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let reviewer = engine
+        .create_session(session_config(
+            "reviewer-session",
+            "reviewer-agent",
+            "reviewer-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .put_agent_route(AgentRouteWrite {
+            route_key: AgentRouteKey::new("reviewer"),
+            label: "Reviewer".into(),
+            description: None,
+            enabled: true,
+            target: AgentRouteTarget::DirectBrain {
+                agent_id: reviewer.agent_id.clone(),
+                session_id: reviewer.session_id.clone(),
+            },
+            required_runtime_kind: Some(AgentDirectoryRuntimeKind::DirectBrain),
+            required_delivery_policy: None,
+            expected_revision: None,
+            updated_at: "2026-06-19T00:00:00Z".into(),
+        })
+        .unwrap();
+    assert!(engine
+        .get_agent_route_resolution(&AgentRouteKey::new("unrouted-sender"))
+        .unwrap()
+        .is_none());
+
+    let original = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::DirectBrain {
+                session_id: sender.session_id.clone(),
+                wake_id: "sender-wake".into(),
+                tool_call_id: "sender-call".into(),
+            },
+            delivery_id: AgentMessageDeliveryId::new("review-delivery"),
+            idempotency_key: "review-delivery".into(),
+            message_id: "review-message".into(),
+            to_address: "@reviewer".into(),
+            input_kind: AgentMessageInputKind::RoutedAgentMessage,
+            body: "review this change".into(),
+            collaboration_mode: None,
+            correlation_id: Some("review-correlation".into()),
+            require_wake: true,
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:01:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(original.status, AgentMessageDeliveryStatus::Accepted);
+    assert_eq!(
+        original.request.from_session_id,
+        Some(sender.session_id.clone())
+    );
+
+    engine.config.clock = ClockConfig::Fixed {
+        at: "2026-06-19T00:02:00Z".into(),
+    };
+    let reply_command = AgentMessageReplyCommand {
+        caller: AgentCoordinationCaller::DirectBrain {
+            session_id: reviewer.session_id.clone(),
+            wake_id: "reviewer-wake".into(),
+            tool_call_id: "reviewer-reply-call".into(),
+        },
+        delivery_id: AgentMessageDeliveryId::new("review-reply-delivery"),
+        idempotency_key: "review-reply-delivery".into(),
+        message_id: "review-reply-message".into(),
+        in_reply_to_message_id: "review-message".into(),
+        body: "review completed".into(),
+        created_at: "2026-06-19T00:02:00Z".into(),
+        expires_at: "2026-06-19T00:07:00Z".into(),
+    };
+    let reply = engine.reply_agent_message(reply_command.clone()).unwrap();
+    assert_eq!(reply.status, AgentMessageDeliveryStatus::Accepted);
+    assert_eq!(reply.request.requested_address, sender.agent_id.0);
+    assert_eq!(reply.request.to_session_id, Some(sender.session_id.clone()));
+    assert_eq!(
+        reply.request.correlation_id.as_deref(),
+        Some("review-correlation")
+    );
+    assert_eq!(
+        reply.request.reply_to_message_id.as_deref(),
+        Some("review-message")
+    );
+    assert!(reply.request.routing.is_none());
+
+    engine.archive_session(&sender.session_id).unwrap();
+    let archived_sender = engine.reply_agent_message(reply_command).unwrap_err();
+    assert_eq!(
+        archived_sender.message,
+        "agent_message_reply_sender_session_changed"
+    );
+
+    let expired = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::System {
+                sender_agent_id: AgentId::new("expired-system-sender"),
+            },
+            delivery_id: AgentMessageDeliveryId::new("expired-delivery"),
+            idempotency_key: "expired-delivery".into(),
+            message_id: "expired-message".into(),
+            to_address: "@reviewer".into(),
+            input_kind: AgentMessageInputKind::RoutedAgentMessage,
+            body: "stale request".into(),
+            collaboration_mode: None,
+            correlation_id: None,
+            require_wake: true,
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:01:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(expired.status, AgentMessageDeliveryStatus::Expired);
+    let expired_reply = engine
+        .reply_agent_message(AgentMessageReplyCommand {
+            caller: AgentCoordinationCaller::DirectBrain {
+                session_id: reviewer.session_id,
+                wake_id: "reviewer-wake-2".into(),
+                tool_call_id: "reviewer-reply-call-2".into(),
+            },
+            delivery_id: AgentMessageDeliveryId::new("expired-reply-delivery"),
+            idempotency_key: "expired-reply-delivery".into(),
+            message_id: "expired-reply-message".into(),
+            in_reply_to_message_id: "expired-message".into(),
+            body: "must not revive".into(),
+            created_at: "2026-06-19T00:02:00Z".into(),
+            expires_at: "2026-06-19T00:07:00Z".into(),
+        })
+        .unwrap_err();
+    assert_eq!(
+        expired_reply.message,
+        "agent_message_reply_original_not_accepted"
+    );
+}
 
 #[test]
 fn switchboard_routes_wake_the_exact_resolved_direct_session() {

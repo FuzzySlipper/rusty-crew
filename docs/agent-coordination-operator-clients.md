@@ -86,8 +86,13 @@ the requested address, route key and revision, and resolved concrete target.
 
 TTL is required by the CLI, is expressed in whole seconds, and is bounded to
 1-300 seconds. Expired deliveries and rounds remain terminal and are never
-resurrected. JSON output identifies the deployment role, target agent, delivery
-ID, round ID, status, and terminal reason. Message and round writes use the
-`toAddress` field. A correlated operator round includes
+resurrected. Once a message is accepted, that TTL no longer limits its one-reply
+return path: Crew retains the exact sender agent/session identity, and a later
+reply remains valid while that same sender session is active. The reply carries
+its own delivery TTL. No switchboard route for the sender is required.
+
+JSON output identifies the deployment role, target agent, delivery ID, round
+ID, status, and terminal reason. Message and round writes use the `toAddress`
+field. A correlated operator round includes
 a service-authored reply contract so direct and managed Codex recipients can
 return through their native Crew coordination tool.
