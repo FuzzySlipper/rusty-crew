@@ -1,0 +1,9 @@
+.git
+.den-serve.json
+**/node_modules
+**/target
+artifacts
+backups
+logs
+run
+tmp
