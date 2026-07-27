@@ -1,7 +1,9 @@
 .git
 .den-serve.json
 **/node_modules
-**/target
+/target
+!fixtures/runtime-config-parity/target
+!fixtures/runtime-config-parity/target/**
 artifacts
 backups
 logs
