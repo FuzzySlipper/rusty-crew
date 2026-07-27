@@ -1315,6 +1315,7 @@ export class ServiceExternalRuntimeController {
   async #resumePersistedBindings(controlled: ControlledRuntime): Promise<void> {
     controlled.bindingResumeFailures = [];
     const bindings = await this.#bridge.listExternalBindings();
+    const activeTurns = await this.#bridge.listActiveExternalTurns();
     for (const binding of bindings) {
       if (
         binding.runtimeId !== controlled.registration.runtimeId ||
@@ -1356,6 +1357,23 @@ export class ServiceExternalRuntimeController {
             name: currentBinding.label,
           });
         }
+        const bindingTurns = activeTurns.filter(
+          (turn) =>
+            turn.runtimeId === controlled.registration.runtimeId &&
+            turn.request.bindingId === currentBinding.bindingId,
+        );
+        if (bindingTurns.length > 0) {
+          const native = await controlled.driver.threadRead({
+            threadId: nativeThreadId,
+            includeTurns: true,
+          });
+          await this.#reconcileBindingExternalTurns(
+            controlled,
+            currentBinding,
+            native.thread,
+            bindingTurns,
+          );
+        }
       } catch (error) {
         controlled.bindingResumeFailures.push({
           bindingId: binding.bindingId,
@@ -1365,6 +1383,48 @@ export class ServiceExternalRuntimeController {
         });
       }
     }
+  }
+
+  async #reconcileBindingExternalTurns(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding,
+    nativeThread: unknown,
+    candidates?: readonly ExternalTurnCorrelation[],
+  ): Promise<number> {
+    const activeTurns =
+      candidates ?? (await this.#bridge.listActiveExternalTurns());
+    const matchingTurns = activeTurns.filter(
+      (turn) =>
+        turn.runtimeId === controlled.registration.runtimeId &&
+        turn.request.bindingId === binding.bindingId,
+    );
+    if (matchingTurns.length === 0) return 0;
+
+    const projected = projectExternalThread(nativeThread, null);
+    const nativeTurns = new Map(
+      projected.turns.map((turn) => [turn.turnId, turn] as const),
+    );
+    let reconciled = 0;
+    for (const turn of matchingTurns) {
+      if (turn.nativeTurnId == null) continue;
+      const nativeTurn = nativeTurns.get(turn.nativeTurnId);
+      const phase = nativeTurnTerminalPhase(nativeTurn?.status);
+      if (nativeTurn === undefined || phase === undefined) continue;
+      await this.#bridge.transitionExternalTurn({
+        controller: this.#controllerContext(controlled),
+        requestId: turn.request.requestId,
+        nextPhase: phase,
+        ...(phase === "completed"
+          ? {}
+          : { terminalReasonCode: `codex_${phase}` }),
+        ...(nativeTurn.error === null
+          ? {}
+          : { terminalError: nativeTurn.error }),
+        now: this.#now().toISOString(),
+      });
+      reconciled += 1;
+    }
+    return reconciled;
   }
 
   async #developerInstructionsForBinding(
@@ -2340,12 +2400,21 @@ export class ServiceExternalRuntimeController {
         );
       }
       case "reconcile_runtime":
-        return typeof binding.nativeThreadId !== "string"
-          ? { reconciled: true, nativeThreadId: null }
-          : controlled.driver.threadRead({
-              threadId: binding.nativeThreadId,
-              includeTurns: true,
-            });
+        if (typeof binding.nativeThreadId !== "string") {
+          return { reconciled: true, nativeThreadId: null };
+        }
+        {
+          const native = await controlled.driver.threadRead({
+            threadId: binding.nativeThreadId,
+            includeTurns: true,
+          });
+          await this.#reconcileBindingExternalTurns(
+            controlled,
+            binding,
+            native.thread,
+          );
+          return native;
+        }
       case "archive_binding":
         return this.#bridge.bindExternalAgent({
           binding: {
@@ -3348,6 +3417,15 @@ function crewTerminalStatus(
   if (phase === "failed") return "failed";
   if (phase === "interrupted") return "interrupted";
   if (phase === "outcome_unknown") return "outcomeUnknown";
+  return undefined;
+}
+
+function nativeTurnTerminalPhase(
+  status: string | undefined,
+): "completed" | "failed" | "interrupted" | undefined {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "interrupted") return "interrupted";
   return undefined;
 }
 

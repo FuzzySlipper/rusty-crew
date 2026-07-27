@@ -1617,6 +1617,103 @@ test("failed native turns retain diagnostics after raw cache eviction and contro
   }
 });
 
+for (const nativeStatus of ["completed", "interrupted"] as const) {
+  test(`controller reconciles a stale Crew turn from native ${nativeStatus} state after reconnect`, async () => {
+    const fixture = await externalCreationFixture(false);
+    let reloaded: ServiceExternalRuntimeController | undefined;
+    try {
+      const created = await fixture.controller.createAgentSession({
+        idempotencyKey: `reconcile-${nativeStatus}-session`,
+        runtimeId: fixture.runtimeId,
+        profileId: fixture.profileId,
+        cwd: fixture.dataDir,
+        requestedAt: new Date().toISOString(),
+      });
+      const firstDelivery = await fixture.bridge.deliverAgentMessage({
+        caller: { type: "system", senderAgentId: "operator" },
+        deliveryId: `reconcile-${nativeStatus}-delivery-1`,
+        idempotencyKey: `reconcile-${nativeStatus}-delivery-1`,
+        messageId: `reconcile-${nativeStatus}-message-1`,
+        toAddress: created.creation.session.agentId,
+        inputKind: "operator",
+        body: "start a turn that will finish while Crew is disconnected",
+        requireWake: true,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      assert.equal(firstDelivery.activation?.type, "external_turn_requested");
+      await fixture.controller.tick();
+      await waitUntil(
+        async () =>
+          (await fixture.bridge.listActiveExternalTurns()).some(
+            (turn) => turn.nativeTurnId === "native-turn-1",
+          ),
+        "first native turn activation",
+      );
+      const active = (await fixture.bridge.listActiveExternalTurns())[0];
+      assert.ok(active);
+      const nativeThread = fixture.transport.threads.find(
+        (thread) => thread.id === created.thread.threadId,
+      );
+      assert.ok(nativeThread);
+      const nativeTurn = (
+        nativeThread.turns as Array<Record<string, unknown>>
+      )[0];
+      assert.ok(nativeTurn);
+
+      await fixture.controller.stop();
+      nativeTurn.status = nativeStatus;
+      nativeTurn.completedAt = 2;
+      nativeTurn.durationMs = 1_000;
+
+      reloaded = new ServiceExternalRuntimeController({
+        bridge: fixture.bridge,
+        instanceId: `reconcile-${nativeStatus}-controller`,
+        driverFactory: (_registration, authority) =>
+          new CodexAppServerDriver(fixture.transport, authority, {
+            requestTimeoutMs: 50,
+          }),
+      });
+      await reloaded.connect(fixture.runtimeId);
+
+      assert.equal((await fixture.bridge.listActiveExternalTurns()).length, 0);
+      const reconciled = await fixture.bridge.getExternalTurn(
+        active.request.requestId,
+      );
+      assert.equal(reconciled?.phase, nativeStatus);
+      assert.equal(
+        reconciled?.terminalReasonCode,
+        nativeStatus === "completed" ? null : "codex_interrupted",
+      );
+
+      const nextDelivery = await fixture.bridge.deliverAgentMessage({
+        caller: { type: "system", senderAgentId: "operator" },
+        deliveryId: `reconcile-${nativeStatus}-delivery-2`,
+        idempotencyKey: `reconcile-${nativeStatus}-delivery-2`,
+        messageId: `reconcile-${nativeStatus}-message-2`,
+        toAddress: created.creation.session.agentId,
+        inputKind: "operator",
+        body: "start a fresh turn after reconnect",
+        requireWake: true,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      assert.equal(nextDelivery.activation?.type, "external_turn_requested");
+      await reloaded.tick();
+      await waitUntil(
+        async () =>
+          fixture.transport.sent.filter(
+            (message) => message.method === "turn/start",
+          ).length === 2,
+        "fresh native turn after reconnect",
+      );
+    } finally {
+      await reloaded?.stop().catch(() => undefined);
+      await fixture.cleanup();
+    }
+  });
+}
+
 test("controller archives native history with bindings and restores history explicitly", async () => {
   const fixture = await externalCreationFixture(false);
   try {
