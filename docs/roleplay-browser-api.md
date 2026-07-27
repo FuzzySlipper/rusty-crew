@@ -398,6 +398,14 @@ response includes:
 Config changes apply on the next wake/config reload boundary and patch only the
 `roleplayNarrator` profile section.
 
+The response also includes `multimodalContext`, an honest capability receipt
+derived from the selected narrator provider. Image input is disabled unless the
+provider metadata explicitly contains
+`{"narrator_image_input":{"supported":true}}`; optional `max_images`,
+`max_image_bytes`, and `max_total_bytes` values may lower Crew's hard bounds.
+Generated attachments remain excluded unless their Roleplay link also sets
+`include_in_narrator_context` to `true`.
+
 ```json
 {
   "tone": "wry",

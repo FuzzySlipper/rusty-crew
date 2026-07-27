@@ -145,6 +145,7 @@ export function toNativeChatCompletionsBrainRunInput(
       tool_call_id: message.toolCallId,
       tool_calls: message.toolCalls,
     })),
+    inputImages: input.inputImages,
     providerState: input.providerState
       ? toNativeProviderStateInput(input.providerState)
       : undefined,

@@ -169,6 +169,28 @@ JSON
 ```
 
 This no-secret example is specific to a proxy that owns upstream credentials.
+
+For an OpenAI-compatible chat-completions provider that accepts image content
+parts, opt in explicitly through non-secret metadata:
+
+```json
+{
+  "metadataJson": {
+    "narrator_image_input": {
+      "supported": true,
+      "max_images": 4,
+      "max_image_bytes": 10485760,
+      "max_total_bytes": 20971520
+    }
+  }
+}
+```
+
+Crew treats image input as unsupported when this declaration is absent. The
+optional bounds may only lower Crew's hard limits. This capability applies to
+opted-in Roleplay attachment links and does not make generated images part of
+ordinary transcript or provider-state history.
+
 For a normal API-key provider, include a typed secret:
 
 ```json

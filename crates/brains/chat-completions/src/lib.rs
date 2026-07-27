@@ -442,6 +442,30 @@ pub struct ChatCompletionMessage {
     pub tool_calls: Vec<ChatAssistantToolCall>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatCompletionsInputImage {
+    pub attachment_id: String,
+    pub mime_type: String,
+    pub bytes_base64: String,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ChatCompletionsRequestMessage {
+    pub role: ChatMessageRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ChatAssistantToolCall>,
+}
+
 impl ChatCompletionMessage {
     pub fn system(content: impl Into<String>) -> Self {
         Self::text(ChatMessageRole::System, content)
@@ -535,7 +559,7 @@ impl ChatToolChoice {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatCompletionsRequest {
     pub model: String,
-    pub messages: Vec<ChatCompletionMessage>,
+    pub messages: Vec<ChatCompletionsRequestMessage>,
     pub tools: Vec<ChatToolDescriptor>,
     pub tool_choice: Value,
     pub stream: bool,
@@ -639,10 +663,48 @@ impl ChatCompletionsRequestBuilder {
     }
 
     pub fn build(&self, messages: Vec<ChatCompletionMessage>) -> ChatCompletionsRequest {
+        self.build_with_images(messages, &[])
+    }
+
+    pub fn build_with_images(
+        &self,
+        messages: Vec<ChatCompletionMessage>,
+        input_images: &[ChatCompletionsInputImage],
+    ) -> ChatCompletionsRequest {
         let extensions = chat_completions_dialect_extensions(&self.config);
+        let mut request_messages = messages
+            .into_iter()
+            .map(chat_completions_request_message)
+            .collect::<Vec<_>>();
+        if !input_images.is_empty() {
+            if let Some(message) = request_messages
+                .iter_mut()
+                .rev()
+                .find(|message| message.role == ChatMessageRole::User)
+            {
+                let mut content = Vec::with_capacity(input_images.len() + 1);
+                if let Some(Value::String(text)) = message.content.take() {
+                    if !text.is_empty() {
+                        content.push(json!({"type": "text", "text": text}));
+                    }
+                }
+                content.extend(input_images.iter().map(|image| {
+                    json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!(
+                                "data:{};base64,{}",
+                                image.mime_type, image.bytes_base64
+                            )
+                        }
+                    })
+                }));
+                message.content = Some(Value::Array(content));
+            }
+        }
         ChatCompletionsRequest {
             model: self.config.model.clone(),
-            messages,
+            messages: request_messages,
             tools: self.tools.iter().map(adapt_neutral_tool).collect(),
             tool_choice: self.tool_choice.as_value(),
             stream: true,
@@ -660,6 +722,19 @@ impl ChatCompletionsRequestBuilder {
             thinking_budget: extensions.thinking_budget,
             max_tokens: self.config.max_output_tokens,
         }
+    }
+}
+
+fn chat_completions_request_message(
+    message: ChatCompletionMessage,
+) -> ChatCompletionsRequestMessage {
+    ChatCompletionsRequestMessage {
+        role: message.role,
+        content: message.content.map(Value::String),
+        reasoning_content: message.reasoning_content,
+        name: message.name,
+        tool_call_id: message.tool_call_id,
+        tool_calls: message.tool_calls,
     }
 }
 
@@ -892,6 +967,7 @@ impl Default for ChatCompletionsBrainLoopConfig {
 pub struct ChatCompletionsBrainLoopInput {
     pub context: BrainEventContext,
     pub messages: Vec<ChatCompletionMessage>,
+    pub input_images: Vec<ChatCompletionsInputImage>,
     pub provider_state: Option<BrainWakeProviderStateInput>,
     pub final_message_fallback: Option<ChatCompletionsFinalMessage>,
 }
@@ -969,6 +1045,7 @@ where
         self.wake(ChatCompletionsBrainLoopInput {
             context,
             messages,
+            input_images: Vec::new(),
             provider_state: None,
             final_message_fallback: None,
         })
@@ -1032,10 +1109,13 @@ where
 
         loop {
             provider_request_count += 1;
-            let request = self.request_builder.build(messages.clone());
-            provider_request_debug_samples.push(
-                serde_json::to_value(&request).unwrap_or_else(|_| json!({"error": "serialize"})),
-            );
+            let request = self
+                .request_builder
+                .build_with_images(messages.clone(), &input.input_images);
+            provider_request_debug_samples.push(chat_completions_debug_request(
+                &request,
+                &input.input_images,
+            ));
             let mut assistant_text = String::new();
             let mut assistant_reasoning = String::new();
             let mut tool_calls = Vec::new();
@@ -1370,6 +1450,37 @@ where
             }
         }
     }
+}
+
+fn chat_completions_debug_request(
+    request: &ChatCompletionsRequest,
+    input_images: &[ChatCompletionsInputImage],
+) -> Value {
+    let mut value = serde_json::to_value(request).unwrap_or_else(|_| json!({"error": "serialize"}));
+    let Some(messages) = value.get_mut("messages").and_then(Value::as_array_mut) else {
+        return value;
+    };
+    let mut image_index = 0usize;
+    for message in messages {
+        let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for part in parts {
+            if part.get("type").and_then(Value::as_str) != Some("image_url") {
+                continue;
+            }
+            let image = input_images.get(image_index);
+            part["image_url"] = json!({
+                "redacted": true,
+                "reason": "image_bytes",
+                "attachment_id": image.map(|item| item.attachment_id.as_str()),
+                "mime_type": image.map(|item| item.mime_type.as_str()),
+                "byte_size": image.map(|item| item.byte_size),
+            });
+            image_index += 1;
+        }
+    }
+    value
 }
 
 #[derive(Debug, Default)]
@@ -2709,6 +2820,34 @@ mod tests {
     }
 
     #[test]
+    fn opted_image_is_serialized_once_and_redacted_from_debug_samples() {
+        let image = ChatCompletionsInputImage {
+            attachment_id: "attachment-1".to_string(),
+            mime_type: "image/png".to_string(),
+            bytes_base64: "YWJj".to_string(),
+            byte_size: 3,
+        };
+        let request =
+            ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig::new("test-model"))
+                .build_with_images(
+                    vec![
+                        ChatCompletionMessage::system("system"),
+                        ChatCompletionMessage::user("look at this"),
+                    ],
+                    std::slice::from_ref(&image),
+                );
+        let wire = serde_json::to_string(&request).expect("serialize image request");
+        assert_eq!(wire.matches("data:image/png;base64,YWJj").count(), 1);
+        assert_eq!(wire.matches("\"type\":\"image_url\"").count(), 1);
+
+        let debug = chat_completions_debug_request(&request, &[image]);
+        let debug_json = serde_json::to_string(&debug).expect("serialize debug request");
+        assert!(!debug_json.contains("YWJj"));
+        assert!(debug_json.contains("attachment-1"));
+        assert!(debug_json.contains("image_bytes"));
+    }
+
+    #[test]
     fn live_provider_has_no_request_deadline_by_default() {
         let base_url = delayed_chat_completions_server(Duration::from_millis(100));
         let mut client =
@@ -3557,6 +3696,7 @@ mod tests {
             ChatCompletionsBrainLoopInput {
                 context: context(),
                 messages: vec![ChatCompletionMessage::user("use a tool")],
+                input_images: Vec::new(),
                 provider_state: None,
                 final_message_fallback: None,
             },
@@ -3755,6 +3895,7 @@ mod tests {
                 ChatCompletionMessage::system("system"),
                 ChatCompletionMessage::user("second question"),
             ],
+            input_images: Vec::new(),
             provider_state: Some(provider_state),
             final_message_fallback: None,
         });
@@ -3874,6 +4015,7 @@ mod tests {
         let second = second_brain.wake(ChatCompletionsBrainLoopInput {
             context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
             messages: vec![ChatCompletionMessage::user("second question")],
+            input_images: Vec::new(),
             provider_state: Some(provider_state_input(state)),
             final_message_fallback: None,
         });
@@ -3939,6 +4081,7 @@ mod tests {
         let second = second_brain.wake(ChatCompletionsBrainLoopInput {
             context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
             messages: vec![ChatCompletionMessage::user("second question")],
+            input_images: Vec::new(),
             provider_state: Some(BrainWakeProviderStateInput {
                 module_id: state.module_id,
                 strategy_id: state.strategy_id,
@@ -4031,6 +4174,7 @@ mod tests {
         let output = brain.wake(ChatCompletionsBrainLoopInput {
             context: BrainEventContext::new("wake-2", SessionId::new("session-1")),
             messages: vec![ChatCompletionMessage::user("new question")],
+            input_images: Vec::new(),
             provider_state: Some(prior_state),
             final_message_fallback: None,
         });
@@ -4085,6 +4229,7 @@ mod tests {
         let next = next_brain.wake(ChatCompletionsBrainLoopInput {
             context: BrainEventContext::new("wake-3", SessionId::new("session-1")),
             messages: vec![ChatCompletionMessage::user("third question")],
+            input_images: Vec::new(),
             provider_state: Some(BrainWakeProviderStateInput {
                 module_id: state.module_id,
                 strategy_id: state.strategy_id,
@@ -5002,6 +5147,7 @@ mod tests {
         let output = brain.wake(ChatCompletionsBrainLoopInput {
             context,
             messages: vec![ChatCompletionMessage::user("hi")],
+            input_images: Vec::new(),
             provider_state: None,
             final_message_fallback: Some(ChatCompletionsFinalMessage {
                 text: Some("final-only".to_string()),

@@ -85,6 +85,10 @@ import type {
 } from "@rusty-crew/contracts";
 
 import type { NativeAgentCoordinationBridgeMethods } from "./agent-coordination-public-api.js";
+import type {
+  ChatCompletionsChatCompletionMessage,
+  ChatCompletionsInputImage,
+} from "./chat-completions-public-api.js";
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
 import type {
   NativeModelProviderCredentialKind,
@@ -127,6 +131,10 @@ export type {
   NativeServiceCredentialDelete,
   NativeServiceCredentialWrite,
 } from "./model-provider-public-api.js";
+export type {
+  ChatCompletionsChatCompletionMessage,
+  ChatCompletionsInputImage,
+} from "./chat-completions-public-api.js";
 
 export interface NativeSessionConfigInput {
   sessionId: string;
@@ -304,19 +312,11 @@ export interface OpenAiResponsesToolRequest {
   argumentsJson: string;
 }
 
-export interface ChatCompletionsChatCompletionMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content?: string;
-  reasoningContent?: string;
-  name?: string;
-  toolCallId?: string;
-  toolCalls?: unknown[];
-}
-
 export interface ChatCompletionsBrainRunInput {
   wakeId: string;
   sessionId: SessionId;
   messages: ChatCompletionsChatCompletionMessage[];
+  inputImages?: ChatCompletionsInputImage[];
   providerState?: BrainWakeProviderStateInput;
   tools?: Array<{
     name: string;

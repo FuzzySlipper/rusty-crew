@@ -12,6 +12,7 @@ import type {
 } from "../src/rusty-view-chat-api.js";
 import { rustyViewToolCallDebugDetail } from "../src/service-rusty-view-chat-operations.js";
 import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
+import { narratorImageInputCapability } from "../src/narrator-image-context.js";
 import {
   brainToolResultToHostOutput,
   executePreparedBrainHostToolRequest,
@@ -96,6 +97,32 @@ function harness(rootDir: string, now = "2026-07-25T12:00:00.000Z") {
     });
   return { attachments, bridge, createStore, events };
 }
+
+test("narrator image provider capability is explicit and bounded", () => {
+  assert.deepEqual(narratorImageInputCapability({}), {
+    supported: false,
+    maxImages: 0,
+    maxImageBytes: 0,
+    maxTotalBytes: 0,
+    reasonCode: "narrator_image_input_not_configured",
+  });
+  assert.deepEqual(
+    narratorImageInputCapability({
+      narrator_image_input: {
+        supported: true,
+        max_images: 999,
+        max_image_bytes: 999_999_999,
+        max_total_bytes: 999_999_999,
+      },
+    }),
+    {
+      supported: true,
+      maxImages: 4,
+      maxImageBytes: 10 * 1024 * 1024,
+      maxTotalBytes: 20 * 1024 * 1024,
+    },
+  );
+});
 
 test("typed tool images persist, replay after restart, link, and remove without base64 events", async () => {
   const root = await mkdtemp(join(tmpdir(), "rusty-tool-media-"));
@@ -224,6 +251,182 @@ test("expired tool media is inaccessible and its stored bytes are purged", async
     (error: unknown) =>
       error instanceof ToolMediaAttachmentError &&
       error.reasonCode === "attachment_expired",
+  );
+});
+
+test("narrator image context requires explicit link opt-in and deduplicates durable links", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-narrator-media-"));
+  const testHarness = harness(root);
+  const store = testHarness.createStore();
+  const [reference] = await store.persistImages({
+    sessionId: "session-narrator",
+    wakeId: "wake-image",
+    callId: "call-image",
+    toolName: "image_generate",
+    result: {
+      content: [
+        {
+          type: "image",
+          data: png(3, 4).toString("base64"),
+          mimeType: "image/png",
+        },
+      ],
+      details: {},
+    },
+  });
+  assert.ok(reference);
+  const record = testHarness.attachments.get(reference.attachmentId)!;
+  const link = (id: string, include: boolean) => ({
+    link_id: id,
+    attachment_id: record.attachment_id,
+    session_id: record.session_id,
+    message_id: "assistant-image-message",
+    block_id: null,
+    scope_id: null,
+    metadata_json: {
+      source: "roleplay_image_generation",
+      include_in_narrator_context: include,
+    },
+    created_at: "2026-07-25T12:00:01.000Z",
+  });
+  testHarness.attachments.set(reference.attachmentId, {
+    ...record,
+    links: [link("link-default", false)],
+  });
+  const capability = {
+    supported: true,
+    maxImages: 4,
+    maxImageBytes: 10 * 1024 * 1024,
+    maxTotalBytes: 20 * 1024 * 1024,
+  };
+  const excluded = await store.resolveNarratorImageContext({
+    sessionId: "session-narrator" as SessionId,
+    capability,
+  });
+  assert.deepEqual(excluded.images, []);
+
+  testHarness.attachments.set(reference.attachmentId, {
+    ...record,
+    links: [link("link-opt-in-1", true), link("link-opt-in-2", true)],
+  });
+  const restarted = testHarness.createStore();
+  const included = await restarted.resolveNarratorImageContext({
+    sessionId: "session-narrator" as SessionId,
+    capability,
+  });
+  assert.deepEqual(included.selectedAttachmentIds, [reference.attachmentId]);
+  assert.equal(included.images.length, 1);
+  assert.equal(included.images[0]?.bytesBase64, png(3, 4).toString("base64"));
+});
+
+test("narrator image context reports unsupported, removed, missing, and bounded inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-narrator-media-bounds-"));
+  const testHarness = harness(root);
+  const store = testHarness.createStore();
+  const references = [];
+  for (const [index, dimensions] of [
+    [2, 2],
+    [3, 3],
+  ].entries()) {
+    const [reference] = await store.persistImages({
+      sessionId: "session-narrator",
+      wakeId: `wake-image-${index}`,
+      callId: `call-image-${index}`,
+      toolName: "image_generate",
+      result: {
+        content: [
+          {
+            type: "image",
+            data: png(dimensions[0]!, dimensions[1]!).toString("base64"),
+            mimeType: "image/png",
+          },
+        ],
+        details: {},
+      },
+    });
+    assert.ok(reference);
+    references.push(reference);
+    const record = testHarness.attachments.get(reference.attachmentId)!;
+    testHarness.attachments.set(reference.attachmentId, {
+      ...record,
+      links: [
+        {
+          link_id: `link-${index}`,
+          attachment_id: record.attachment_id,
+          session_id: record.session_id,
+          message_id: `message-${index}`,
+          block_id: null,
+          scope_id: null,
+          metadata_json: {
+            source: "roleplay_image_generation",
+            include_in_narrator_context: true,
+          },
+          created_at: `2026-07-25T12:00:0${index}.000Z`,
+        },
+      ],
+    });
+  }
+
+  const unsupported = await store.resolveNarratorImageContext({
+    sessionId: "session-narrator" as SessionId,
+    capability: {
+      supported: false,
+      maxImages: 0,
+      maxImageBytes: 0,
+      maxTotalBytes: 0,
+      reasonCode: "narrator_image_input_not_configured",
+    },
+  });
+  assert.equal(unsupported.images.length, 0);
+  assert.equal(
+    unsupported.diagnostics[0]?.reasonCode,
+    "narrator_image_input_not_configured",
+  );
+
+  const bounded = await store.resolveNarratorImageContext({
+    sessionId: "session-narrator" as SessionId,
+    capability: {
+      supported: true,
+      maxImages: 1,
+      maxImageBytes: 1024,
+      maxTotalBytes: 1024,
+    },
+  });
+  assert.equal(bounded.images.length, 1);
+  assert.ok(
+    bounded.diagnostics.some(
+      (item) => item.reasonCode === "narrator_image_count_limit",
+    ),
+  );
+
+  const removedRecord = testHarness.attachments.get(
+    references[0]!.attachmentId,
+  )!;
+  testHarness.attachments.set(references[0]!.attachmentId, {
+    ...removedRecord,
+    status: "removed",
+  });
+  await store.removeContent(
+    testHarness.attachments.get(references[1]!.attachmentId)!,
+  );
+  const unavailable = await store.resolveNarratorImageContext({
+    sessionId: "session-narrator" as SessionId,
+    capability: {
+      supported: true,
+      maxImages: 4,
+      maxImageBytes: 1024,
+      maxTotalBytes: 2048,
+    },
+  });
+  assert.ok(
+    unavailable.diagnostics.some(
+      (item) => item.reasonCode === "narrator_image_attachment_removed",
+    ),
+  );
+  assert.ok(
+    unavailable.diagnostics.some(
+      (item) => item.reasonCode === "narrator_image_content_unavailable",
+    ),
   );
 });
 

@@ -9,6 +9,10 @@ import type {
   BrainToolMediaSink,
 } from "./brain-tool-media.js";
 import type { AttachmentRecord, ChatEvent } from "./rusty-view-chat-api.js";
+import type {
+  NarratorImageContextResolution,
+  NarratorImageInputCapability,
+} from "./narrator-image-context.js";
 
 const MAX_TOOL_IMAGE_BYTES = 20 * 1024 * 1024;
 const MIME_EXTENSIONS = new Map([
@@ -92,6 +96,141 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
         metadata.source === "brain_tool_media" && metadata.wake_id === wakeId
       );
     });
+  }
+
+  async resolveNarratorImageContext(input: {
+    sessionId: SessionId;
+    capability: NarratorImageInputCapability;
+  }): Promise<NarratorImageContextResolution> {
+    const records = await this.queryAllAttachments({
+      session_id: input.sessionId,
+      include_removed: true,
+      include_expired: true,
+      expired_only: false,
+      now: this.options.now(),
+    });
+    const selected = records
+      .flatMap((attachment) =>
+        attachment.links
+          .filter((link) => {
+            const metadata = recordValue(link.metadata_json);
+            return (
+              metadata.source === "roleplay_image_generation" &&
+              metadata.include_in_narrator_context === true
+            );
+          })
+          .map((link) => ({ attachment, link })),
+      )
+      .sort(
+        (left, right) =>
+          left.link.created_at.localeCompare(right.link.created_at) ||
+          left.attachment.attachment_id.localeCompare(
+            right.attachment.attachment_id,
+          ) ||
+          left.link.link_id.localeCompare(right.link.link_id),
+      );
+    const selectedAttachmentIds = [
+      ...new Set(selected.map(({ attachment }) => attachment.attachment_id)),
+    ];
+    const diagnostics: NarratorImageContextResolution["diagnostics"] = [];
+    if (!input.capability.supported) {
+      if (selectedAttachmentIds.length > 0) {
+        diagnostics.push({
+          reasonCode:
+            input.capability.reasonCode ?? "narrator_image_input_unsupported",
+          summary: `${selectedAttachmentIds.length} opted-in narrator image(s) were omitted because the provider is not configured for image input`,
+        });
+      }
+      return {
+        capability: input.capability,
+        selectedAttachmentIds,
+        images: [],
+        diagnostics,
+      };
+    }
+
+    const images: NarratorImageContextResolution["images"] = [];
+    let totalBytes = 0;
+    for (const attachmentId of selectedAttachmentIds) {
+      const attachment = records.find(
+        (candidate) => candidate.attachment_id === attachmentId,
+      );
+      if (!attachment) {
+        diagnostics.push({
+          reasonCode: "narrator_image_attachment_missing",
+          attachmentId,
+          summary: "An opted-in narrator image attachment was not found",
+        });
+        continue;
+      }
+      if (attachment.status !== "active") {
+        diagnostics.push({
+          reasonCode: "narrator_image_attachment_removed",
+          attachmentId,
+          summary: "An opted-in narrator image attachment has been removed",
+        });
+        continue;
+      }
+      if (images.length >= input.capability.maxImages) {
+        diagnostics.push({
+          reasonCode: "narrator_image_count_limit",
+          attachmentId,
+          summary: `Narrator image input is limited to ${input.capability.maxImages} image(s)`,
+        });
+        continue;
+      }
+      if (attachment.byte_size > input.capability.maxImageBytes) {
+        diagnostics.push({
+          reasonCode: "narrator_image_size_limit",
+          attachmentId,
+          summary: `Narrator image ${attachmentId} exceeds the configured per-image byte limit`,
+        });
+        continue;
+      }
+      if (totalBytes + attachment.byte_size > input.capability.maxTotalBytes) {
+        diagnostics.push({
+          reasonCode: "narrator_image_total_size_limit",
+          attachmentId,
+          summary:
+            "Narrator image input exceeds the configured total byte limit",
+        });
+        continue;
+      }
+      try {
+        const content = await this.readContent(input.sessionId, attachmentId);
+        if (content.bytes.length !== attachment.byte_size) {
+          throw new ToolMediaAttachmentError(
+            "attachment_byte_size_mismatch",
+            "attachment byte size does not match stored content",
+          );
+        }
+        images.push({
+          attachmentId,
+          mimeType: attachment.mime_type,
+          bytesBase64: content.bytes.toString("base64"),
+          byteSize: content.bytes.length,
+        });
+        totalBytes += content.bytes.length;
+      } catch (error) {
+        diagnostics.push({
+          reasonCode:
+            error instanceof ToolMediaAttachmentError
+              ? error.reasonCode
+              : "narrator_image_content_unavailable",
+          attachmentId,
+          summary:
+            error instanceof Error
+              ? error.message
+              : "Narrator image content is unavailable",
+        });
+      }
+    }
+    return {
+      capability: input.capability,
+      selectedAttachmentIds,
+      images,
+      diagnostics,
+    };
   }
 
   async linkAttachmentsToMessage(input: {

@@ -8,6 +8,7 @@ import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 import type { BrainToolMediaSink } from "./brain-tool-media.js";
+import type { NarratorImageContextResolver } from "./narrator-image-context.js";
 
 export interface BrainHostContext {
   profile: LoadedProfileContext;
@@ -22,4 +23,5 @@ export interface BrainHostContext {
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   toolMediaSink?: BrainToolMediaSink;
+  narratorImageContextResolver?: NarratorImageContextResolver;
 }

@@ -564,6 +564,13 @@ try {
     "/v1/admin/roleplay/profiles/rp-profile/narrator-config",
   );
   assert.equal(narratorReadback.body.data.config.memoryDepth, "deep");
+  assert.deepEqual(narratorReadback.body.data.multimodalContext, {
+    supported: false,
+    maxImages: 0,
+    maxImageBytes: 0,
+    maxTotalBytes: 0,
+    reasonCode: "narrator_provider_alias_missing",
+  });
   assert.equal(
     narratorReadback.body.data.config.stylePrompt,
     "Use lean, emotionally direct narration with one vivid sensory anchor.",

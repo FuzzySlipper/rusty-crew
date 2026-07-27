@@ -9,6 +9,10 @@ import { failure, successRoute } from "./service-route-results.js";
 import { loadProfileConfig } from "./profile-loading.js";
 import { createLocalToolProfileStore } from "./local-tool-profiles.js";
 import {
+  narratorImageInputCapability,
+  type NarratorImageInputCapability,
+} from "./narrator-image-context.js";
+import {
   handleAdminRoleplayLoreRequest,
   handleBrowserProfileLoreLayersRequest,
 } from "./roleplay/lore-routes.js";
@@ -940,6 +944,10 @@ async function handleRoleplayNarratorConfigRequest(
       return successRoute(requestIdValue, {
         profileId,
         config: await readRoleplayNarratorConfig(state, profileId),
+        multimodalContext: await readRoleplayNarratorImageCapability(
+          state,
+          profileId,
+        ),
         applies: "next_wake",
       });
     }
@@ -952,6 +960,10 @@ async function handleRoleplayNarratorConfigRequest(
       return successRoute(requestIdValue, {
         profileId,
         config,
+        multimodalContext: await readRoleplayNarratorImageCapability(
+          state,
+          profileId,
+        ),
         applies: "next_wake",
       });
     }
@@ -3034,6 +3046,45 @@ async function readRoleplayNarratorConfig(
     profileId as ProfileId,
   );
   return normalizeRoleplayNarratorConfig(state, profile.roleplayNarrator ?? {});
+}
+
+async function readRoleplayNarratorImageCapability(
+  state: RoleplayRouteContext,
+  profileId: string,
+): Promise<NarratorImageInputCapability> {
+  const profile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId as ProfileId,
+  );
+  if (!profile.providerAlias) {
+    return {
+      supported: false,
+      maxImages: 0,
+      maxImageBytes: 0,
+      maxTotalBytes: 0,
+      reasonCode: "narrator_provider_alias_missing",
+    };
+  }
+  const provider = await state.bridge.getModelProvider(profile.providerAlias);
+  if (!provider || provider.status !== "active") {
+    return {
+      supported: false,
+      maxImages: 0,
+      maxImageBytes: 0,
+      maxTotalBytes: 0,
+      reasonCode: "narrator_provider_unavailable",
+    };
+  }
+  if (provider.protocol !== "chat_completions") {
+    return {
+      supported: false,
+      maxImages: 0,
+      maxImageBytes: 0,
+      maxTotalBytes: 0,
+      reasonCode: "narrator_provider_protocol_unsupported",
+    };
+  }
+  return narratorImageInputCapability(provider.metadataJson);
 }
 
 async function writeRoleplayNarratorConfig(

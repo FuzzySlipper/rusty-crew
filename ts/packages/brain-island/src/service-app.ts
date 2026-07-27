@@ -990,6 +990,7 @@ export async function createRustyCrewServiceApp(
       providerRequestDebugStore,
       browserResources,
       toolMediaSink: toolMediaAttachments,
+      narratorImageContextResolver: toolMediaAttachments,
       onBrainWakeResult: (observation) => {
         const state = liveState;
         if (state === undefined) return;
@@ -3346,6 +3347,7 @@ async function applyServiceRuntimeConfigFromDisk(
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
     toolMediaSink: state.toolMediaAttachments,
+    narratorImageContextResolver: state.toolMediaAttachments,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -3386,6 +3388,7 @@ async function rebuildServiceBrainRuntime(
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
     toolMediaSink: state.toolMediaAttachments,
+    narratorImageContextResolver: state.toolMediaAttachments,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });

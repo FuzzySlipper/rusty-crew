@@ -68,6 +68,8 @@ import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { BrainToolMediaSink } from "./brain-tool-media.js";
+import type { NarratorImageContextResolver } from "./narrator-image-context.js";
+import { narratorImageInputCapability } from "./narrator-image-context.js";
 import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
 import {
   channelReadbackTool,
@@ -817,6 +819,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
   toolMediaSink?: BrainToolMediaSink;
+  narratorImageContextResolver?: NarratorImageContextResolver;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
@@ -930,6 +933,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             providerRequestDebugStore: input.providerRequestDebugStore,
             browserResources,
             toolMediaSink: input.toolMediaSink,
+            narratorImageContextResolver: input.narratorImageContextResolver,
             localCodeResourcePolicy,
           }),
           {
@@ -1052,6 +1056,7 @@ function modelProviderToBrainModelConfig(
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
     reasoningBudgetTokens: provider.reasoningBudgetTokens,
+    narratorImageInput: narratorImageInputCapability(provider.metadataJson),
   };
 }
 
@@ -1110,6 +1115,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
   toolMediaSink?: BrainToolMediaSink;
+  narratorImageContextResolver?: NarratorImageContextResolver;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
@@ -1196,6 +1202,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         providerRequestDebugStore: input.providerRequestDebugStore,
         browserResources,
         toolMediaSink: input.toolMediaSink,
+        narratorImageContextResolver: input.narratorImageContextResolver,
         localCodeResourcePolicy,
       }),
       {
@@ -1498,6 +1505,7 @@ async function createConfiguredBrain(
     providerRequestDebugStore?: ProviderRequestDebugStore;
     browserResources: ServiceBrowserResources;
     toolMediaSink?: BrainToolMediaSink;
+    narratorImageContextResolver?: NarratorImageContextResolver;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
 ): Promise<BrainHostExecutor> {
@@ -1523,6 +1531,7 @@ async function createConfiguredBrain(
     toolCallDebugStore: options.toolCallDebugStore,
     providerRequestDebugStore: options.providerRequestDebugStore,
     toolMediaSink: options.toolMediaSink,
+    narratorImageContextResolver: options.narratorImageContextResolver,
   });
 }
 

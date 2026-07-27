@@ -27,6 +27,8 @@ import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
 import { chatCompletionsMaxToolRounds } from "./chat-completions-continuation-policy.js";
+import type { RoleplayNarratorProviderPhase } from "./roleplay-narrator-fsm.js";
+import type { NarratorImageContextResolution } from "./narrator-image-context.js";
 
 export function createChatCompletionsBrainHost(
   context: BrainHostContext,
@@ -52,6 +54,7 @@ export function createChatCompletionsBrainHost(
           submitEvent: phase.submitEvent,
           liveEvents: phase.submitEvent !== undefined,
           planActions: phase.planActions,
+          narratorPhase: phase.phase,
         }),
       planActions: context.planActions,
       resolveTools: context.toolResolver,
@@ -136,6 +139,7 @@ interface RustChatCompletionsBrainImplementationOptions {
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   liveEvents?: boolean;
   planActions?: BrainActionPlanner;
+  narratorPhase?: RoleplayNarratorProviderPhase;
 }
 
 function createRustChatCompletionsBrainHostExecutor(
@@ -159,10 +163,30 @@ function createRustChatCompletionsBrainHostExecutor(
             (async (event: BrainEventEnvelope) => {
               await bridge.submitBrainEvent(event);
             }));
+      const narratorImageContext =
+        implementation.narratorPhase === "compose" ||
+        implementation.narratorPhase === "compose_draft"
+          ? await context.narratorImageContextResolver?.resolveNarratorImageContext(
+              {
+                sessionId: wake.sessionId,
+                capability: context.profile.profile.modelConfig
+                  .narratorImageInput ?? {
+                  supported: false,
+                  maxImages: 0,
+                  maxImageBytes: 0,
+                  maxTotalBytes: 0,
+                  reasonCode: "narrator_image_input_not_configured",
+                },
+              },
+            )
+          : undefined;
       const input: ChatCompletionsBrainRunInput = {
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
         messages: rustChatCompletionsMessages(wake),
+        ...(narratorImageContext?.images.length
+          ? { inputImages: narratorImageContext.images }
+          : {}),
         providerState: wake.providerState,
         config: {
           model: context.profile.profile.modelConfig.modelName,
@@ -216,6 +240,13 @@ function createRustChatCompletionsBrainHostExecutor(
         },
       });
       const events: BrainEventEnvelope[] = [];
+      for (const event of narratorImageContextEvents(
+        wake,
+        narratorImageContext,
+      )) {
+        if (submitEvent) await submitEvent(event);
+        else events.push(event);
+      }
       if (providerDebug) {
         const event = providerRequestDebugEvent(wake, providerDebug);
         if (submitEvent) {
@@ -335,6 +366,53 @@ function rustChatCompletionsMessages(
       content: message.body,
     })),
   ];
+}
+
+function narratorImageContextEvents(
+  wake: BrainWakeInput,
+  resolution: NarratorImageContextResolution | undefined,
+): BrainEventEnvelope[] {
+  if (!resolution || resolution.selectedAttachmentIds.length === 0) return [];
+  const events: BrainEventEnvelope[] = resolution.diagnostics.map(
+    (diagnostic) => ({
+      wakeId: wake.wakeId,
+      sessionId: wake.sessionId,
+      event: {
+        type: "provider_status",
+        level: "degraded",
+        message: diagnostic.summary,
+        metadataJson: JSON.stringify({
+          kind: "narrator_image_context",
+          reason_code: diagnostic.reasonCode,
+          ...(diagnostic.attachmentId === undefined
+            ? {}
+            : { attachment_id: diagnostic.attachmentId }),
+        }),
+      },
+    }),
+  );
+  if (resolution.images.length > 0) {
+    events.push({
+      wakeId: wake.wakeId,
+      sessionId: wake.sessionId,
+      event: {
+        type: "provider_status",
+        level: "info",
+        message: `Included ${resolution.images.length} opted-in image(s) in narrator context.`,
+        metadataJson: JSON.stringify({
+          kind: "narrator_image_context",
+          reason_code: "narrator_images_included",
+          attachment_ids: resolution.images.map((image) => image.attachmentId),
+          image_count: resolution.images.length,
+          total_bytes: resolution.images.reduce(
+            (total, image) => total + image.byteSize,
+            0,
+          ),
+        }),
+      },
+    });
+  }
+  return events;
 }
 
 async function runRustChatCompletionsBrainWithIncrementalDrain(

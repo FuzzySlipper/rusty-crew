@@ -594,6 +594,13 @@ export interface BrainModelConfig {
     | "preserve_all"
     | "tool_calls_only";
   reasoningBudgetTokens?: number;
+  narratorImageInput?: {
+    supported: boolean;
+    maxImages: number;
+    maxImageBytes: number;
+    maxTotalBytes: number;
+    reasonCode?: string;
+  };
 }
 
 export interface BrainImplementationRegistration {

@@ -8,8 +8,8 @@ use rusty_crew_brain_runtime::{
 use rusty_crew_chat_completions_brain::{
     ChatCompletionMessage, ChatCompletionsBrainLoop, ChatCompletionsBrainLoopConfig,
     ChatCompletionsBrainLoopInput, ChatCompletionsChatConfig, ChatCompletionsEvent,
-    ChatCompletionsFinalMessage, ChatCompletionsNeutralToolExecutor, ChatCompletionsToolOutput,
-    FakeChatCompletionsClient, LiveChatCompletionsClient,
+    ChatCompletionsFinalMessage, ChatCompletionsInputImage, ChatCompletionsNeutralToolExecutor,
+    ChatCompletionsToolOutput, FakeChatCompletionsClient, LiveChatCompletionsClient,
     NeutralBrainTool as ChatCompletionsNeutralBrainTool, PendingChatFunctionCall,
     ProviderCancellation, DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES, DEFAULT_MAX_TOOL_ROUNDS,
 };
@@ -27,6 +27,8 @@ struct JsChatCompletionsBrainRunInput {
     session_id: String,
     #[serde(default)]
     messages: Vec<ChatCompletionMessage>,
+    #[serde(default)]
+    input_images: Vec<ChatCompletionsInputImage>,
     #[serde(default)]
     provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default)]
@@ -162,6 +164,7 @@ pub(crate) fn start_chat_completions_brain_json(
                 format!("invalid chat-completions brain input JSON: {error}"),
             )
         })?;
+    validate_chat_completions_input_images(&input.input_images)?;
     let wake_id = input.wake_id.clone();
     let mut coordinator = BufferedBrainTurnCoordinator::new(
         "chat-completions",
@@ -442,6 +445,7 @@ fn run_chat_completions_brain_with_buffered_tools(
     let loop_input = ChatCompletionsBrainLoopInput {
         context,
         messages: input.messages,
+        input_images: input.input_images,
         provider_state: input.provider_state,
         final_message_fallback,
     };
@@ -485,6 +489,82 @@ fn run_chat_completions_brain_with_buffered_tools(
             Ok(brain.wake_with_stream_sink(loop_input, sink))
         }
     }
+}
+
+fn validate_chat_completions_input_images(
+    images: &[ChatCompletionsInputImage],
+) -> napi::Result<()> {
+    const MAX_IMAGES: usize = 4;
+    const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+    const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+    if images.len() > MAX_IMAGES {
+        return Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("chat-completions image input exceeds {MAX_IMAGES} images"),
+        ));
+    }
+    let mut total = 0u64;
+    for image in images {
+        if !matches!(
+            image.mime_type.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        ) {
+            return Err(napi::Error::new(
+                napi::Status::InvalidArg,
+                format!(
+                    "chat-completions image {} has unsupported MIME type {}",
+                    image.attachment_id, image.mime_type
+                ),
+            ));
+        }
+        let decoded_len = canonical_base64_decoded_len(&image.bytes_base64).ok_or_else(|| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!(
+                    "chat-completions image {} is not canonical base64",
+                    image.attachment_id
+                ),
+            )
+        })?;
+        if decoded_len == 0 || decoded_len != image.byte_size || decoded_len > MAX_IMAGE_BYTES {
+            return Err(napi::Error::new(
+                napi::Status::InvalidArg,
+                format!(
+                    "chat-completions image {} has invalid byte size {}",
+                    image.attachment_id, image.byte_size
+                ),
+            ));
+        }
+        total = total.saturating_add(decoded_len);
+        if total > MAX_TOTAL_BYTES {
+            return Err(napi::Error::new(
+                napi::Status::InvalidArg,
+                "chat-completions image input exceeds the total byte limit".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn canonical_base64_decoded_len(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.len().is_multiple_of(4) {
+        return None;
+    }
+    let padding = value.bytes().rev().take_while(|byte| *byte == b'=').count();
+    if padding > 2 {
+        return None;
+    }
+    let content_len = value.len().saturating_sub(padding);
+    if !value.bytes().enumerate().all(|(index, byte)| {
+        if index >= content_len {
+            byte == b'='
+        } else {
+            byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'/'
+        }
+    }) {
+        return None;
+    }
+    Some(((value.len() / 4) * 3 - padding) as u64)
 }
 
 fn chat_completions_chat_config(
@@ -679,5 +759,52 @@ impl ChatCompletionsNeutralToolExecutor for BufferedChatCompletionsToolExecutor 
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
+    }
+}
+
+#[cfg(test)]
+mod image_input_tests {
+    use super::*;
+
+    #[test]
+    fn native_image_input_validation_rejects_malformed_and_mismatched_content() {
+        assert!(
+            validate_chat_completions_input_images(&[ChatCompletionsInputImage {
+                attachment_id: "bad-base64".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes_base64: "not base64".to_string(),
+                byte_size: 6,
+            }])
+            .is_err()
+        );
+        assert!(
+            validate_chat_completions_input_images(&[ChatCompletionsInputImage {
+                attachment_id: "wrong-size".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes_base64: "YWJj".to_string(),
+                byte_size: 4,
+            }])
+            .is_err()
+        );
+        assert!(
+            validate_chat_completions_input_images(&[ChatCompletionsInputImage {
+                attachment_id: "unsupported".to_string(),
+                mime_type: "image/svg+xml".to_string(),
+                bytes_base64: "YWJj".to_string(),
+                byte_size: 3,
+            }])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn native_image_input_validation_accepts_canonical_bounded_content() {
+        validate_chat_completions_input_images(&[ChatCompletionsInputImage {
+            attachment_id: "image-1".to_string(),
+            mime_type: "image/png".to_string(),
+            bytes_base64: "YWJj".to_string(),
+            byte_size: 3,
+        }])
+        .expect("canonical bounded image input");
     }
 }

@@ -10,6 +10,10 @@ import type {
   ToolDescriptor,
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import type {
+  ChatCompletionsBrainRunInput,
+  NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
 import { Type } from "typebox";
 import type { BrainTool } from "../src/brain-tool.js";
 import type { BrainHostExecutor, BrainWakeInput } from "../src/index.js";
@@ -18,6 +22,8 @@ import {
   type RoleplayNarratorPhaseBrainOptions,
 } from "../src/narrator-brain.js";
 import { createRoleplayNarratorFsmBridge } from "../src/roleplay-narrator-fsm.js";
+import { createChatCompletionsBrainHost } from "../src/chat-completions-host.js";
+import type { BrainHostContext } from "../src/brain-host-context.js";
 
 const sessionId = "roleplay-narrator-session" as SessionId;
 
@@ -229,6 +235,89 @@ async function runSmoke(): Promise<void> {
   }).wake(wakeInput("roleplay-narrator-omitted-lore-wake"));
   assert.equal(omittedLoreResult.actions.length, 0);
   assert.deepEqual(omittedLoreDiagnostics, [{ relevantLoreRecordIds: [] }]);
+
+  const nativeBridge = await loadNativeBridge();
+  const capturedRuns: ChatCompletionsBrainRunInput[] = [];
+  const capturingBridge = new Proxy(nativeBridge, {
+    get(target, property, receiver) {
+      if (property === "submitBrainEvent") {
+        return async () => ({ ok: true });
+      }
+      if (property === "getRoleplaySessionMetadata") {
+        return async () => undefined;
+      }
+      if (property === "startBrainRun") {
+        return async (
+          input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
+        ) => {
+          if (input.moduleId === "chat-completions") {
+            capturedRuns.push(input.providerInput);
+          }
+          return target.startBrainRun(input);
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  let imageResolutionCount = 0;
+  const multimodalBrain = createChatCompletionsBrainHost(
+    {
+      bridge: capturingBridge,
+      profile: {
+        profile: {
+          profileId: "roleplay-multimodal-profile" as ProfileId,
+          modelConfig: {
+            provider: "fake",
+            modelName: "fake-multimodal",
+            narratorImageInput: {
+              supported: true,
+              maxImages: 4,
+              maxImageBytes: 10 * 1024 * 1024,
+              maxTotalBytes: 20 * 1024 * 1024,
+            },
+          },
+          roleplayNarrator: {
+            tone: "wry",
+            pacing: "balanced",
+            explicitness: "implied",
+            memoryDepth: "shallow",
+            review: { enabled: false, maxReviewCycles: 0 },
+          },
+        },
+        skills: [],
+        toolSelection: { toolProfile: { tools: [] } },
+      },
+      narratorImageContextResolver: {
+        async resolveNarratorImageContext({ capability }) {
+          imageResolutionCount += 1;
+          return {
+            capability,
+            selectedAttachmentIds: ["attachment-opt-in"],
+            images: [
+              {
+                attachmentId: "attachment-opt-in",
+                mimeType: "image/png",
+                bytesBase64: "YWJj",
+                byteSize: 3,
+              },
+            ],
+            diagnostics: [],
+          };
+        },
+      },
+    } as unknown as BrainHostContext,
+    { mode: "fake" },
+  );
+  await multimodalBrain.wake(wakeInput("roleplay-narrator-multimodal-wake"));
+  assert.equal(imageResolutionCount, 1);
+  assert.equal(
+    capturedRuns.filter((run) => (run.inputImages?.length ?? 0) > 0).length,
+    1,
+  );
+  assert.equal(
+    capturedRuns.flatMap((run) => run.inputImages ?? [])[0]?.attachmentId,
+    "attachment-opt-in",
+  );
 
   console.log(
     JSON.stringify(
