@@ -131,6 +131,7 @@ export interface NativeBridgeBinding {
   completeExternalAgentSessionCreationJson(inputJson: string): string
   recordExternalAgentSessionCreationFailureJson(inputJson: string): string
   getExternalTurnJson(requestId: string): string
+  listExternalTurnsForNativeThreadJson(runtimeId: string, nativeThreadId: string): string
   listActiveExternalTurnsJson(): string
   expireExternalTurnDispatchesJson(now: string): string
   transitionExternalTurnJson(inputJson: string): string
@@ -823,7 +824,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 276,
+  "manifestOperationCount": 277,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1864,6 +1865,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_external_turn"
+    },
+    {
+      "name": "listExternalTurnsForNativeThreadJson",
+      "parameterSource": "runtimeId: string, nativeThreadId: string",
+      "parameterCount": 2,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_external_turns_for_native_thread"
     },
     {
       "name": "listActiveExternalTurnsJson",

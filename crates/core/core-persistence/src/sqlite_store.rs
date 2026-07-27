@@ -574,6 +574,22 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn list_external_turns_for_native_thread(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        match self {
+            Self::Sqlite(store) => {
+                store.list_external_turns_for_native_thread(runtime_id, native_thread_id)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => {
+                store.list_external_turns_for_native_thread(runtime_id, native_thread_id)
+            }
+        }
+    }
+
     pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
         match self {
             Self::Sqlite(store) => store.list_nonterminal_external_turns(),

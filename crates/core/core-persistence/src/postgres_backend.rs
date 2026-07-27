@@ -15972,12 +15972,19 @@ mod tests {
             phase: rusty_crew_core_protocol::ExternalTurnPhase::Accepted,
             capacity_lease_id: Some("capacity-a".into()),
             terminal_reason_code: None,
+            terminal_error: None,
             revision: 1,
             updated_at: "2026-07-10T00:00:00Z".into(),
         };
         assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
         assert_eq!(store.create_external_turn(&turn).unwrap(), turn);
         assert_eq!(store.list_nonterminal_external_turns().unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_external_turns_for_native_thread(&turn.runtime_id, "native-thread",)
+                .unwrap(),
+            vec![turn.clone()]
+        );
         let queued = QueuedMessageRecord {
             message_id: "queued-external-turn-a".into(),
             owner_session_id: Some(session.session_id.clone()),

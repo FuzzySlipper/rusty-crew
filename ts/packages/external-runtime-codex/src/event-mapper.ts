@@ -149,16 +149,56 @@ function projectPayload(
         },
       };
     }
+    case "turn_lifecycle":
+      return { ...base, ...projectErrorPayload(params, turn) };
     case "runtime_warning": {
-      const message = stringValue(params.message);
+      const errorPayload = projectErrorPayload(params, turn);
+      const message = errorPayload.error?.message;
       return {
         ...base,
         ...(message === undefined ? {} : { message }),
+        ...errorPayload,
       };
     }
     default:
       return base;
   }
+}
+
+function projectErrorPayload(
+  params: Record<string, unknown>,
+  turn: Record<string, unknown>,
+): Pick<NeutralExternalRuntimeEventPayload, "error"> {
+  const paramsError = asRecord(params.error);
+  const error = asRecord(
+    stringValue(paramsError.message) === undefined ? turn.error : params.error,
+  );
+  const message = boundedStringValue(error.message, 4_096);
+  if (message === undefined) return {};
+  const code = codexErrorCode(error.codexErrorInfo);
+  const additionalDetails = boundedStringValue(error.additionalDetails, 8_192);
+  return {
+    error: {
+      message,
+      code: code ?? null,
+      additionalDetails: additionalDetails ?? null,
+      willRetry: params.willRetry === true,
+    },
+  };
+}
+
+function codexErrorCode(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) return value;
+  const record = asRecord(value);
+  return Object.keys(record)[0];
+}
+
+function boundedStringValue(value: unknown, maxLength: number) {
+  const string = stringValue(value);
+  if (string === undefined) return undefined;
+  return string.length <= maxLength
+    ? string
+    : `${string.slice(0, maxLength)}...[truncated]`;
 }
 
 function messagePhaseValue(

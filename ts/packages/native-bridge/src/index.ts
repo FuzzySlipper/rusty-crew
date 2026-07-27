@@ -732,6 +732,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
       "record_external_agent_session_creation_failure",
     ),
     getExternalTurn: unavailable("get_external_turn"),
+    listExternalTurnsForNativeThread: unavailable(
+      "list_external_turns_for_native_thread",
+    ),
     listActiveExternalTurns: unavailable("list_active_external_turns"),
     expireExternalTurnDispatches: unavailable(
       "expire_external_turn_dispatches",

@@ -74,6 +74,8 @@ pub(crate) fn migrate_v35_add_external_runtime(tx: &rusqlite::Transaction<'_>) -
          CREATE UNIQUE INDEX IF NOT EXISTS external_turns_native_turn_idx
             ON external_turns(runtime_id, native_turn_id)
             WHERE native_turn_id IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS external_turns_native_thread_idx
+            ON external_turns(runtime_id, native_thread_id, updated_at);
          CREATE INDEX IF NOT EXISTS external_turns_active_session_idx
             ON external_turns(session_id, phase, updated_at);
          CREATE TABLE IF NOT EXISTS external_control_receipts (
@@ -1272,6 +1274,22 @@ impl CoordinationStore {
         )
     }
 
+    pub fn list_external_turns_for_native_thread(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        let conn = self.conn()?;
+        load_json_list(
+            &conn,
+            "SELECT record_json FROM external_turns
+             WHERE runtime_id = ?1 AND native_thread_id = ?2
+             ORDER BY updated_at, request_id",
+            params![runtime_id.0.as_str(), native_thread_id],
+            "list external turns for native thread",
+        )
+    }
+
     pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
         let conn = self.conn()?;
         load_json_list(
@@ -2092,8 +2110,9 @@ mod tests {
         ExternalRuntimeCompatibilityProbeReport, ExternalRuntimeCompatibilityProbeStep,
         ExternalRuntimeCompatibilityProbeStepStatus, ExternalRuntimeCompatibilityState,
         ExternalRuntimeDesiredState, ExternalRuntimeKind, ExternalRuntimeObservedState,
-        ExternalTurnInputPart, ExternalTurnPhase, SessionHandle, SessionKind, SessionState,
-        SessionStatus, ToolProfile, TurnInputProvenance, TurnInputProvenanceKind,
+        ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnTerminalError, SessionHandle,
+        SessionKind, SessionState, SessionStatus, ToolProfile, TurnInputProvenance,
+        TurnInputProvenanceKind,
     };
     use serde_json::json;
     use std::fs;
@@ -2195,6 +2214,12 @@ mod tests {
         let mut completed = active.clone();
         completed.phase = ExternalTurnPhase::Completed;
         completed.capacity_lease_id = None;
+        completed.terminal_error = Some(ExternalTurnTerminalError {
+            message: "stream closed".into(),
+            code: Some("responseStreamDisconnected".into()),
+            additional_details: None,
+            will_retry: Some(false),
+        });
         completed.updated_at = "2026-07-10T00:03:00Z".into();
         let completed = store
             .update_external_turn(&completed, active.revision)
@@ -2214,6 +2239,15 @@ mod tests {
                 .unwrap()
                 .phase,
             ExternalTurnPhase::Completed
+        );
+        assert_eq!(
+            reopened
+                .list_external_turns_for_native_thread(
+                    &ExternalRuntimeId::new("codex-local"),
+                    "native-thread-a",
+                )
+                .unwrap(),
+            vec![completed]
         );
         assert!(reopened
             .list_nonterminal_external_turns()
@@ -2512,6 +2546,7 @@ mod tests {
             phase: ExternalTurnPhase::Accepted,
             capacity_lease_id: Some("capacity-a".into()),
             terminal_reason_code: None,
+            terminal_error: None,
             revision: 1,
             updated_at: "2026-07-10T00:00:00Z".into(),
         }

@@ -1765,45 +1765,47 @@ export class ServiceExternalRuntimeController {
     const status = projectNativeStatus(thread.status);
     const loaded =
       status === "idle" || status === "active" || status === "systemError";
+    let effectiveModel: string | null = null;
     if (
-      forceUnavailable ||
-      controlled.archivedThreadIds.has(threadId) ||
-      !loaded
+      !forceUnavailable &&
+      !controlled.archivedThreadIds.has(threadId) &&
+      loaded
     ) {
-      return projectExternalThread(
-        thread,
-        null,
-        binding === undefined ? undefined : (binding.label ?? null),
-      );
-    }
-
-    let settings = controlled.threadSettings.get(threadId);
-    if (settings === undefined) {
-      try {
-        const resumed = await controlled.driver.threadResume({
-          threadId,
-          excludeTurns: true,
-        });
-        settings = threadSettingsFromResume(resumed);
-      } catch {
-        return projectExternalThread(
-          thread,
-          null,
-          binding === undefined ? undefined : (binding.label ?? null),
-        );
+      let settings = controlled.threadSettings.get(threadId);
+      if (settings === undefined) {
+        try {
+          const resumed = await controlled.driver.threadResume({
+            threadId,
+            excludeTurns: true,
+          });
+          settings = threadSettingsFromResume(resumed);
+        } catch {
+          settings = undefined;
+        }
+      } else {
+        settings = {
+          ...settings,
+          modelProvider:
+            nativeString(thread.modelProvider) ?? settings.modelProvider,
+        };
       }
-    } else {
-      settings = {
-        ...settings,
-        modelProvider:
-          nativeString(thread.modelProvider) ?? settings.modelProvider,
-      };
+      if (settings !== undefined) {
+        controlled.threadSettings.set(threadId, settings);
+        effectiveModel = settings.model;
+      }
     }
-    controlled.threadSettings.set(threadId, settings);
-    return projectExternalThread(
+    const projected = projectExternalThread(
       thread,
-      settings.model,
+      effectiveModel,
       binding === undefined ? undefined : (binding.label ?? null),
+    );
+    if (projected.turns.length === 0) return projected;
+    return reconcileExternalThreadProjection(
+      projected,
+      await this.#bridge.listExternalTurnsForNativeThread(
+        controlled.registration.runtimeId,
+        threadId,
+      ),
     );
   }
 
@@ -2564,6 +2566,7 @@ export class ServiceExternalRuntimeController {
         candidate.nativeTurnId === event.nativeTurnId,
     );
     if (turn === undefined) return;
+    const error = terminalError(event);
     await this.#bridge.transitionExternalTurn({
       controller: this.#controllerContext(controlled),
       requestId: turn.request.requestId,
@@ -2571,6 +2574,7 @@ export class ServiceExternalRuntimeController {
       ...(phase === "completed"
         ? {}
         : { terminalReasonCode: `codex_${phase}` }),
+      ...(error === undefined ? {} : { terminalError: error }),
       now: this.#now().toISOString(),
     });
   }
@@ -3295,12 +3299,101 @@ function projectExternalThreadTurn(
   return {
     turnId: requireNativeString(turn.id, "turn.id"),
     status: nativeString(turn.status) ?? "unknown",
+    statusSource: "native",
+    terminalReasonCode: null,
+    error: projectNativeTurnError(turn.error),
     startedAt: nullableNativeNumber(turn.startedAt),
     completedAt: nullableNativeNumber(turn.completedAt),
     durationMs: nullableNativeNumber(turn.durationMs),
     items: Array.isArray(turn.items)
       ? turn.items.map(projectExternalThreadItem)
       : [],
+  };
+}
+
+function reconcileExternalThreadProjection(
+  thread: ExternalThreadProjection,
+  correlations: readonly ExternalTurnCorrelation[],
+): ExternalThreadProjection {
+  const byNativeTurnId = new Map(
+    correlations.flatMap((correlation) =>
+      correlation.nativeTurnId === null
+        ? []
+        : [[correlation.nativeTurnId, correlation] as const],
+    ),
+  );
+  return {
+    ...thread,
+    turns: thread.turns.map((turn) => {
+      const correlation = byNativeTurnId.get(turn.turnId);
+      const reconciledStatus = crewTerminalStatus(correlation?.phase);
+      if (correlation === undefined || reconciledStatus === undefined) {
+        return turn;
+      }
+      return {
+        ...turn,
+        status: reconciledStatus,
+        statusSource: "crew_terminal" as const,
+        terminalReasonCode: correlation.terminalReasonCode ?? null,
+        error:
+          correlation.terminalError == null
+            ? turn.error
+            : {
+                message: correlation.terminalError.message,
+                code: correlation.terminalError.code ?? null,
+                additionalDetails:
+                  correlation.terminalError.additionalDetails ?? null,
+                willRetry: correlation.terminalError.willRetry ?? null,
+              },
+      };
+    }),
+  };
+}
+
+function crewTerminalStatus(
+  phase: ExternalTurnCorrelation["phase"] | undefined,
+) {
+  if (phase === "failed") return "failed";
+  if (phase === "interrupted") return "interrupted";
+  if (phase === "outcome_unknown") return "outcomeUnknown";
+  return undefined;
+}
+
+function projectNativeTurnError(value: unknown) {
+  const error = isRecord(value) ? value : undefined;
+  const message = error === undefined ? undefined : nativeString(error.message);
+  if (error === undefined || message === undefined) return null;
+  return {
+    message,
+    code: nativeCodexErrorCode(error.codexErrorInfo),
+    additionalDetails: nullableNativeString(error.additionalDetails),
+    willRetry: null,
+  };
+}
+
+function nativeCodexErrorCode(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value;
+  const record = isRecord(value) ? value : undefined;
+  return record === undefined ? null : (Object.keys(record)[0] ?? null);
+}
+
+function terminalError(
+  event: NormalizedExternalRuntimeEvent,
+): ExternalTurnCorrelation["terminalError"] | undefined {
+  if (!isRecord(event.payload) || !isRecord(event.payload.error)) {
+    return undefined;
+  }
+  const message = stringValue(event.payload.error.message);
+  if (message === undefined) return undefined;
+  return {
+    message,
+    code: stringValue(event.payload.error.code) ?? null,
+    additionalDetails:
+      stringValue(event.payload.error.additionalDetails) ?? null,
+    willRetry:
+      typeof event.payload.error.willRetry === "boolean"
+        ? event.payload.error.willRetry
+        : null,
   };
 }
 
@@ -3494,7 +3587,12 @@ function terminalPhase(
     return "completed";
   }
   if (source === "turn/interrupted") return "interrupted";
-  if (source === "turn/failed" || source === "error") return "failed";
+  if (source === "turn/failed") return "failed";
+  if (source === "error") {
+    const error = isRecord(event.payload) ? event.payload.error : undefined;
+    if (isRecord(error) && error.willRetry === true) return undefined;
+    return "failed";
+  }
   return undefined;
 }
 

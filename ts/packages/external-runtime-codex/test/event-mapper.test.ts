@@ -32,3 +32,67 @@ for (const [itemType, expectedKind] of [
     assert.equal("item" in event.payload, false);
   });
 }
+
+test("error notifications preserve bounded durable diagnostics", () => {
+  const event = mapNotification(
+    {
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        error: {
+          message: "response stream disconnected",
+          codexErrorInfo: {
+            responseStreamDisconnected: { httpStatusCode: 502 },
+          },
+          additionalDetails: "upstream closed before final answer",
+        },
+        willRetry: false,
+      },
+    },
+    9,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.kind, "runtime_warning");
+  assert.equal(event.payload.message, "response stream disconnected");
+  assert.deepEqual(event.payload.error, {
+    message: "response stream disconnected",
+    code: "responseStreamDisconnected",
+    additionalDetails: "upstream closed before final answer",
+    willRetry: false,
+  });
+});
+
+test("failed turn completion preserves its embedded error", () => {
+  const event = mapNotification(
+    {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "provider rejected the request",
+            codexErrorInfo: "badRequest",
+            additionalDetails: null,
+          },
+        },
+      },
+    },
+    10,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.kind, "turn_lifecycle");
+  assert.equal(event.payload.status, "failed");
+  assert.deepEqual(event.payload.error, {
+    message: "provider rejected the request",
+    code: "badRequest",
+    additionalDetails: null,
+    willRetry: false,
+  });
+});

@@ -19,7 +19,7 @@ use rusty_crew_core_protocol::{
     ExternalRuntimeDesiredState, ExternalRuntimeEventInput, ExternalRuntimeHandshakeDecision,
     ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeObservedState,
     ExternalRuntimeRegistration, ExternalRuntimeStateObservation, ExternalTurnCorrelation,
-    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, ExternalTurnTerminalError,
     NormalizedExternalRuntimeEvent, ProfileRegistryLifecycleStatus, SessionTurnRequested,
     TurnInputProvenance,
 };
@@ -51,6 +51,16 @@ pub struct ExternalRuntimeHydrationReport {
     pub expired_interaction_ids: Vec<String>,
     pub expired_round_ids: Vec<String>,
     pub reconciled_delivery_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalControllerTurnTransition {
+    pub request_id: ExternalTurnRequestId,
+    pub next_phase: ExternalTurnPhase,
+    pub native_turn_id: Option<String>,
+    pub terminal_reason_code: Option<String>,
+    pub terminal_error: Option<ExternalTurnTerminalError>,
+    pub now: IsoTimestamp,
 }
 
 impl CoreEngine {
@@ -612,6 +622,15 @@ impl CoreEngine {
         self.store.get_external_turn(request_id)
     }
 
+    pub fn list_external_turns_for_native_thread(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        self.store
+            .list_external_turns_for_native_thread(runtime_id, native_thread_id)
+    }
+
     pub fn list_active_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
         self.store.list_nonterminal_external_turns()
     }
@@ -1167,6 +1186,7 @@ impl CoreEngine {
             phase: ExternalTurnPhase::Accepted,
             capacity_lease_id: Some(request.capacity_lease_id),
             terminal_reason_code: None,
+            terminal_error: None,
             revision: 1,
             updated_at: request.created_at,
         };

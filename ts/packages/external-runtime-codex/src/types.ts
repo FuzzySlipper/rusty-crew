@@ -79,6 +79,12 @@ export interface NeutralExternalRuntimeEventPayload {
   readonly text?: string;
   readonly messagePhase?: "commentary" | "final_answer" | "unknown";
   readonly message?: string;
+  readonly error?: {
+    readonly message: string;
+    readonly code: string | null;
+    readonly additionalDetails: string | null;
+    readonly willRetry: boolean;
+  };
   readonly command?: string;
   readonly cwd?: string;
   readonly output?: string;

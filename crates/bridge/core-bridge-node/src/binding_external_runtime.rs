@@ -68,6 +68,7 @@ struct TurnTransition {
     next_phase: ExternalTurnPhase,
     native_turn_id: Option<String>,
     terminal_reason_code: Option<String>,
+    terminal_error: Option<ExternalTurnTerminalError>,
     now: String,
 }
 
@@ -422,6 +423,25 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn list_external_turns_for_native_thread_json(
+        &self,
+        runtime_id: String,
+        native_thread_id: String,
+    ) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .list_external_turns_for_native_thread(
+                    &ExternalRuntimeId::new(runtime_id),
+                    &native_thread_id,
+                )
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
     pub fn list_active_external_turns_json(&self) -> napi::Result<String> {
         serialize_json(
             &self
@@ -455,11 +475,14 @@ impl NativeBridgeBinding {
                 .map_err(to_napi_error)?
                 .transition_external_turn_from_controller(
                     &input.controller,
-                    &input.request_id,
-                    input.next_phase,
-                    input.native_turn_id,
-                    input.terminal_reason_code,
-                    input.now,
+                    rusty_crew_core_engine::ExternalControllerTurnTransition {
+                        request_id: input.request_id,
+                        next_phase: input.next_phase,
+                        native_turn_id: input.native_turn_id,
+                        terminal_reason_code: input.terminal_reason_code,
+                        terminal_error: input.terminal_error,
+                        now: input.now,
+                    },
                 )
                 .map_err(to_napi_error)?,
         )

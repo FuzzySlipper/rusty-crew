@@ -39,7 +39,9 @@ mod sessions;
 
 pub(crate) use body::{add_millis_to_iso, sanitized_clock_key};
 pub use delegation::{delegated_agent_id, delegated_session_id};
-pub use external_runtime::{AgentActivationRequest, ExternalRuntimeHydrationReport};
+pub use external_runtime::{
+    AgentActivationRequest, ExternalControllerTurnTransition, ExternalRuntimeHydrationReport,
+};
 pub use scheduler::SchedulerTickReport;
 
 use body_queue::{

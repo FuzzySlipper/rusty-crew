@@ -32,6 +32,44 @@ function isCompatibilityProbeThreadId(threadId: string): boolean {
   );
 }
 
+function nativeErrorPayload(payload: unknown):
+  | {
+      nativeMethod: "error";
+      error: {
+        message: string;
+        code: string | null;
+        additionalDetails: string | null;
+        willRetry: boolean;
+      };
+    }
+  | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const candidate = payload as Record<string, unknown>;
+  if (candidate.nativeMethod !== "error") return undefined;
+  if (typeof candidate.error !== "object" || candidate.error === null) {
+    return undefined;
+  }
+  const error = candidate.error as Record<string, unknown>;
+  if (
+    typeof error.message !== "string" ||
+    (typeof error.code !== "string" && error.code !== null) ||
+    (typeof error.additionalDetails !== "string" &&
+      error.additionalDetails !== null) ||
+    typeof error.willRetry !== "boolean"
+  ) {
+    return undefined;
+  }
+  return {
+    nativeMethod: "error",
+    error: {
+      message: error.message,
+      code: error.code,
+      additionalDetails: error.additionalDetails,
+      willRetry: error.willRetry,
+    },
+  };
+}
+
 class FakeTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -238,6 +276,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   >();
   deleteFailureMessage?: string;
   loseNextDeleteResponse = false;
+  #nextTurn = 1;
   #loseFirstStartResponse: boolean;
   readonly #startFailureMessage?: string;
 
@@ -292,6 +331,22 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
             fakeModel("gpt-5.4-mini", ["low", "medium"], "low", false),
           ],
           nextCursor: null,
+        },
+      });
+      return;
+    }
+    if (parsed.method === "collaborationMode/list") {
+      this.emit({
+        id: parsed.id,
+        result: {
+          data: [
+            {
+              name: "Default",
+              mode: "default",
+              model: null,
+              reasoning_effort: null,
+            },
+          ],
         },
       });
       return;
@@ -413,6 +468,32 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
           this.threadSettings.get(String(thread.id)),
         ),
       });
+      return;
+    }
+    if (parsed.method === "turn/start") {
+      const thread = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      if (thread === undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: "thread not found" },
+        });
+        return;
+      }
+      const turn = {
+        id: `native-turn-${this.#nextTurn}`,
+        items: [],
+        itemsView: "full",
+        status: "inProgress",
+        error: null,
+        startedAt: 1,
+        completedAt: null,
+        durationMs: null,
+      };
+      this.#nextTurn += 1;
+      (thread.turns as Array<Record<string, unknown>>).push(turn);
+      this.emit({ id: parsed.id, result: { turn } });
       return;
     }
     if (parsed.method === "thread/fork") {
@@ -1291,6 +1372,194 @@ test("thread list and read project the authoritative next-effective model", asyn
       null,
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("failed native turns retain diagnostics after raw cache eviction and controller restart", async () => {
+  const fixture = await externalCreationFixture(false);
+  let reloaded: ServiceExternalRuntimeController | undefined;
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "durable-turn-error-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const delivery = await fixture.bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "durable-turn-error-delivery",
+      idempotencyKey: "durable-turn-error-delivery",
+      messageId: "durable-turn-error-message",
+      toAddress: created.creation.session.agentId,
+      inputKind: "operator",
+      body: "exercise durable external failure projection",
+      requireWake: true,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(delivery.activation?.type, "external_turn_requested");
+    await fixture.controller.tick();
+    await waitUntil(
+      async () =>
+        fixture.transport.sent.some(
+          (message) => message.method === "turn/start",
+        ),
+      "native turn start",
+    );
+    const active = (await fixture.bridge.listActiveExternalTurns())[0];
+    assert.equal(active?.nativeTurnId, "native-turn-1");
+    const nativeThread = fixture.transport.threads.find(
+      (thread) => thread.id === created.thread.threadId,
+    );
+    assert.ok(nativeThread);
+    const nativeTurn = (
+      nativeThread.turns as Array<Record<string, unknown>>
+    )[0];
+    assert.ok(nativeTurn);
+    nativeTurn.status = "completed";
+    nativeTurn.completedAt = 2;
+    nativeTurn.durationMs = 1_000;
+
+    fixture.transport.emit({
+      method: "error",
+      params: {
+        threadId: created.thread.threadId,
+        turnId: "native-turn-1",
+        error: {
+          message: "temporary stream interruption",
+          codexErrorInfo: {
+            responseStreamConnectionFailed: { httpStatusCode: 503 },
+          },
+          additionalDetails: null,
+        },
+        willRetry: true,
+      },
+    });
+    await waitUntil(async () => {
+      const events = await fixture.bridge.queryExternalRuntimeEvents({
+        runtimeId: fixture.runtimeId,
+        afterSequence: 0,
+        limit: 1_000,
+      });
+      return events.some(
+        (event) => nativeErrorPayload(event.payload)?.error.willRetry === true,
+      );
+    }, "retrying native error");
+    assert.equal(
+      (await fixture.bridge.listActiveExternalTurns())[0]?.phase,
+      "active",
+    );
+
+    fixture.transport.emit({
+      method: "error",
+      params: {
+        threadId: created.thread.threadId,
+        turnId: "native-turn-1",
+        error: {
+          message: "response stream disconnected before final answer",
+          codexErrorInfo: {
+            responseStreamDisconnected: { httpStatusCode: 502 },
+          },
+          additionalDetails: "upstream stream closed",
+        },
+        willRetry: false,
+      },
+    });
+    fixture.transport.emit({
+      method: "turn/completed",
+      params: {
+        threadId: created.thread.threadId,
+        turn: {
+          ...nativeTurn,
+          status: "failed",
+          error: {
+            message: "response stream disconnected before final answer",
+            codexErrorInfo: {
+              responseStreamDisconnected: { httpStatusCode: 502 },
+            },
+            additionalDetails: "upstream stream closed",
+          },
+        },
+      },
+    });
+    await waitUntil(
+      async () => (await fixture.bridge.listActiveExternalTurns()).length === 0,
+      "durable failed external turn",
+    );
+    const failedTurn = await fixture.bridge.getExternalTurn(
+      active?.request.requestId ?? "missing-request",
+    );
+    assert.deepEqual(failedTurn?.terminalError, {
+      message: "response stream disconnected before final answer",
+      code: "responseStreamDisconnected",
+      additionalDetails: "upstream stream closed",
+      willRetry: false,
+    });
+
+    for (let index = 0; index < 300; index += 1) {
+      fixture.transport.emit({
+        method: "warning",
+        params: { message: `cache churn ${index}` },
+      });
+    }
+    await waitUntil(async () => {
+      const events = await fixture.bridge.queryExternalRuntimeEvents({
+        runtimeId: fixture.runtimeId,
+        afterSequence: 0,
+        limit: 1_000,
+      });
+      return events.length >= 302;
+    }, "raw detail cache churn persistence");
+    const durableEvents = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    });
+    const failureEvent = durableEvents.find(
+      (event) => nativeErrorPayload(event.payload)?.error.willRetry === false,
+    );
+    assert.ok(failureEvent);
+    assert.deepEqual(nativeErrorPayload(failureEvent.payload)?.error, {
+      message: "response stream disconnected before final answer",
+      code: "responseStreamDisconnected",
+      additionalDetails: "upstream stream closed",
+      willRetry: false,
+    });
+    assert.equal(
+      fixture.controller.rawDetail(
+        fixture.runtimeId,
+        failureEvent.rawDetailRef ?? "missing-detail",
+      ),
+      undefined,
+    );
+
+    await fixture.controller.stop();
+    reloaded = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "durable-turn-error-reloaded-controller",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    await reloaded.connect(fixture.runtimeId);
+    const read = await reloaded.readThread(fixture.runtimeId, {
+      threadId: created.thread.threadId,
+      includeTurns: true,
+    });
+    assert.equal(read.thread.turns[0]?.status, "failed");
+    assert.equal(read.thread.turns[0]?.statusSource, "crew_terminal");
+    assert.equal(read.thread.turns[0]?.terminalReasonCode, "codex_failed");
+    assert.deepEqual(read.thread.turns[0]?.error, {
+      message: "response stream disconnected before final answer",
+      code: "responseStreamDisconnected",
+      additionalDetails: "upstream stream closed",
+      willRetry: false,
+    });
+  } finally {
+    await reloaded?.stop().catch(() => undefined);
     await fixture.cleanup();
   }
 });

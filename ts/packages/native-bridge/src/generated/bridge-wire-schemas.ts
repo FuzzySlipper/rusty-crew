@@ -4853,6 +4853,39 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "terminalError": {
+            "default": null,
+            "properties": {
+              "additionalDetails": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "code": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "willRetry": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "terminalReasonCode": {
             "type": [
               "string",
@@ -7485,6 +7518,39 @@ export const bridgeWireSchemaArtifact = {
               ]
             }
           },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "terminalError": {
+          "default": null,
+          "properties": {
+            "additionalDetails": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "willRetry": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "message"
+          ],
           "type": [
             "object",
             "null"
@@ -21035,6 +21101,39 @@ export const bridgeWireSchemaArtifact = {
               ]
             }
           },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "terminalError": {
+          "default": null,
+          "properties": {
+            "additionalDetails": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "willRetry": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "message"
+          ],
           "type": [
             "object",
             "null"

@@ -1006,6 +1006,24 @@ impl PostgresBackendStore {
         )
     }
 
+    pub fn list_external_turns_for_native_thread(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        let schema = self.quoted_schema();
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_turns
+                 WHERE runtime_id = $1 AND native_thread_id = $2
+                 ORDER BY updated_at, request_id"
+            ),
+            &[&runtime_id.0, &native_thread_id],
+            "list PostgreSQL external turns for native thread",
+        )
+    }
+
     pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
         let schema = self.quoted_schema();
         load_list(

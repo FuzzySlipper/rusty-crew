@@ -23,6 +23,7 @@ type ExternalRuntimeMethodName =
   | "completeExternalAgentSessionCreation"
   | "recordExternalAgentSessionCreationFailure"
   | "getExternalTurn"
+  | "listExternalTurnsForNativeThread"
   | "listActiveExternalTurns"
   | "expireExternalTurnDispatches"
   | "transitionExternalTurn"

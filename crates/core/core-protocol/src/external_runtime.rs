@@ -777,6 +777,15 @@ impl ExternalTurnPhase {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct ExternalTurnTerminalError {
+    pub message: String,
+    pub code: Option<String>,
+    pub additional_details: Option<String>,
+    pub will_retry: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalTurnCorrelation {
     pub request: SessionTurnRequested,
     pub runtime_id: ExternalRuntimeId,
@@ -786,6 +795,8 @@ pub struct ExternalTurnCorrelation {
     pub phase: ExternalTurnPhase,
     pub capacity_lease_id: Option<String>,
     pub terminal_reason_code: Option<String>,
+    #[serde(default)]
+    pub terminal_error: Option<ExternalTurnTerminalError>,
     pub revision: u64,
     pub updated_at: IsoTimestamp,
 }

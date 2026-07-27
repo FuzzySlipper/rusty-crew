@@ -658,6 +658,15 @@ errors = "core_protocol::CoreError"
 summary = "Read one Crew/native external turn correlation."
 
 [[operation]]
+name = "list_external_turns_for_native_thread"
+surface = "stable"
+direction = "ts_to_rust"
+input = "runtime_id + native_thread_id"
+output = "vec<core_protocol::ExternalTurnCorrelation>"
+errors = "core_protocol::CoreError"
+summary = "Read durable Crew/native turn correlations for one native thread."
+
+[[operation]]
 name = "list_active_external_turns"
 surface = "stable"
 direction = "ts_to_rust"
@@ -679,7 +688,7 @@ summary = "Terminalize accepted external turns whose input TTL elapsed before na
 name = "transition_external_turn"
 surface = "stable"
 direction = "ts_to_rust"
-input = "request_id + phase + native_turn_id + terminal_reason_code + now"
+input = "request_id + phase + native_turn_id + terminal_reason_code + terminal_error + now"
 output = "core_protocol::ExternalTurnCorrelation"
 errors = "core_protocol::CoreError"
 summary = "Apply a validated monotonic Crew/native external turn lifecycle transition."

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.12.0",
+    "version": "0.13.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -3694,6 +3694,13 @@
               { "type": "null" }
             ]
           },
+          "terminalError": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalTurnTerminalError" },
+              { "type": "null" }
+            ],
+            "default": null
+          },
           "terminalReasonCode": { "type": ["string", "null"] },
           "updatedAt": { "type": "string" }
         },
@@ -3757,6 +3764,16 @@
           "outcome_unknown"
         ],
         "type": "string"
+      },
+      "ExternalTurnTerminalError": {
+        "properties": {
+          "additionalDetails": { "type": ["string", "null"] },
+          "code": { "type": ["string", "null"] },
+          "message": { "type": "string" },
+          "willRetry": { "type": ["boolean", "null"] }
+        },
+        "required": ["message"],
+        "type": "object"
       },
       "FanOutFailurePolicy": {
         "enum": ["fail_fast", "fail_soft"],
@@ -5630,6 +5647,9 @@
           "status": { "type": "string" },
           "text": { "type": "string" },
           "message": { "type": "string" },
+          "error": {
+            "$ref": "#/components/schemas/ExternalThreadTurnErrorProjection"
+          },
           "command": { "type": "string" },
           "argument": { "type": ["string", "null"] },
           "controlId": { "type": "string" },
@@ -5743,6 +5763,9 @@
         "required": [
           "turnId",
           "status",
+          "statusSource",
+          "terminalReasonCode",
+          "error",
           "startedAt",
           "completedAt",
           "durationMs",
@@ -5751,6 +5774,19 @@
         "properties": {
           "turnId": { "type": "string" },
           "status": { "type": "string" },
+          "statusSource": {
+            "type": "string",
+            "enum": ["native", "crew_terminal"]
+          },
+          "terminalReasonCode": { "type": ["string", "null"] },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalThreadTurnErrorProjection"
+              },
+              { "type": "null" }
+            ]
+          },
           "startedAt": { "type": ["number", "null"] },
           "completedAt": { "type": ["number", "null"] },
           "durationMs": { "type": ["number", "null"] },
@@ -5760,6 +5796,17 @@
               "$ref": "#/components/schemas/ExternalThreadItemProjection"
             }
           }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadTurnErrorProjection": {
+        "type": "object",
+        "required": ["message", "code", "additionalDetails", "willRetry"],
+        "properties": {
+          "message": { "type": "string" },
+          "code": { "type": ["string", "null"] },
+          "additionalDetails": { "type": ["string", "null"] },
+          "willRetry": { "type": ["boolean", "null"] }
         },
         "additionalProperties": false
       },

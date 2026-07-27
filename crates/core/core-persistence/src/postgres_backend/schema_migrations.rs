@@ -1564,6 +1564,8 @@ fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> Co
          CREATE UNIQUE INDEX IF NOT EXISTS external_turns_native_turn_idx
             ON {schema}.external_turns(runtime_id, native_turn_id)
             WHERE native_turn_id IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS external_turns_native_thread_idx
+            ON {schema}.external_turns(runtime_id, native_thread_id, updated_at);
          CREATE INDEX IF NOT EXISTS external_turns_active_session_idx
             ON {schema}.external_turns(session_id, phase, updated_at);
          CREATE TABLE IF NOT EXISTS {schema}.external_control_receipts (

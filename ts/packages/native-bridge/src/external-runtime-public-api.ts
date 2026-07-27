@@ -14,12 +14,14 @@ import type {
   ExternalRuntimeHandshakeObservation,
   ExternalRuntimeRegistration,
   ExternalRuntimeStateObservation,
-  ExternalTurnCorrelation,
-  ExternalTurnPhase,
   NormalizedExternalRuntimeEvent,
 } from "@rusty-crew/contracts";
 import type { NativeExternalRuntimeCertificationBridgeMethods } from "./external-runtime-certification-public-api.js";
-export interface NativeExternalRuntimeBridgeMethods extends NativeExternalRuntimeCertificationBridgeMethods {
+import type { NativeExternalRuntimeTurnBridgeMethods } from "./external-runtime-turn-public-api.js";
+export interface NativeExternalRuntimeBridgeMethods
+  extends
+    NativeExternalRuntimeCertificationBridgeMethods,
+    NativeExternalRuntimeTurnBridgeMethods {
   registerExternalRuntime(input: {
     registration: ExternalRuntimeRegistration;
     expectedRevision?: number;
@@ -79,19 +81,6 @@ export interface NativeExternalRuntimeBridgeMethods extends NativeExternalRuntim
     reasonMessage: string;
     now: string;
   }): Promise<ExternalAgentSessionCreationRecord>;
-  getExternalTurn(
-    requestId: string,
-  ): Promise<ExternalTurnCorrelation | undefined>;
-  listActiveExternalTurns(): Promise<ExternalTurnCorrelation[]>;
-  expireExternalTurnDispatches(now: string): Promise<ExternalTurnCorrelation[]>;
-  transitionExternalTurn(input: {
-    controller: ExternalControllerContext;
-    requestId: string;
-    nextPhase: ExternalTurnPhase;
-    nativeTurnId?: string;
-    terminalReasonCode?: string;
-    now: string;
-  }): Promise<ExternalTurnCorrelation>;
   submitExternalControl(
     request: ExternalControlRequest,
   ): Promise<ExternalControlReceipt>;

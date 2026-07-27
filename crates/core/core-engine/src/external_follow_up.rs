@@ -16,6 +16,25 @@ impl CoreEngine {
         terminal_reason_code: Option<String>,
         now: IsoTimestamp,
     ) -> CoreResult<ExternalTurnCorrelation> {
+        self.transition_external_turn_with_error(
+            request_id,
+            next_phase,
+            native_turn_id,
+            terminal_reason_code,
+            None,
+            now,
+        )
+    }
+
+    fn transition_external_turn_with_error(
+        &self,
+        request_id: &ExternalTurnRequestId,
+        next_phase: ExternalTurnPhase,
+        native_turn_id: Option<String>,
+        terminal_reason_code: Option<String>,
+        terminal_error: Option<rusty_crew_core_protocol::ExternalTurnTerminalError>,
+        now: IsoTimestamp,
+    ) -> CoreResult<ExternalTurnCorrelation> {
         let current = self.store.get_external_turn(request_id)?.ok_or_else(|| {
             CoreError::new(
                 CoreErrorKind::NotFound,
@@ -28,6 +47,7 @@ impl CoreEngine {
             next.native_turn_id = Some(native_turn_id);
         }
         next.terminal_reason_code = terminal_reason_code;
+        next.terminal_error = terminal_error;
         next.updated_at = now;
         let became_terminal = !current.phase.is_terminal() && next.phase.is_terminal();
         if next.phase.is_terminal() {
@@ -246,25 +266,25 @@ impl CoreEngine {
     pub fn transition_external_turn_from_controller(
         &self,
         controller: &ExternalControllerContext,
-        request_id: &ExternalTurnRequestId,
-        next_phase: ExternalTurnPhase,
-        native_turn_id: Option<String>,
-        terminal_reason_code: Option<String>,
-        now: IsoTimestamp,
+        transition: ExternalControllerTurnTransition,
     ) -> CoreResult<ExternalTurnCorrelation> {
-        let current = self.store.get_external_turn(request_id)?.ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::NotFound,
-                format!("external turn {} was not found", request_id.0),
-            )
-        })?;
+        let current = self
+            .store
+            .get_external_turn(&transition.request_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("external turn {} was not found", transition.request_id.0),
+                )
+            })?;
         self.validate_external_controller(&current.runtime_id, controller)?;
-        self.transition_external_turn(
-            request_id,
-            next_phase,
-            native_turn_id,
-            terminal_reason_code,
-            now,
+        self.transition_external_turn_with_error(
+            &transition.request_id,
+            transition.next_phase,
+            transition.native_turn_id,
+            transition.terminal_reason_code,
+            transition.terminal_error,
+            transition.now,
         )
     }
 }

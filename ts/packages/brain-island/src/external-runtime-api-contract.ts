@@ -5,7 +5,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.12.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.13.0";
 
 export const EXTERNAL_CONTROL_API_REASON_CODES = [
   "external_control_idempotency_conflict",
@@ -73,10 +73,20 @@ export type ExternalAgentMessagePhase =
 export interface ExternalThreadTurnProjection {
   readonly turnId: string;
   readonly status: string;
+  readonly statusSource: "native" | "crew_terminal";
+  readonly terminalReasonCode: string | null;
+  readonly error: ExternalThreadTurnErrorProjection | null;
   readonly startedAt: number | null;
   readonly completedAt: number | null;
   readonly durationMs: number | null;
   readonly items: readonly ExternalThreadItemProjection[];
+}
+
+export interface ExternalThreadTurnErrorProjection {
+  readonly message: string;
+  readonly code: string | null;
+  readonly additionalDetails: string | null;
+  readonly willRetry: boolean | null;
 }
 
 export interface ExternalThreadProjection {
@@ -1346,6 +1356,9 @@ function routeSchemas(): Record<string, JsonSchema> {
         status: { type: "string" },
         text: { type: "string" },
         message: { type: "string" },
+        error: {
+          $ref: "#/components/schemas/ExternalThreadTurnErrorProjection",
+        },
         command: { type: "string" },
         argument: nullableString,
         controlId: { type: "string" },
@@ -1485,6 +1498,9 @@ function routeSchemas(): Record<string, JsonSchema> {
       required: [
         "turnId",
         "status",
+        "statusSource",
+        "terminalReasonCode",
+        "error",
         "startedAt",
         "completedAt",
         "durationMs",
@@ -1493,6 +1509,17 @@ function routeSchemas(): Record<string, JsonSchema> {
       properties: {
         turnId: { type: "string" },
         status: { type: "string" },
+        statusSource: {
+          type: "string",
+          enum: ["native", "crew_terminal"],
+        },
+        terminalReasonCode: { type: ["string", "null"] },
+        error: {
+          anyOf: [
+            { $ref: "#/components/schemas/ExternalThreadTurnErrorProjection" },
+            { type: "null" },
+          ],
+        },
         startedAt: { type: ["number", "null"] },
         completedAt: { type: ["number", "null"] },
         durationMs: { type: ["number", "null"] },
@@ -1500,6 +1527,17 @@ function routeSchemas(): Record<string, JsonSchema> {
           type: "array",
           items: { $ref: "#/components/schemas/ExternalThreadItemProjection" },
         },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadTurnErrorProjection: {
+      type: "object",
+      required: ["message", "code", "additionalDetails", "willRetry"],
+      properties: {
+        message: { type: "string" },
+        code: { type: ["string", "null"] },
+        additionalDetails: { type: ["string", "null"] },
+        willRetry: { type: ["boolean", "null"] },
       },
       additionalProperties: false,
     },

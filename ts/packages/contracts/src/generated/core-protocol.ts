@@ -996,6 +996,7 @@ export type ExternalTurnCorrelation = {
   revision: number;
   runtimeId: string;
   taskRef?: DenRuntimeReference | null;
+  terminalError?: ExternalTurnTerminalError | null;
   terminalReasonCode?: string | null;
   updatedAt: string;
 };
@@ -1017,6 +1018,13 @@ export type ExternalTurnInputPart = {
 };
 
 export type ExternalTurnPhase = "accepted" | "starting" | "active" | "waiting_interaction" | "completed" | "failed" | "interrupted" | "outcome_unknown";
+
+export type ExternalTurnTerminalError = {
+  additionalDetails?: string | null;
+  code?: string | null;
+  message: string;
+  willRetry?: boolean | null;
+};
 
 export type FanOutFailurePolicy = "fail_fast" | "fail_soft";
 
