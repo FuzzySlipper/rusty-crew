@@ -23,6 +23,7 @@ import {
   CodexRpcError,
   UnixWebSocketTransport,
   captureBoundedRawDetail,
+  projectCodexErrorDiagnostic,
   type CollaborationMode,
   type CodexControllerAuthority,
   type CodexInitializeIdentity,
@@ -3335,16 +3336,7 @@ function reconcileExternalThreadProjection(
         status: reconciledStatus,
         statusSource: "crew_terminal" as const,
         terminalReasonCode: correlation.terminalReasonCode ?? null,
-        error:
-          correlation.terminalError == null
-            ? turn.error
-            : {
-                message: correlation.terminalError.message,
-                code: correlation.terminalError.code ?? null,
-                additionalDetails:
-                  correlation.terminalError.additionalDetails ?? null,
-                willRetry: correlation.terminalError.willRetry ?? null,
-              },
+        error: projectTerminalError(correlation.terminalError) ?? turn.error,
       };
     }),
   };
@@ -3360,21 +3352,22 @@ function crewTerminalStatus(
 }
 
 function projectNativeTurnError(value: unknown) {
-  const error = isRecord(value) ? value : undefined;
-  const message = error === undefined ? undefined : nativeString(error.message);
-  if (error === undefined || message === undefined) return null;
+  const diagnostic = projectCodexErrorDiagnostic(value);
+  if (diagnostic === undefined) return null;
   return {
-    message,
-    code: nativeCodexErrorCode(error.codexErrorInfo),
-    additionalDetails: nullableNativeString(error.additionalDetails),
+    ...diagnostic,
     willRetry: null,
   };
 }
 
-function nativeCodexErrorCode(value: unknown): string | null {
-  if (typeof value === "string" && value.length > 0) return value;
-  const record = isRecord(value) ? value : undefined;
-  return record === undefined ? null : (Object.keys(record)[0] ?? null);
+function projectTerminalError(value: ExternalTurnCorrelation["terminalError"]) {
+  if (value == null) return null;
+  const diagnostic = projectCodexErrorDiagnostic(value);
+  if (diagnostic === undefined) return null;
+  return {
+    ...diagnostic,
+    willRetry: value.willRetry ?? null,
+  };
 }
 
 function terminalError(

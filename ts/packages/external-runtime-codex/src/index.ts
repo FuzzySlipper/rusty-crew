@@ -1,5 +1,10 @@
 export { CodexProtocolCodec, CodexProtocolError } from "./codec.js";
 export { CodexAppServerDriver, CodexRpcError } from "./driver.js";
+export {
+  CODEX_ERROR_DIAGNOSTIC_LIMITS,
+  projectCodexErrorDiagnostic,
+  type CodexErrorDiagnostic,
+} from "./error-diagnostics.js";
 export { CODEX_COORDINATION_DYNAMIC_TOOLS } from "./coordination.js";
 export { CODEX_APP_SERVER_PROTOCOL } from "./protocol-manifest.js";
 export { captureBoundedRawDetail } from "./raw-detail.js";

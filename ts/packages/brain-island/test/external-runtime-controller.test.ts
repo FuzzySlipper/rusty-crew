@@ -10,6 +10,7 @@ import type {
   ExternalAgentSessionCreationRequest,
 } from "@rusty-crew/contracts";
 import {
+  CODEX_ERROR_DIAGNOSTIC_LIMITS,
   CODEX_APP_SERVER_PROTOCOL,
   CodexAppServerDriver,
   type CodexJsonRpcTransport,
@@ -1371,6 +1372,58 @@ test("thread list and read project the authoritative next-effective model", asyn
       ).thread.effectiveModel,
       null,
     );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("thread read bounds direct native Codex error diagnostics", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "bounded-native-error-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const nativeThread = fixture.transport.threads.find(
+      (thread) => thread.id === created.thread.threadId,
+    );
+    assert.ok(nativeThread);
+    nativeThread.turns = [
+      {
+        id: "native-turn-with-error",
+        items: [],
+        itemsView: "full",
+        status: "failed",
+        error: {
+          message: `native message\u0000${"m".repeat(8_000)}`,
+          codexErrorInfo: { responseStreamDisconnected: {} },
+          additionalDetails: `native details\u0007${"d".repeat(16_000)}`,
+        },
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1_000,
+      },
+    ];
+
+    const read = await fixture.controller.readThread(fixture.runtimeId, {
+      threadId: created.thread.threadId,
+      includeTurns: true,
+    });
+    const error = read.thread.turns[0]?.error;
+    assert.ok(error);
+    assert.equal(error.message.length, CODEX_ERROR_DIAGNOSTIC_LIMITS.message);
+    assert.equal(error.code, "responseStreamDisconnected");
+    assert.equal(
+      error.additionalDetails?.length,
+      CODEX_ERROR_DIAGNOSTIC_LIMITS.additionalDetails,
+    );
+    assert.equal(error.message.includes("\u0000"), false);
+    assert.equal(error.additionalDetails?.includes("\u0007"), false);
+    assert.match(error.message, /\.\.\.\[truncated\]$/);
+    assert.match(error.additionalDetails ?? "", /\.\.\.\[truncated\]$/);
   } finally {
     await fixture.cleanup();
   }

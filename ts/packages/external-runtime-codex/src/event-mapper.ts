@@ -6,6 +6,7 @@ import type {
   NeutralExternalRuntimeEvent,
   NeutralExternalRuntimeEventPayload,
 } from "./types.js";
+import { projectCodexErrorDiagnostic } from "./error-diagnostics.js";
 
 export function mapNotification(
   notification: ServerNotification | { method: string; params: unknown },
@@ -173,32 +174,14 @@ function projectErrorPayload(
   const error = asRecord(
     stringValue(paramsError.message) === undefined ? turn.error : params.error,
   );
-  const message = boundedStringValue(error.message, 4_096);
-  if (message === undefined) return {};
-  const code = codexErrorCode(error.codexErrorInfo);
-  const additionalDetails = boundedStringValue(error.additionalDetails, 8_192);
+  const diagnostic = projectCodexErrorDiagnostic(error);
+  if (diagnostic === undefined) return {};
   return {
     error: {
-      message,
-      code: code ?? null,
-      additionalDetails: additionalDetails ?? null,
+      ...diagnostic,
       willRetry: params.willRetry === true,
     },
   };
-}
-
-function codexErrorCode(value: unknown): string | undefined {
-  if (typeof value === "string" && value.length > 0) return value;
-  const record = asRecord(value);
-  return Object.keys(record)[0];
-}
-
-function boundedStringValue(value: unknown, maxLength: number) {
-  const string = stringValue(value);
-  if (string === undefined) return undefined;
-  return string.length <= maxLength
-    ? string
-    : `${string.slice(0, maxLength)}...[truncated]`;
 }
 
 function messagePhaseValue(
