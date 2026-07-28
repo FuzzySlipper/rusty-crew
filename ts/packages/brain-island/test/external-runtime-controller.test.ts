@@ -8,6 +8,7 @@ import { test } from "node:test";
 import type {
   ExternalAgentBinding,
   ExternalAgentSessionCreationRequest,
+  SessionId,
 } from "@rusty-crew/contracts";
 import {
   CODEX_ERROR_DIAGNOSTIC_LIMITS,
@@ -979,6 +980,143 @@ test("profile prompt refresh forks history and preserves Crew identity", async (
         forkRequest?.params as Record<string, unknown>,
         "baseInstructions",
       ),
+      false,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("profile lifecycle-only revision repair preserves the native thread", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "profile-revision-repair",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const before = created.creation.binding;
+    const current = await fixture.bridge.getProfileRegistryRecord(
+      fixture.profileId,
+    );
+    assert.ok(current);
+    await fixture.bridge.updateProfileRegistryRecord({
+      write: {
+        profileId: current.profileId,
+        lifecycleStatus: current.lifecycleStatus,
+        displayName: current.displayName,
+        summary: "metadata-only profile edit",
+        defaultSessionKind: current.defaultSessionKind,
+        agentId: current.agentId,
+        ownerId: current.ownerId,
+        promptSoulMarkdown: current.promptSoulMarkdown,
+        promptMemoryMarkdown: current.promptMemoryMarkdown,
+        activeRuntimeSettingsJson: current.activeRuntimeSettingsJson,
+        sourceAssetRefs: current.sourceAssetRefs,
+        derivedRuntimeRefs: current.derivedRuntimeRefs,
+        importExport: current.importExport,
+        now: new Date().toISOString(),
+      },
+      expectedRevision: current.revision,
+    });
+    const sentBefore = fixture.transport.sent.length;
+    const receipt = await fixture.controller.refreshProfileInstructions(
+      fixture.profileId,
+    );
+    assert.deepEqual(receipt.refreshedBindings, []);
+    assert.deepEqual(receipt.unchangedBindings, [before.bindingId]);
+    const after = await fixture.bridge.getExternalBinding(before.bindingId);
+    assert.ok(after);
+    assert.equal(after.nativeThreadId, before.nativeThreadId);
+    assert.equal(after.profileRevision, current.revision + 1);
+    assert.equal(
+      fixture.transport.sent
+        .slice(sentBefore)
+        .some((message) => message.method === "thread/fork"),
+      false,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("archived binding restore resumes the exact native thread and Crew identity", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "archived-binding-restore",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const before = created.creation.binding;
+    assert.ok(before.sessionId);
+    assert.ok(before.agentId);
+    assert.ok(before.profileId);
+    assert.ok(before.nativeThreadId);
+    await fixture.bridge.archiveSession(before.sessionId as SessionId);
+    const archived = await fixture.bridge.getExternalBinding(before.bindingId);
+    assert.ok(archived);
+    assert.equal(archived.status, "archived");
+
+    const profile = await fixture.bridge.getProfileRegistryRecord(
+      fixture.profileId,
+    );
+    assert.ok(profile);
+    await fixture.bridge.updateProfileRegistryRecord({
+      write: {
+        profileId: profile.profileId,
+        lifecycleStatus: profile.lifecycleStatus,
+        displayName: profile.displayName,
+        summary: "reactivated without prompt change",
+        defaultSessionKind: profile.defaultSessionKind,
+        agentId: profile.agentId,
+        ownerId: profile.ownerId,
+        promptSoulMarkdown: profile.promptSoulMarkdown,
+        promptMemoryMarkdown: profile.promptMemoryMarkdown,
+        activeRuntimeSettingsJson: profile.activeRuntimeSettingsJson,
+        sourceAssetRefs: profile.sourceAssetRefs,
+        derivedRuntimeRefs: profile.derivedRuntimeRefs,
+        importExport: profile.importExport,
+        now: new Date().toISOString(),
+      },
+      expectedRevision: profile.revision,
+    });
+    const sentBefore = fixture.transport.sent.length;
+    const receipt = await fixture.controller.restoreBinding({
+      bindingId: archived.bindingId,
+      expectedBindingRevision: archived.revision,
+      expectedSessionId: before.sessionId,
+      expectedAgentId: before.agentId,
+      expectedProfileId: before.profileId,
+      expectedNativeThreadId: before.nativeThreadId,
+    });
+    assert.equal(receipt.outcome, "restored");
+    assert.equal(receipt.binding.bindingId, before.bindingId);
+    assert.equal(receipt.binding.nativeThreadId, before.nativeThreadId);
+    assert.equal(receipt.session.sessionId, before.sessionId);
+    assert.equal(receipt.profileRevisionUpdated, true);
+    assert.ok(
+      fixture.transport.sent
+        .slice(sentBefore)
+        .some(
+          (message) =>
+            message.method === "thread/resume" &&
+            (message.params as Record<string, unknown>).threadId ===
+              before.nativeThreadId,
+        ),
+    );
+    assert.equal(
+      fixture.transport.sent
+        .slice(sentBefore)
+        .some(
+          (message) =>
+            message.method === "thread/start" ||
+            message.method === "thread/fork",
+        ),
       false,
     );
   } finally {

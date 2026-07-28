@@ -64,6 +64,7 @@ export const bridgeOperations = [
   {"name":"acquire_external_controller","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalControllerLease + now","output":"core_protocol::ExternalControllerLease","errors":"core_protocol::CoreError","summary":"Acquire or renew the exclusive generation-fenced controller lease for an external runtime."},
   {"name":"release_external_controller","surface":"stable","direction":"ts_to_rust","input":"runtime_id + holder_instance_id + generation + now","output":"core_protocol::ExternalControllerLease","errors":"core_protocol::CoreError","summary":"Release the current external runtime controller lease without permitting stale generations."},
   {"name":"bind_external_agent","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalAgentBinding + expected_revision","output":"core_protocol::ExternalAgentBinding","errors":"core_protocol::CoreError","summary":"Bind an explicitly routable Crew agent or observer to a native external thread."},
+  {"name":"restore_external_agent_binding","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalAgentBindingRestoreRequest","output":"core_protocol::ExternalAgentBindingRestoreReceipt","errors":"core_protocol::CoreError","summary":"Restore one archived Crew session and external binding while preserving its exact native thread identity."},
   {"name":"list_external_bindings","surface":"stable","direction":"ts_to_rust","input":"unit","output":"vec<core_protocol::ExternalAgentBinding>","errors":"core_protocol::CoreError","summary":"List durable Crew-to-native external runtime bindings."},
   {"name":"update_external_binding_metadata","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalAgentBindingMetadataWrite","output":"core_protocol::ExternalAgentBinding","errors":"core_protocol::CoreError","summary":"Update only operator label and Den task mapping under optimistic revision authority."},
   {"name":"get_external_binding","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalBindingId","output":"option<core_protocol::ExternalAgentBinding>","errors":"core_protocol::CoreError","summary":"Read one durable external runtime binding."},
@@ -289,4 +290,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "bd0a5d03943c7449619add7e2ff375a95240f8479a8612edba5d4c53c60afbdb" as const;
+export const bridgeWireShapeFingerprint = "e17912d32c4e71c1c9763b0458440e19b818692d3a9a3a586c2d5fce2a24fb5e" as const;

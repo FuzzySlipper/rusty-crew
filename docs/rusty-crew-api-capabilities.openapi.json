@@ -4736,6 +4736,32 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/external-bindings/{binding_id}/restore": {
+      "post": {
+        "operationId": "externalBindingsRestore",
+        "summary": "Restore an archived external binding and exact Crew session without replacing its native thread.",
+        "tags": ["session", "profile"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.restore",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/external-interactions": {
       "get": {
         "operationId": "externalInteractionsList",
@@ -5381,7 +5407,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 216,
+    "capability_count": 217,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

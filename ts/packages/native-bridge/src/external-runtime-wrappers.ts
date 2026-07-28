@@ -1,9 +1,10 @@
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import type { NativeBridgeModule } from "./public-api.js";
 import {
-  serializeExternalAgentBindingMetadataWrite,
-  serializeExternalAgentSessionCreationRequest,
-} from "./external-runtime-wire.js";
+  createNativeBridgeExternalBindingMethods,
+  type ExternalBindingMethodName,
+} from "./external-runtime-binding-wrappers.js";
+import { serializeExternalAgentSessionCreationRequest } from "./external-runtime-wire.js";
 import { createNativeBridgeExternalRuntimeTurnMethods } from "./external-runtime-turn-wrappers.js";
 
 type ExternalRuntimeMethodName =
@@ -14,10 +15,6 @@ type ExternalRuntimeMethodName =
   | "getExternalRuntime"
   | "acquireExternalController"
   | "releaseExternalController"
-  | "bindExternalAgent"
-  | "updateExternalBindingMetadata"
-  | "listExternalBindings"
-  | "getExternalBinding"
   | "prepareExternalAgentSessionCreation"
   | "markExternalAgentSessionNativeStarting"
   | "completeExternalAgentSessionCreation"
@@ -38,9 +35,13 @@ type ExternalRuntimeMethodName =
 
 export function createNativeBridgeExternalRuntimeMethods(
   binding: NativeBridgeBinding,
-): Pick<NativeBridgeModule, ExternalRuntimeMethodName> {
+): Pick<
+  NativeBridgeModule,
+  ExternalRuntimeMethodName | ExternalBindingMethodName
+> {
   return {
     ...createNativeBridgeExternalRuntimeTurnMethods(binding),
+    ...createNativeBridgeExternalBindingMethods(binding),
     registerExternalRuntime: async (input) =>
       JSON.parse(
         binding.registerExternalRuntimeJson(JSON.stringify(input)),
@@ -79,30 +80,6 @@ export function createNativeBridgeExternalRuntimeMethods(
       JSON.parse(
         binding.releaseExternalControllerJson(JSON.stringify(input)),
       ) as Awaited<ReturnType<NativeBridgeModule["releaseExternalController"]>>,
-    bindExternalAgent: async (input) =>
-      JSON.parse(
-        binding.bindExternalAgentJson(JSON.stringify(input)),
-      ) as Awaited<ReturnType<NativeBridgeModule["bindExternalAgent"]>>,
-    updateExternalBindingMetadata: async (write) =>
-      JSON.parse(
-        binding.updateExternalBindingMetadataJson(
-          serializeExternalAgentBindingMetadataWrite(write),
-        ),
-      ) as Awaited<
-        ReturnType<NativeBridgeModule["updateExternalBindingMetadata"]>
-      >,
-    listExternalBindings: async () =>
-      JSON.parse(binding.listExternalBindingsJson()) as Awaited<
-        ReturnType<NativeBridgeModule["listExternalBindings"]>
-      >,
-    getExternalBinding: async (bindingId) => {
-      const value = binding.getExternalBindingJson(bindingId);
-      return value === null || value === undefined
-        ? undefined
-        : (JSON.parse(value) as Awaited<
-            ReturnType<NativeBridgeModule["getExternalBinding"]>
-          >);
-    },
     prepareExternalAgentSessionCreation: async (request) =>
       JSON.parse(
         binding.prepareExternalAgentSessionCreationJson(

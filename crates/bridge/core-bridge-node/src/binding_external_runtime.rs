@@ -289,6 +289,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn restore_external_agent_binding_json(&self, input_json: String) -> napi::Result<String> {
+        let request = parse_json::<ExternalAgentBindingRestoreRequest>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .restore_external_agent_binding(&request)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
     pub fn list_external_bindings_json(&self) -> napi::Result<String> {
         serialize_json(
             &self

@@ -1701,7 +1701,9 @@ pub(super) fn external_controller_lease() -> ExternalControllerLease {
     }
 }
 
-fn ready_external_creation_dependencies(engine: &CoreEngine) -> ExternalControllerContext {
+pub(super) fn ready_external_creation_dependencies(
+    engine: &CoreEngine,
+) -> ExternalControllerContext {
     engine
         .create_profile_registry_record(&profile_registry_write(
             "codex-profile",
@@ -1722,7 +1724,9 @@ fn ready_external_creation_dependencies(engine: &CoreEngine) -> ExternalControll
     }
 }
 
-fn external_creation_request(idempotency_key: &str) -> ExternalAgentSessionCreationRequest {
+pub(super) fn external_creation_request(
+    idempotency_key: &str,
+) -> ExternalAgentSessionCreationRequest {
     ExternalAgentSessionCreationRequest {
         idempotency_key: idempotency_key.into(),
         runtime_id: ExternalRuntimeId::new("codex-local"),

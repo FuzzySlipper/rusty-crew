@@ -700,6 +700,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
     );
     schema!("bind_external_agent", protocol::ExternalAgentBinding);
     schema!(
+        "restore_external_agent_binding",
+        protocol::ExternalAgentBindingRestoreReceipt
+    );
+    schema!(
         "list_external_bindings",
         Vec<protocol::ExternalAgentBinding>
     );

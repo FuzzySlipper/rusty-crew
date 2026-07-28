@@ -19898,6 +19898,345 @@ export const bridgeWireSchemaArtifact = {
       "title": "ExternalAgentBinding",
       "type": "object"
     },
+    "rusty_crew_core_protocol::external_runtime::ExternalAgentBindingRestoreReceipt": {
+      "properties": {
+        "binding": {
+          "properties": {
+            "agentId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "bindingId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "effectiveConfigFingerprint": {
+              "type": "string"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "messageDeliveryPolicy": {
+              "default": "immediate_steer",
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn"
+              ],
+              "type": "string"
+            },
+            "nativeThreadId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profileId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profilePromptHash": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profileRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "purpose": {
+              "enum": [
+                "crew_agent",
+                "imported_observer"
+              ],
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "runtimeId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "active",
+                "paused",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "taskRef": {
+              "properties": {
+                "project_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "bindingId",
+            "runtimeId",
+            "purpose",
+            "effectiveConfigFingerprint",
+            "status",
+            "revision",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": "object"
+        },
+        "outcome": {
+          "enum": [
+            "restored",
+            "already_active"
+          ],
+          "type": "string"
+        },
+        "profileRevisionUpdated": {
+          "type": "boolean"
+        },
+        "session": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "brain_turn_count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "delegation": {
+              "properties": {
+                "correlation_id": {
+                  "type": "string"
+                },
+                "parent_agent_id": {
+                  "type": "string"
+                },
+                "parent_session_id": {
+                  "type": "string"
+                },
+                "requested_task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_action_index": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "source_wake_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "parent_session_id",
+                "parent_agent_id",
+                "source_wake_id",
+                "source_action_index",
+                "correlation_id"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "handle": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "history_window": {
+              "properties": {
+                "max_messages": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "inference_overrides": {
+              "default": {},
+              "properties": {
+                "reasoning_effort": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated"
+              ],
+              "type": "string"
+            },
+            "last_active_at": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "resource_limits": {
+              "properties": {
+                "max_delegation_depth": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max_duration_ms": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "workdir": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "active",
+                "idle",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "tool_profile": {
+              "properties": {
+                "tools": {
+                  "items": {
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "input_schema": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "description"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "tools"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "agent_id",
+            "profile_id",
+            "kind",
+            "resource_limits",
+            "tool_profile",
+            "status",
+            "brain_turn_count",
+            "created_at",
+            "last_active_at"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "outcome",
+        "binding",
+        "session",
+        "profileRevisionUpdated"
+      ],
+      "title": "ExternalAgentBindingRestoreReceipt",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord": {
       "properties": {
         "binding": {
@@ -25040,6 +25379,7 @@ export const bridgeWireSchemaArtifact = {
     "resolve_agent_address": "rusty_crew_core_protocol::external_runtime::AgentRouteResolution",
     "resolve_conversation_jump": "rusty_crew_core_persistence::contracts::ConversationJumpResult",
     "resolve_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
+    "restore_external_agent_binding": "rusty_crew_core_protocol::external_runtime::ExternalAgentBindingRestoreReceipt",
     "roleplay_speaker_identity": "rusty_crew_roleplay_core::RoleplaySpeakerIdentitySnapshot",
     "run_scheduler_tick": "rusty_crew_core_bridge_api::scheduler_wire::SchedulerTickWireOutput",
     "runtime_activity_census": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityCensus",

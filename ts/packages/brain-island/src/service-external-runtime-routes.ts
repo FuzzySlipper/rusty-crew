@@ -22,11 +22,15 @@ import {
   EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES,
   ExternalAgentSessionCreationError,
   ExternalBindingMetadataError,
+  ExternalBindingRestoreError,
   ExternalRuntimeCommandError,
   ExternalThreadLifecycleError,
   type ServiceExternalRuntimeController,
 } from "./service-external-runtime.js";
-import { EXTERNAL_CONTROL_API_REASON_CODES } from "./external-runtime-api-contract.js";
+import {
+  EXTERNAL_BINDING_RESTORE_API_REASON_CODES,
+  EXTERNAL_CONTROL_API_REASON_CODES,
+} from "./external-runtime-api-contract.js";
 import {
   ExternalRuntimeCommandInputError,
   isRecognizedExternalRuntimeCommandInput,
@@ -260,6 +264,32 @@ export async function handleExternalRuntimeRequest(
       );
     }
     return methodNotAllowed(requestId);
+  }
+
+  if (
+    parts[1] === "external-bindings" &&
+    parts.length === 4 &&
+    parts[3] === "restore"
+  ) {
+    if (method !== "POST") return methodNotAllowed(requestId);
+    try {
+      const body = requireRecord(await context.readJsonBody(request));
+      return successRoute(
+        requestId,
+        await context.controller.restoreBinding({
+          bindingId: parts[2] ?? "",
+          expectedBindingRevision: requiredInteger(
+            body.expectedBindingRevision,
+          ),
+          expectedSessionId: requiredString(body.expectedSessionId),
+          expectedAgentId: requiredString(body.expectedAgentId),
+          expectedProfileId: requiredString(body.expectedProfileId),
+          expectedNativeThreadId: requiredString(body.expectedNativeThreadId),
+        }),
+      );
+    } catch (error) {
+      return externalBindingRestoreFailure(requestId, error);
+    }
   }
 
   if (
@@ -950,6 +980,58 @@ function externalBindingMetadataFailure(
     reason_code: "external_binding_metadata_invalid_request",
     message,
     retryable: false,
+  });
+}
+
+function externalBindingRestoreFailure(
+  requestId: string,
+  error: unknown,
+): ServiceRouteResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const reasonCode =
+    error instanceof ExternalBindingRestoreError
+      ? error.reasonCode
+      : EXTERNAL_BINDING_RESTORE_API_REASON_CODES.find((candidate) =>
+          message.includes(candidate),
+        );
+  if (reasonCode === undefined) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "external_binding_restore_invalid_request",
+      message,
+      retryable: false,
+    });
+  }
+  const status =
+    reasonCode === "external_binding_restore_invalid_request"
+      ? 400
+      : reasonCode === "external_binding_restore_not_found" ||
+          reasonCode === "external_binding_restore_session_config_missing" ||
+          reasonCode === "external_binding_restore_runtime_unavailable" ||
+          reasonCode === "external_binding_restore_profile_missing" ||
+          reasonCode === "external_binding_restore_native_thread_missing"
+        ? 404
+        : reasonCode.endsWith("_failed") ||
+            reasonCode === "external_binding_restore_native_resume_failed" ||
+            reasonCode === "external_binding_restore_native_compensation_failed"
+          ? 502
+          : 409;
+  return failure(status, requestId, {
+    code:
+      status === 400
+        ? "invalid_input"
+        : status === 404
+          ? "not_found"
+          : status === 409
+            ? "conflict"
+            : "failed_precondition",
+    reason_code: reasonCode,
+    message,
+    retryable:
+      error instanceof ExternalBindingRestoreError
+        ? error.retryable
+        : reasonCode === "external_binding_restore_revision_conflict" ||
+          status === 502,
   });
 }
 

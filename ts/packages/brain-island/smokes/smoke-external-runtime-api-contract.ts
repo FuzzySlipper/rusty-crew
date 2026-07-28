@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { apiCapabilityRegistry } from "../src/api-command-registry.js";
 import {
+  EXTERNAL_BINDING_RESTORE_API_REASON_CODES,
   EXTERNAL_CONTROL_API_REASON_CODES,
   EXTERNAL_RUNTIME_API_CONTRACT_VERSION,
   EXTERNAL_RUNTIME_API_OPENAPI_PATH,
@@ -19,7 +20,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.13.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.14.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -114,6 +115,24 @@ assert.deepEqual(schema("ExternalBindingMetadataWrite").required, [
   "label",
   "taskRef",
 ]);
+assert.equal(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.bindingRestore]?.post?.operationId,
+  "restoreExternalBinding",
+);
+assert.deepEqual(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.bindingRestore]?.post?.[
+    "x-rusty-crew-error-reason-codes"
+  ],
+  EXTERNAL_BINDING_RESTORE_API_REASON_CODES,
+);
+assert.deepEqual(schema("ExternalBindingRestoreWrite").required, [
+  "expectedBindingRevision",
+  "expectedSessionId",
+  "expectedAgentId",
+  "expectedProfileId",
+  "expectedNativeThreadId",
+]);
+assert.ok(schema("ExternalAgentBindingRestoreReceipt").properties?.binding);
 assert.ok(schema("ExternalAgentBinding").properties?.label);
 assert.deepEqual(
   propertySchema("ExternalRuntimeEventPayload", "messagePhase").enum,

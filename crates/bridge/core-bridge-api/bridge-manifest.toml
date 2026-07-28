@@ -586,6 +586,15 @@ errors = "core_protocol::CoreError"
 summary = "Bind an explicitly routable Crew agent or observer to a native external thread."
 
 [[operation]]
+name = "restore_external_agent_binding"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalAgentBindingRestoreRequest"
+output = "core_protocol::ExternalAgentBindingRestoreReceipt"
+errors = "core_protocol::CoreError"
+summary = "Restore one archived Crew session and external binding while preserving its exact native thread identity."
+
+[[operation]]
 name = "list_external_bindings"
 surface = "stable"
 direction = "ts_to_rust"

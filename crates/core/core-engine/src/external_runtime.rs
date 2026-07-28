@@ -1397,7 +1397,7 @@ fn external_agent_effective_config_fingerprint(
     )
 }
 
-fn external_profile_prompt_hash(profile: &ProfileRegistryRecord) -> String {
+pub(crate) fn external_profile_prompt_hash(profile: &ProfileRegistryRecord) -> String {
     let soul = profile
         .prompt_soul_markdown
         .as_deref()

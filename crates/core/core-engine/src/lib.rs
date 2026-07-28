@@ -11,6 +11,7 @@ mod chat_store;
 mod curator;
 mod delegation;
 mod delegation_store;
+mod external_binding_restore;
 mod external_controls;
 mod external_follow_up;
 mod external_runtime;

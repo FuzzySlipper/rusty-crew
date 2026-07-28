@@ -4,6 +4,7 @@ import type {
   AgentMessageDeliveryReceipt,
   DenRuntimeReference,
   ExternalAgentBinding,
+  ExternalAgentBindingRestoreReceipt,
   ExternalAgentSessionCreationRecord,
   ExternalAgentSessionCreationRequest,
   ExternalControlReceipt,
@@ -16,6 +17,7 @@ import type {
   ExternalTurnCorrelation,
   NormalizedExternalRuntimeEvent,
 } from "@rusty-crew/contracts";
+import { EXTERNAL_BINDING_RESTORE_API_REASON_CODES } from "./external-runtime-api-contract.js";
 import {
   CODEX_APP_SERVER_PROTOCOL,
   CODEX_COORDINATION_DYNAMIC_TOOLS,
@@ -199,6 +201,17 @@ export class ExternalBindingMetadataError extends Error {
   ) {
     super(`${reasonCode}: ${message}`);
     this.name = "ExternalBindingMetadataError";
+  }
+}
+
+export class ExternalBindingRestoreError extends Error {
+  constructor(
+    readonly reasonCode: (typeof EXTERNAL_BINDING_RESTORE_API_REASON_CODES)[number],
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(`${reasonCode}: ${message}`);
+    this.name = "ExternalBindingRestoreError";
   }
 }
 
@@ -978,6 +991,18 @@ export class ServiceExternalRuntimeController {
         unchangedBindings.push(binding.bindingId);
         continue;
       }
+      if (binding.profilePromptHash === profile.promptHash) {
+        await this.#bridge.bindExternalAgent({
+          binding: {
+            ...binding,
+            profileRevision: profile.revision,
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: binding.revision,
+        });
+        unchangedBindings.push(binding.bindingId);
+        continue;
+      }
       if (typeof binding.nativeThreadId !== "string") {
         throw new ExternalAgentSessionCreationError(
           "external_agent_creation_recovery_required",
@@ -1044,6 +1069,157 @@ export class ServiceExternalRuntimeController {
       refreshedBindings,
       unchangedBindings,
     };
+  }
+
+  async restoreBinding(input: {
+    bindingId: string;
+    expectedBindingRevision: number;
+    expectedSessionId: string;
+    expectedAgentId: string;
+    expectedProfileId: string;
+    expectedNativeThreadId: string;
+  }): Promise<ExternalAgentBindingRestoreReceipt> {
+    const binding = await this.#bridge.getExternalBinding(input.bindingId);
+    if (binding === undefined) {
+      throw new ExternalBindingRestoreError(
+        "external_binding_restore_not_found",
+        `external binding ${input.bindingId} was not found`,
+      );
+    }
+    if (
+      binding.revision !== input.expectedBindingRevision ||
+      binding.sessionId !== input.expectedSessionId ||
+      binding.agentId !== input.expectedAgentId ||
+      binding.profileId !== input.expectedProfileId ||
+      binding.nativeThreadId !== input.expectedNativeThreadId
+    ) {
+      throw new ExternalBindingRestoreError(
+        binding.revision !== input.expectedBindingRevision
+          ? "external_binding_restore_revision_conflict"
+          : "external_binding_restore_identity_conflict",
+        "external binding no longer matches the revision and identities selected for restore",
+        binding.revision !== input.expectedBindingRevision,
+      );
+    }
+    let controlled: ControlledRuntime;
+    try {
+      controlled = await this.#requireControlled(binding.runtimeId);
+    } catch (error) {
+      throw new ExternalBindingRestoreError(
+        "external_binding_restore_runtime_unavailable",
+        String(error),
+        true,
+      );
+    }
+    let located:
+      | { readonly thread: NativeCodexThread }
+      | "archived"
+      | undefined;
+    try {
+      located = await this.#locateThread(
+        controlled,
+        input.expectedNativeThreadId,
+      );
+    } catch (error) {
+      throw new ExternalBindingRestoreError(
+        "external_binding_restore_native_lookup_failed",
+        String(error),
+        true,
+      );
+    }
+    if (located === undefined) {
+      throw new ExternalBindingRestoreError(
+        "external_binding_restore_native_thread_missing",
+        `native thread ${input.expectedNativeThreadId} was not found`,
+      );
+    }
+    let nativeUnarchived = false;
+    if (located === "archived") {
+      try {
+        await controlled.driver.threadUnarchive({
+          threadId: input.expectedNativeThreadId,
+        });
+      } catch (error) {
+        throw new ExternalBindingRestoreError(
+          "external_binding_restore_native_unarchive_failed",
+          String(error),
+          true,
+        );
+      }
+      controlled.archivedThreadIds.delete(input.expectedNativeThreadId);
+      nativeUnarchived = true;
+    }
+
+    let receipt: ExternalAgentBindingRestoreReceipt;
+    try {
+      receipt = await this.#bridge.restoreExternalAgentBinding({
+        bindingId: input.bindingId,
+        expectedBindingRevision: input.expectedBindingRevision,
+        expectedSessionId: input.expectedSessionId,
+        expectedAgentId: input.expectedAgentId,
+        expectedProfileId: input.expectedProfileId,
+        expectedNativeThreadId: input.expectedNativeThreadId,
+        restoredAt: this.#now().toISOString(),
+      });
+    } catch (error) {
+      if (nativeUnarchived) {
+        try {
+          await controlled.driver.threadArchive({
+            threadId: input.expectedNativeThreadId,
+          });
+          controlled.archivedThreadIds.add(input.expectedNativeThreadId);
+        } catch (compensationError) {
+          throw new ExternalBindingRestoreError(
+            "external_binding_restore_native_compensation_failed",
+            `Crew restore failed (${String(error)}) and native archive compensation failed (${String(compensationError)})`,
+            true,
+          );
+        }
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const reasonCode = EXTERNAL_BINDING_RESTORE_API_REASON_CODES.find(
+        (candidate) => message.includes(candidate),
+      );
+      throw new ExternalBindingRestoreError(
+        reasonCode ?? "external_binding_restore_binding_persist_failed",
+        message,
+        reasonCode === "external_binding_restore_revision_conflict" ||
+          reasonCode?.endsWith("_persist_failed") === true,
+      );
+    }
+
+    try {
+      const promptContext = await this.#bindingPromptContext(receipt.binding);
+      const resumed = await controlled.driver.threadResume({
+        threadId: input.expectedNativeThreadId,
+        ...(typeof receipt.binding.cwd === "string"
+          ? { cwd: receipt.binding.cwd }
+          : {}),
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        excludeTurns: true,
+        developerInstructions: promptContext.developerInstructions,
+      });
+      controlled.threadSettings.set(input.expectedNativeThreadId, {
+        model: resumed.model,
+        modelProvider: resumed.modelProvider,
+        reasoning_effort: resumed.reasoningEffort,
+        developer_instructions: promptContext.developerInstructions,
+      });
+      if (typeof receipt.binding.label === "string") {
+        await controlled.driver.threadSetName({
+          threadId: input.expectedNativeThreadId,
+          name: receipt.binding.label,
+        });
+      }
+      return receipt;
+    } catch (error) {
+      throw new ExternalBindingRestoreError(
+        "external_binding_restore_native_resume_failed",
+        `Crew identity was restored but native thread resume failed; refresh the binding revision and retry: ${String(error)}`,
+        true,
+      );
+    }
   }
 
   async applyCoordinationDelivery(
@@ -1489,15 +1665,26 @@ export class ServiceExternalRuntimeController {
       );
     }
     const profile = await this.#profileDeveloperInstructions(binding.profileId);
-    if (
-      profile.revision !== binding.profileRevision ||
-      profile.promptHash !== binding.profilePromptHash
-    ) {
+    if (profile.promptHash !== binding.profilePromptHash) {
       throw new ExternalAgentSessionCreationError(
         "external_agent_creation_profile_revision_conflict",
-        `profile ${binding.profileId} revision or prompt hash changed; refresh the bound Codex thread`,
+        `profile ${binding.profileId} prompt changed; refresh the bound Codex thread`,
         false,
       );
+    }
+    if (profile.revision !== binding.profileRevision) {
+      const repaired = await this.#bridge.bindExternalAgent({
+        binding: {
+          ...binding,
+          profileRevision: profile.revision,
+          updatedAt: this.#now().toISOString(),
+        },
+        expectedRevision: binding.revision,
+      });
+      return {
+        binding: repaired,
+        developerInstructions: profile.developerInstructions,
+      };
     }
     return { binding, developerInstructions: profile.developerInstructions };
   }

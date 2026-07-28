@@ -714,6 +714,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     acquireExternalController: unavailable("acquire_external_controller"),
     releaseExternalController: unavailable("release_external_controller"),
     bindExternalAgent: unavailable("bind_external_agent"),
+    restoreExternalAgentBinding: unavailable("restore_external_agent_binding"),
     updateExternalBindingMetadata: unavailable(
       "update_external_binding_metadata",
     ),

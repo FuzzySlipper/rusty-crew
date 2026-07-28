@@ -123,6 +123,7 @@ export declare class NativeBridgeBinding {
   acquireExternalControllerJson(inputJson: string): string
   releaseExternalControllerJson(inputJson: string): string
   bindExternalAgentJson(inputJson: string): string
+  restoreExternalAgentBindingJson(inputJson: string): string
   listExternalBindingsJson(): string
   updateExternalBindingMetadataJson(inputJson: string): string
   getExternalBindingJson(bindingId: string): string

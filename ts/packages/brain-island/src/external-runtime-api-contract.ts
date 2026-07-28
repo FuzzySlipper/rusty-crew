@@ -5,7 +5,29 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.13.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.14.0";
+
+export const EXTERNAL_BINDING_RESTORE_API_REASON_CODES = [
+  "external_binding_restore_invalid_request",
+  "external_binding_restore_not_found",
+  "external_binding_restore_revision_conflict",
+  "external_binding_restore_identity_conflict",
+  "external_binding_restore_status_conflict",
+  "external_binding_restore_work_conflict",
+  "external_binding_restore_session_config_missing",
+  "external_binding_restore_runtime_unavailable",
+  "external_binding_restore_profile_missing",
+  "external_binding_restore_profile_inactive",
+  "external_binding_restore_prompt_conflict",
+  "external_binding_restore_session_status_conflict",
+  "external_binding_restore_native_thread_missing",
+  "external_binding_restore_native_lookup_failed",
+  "external_binding_restore_native_unarchive_failed",
+  "external_binding_restore_native_resume_failed",
+  "external_binding_restore_native_compensation_failed",
+  "external_binding_restore_session_persist_failed",
+  "external_binding_restore_binding_persist_failed",
+] as const;
 
 export const EXTERNAL_CONTROL_API_REASON_CODES = [
   "external_control_idempotency_conflict",
@@ -45,6 +67,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   stream: "/v1/external-runtimes/{runtime_id}/stream",
   rawDetail: "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
   bindings: "/v1/external-bindings",
+  bindingRestore: "/v1/external-bindings/{binding_id}/restore",
   bindingMetadata: "/v1/external-bindings/{binding_id}/metadata",
   controls: "/v1/external-bindings/{binding_id}/controls",
   commands: "/v1/external-bindings/{binding_id}/commands",
@@ -472,6 +495,16 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.bindingMetadata,
     "ExternalAgentBinding",
     "ExternalBindingMetadataWrite",
+  ),
+  operation(
+    "external.bindings.restore",
+    "restoreExternalBinding",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.bindingRestore,
+    "ExternalAgentBindingRestoreReceipt",
+    "ExternalBindingRestoreWrite",
+    undefined,
+    EXTERNAL_BINDING_RESTORE_API_REASON_CODES,
   ),
   operation(
     "external.bindings.control",
@@ -1022,6 +1055,24 @@ function routeSchemas(): Record<string, JsonSchema> {
             { type: "null" },
           ],
         },
+      },
+      additionalProperties: false,
+    },
+    ExternalBindingRestoreWrite: {
+      type: "object",
+      required: [
+        "expectedBindingRevision",
+        "expectedSessionId",
+        "expectedAgentId",
+        "expectedProfileId",
+        "expectedNativeThreadId",
+      ],
+      properties: {
+        expectedBindingRevision: { type: "integer", minimum: 0 },
+        expectedSessionId: { type: "string", minLength: 1 },
+        expectedAgentId: { type: "string", minLength: 1 },
+        expectedProfileId: { type: "string", minLength: 1 },
+        expectedNativeThreadId: { type: "string", minLength: 1 },
       },
       additionalProperties: false,
     },

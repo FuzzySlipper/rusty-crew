@@ -3000,6 +3000,73 @@
       ],
       "type": "object"
     },
+    "ExternalAgentBindingRestoreOutcome": {
+      "enum": [
+        "restored",
+        "already_active"
+      ],
+      "type": "string"
+    },
+    "ExternalAgentBindingRestoreReceipt": {
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ExternalAgentBinding"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ExternalAgentBindingRestoreOutcome"
+        },
+        "profileRevisionUpdated": {
+          "type": "boolean"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionState"
+        }
+      },
+      "required": [
+        "outcome",
+        "binding",
+        "session",
+        "profileRevisionUpdated"
+      ],
+      "type": "object"
+    },
+    "ExternalAgentBindingRestoreRequest": {
+      "properties": {
+        "bindingId": {
+          "type": "string"
+        },
+        "expectedAgentId": {
+          "type": "string"
+        },
+        "expectedBindingRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expectedNativeThreadId": {
+          "type": "string"
+        },
+        "expectedProfileId": {
+          "type": "string"
+        },
+        "expectedSessionId": {
+          "type": "string"
+        },
+        "restoredAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "expectedBindingRevision",
+        "expectedSessionId",
+        "expectedAgentId",
+        "expectedProfileId",
+        "expectedNativeThreadId",
+        "restoredAt"
+      ],
+      "type": "object"
+    },
     "ExternalAgentSessionCreationPhase": {
       "enum": [
         "prepared",
@@ -6530,6 +6597,12 @@
     "external_agent_binding_metadata_write": {
       "$ref": "#/$defs/ExternalAgentBindingMetadataWrite"
     },
+    "external_agent_binding_restore_receipt": {
+      "$ref": "#/$defs/ExternalAgentBindingRestoreReceipt"
+    },
+    "external_agent_binding_restore_request": {
+      "$ref": "#/$defs/ExternalAgentBindingRestoreRequest"
+    },
     "external_agent_session_creation_record": {
       "$ref": "#/$defs/ExternalAgentSessionCreationRecord"
     },
@@ -6756,6 +6829,8 @@
     "external_controller_lease",
     "external_agent_binding",
     "external_agent_binding_metadata_write",
+    "external_agent_binding_restore_request",
+    "external_agent_binding_restore_receipt",
     "external_agent_session_creation_request",
     "external_agent_session_creation_record",
     "external_turn_correlation",

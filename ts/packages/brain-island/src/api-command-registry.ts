@@ -746,6 +746,13 @@ export const API_CAPABILITIES = [
     ["session", "config"],
   ),
   controlApiCapability(
+    "external.bindings.restore",
+    "POST",
+    "/v1/external-bindings/{binding_id}/restore",
+    "Restore an archived external binding and exact Crew session without replacing its native thread.",
+    ["session", "profile"],
+  ),
+  controlApiCapability(
     "external.bindings.control",
     "POST",
     "/v1/external-bindings/{binding_id}/controls",

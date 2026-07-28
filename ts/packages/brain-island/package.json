@@ -163,6 +163,7 @@
     "smoke:brain-island-entrypoint-surface": "tsx smokes/smoke-brain-island-entrypoint-surface.ts",
     "smoke:external-runtime-service-live": "tsx smokes/external-runtime-service-live.ts",
     "smoke:external-binding-metadata-live-debug-service": "tsx smokes/external-binding-metadata-live-debug-service.ts",
+    "smoke:external-binding-restore-live-debug-service": "tsx smokes/external-binding-restore-live-debug-service.ts",
     "smoke:external-runtime-commands-live": "tsx smokes/external-runtime-commands-live.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",

@@ -385,6 +385,17 @@
         "public": true
       },
       {
+        "id": "external.bindings.restore",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/restore",
+        "description": "Restore an archived external binding and exact Crew session without replacing its native thread.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session", "profile"],
+        "public": true
+      },
+      {
         "id": "external.bindings.control",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/controls",
@@ -2724,6 +2735,13 @@
         "capability_id": "external.bindings.metadata.write",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/metadata",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.restore",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/restore",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

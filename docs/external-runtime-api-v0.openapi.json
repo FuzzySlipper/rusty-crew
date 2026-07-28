@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.13.0",
+    "version": "0.14.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -1012,6 +1012,82 @@
         },
         "x-rusty-crew-capability-id": "external.bindings.metadata.write",
         "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/external-bindings/{binding_id}/restore": {
+      "post": {
+        "operationId": "restoreExternalBinding",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalBindingRestoreWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalAgentBindingRestoreReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.restore",
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_binding_restore_invalid_request",
+          "external_binding_restore_not_found",
+          "external_binding_restore_revision_conflict",
+          "external_binding_restore_identity_conflict",
+          "external_binding_restore_status_conflict",
+          "external_binding_restore_work_conflict",
+          "external_binding_restore_session_config_missing",
+          "external_binding_restore_runtime_unavailable",
+          "external_binding_restore_profile_missing",
+          "external_binding_restore_profile_inactive",
+          "external_binding_restore_prompt_conflict",
+          "external_binding_restore_session_status_conflict",
+          "external_binding_restore_native_thread_missing",
+          "external_binding_restore_native_lookup_failed",
+          "external_binding_restore_native_unarchive_failed",
+          "external_binding_restore_native_resume_failed",
+          "external_binding_restore_native_compensation_failed",
+          "external_binding_restore_session_persist_failed",
+          "external_binding_restore_binding_persist_failed"
+        ]
       }
     },
     "/v1/external-bindings/{binding_id}/controls": {
@@ -3081,6 +3157,47 @@
           "updatedAt": { "type": "string" }
         },
         "required": ["bindingId", "expectedRevision", "updatedAt"],
+        "type": "object"
+      },
+      "ExternalAgentBindingRestoreOutcome": {
+        "enum": ["restored", "already_active"],
+        "type": "string"
+      },
+      "ExternalAgentBindingRestoreReceipt": {
+        "properties": {
+          "binding": { "$ref": "#/components/schemas/ExternalAgentBinding" },
+          "outcome": {
+            "$ref": "#/components/schemas/ExternalAgentBindingRestoreOutcome"
+          },
+          "profileRevisionUpdated": { "type": "boolean" },
+          "session": { "$ref": "#/components/schemas/SessionState" }
+        },
+        "required": ["outcome", "binding", "session", "profileRevisionUpdated"],
+        "type": "object"
+      },
+      "ExternalAgentBindingRestoreRequest": {
+        "properties": {
+          "bindingId": { "type": "string" },
+          "expectedAgentId": { "type": "string" },
+          "expectedBindingRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expectedNativeThreadId": { "type": "string" },
+          "expectedProfileId": { "type": "string" },
+          "expectedSessionId": { "type": "string" },
+          "restoredAt": { "type": "string" }
+        },
+        "required": [
+          "bindingId",
+          "expectedBindingRevision",
+          "expectedSessionId",
+          "expectedAgentId",
+          "expectedProfileId",
+          "expectedNativeThreadId",
+          "restoredAt"
+        ],
         "type": "object"
       },
       "ExternalAgentSessionCreationPhase": {
@@ -5294,6 +5411,24 @@
         },
         "additionalProperties": false
       },
+      "ExternalBindingRestoreWrite": {
+        "type": "object",
+        "required": [
+          "expectedBindingRevision",
+          "expectedSessionId",
+          "expectedAgentId",
+          "expectedProfileId",
+          "expectedNativeThreadId"
+        ],
+        "properties": {
+          "expectedBindingRevision": { "type": "integer", "minimum": 0 },
+          "expectedSessionId": { "type": "string", "minLength": 1 },
+          "expectedAgentId": { "type": "string", "minLength": 1 },
+          "expectedProfileId": { "type": "string", "minLength": 1 },
+          "expectedNativeThreadId": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
       "ExternalControlWrite": {
         "type": "object",
         "required": ["kind"],
@@ -5958,7 +6093,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 30,
+    "operation_count": 31,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

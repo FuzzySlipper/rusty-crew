@@ -40,6 +40,7 @@ mod chat_mutations;
 mod chat_read;
 mod delegation_fanout;
 mod delegation_lifecycle;
+mod external_binding_restore;
 mod external_runtime;
 mod external_runtime_certification;
 mod external_runtime_controls;

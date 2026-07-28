@@ -412,6 +412,42 @@ test("external binding metadata route requires explicit nullable fields", async 
   );
 });
 
+test("external binding restore route preserves explicit selected identities", async () => {
+  let captured: Record<string, unknown> | undefined;
+  const context = {
+    bridge: {},
+    controller: {
+      async restoreBinding(input: Record<string, unknown>) {
+        captured = input;
+        return { outcome: "restored" };
+      },
+    },
+    requestId: () => "req-external-binding-restore",
+    readJsonBody: async () => ({
+      expectedBindingRevision: 7,
+      expectedSessionId: "crew-session-1",
+      expectedAgentId: "crew-agent-1",
+      expectedProfileId: "crew-profile-1",
+      expectedNativeThreadId: "native-thread-1",
+    }),
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/restore"),
+    context,
+  );
+  assert.equal((result as AdminRouteResult).status, 200);
+  assert.deepEqual(captured, {
+    bindingId: "binding-1",
+    expectedBindingRevision: 7,
+    expectedSessionId: "crew-session-1",
+    expectedAgentId: "crew-agent-1",
+    expectedProfileId: "crew-profile-1",
+    expectedNativeThreadId: "native-thread-1",
+  });
+});
+
 test("external runtime promotion readiness projects exact Rust-owned blockers", async () => {
   const registration = { runtimeId: "runtime-1", observedState: "ready" };
   const activeBinding = {

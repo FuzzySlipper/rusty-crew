@@ -716,6 +716,25 @@ export type ExternalAgentBindingMetadataWrite = {
   updatedAt: string;
 };
 
+export type ExternalAgentBindingRestoreOutcome = "restored" | "already_active";
+
+export type ExternalAgentBindingRestoreReceipt = {
+  binding: ExternalAgentBinding;
+  outcome: ExternalAgentBindingRestoreOutcome;
+  profileRevisionUpdated: boolean;
+  session: SessionState;
+};
+
+export type ExternalAgentBindingRestoreRequest = {
+  bindingId: string;
+  expectedAgentId: string;
+  expectedBindingRevision: number;
+  expectedNativeThreadId: string;
+  expectedProfileId: string;
+  expectedSessionId: string;
+  restoredAt: string;
+};
+
 export type ExternalAgentSessionCreationPhase = "prepared" | "binding_ready" | "native_starting" | "recovery_required" | "ready";
 
 export type ExternalAgentSessionCreationRecord = {

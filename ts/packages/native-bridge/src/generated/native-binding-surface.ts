@@ -123,6 +123,7 @@ export interface NativeBridgeBinding {
   acquireExternalControllerJson(inputJson: string): string
   releaseExternalControllerJson(inputJson: string): string
   bindExternalAgentJson(inputJson: string): string
+  restoreExternalAgentBindingJson(inputJson: string): string
   listExternalBindingsJson(): string
   updateExternalBindingMetadataJson(inputJson: string): string
   getExternalBindingJson(bindingId: string): string
@@ -824,7 +825,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 277,
+  "manifestOperationCount": 278,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1801,6 +1802,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "bind_external_agent"
+    },
+    {
+      "name": "restoreExternalAgentBindingJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "restore_external_agent_binding"
     },
     {
       "name": "listExternalBindingsJson",

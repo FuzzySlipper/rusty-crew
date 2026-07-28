@@ -6,7 +6,7 @@
 
 use crate::{
     AgentId, CoreError, CoreErrorKind, CoreResult, DenRuntimeReference, IsoTimestamp, ProfileId,
-    RunId, SessionId, SessionKind, SessionStatus,
+    RunId, SessionId, SessionKind, SessionState, SessionStatus,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -551,6 +551,45 @@ pub struct ExternalAgentBindingMetadataWrite {
     pub label: Option<String>,
     pub task_ref: Option<DenRuntimeReference>,
     pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentBindingRestoreRequest {
+    pub binding_id: ExternalBindingId,
+    pub expected_binding_revision: u64,
+    pub expected_session_id: SessionId,
+    pub expected_agent_id: AgentId,
+    pub expected_profile_id: ProfileId,
+    pub expected_native_thread_id: String,
+    pub restored_at: IsoTimestamp,
+}
+
+impl ExternalAgentBindingRestoreRequest {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_non_empty("binding_id", &self.binding_id.0)?;
+        validate_non_empty("expected_session_id", &self.expected_session_id.0)?;
+        validate_non_empty("expected_agent_id", &self.expected_agent_id.0)?;
+        validate_non_empty("expected_profile_id", &self.expected_profile_id.0)?;
+        validate_non_empty("expected_native_thread_id", &self.expected_native_thread_id)?;
+        validate_non_empty("restored_at", &self.restored_at)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalAgentBindingRestoreOutcome {
+    Restored,
+    AlreadyActive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentBindingRestoreReceipt {
+    pub outcome: ExternalAgentBindingRestoreOutcome,
+    pub binding: ExternalAgentBinding,
+    pub session: SessionState,
+    pub profile_revision_updated: bool,
 }
 
 impl ExternalAgentBindingMetadataWrite {
