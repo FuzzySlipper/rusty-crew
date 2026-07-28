@@ -114,6 +114,7 @@ export class CodexAppServerDriver {
   #receiveChain = Promise.resolve();
   #state: CodexDriverState = "disconnected";
   #disconnectNotified = false;
+  #disconnectCause: Error | undefined;
   #lastCompatibilityProbe?: CodexCompatibilityProbeReport;
 
   constructor(
@@ -161,6 +162,7 @@ export class CodexAppServerDriver {
     }
     this.#state = "connecting";
     this.#disconnectNotified = false;
+    this.#disconnectCause = undefined;
     this.#transport.setHandlers({
       onMessage: (message) => {
         this.#receiveChain = this.#receiveChain
@@ -171,12 +173,13 @@ export class CodexAppServerDriver {
       },
       onClose: (reason) => void this.#disconnect(reason),
       onError: (error) => {
+        this.#disconnectCause = error;
         void this.#reportFault({
           reasonCode: "transport_error",
           message: error.message,
           fatal: true,
         });
-        void this.#disconnect(`transport error: ${error.message}`);
+        void this.#disconnect(`transport error: ${error.message}`, error);
       },
     });
     try {
@@ -765,6 +768,8 @@ export class CodexAppServerDriver {
   async #handleReceiveFailure(error: unknown, raw: string): Promise<void> {
     const protocolError =
       error instanceof CodexProtocolError ? error : undefined;
+    const disconnectCause =
+      error instanceof Error ? error : new Error(String(error));
     const fault: CodexProtocolFault = {
       reasonCode:
         protocolError?.reasonCode === "malformed_known_notification"
@@ -779,26 +784,36 @@ export class CodexAppServerDriver {
       rawDetail: captureBoundedRawDetail(raw, this.#maxRawDetailBytes),
     };
     this.#state = "incompatible";
+    // A transport close can arrive before close() resolves. Preserve the
+    // originating protocol failure so pending requests keep its stable class.
+    this.#disconnectCause = disconnectCause;
     await this.#reportFault(fault);
     await this.#transport.close();
-    await this.#disconnect(`protocol failure: ${fault.message}`);
+    await this.#disconnect(
+      `protocol failure: ${fault.message}`,
+      disconnectCause,
+    );
   }
 
   async #reportFault(fault: CodexProtocolFault): Promise<void> {
     await this.#authority.onProtocolFault(fault);
   }
 
-  async #disconnect(reason: string): Promise<void> {
+  async #disconnect(reason: string, cause?: Error): Promise<void> {
+    if (cause !== undefined) this.#disconnectCause = cause;
     if (this.#disconnectNotified) return;
     this.#disconnectNotified = true;
     if (this.#state !== "closed" && this.#state !== "incompatible") {
       this.#state = "disconnected";
     }
     const pendingClientRequestIds = [...this.#pending.keys()];
+    const pendingFailure =
+      this.#disconnectCause ??
+      new Error(`Codex app-server disconnected: ${reason}`);
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);
       pending.abortCleanup?.();
-      pending.reject(new Error(`Codex app-server disconnected: ${reason}`));
+      pending.reject(pendingFailure);
     }
     this.#pending.clear();
     await this.#authority.onDisconnected({

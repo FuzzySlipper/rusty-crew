@@ -20,10 +20,14 @@ class FakeTransport implements CodexJsonRpcTransport {
     string,
     (
       request: Record<string, unknown>,
-    ) => unknown | { readonly __rpcError: { code: number; message: string } }
+    ) =>
+      | unknown
+      | { readonly __rpcError: { code: number; message: string } }
+      | { readonly __rawRpcResponse: unknown }
   >();
   opened = false;
   closed = false;
+  notifyCloseOnClose = false;
 
   setHandlers(handlers: CodexTransportHandlers): void {
     this.handlers = handlers;
@@ -45,6 +49,8 @@ class FakeTransport implements CodexJsonRpcTransport {
       const response = responder(parsed);
       if (isFakeRpcError(response)) {
         this.emit({ id: parsed.id, error: response.__rpcError });
+      } else if (isRawRpcResponse(response)) {
+        this.emit(response.__rawRpcResponse);
       } else {
         this.emit({ id: parsed.id, result: response });
       }
@@ -53,6 +59,9 @@ class FakeTransport implements CodexJsonRpcTransport {
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.notifyCloseOnClose) {
+      this.handlers?.onClose("test close during protocol failure");
+    }
   }
 
   emit(message: unknown): void {
@@ -182,6 +191,14 @@ function isFakeRpcError(
   value: unknown,
 ): value is { readonly __rpcError: { code: number; message: string } } {
   return typeof value === "object" && value !== null && "__rpcError" in value;
+}
+
+function isRawRpcResponse(
+  value: unknown,
+): value is { readonly __rawRpcResponse: unknown } {
+  return (
+    typeof value === "object" && value !== null && "__rawRpcResponse" in value
+  );
 }
 
 async function settle(): Promise<void> {
@@ -637,6 +654,41 @@ test("probe transport timeout remains retryable and reconnectable", async () => 
   await driver.connect();
   assert.equal(driver.state, "ready");
   assert.equal(authority.probeReports[1]?.outcome, "passed");
+});
+
+test("probe preserves a fatal protocol error when close races the pending request", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  authority.accepted = false;
+  transport.notifyCloseOnClose = true;
+  configureInitialize(transport);
+  transport.responders.set("model/list", (request) => ({
+    __rawRpcResponse: {
+      id: request.id,
+      result: { data: [], nextCursor: null },
+      error: { code: -32603, message: "invalid duplicate result" },
+    },
+  }));
+  const driver = new CodexAppServerDriver(transport, authority);
+
+  await assert.rejects(driver.connect(), /rejected Codex app-server handshake/);
+
+  assert.equal(driver.state, "incompatible");
+  assert.equal(authority.probeReports[0]?.outcome, "incompatible");
+  const modelList = authority.probeReports[0]?.steps.find(
+    ({ stepId }) => stepId === "model_list",
+  );
+  assert.equal(
+    modelList?.reasonCode,
+    "external_runtime_required_contract_incompatible",
+  );
+  assert.match(
+    modelList?.detail ?? "",
+    /response cannot contain both result and error/,
+  );
+  assert.doesNotMatch(modelList?.detail ?? "", /disconnected/);
+  assert.equal(authority.faults.at(-1)?.reasonCode, "malformed_response");
+  assert.equal(authority.disconnects.length, 1);
 });
 
 test("known dynamic tools are resolved through the leased Rust callback", async () => {

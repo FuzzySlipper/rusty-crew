@@ -247,6 +247,10 @@ class FakeTransport implements CodexJsonRpcTransport {
 
   async close(): Promise<void> {}
 
+  disconnect(reason = "test app-server restart"): void {
+    this.handlers?.onClose(reason);
+  }
+
   emit(value: unknown): void {
     queueMicrotask(() => this.handlers?.onMessage(JSON.stringify(value)));
   }
@@ -267,6 +271,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   handlers?: CodexTransportHandlers;
   readonly sent: Array<Record<string, unknown>> = [];
   readonly threads: Array<Record<string, unknown>> = [];
+  modelListNotificationMessage?: string;
   readonly resumeFailureThreadIds = new Set<string>();
   settingsUpdateError?: { code: number; message: string };
   nameSetError?: { code: number; message: string };
@@ -325,6 +330,12 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       return;
     }
     if (parsed.method === "model/list") {
+      if (this.modelListNotificationMessage !== undefined) {
+        this.emit({
+          method: "future/runtime-status",
+          params: { text: this.modelListNotificationMessage },
+        });
+      }
       this.emit({
         id: parsed.id,
         result: {
@@ -661,8 +672,23 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
 
   async close(): Promise<void> {}
 
+  disconnect(reason = "test app-server restart"): void {
+    this.handlers?.onClose(reason);
+  }
+
   emit(value: unknown): void {
     queueMicrotask(() => this.handlers?.onMessage(JSON.stringify(value)));
+  }
+}
+
+class ProbeTimeoutCreationTransport extends FakeCreationTransport {
+  override async send(message: string): Promise<void> {
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    if (parsed.method === "model/list") {
+      this.sent.push(parsed);
+      return;
+    }
+    await super.send(message);
   }
 }
 
@@ -2514,6 +2540,178 @@ test("controller isolates stale binding resume failures and repairs degraded rea
     );
   } finally {
     await recoveryController?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("controller reconnect is single-flight and resumes bindings after an app-server bounce", async () => {
+  const fixture = await externalCreationFixture(false);
+  let controller: ServiceExternalRuntimeController | undefined;
+  try {
+    await fixture.controller.stop();
+    const transports: FakeCreationTransport[] = [];
+    controller = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "single-flight-recovery-controller",
+      recoveryBaseDelayMs: 10,
+      recoveryMaxDelayMs: 100,
+      driverFactory: (_registration, authority) => {
+        const transport = new FakeCreationTransport();
+        transport.modelListNotificationMessage = `connection-${transports.length + 1}`;
+        const previous = transports.at(-1);
+        if (previous !== undefined) {
+          transport.threads.push(...previous.threads);
+          for (const [threadId, settings] of previous.threadSettings) {
+            transport.threadSettings.set(threadId, settings);
+          }
+        }
+        transports.push(transport);
+        return new CodexAppServerDriver(transport, authority, {
+          requestTimeoutMs: 50,
+        });
+      },
+    });
+    await controller.connect(fixture.runtimeId);
+    const created = await controller.createAgentSession({
+      idempotencyKey: "single-flight-recovery-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const nativeThreadId = created.creation.binding.nativeThreadId;
+    assert.equal(typeof nativeThreadId, "string");
+
+    transports[0]?.disconnect("app-server process replaced");
+    await waitUntil(
+      async () =>
+        (await fixture.bridge.getExternalRuntime(fixture.runtimeId))
+          ?.observedState === "disconnected",
+      "runtime disconnect observation",
+    );
+
+    await Promise.all([
+      controller.tick(),
+      controller.connect(fixture.runtimeId),
+      controller.connect(fixture.runtimeId),
+    ]);
+
+    assert.equal(transports.length, 2);
+    const status = controller.statuses()[0];
+    assert.equal(status?.driverState, "ready");
+    assert.equal(status?.recovery.phase, "succeeded");
+    assert.equal(status?.recovery.totalAttempts, 1);
+    assert.equal(status?.recovery.consecutiveFailures, 0);
+    assert.equal(status?.recovery.nextAttemptAt, null);
+    assert.equal(typeof status?.recovery.lastRecoveredAt, "string");
+    assert.deepEqual(status?.bindingResumeFailures, []);
+    const connectionEvents = (
+      await fixture.bridge.queryExternalRuntimeEvents({
+        runtimeId: fixture.runtimeId,
+        afterSequence: 0,
+        limit: 100,
+      })
+    ).filter((event) => event.kind === "unknown_native_notification");
+    assert.deepEqual(
+      connectionEvents.map((event) => event.payload),
+      [
+        {
+          nativeMethod: "future/runtime-status",
+          text: "connection-1",
+        },
+        {
+          nativeMethod: "future/runtime-status",
+          text: "connection-2",
+        },
+      ],
+    );
+    assert.notEqual(connectionEvents[0]?.eventId, connectionEvents[1]?.eventId);
+    assert.ok(
+      transports[1]?.sent.some(
+        (message) =>
+          message.method === "thread/resume" &&
+          (message.params as Record<string, unknown>).threadId ===
+            nativeThreadId,
+      ),
+    );
+
+    transports[0]?.handlers?.onError(
+      new Error("late error from superseded socket"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      (await fixture.bridge.getExternalRuntime(fixture.runtimeId))
+        ?.observedState,
+      "ready",
+    );
+  } finally {
+    await controller?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("automatic reconnect failures back off before retrying", async () => {
+  const fixture = await externalCreationFixture(false);
+  let controller: ServiceExternalRuntimeController | undefined;
+  try {
+    await fixture.controller.stop();
+    let nowMs = Date.now() + 1_000;
+    const firstRetryAt = new Date(nowMs + 100).toISOString();
+    const transports: FakeCreationTransport[] = [];
+    controller = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "backoff-recovery-controller",
+      now: () => new Date(nowMs),
+      recoveryBaseDelayMs: 100,
+      recoveryMaxDelayMs: 400,
+      driverFactory: (_registration, authority) => {
+        const transport =
+          transports.length === 1
+            ? new ProbeTimeoutCreationTransport()
+            : new FakeCreationTransport();
+        transports.push(transport);
+        return new CodexAppServerDriver(transport, authority, {
+          requestTimeoutMs: 20,
+          compatibilityProbeTimeoutMs: 20,
+        });
+      },
+    });
+    await controller.connect(fixture.runtimeId);
+    transports[0]?.disconnect("app-server process replaced");
+    await waitUntil(
+      async () => controller?.statuses()[0]?.driverState === "disconnected",
+      "driver disconnect",
+    );
+
+    await controller.tick();
+    assert.equal(transports.length, 2);
+    const failed = controller.statuses()[0]?.recovery;
+    assert.equal(failed?.phase, "failed");
+    assert.equal(failed?.totalAttempts, 1);
+    assert.equal(failed?.consecutiveFailures, 1);
+    assert.equal(failed?.nextAttemptAt, firstRetryAt);
+
+    transports[1]?.disconnect("late close after failed probe");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(controller.statuses()[0]?.recovery.phase, "failed");
+    assert.equal(
+      controller.statuses()[0]?.recovery.nextAttemptAt,
+      firstRetryAt,
+    );
+
+    await controller.tick();
+    assert.equal(transports.length, 2);
+
+    nowMs += 100;
+    await controller.tick();
+    assert.equal(transports.length, 3);
+    const recovered = controller.statuses()[0]?.recovery;
+    assert.equal(recovered?.phase, "succeeded");
+    assert.equal(recovered?.totalAttempts, 2);
+    assert.equal(recovered?.consecutiveFailures, 0);
+    assert.equal(recovered?.nextAttemptAt, null);
+  } finally {
+    await controller?.stop().catch(() => undefined);
     await fixture.cleanup();
   }
 });

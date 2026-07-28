@@ -64,6 +64,8 @@ import type {
 
 const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
+const DEFAULT_RECOVERY_BASE_DELAY_MS = 5_000;
+const DEFAULT_RECOVERY_MAX_DELAY_MS = 60_000;
 export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
   "external_agent_creation_idempotency_key_required",
   "external_agent_creation_idempotency_conflict",
@@ -82,6 +84,7 @@ export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
 interface ControlledRuntime {
   registration: ExternalRuntimeRegistration;
   lease: ExternalControllerLease;
+  connectionId: string;
   driver: CodexAppServerDriver;
   handshakeIdentity?: CodexInitializeIdentity;
   bindingResumeFailures: ExternalBindingResumeFailure[];
@@ -89,6 +92,34 @@ interface ControlledRuntime {
   threadSettings: Map<string, ControlledThreadSettings>;
   threadUsage: Map<string, ExternalThreadUsageProjection>;
   archivedThreadIds: Set<string>;
+  retired: boolean;
+}
+
+type ExternalRuntimeRecoveryPhase =
+  | "idle"
+  | "scheduled"
+  | "attempting"
+  | "succeeded"
+  | "failed";
+
+interface ExternalRuntimeRecoveryTracker {
+  phase: ExternalRuntimeRecoveryPhase;
+  totalAttempts: number;
+  consecutiveFailures: number;
+  lastAttemptAt: string | null;
+  lastRecoveredAt: string | null;
+  nextAttemptAt: string | null;
+  lastFailureReason: string | null;
+}
+
+export interface ExternalRuntimeRecoveryDiagnostics {
+  readonly phase: ExternalRuntimeRecoveryPhase;
+  readonly totalAttempts: number;
+  readonly consecutiveFailures: number;
+  readonly lastAttemptAt: string | null;
+  readonly lastRecoveredAt: string | null;
+  readonly nextAttemptAt: string | null;
+  readonly lastFailureReason: string | null;
 }
 
 type ControlledThreadSettings = CollaborationMode["settings"] & {
@@ -143,6 +174,7 @@ export interface ExternalRuntimeControllerStatus {
     | "probe_failed"
     | "disconnected";
   readonly lastCompatibilityProbe: ExternalRuntimeCompatibilityProbeReport | null;
+  readonly recovery: ExternalRuntimeRecoveryDiagnostics;
   readonly bindingResumeFailures: readonly ExternalBindingResumeFailure[];
 }
 
@@ -297,7 +329,14 @@ export class ServiceExternalRuntimeController {
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
   ) => CodexAppServerDriver;
+  readonly #recoveryBaseDelayMs: number;
+  readonly #recoveryMaxDelayMs: number;
   readonly #controlled = new Map<string, ControlledRuntime>();
+  readonly #connectInFlight = new Map<
+    string,
+    Promise<ExternalRuntimeControllerStatus>
+  >();
+  readonly #recovery = new Map<string, ExternalRuntimeRecoveryTracker>();
   readonly #pendingInteractions = new Map<
     string,
     PendingInteractionResolution
@@ -315,11 +354,27 @@ export class ServiceExternalRuntimeController {
     onCoordinationDelivery?: (
       receipt: AgentMessageDeliveryReceipt,
     ) => Promise<AgentMessageDeliveryReceipt>;
+    recoveryBaseDelayMs?: number;
+    recoveryMaxDelayMs?: number;
   }) {
     this.#bridge = input.bridge;
     this.#now = input.now ?? (() => new Date());
     this.#instanceId = input.instanceId ?? `service-host:${randomUUID()}`;
     this.#onCoordinationDelivery = input.onCoordinationDelivery;
+    this.#recoveryBaseDelayMs =
+      input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
+    this.#recoveryMaxDelayMs =
+      input.recoveryMaxDelayMs ?? DEFAULT_RECOVERY_MAX_DELAY_MS;
+    if (
+      !Number.isFinite(this.#recoveryBaseDelayMs) ||
+      this.#recoveryBaseDelayMs <= 0 ||
+      !Number.isFinite(this.#recoveryMaxDelayMs) ||
+      this.#recoveryMaxDelayMs < this.#recoveryBaseDelayMs
+    ) {
+      throw new Error(
+        "external runtime recovery delays must be positive and max must be at least base",
+      );
+    }
     this.#driverFactory =
       input.driverFactory ??
       ((registration, authority) =>
@@ -344,6 +399,7 @@ export class ServiceExternalRuntimeController {
     }
     this.#pendingInteractions.clear();
     for (const controlled of this.#controlled.values()) {
+      controlled.retired = true;
       await controlled.driver.close().catch(() => undefined);
       await this.#bridge
         .releaseExternalController({
@@ -355,6 +411,8 @@ export class ServiceExternalRuntimeController {
         .catch(() => undefined);
     }
     this.#controlled.clear();
+    this.#connectInFlight.clear();
+    this.#recovery.clear();
   }
 
   statuses(): ExternalRuntimeControllerStatus[] {
@@ -364,6 +422,20 @@ export class ServiceExternalRuntimeController {
   }
 
   async connect(runtimeId: string): Promise<ExternalRuntimeControllerStatus> {
+    const inFlight = this.#connectInFlight.get(runtimeId);
+    if (inFlight !== undefined) return inFlight;
+    const operation = this.#connectRuntime(runtimeId).finally(() => {
+      if (this.#connectInFlight.get(runtimeId) === operation) {
+        this.#connectInFlight.delete(runtimeId);
+      }
+    });
+    this.#connectInFlight.set(runtimeId, operation);
+    return operation;
+  }
+
+  async #connectRuntime(
+    runtimeId: string,
+  ): Promise<ExternalRuntimeControllerStatus> {
     const existing = this.#controlled.get(runtimeId);
     if (existing !== undefined && existing.driver.state === "ready") {
       existing.lease = await this.#acquireLease(runtimeId);
@@ -386,39 +458,67 @@ export class ServiceExternalRuntimeController {
     if (registration.kind !== "codex_app_server") {
       throw new Error(`unsupported external runtime kind ${registration.kind}`);
     }
-    const lease = await this.#acquireLease(runtimeId);
-    const controller: ExternalControllerContext = {
-      holderInstanceId: this.#instanceId,
-      generation: lease.generation,
-    };
-    await this.#bridge.recordExternalRuntimeState({
-      runtimeId,
-      controller,
-      observedState: "connecting",
-      reasonCode: "controller_connecting",
-      observedAt: this.#now().toISOString(),
-    });
-    const controlled: ControlledRuntime = {
-      registration,
-      lease,
-      driver: undefined as unknown as CodexAppServerDriver,
-      bindingResumeFailures: [],
-      rawDetails: new Map(),
-      threadSettings: new Map(),
-      threadUsage: new Map(),
-      archivedThreadIds: new Set(),
-    };
-    const authority = this.#authority(controlled);
-    controlled.driver = this.#driverFactory(registration, authority);
-    this.#controlled.set(runtimeId, controlled);
+    const recovering = existing !== undefined;
+    const recovery = this.#recoveryTracker(runtimeId);
+    if (recovering) {
+      recovery.phase = "attempting";
+      recovery.totalAttempts += 1;
+      recovery.lastAttemptAt = this.#now().toISOString();
+      recovery.nextAttemptAt = null;
+    }
+    let controlled: ControlledRuntime | undefined;
     try {
+      const lease = await this.#acquireLease(runtimeId);
+      const controller: ExternalControllerContext = {
+        holderInstanceId: this.#instanceId,
+        generation: lease.generation,
+      };
+      controlled = {
+        registration,
+        lease,
+        connectionId: randomUUID(),
+        driver: undefined as unknown as CodexAppServerDriver,
+        bindingResumeFailures: [],
+        rawDetails: new Map(),
+        threadSettings: new Map(),
+        threadUsage: new Map(),
+        archivedThreadIds: new Set(),
+        retired: false,
+      };
+      const authority = this.#authority(controlled);
+      controlled.driver = this.#driverFactory(registration, authority);
+      if (existing !== undefined) {
+        existing.retired = true;
+        await existing.driver.close().catch(() => undefined);
+      }
+      this.#controlled.set(runtimeId, controlled);
+      await this.#bridge.recordExternalRuntimeState({
+        runtimeId,
+        controller,
+        observedState: "connecting",
+        reasonCode: recovering
+          ? "controller_recovery_attempting"
+          : "controller_connecting",
+        observedAt: this.#now().toISOString(),
+      });
       await controlled.driver.connect();
       await this.#resumePersistedBindings(controlled);
       controlled.registration =
         (await this.#bridge.getExternalRuntime(runtimeId)) ?? registration;
+      if (recovering) {
+        recovery.phase = "succeeded";
+        recovery.consecutiveFailures = 0;
+        recovery.lastRecoveredAt = this.#now().toISOString();
+        recovery.nextAttemptAt = null;
+      }
       return this.#status(controlled);
     } catch (error) {
+      if (recovering) {
+        this.#recordRecoveryFailure(runtimeId, error);
+      }
       if (
+        controlled !== undefined &&
+        this.#isActiveController(controlled) &&
         controlled.driver.state !== "incompatible" &&
         controlled.registration.lastCompatibilityProbe?.outcome !==
           "transport_retryable"
@@ -1625,11 +1725,19 @@ export class ServiceExternalRuntimeController {
       for (const registration of runtimes) {
         if (registration.desiredState !== "enabled") continue;
         const controlled = this.#controlled.get(registration.runtimeId);
+        if (controlled === undefined) {
+          await this.connect(registration.runtimeId).catch(() => undefined);
+          continue;
+        }
+        if (controlled.driver.state === "disconnected") {
+          if (this.#recoveryDue(registration.runtimeId)) {
+            await this.connect(registration.runtimeId).catch(() => undefined);
+          }
+          continue;
+        }
         if (
-          controlled === undefined ||
-          controlled.driver.state === "disconnected" ||
-          (controlled.driver.state === "ready" &&
-            registration.observedState !== "ready")
+          controlled.driver.state === "ready" &&
+          registration.observedState !== "ready"
         ) {
           await this.connect(registration.runtimeId).catch(() => undefined);
           continue;
@@ -3022,13 +3130,37 @@ export class ServiceExternalRuntimeController {
 
   #authority(controlled: ControlledRuntime): CodexControllerAuthority {
     return {
-      authorizeHandshake: (identity, probeReport) =>
-        this.#authorizeHandshake(controlled, identity, probeReport),
-      hasControllerLease: () => this.#hasLease(controlled),
-      onEvent: (event) => this.#recordEvent(controlled, event),
-      resolveServerRequest: (context) =>
-        this.#resolveServerRequest(controlled, context),
-      onProtocolFault: (fault) => this.#recordProtocolFault(controlled, fault),
+      authorizeHandshake: async (identity, probeReport) => {
+        if (!this.#isActiveController(controlled)) {
+          return {
+            accepted: false,
+            retryable: true,
+            reasonCode: "external_runtime_controller_superseded",
+            message: "controller was superseded during handshake",
+          };
+        }
+        return this.#authorizeHandshake(controlled, identity, probeReport);
+      },
+      hasControllerLease: () =>
+        this.#isActiveController(controlled) && this.#hasLease(controlled),
+      onEvent: (event) => {
+        if (!this.#isActiveController(controlled)) return;
+        return this.#recordEvent(controlled, event);
+      },
+      resolveServerRequest: (context) => {
+        if (!this.#isActiveController(controlled)) {
+          return Promise.resolve({
+            type: "error" as const,
+            code: -32001,
+            message: "Rusty Crew controller was superseded",
+          });
+        }
+        return this.#resolveServerRequest(controlled, context);
+      },
+      onProtocolFault: (fault) => {
+        if (!this.#isActiveController(controlled)) return;
+        return this.#recordProtocolFault(controlled, fault);
+      },
       onDisconnected: ({ reason }) => this.#onDisconnected(controlled, reason),
     };
   }
@@ -3101,7 +3233,7 @@ export class ServiceExternalRuntimeController {
         projectThreadUsage(event.payload.usage),
       );
     }
-    const detailId = `${controlled.registration.runtimeId}:${controlled.lease.generation}:${event.transportSequence}`;
+    const detailId = `${controlled.registration.runtimeId}:${controlled.lease.generation}:${controlled.connectionId}:${event.transportSequence}`;
     this.#rememberRawDetail(controlled, {
       detailId,
       runtimeId: controlled.registration.runtimeId,
@@ -3346,6 +3478,8 @@ export class ServiceExternalRuntimeController {
     controlled: ControlledRuntime,
     reason: string,
   ): Promise<void> {
+    if (!this.#isActiveController(controlled)) return;
+    this.#scheduleRecovery(controlled.registration.runtimeId, reason);
     for (const [interactionId, pending] of this.#pendingInteractions) {
       if (pending.interaction.runtimeId !== controlled.registration.runtimeId) {
         continue;
@@ -3404,6 +3538,67 @@ export class ServiceExternalRuntimeController {
       },
       now: now.toISOString(),
     });
+  }
+
+  #recoveryTracker(runtimeId: string): ExternalRuntimeRecoveryTracker {
+    let tracker = this.#recovery.get(runtimeId);
+    if (tracker !== undefined) return tracker;
+    tracker = {
+      phase: "idle",
+      totalAttempts: 0,
+      consecutiveFailures: 0,
+      lastAttemptAt: null,
+      lastRecoveredAt: null,
+      nextAttemptAt: null,
+      lastFailureReason: null,
+    };
+    this.#recovery.set(runtimeId, tracker);
+    return tracker;
+  }
+
+  #scheduleRecovery(runtimeId: string, reason: string): void {
+    const tracker = this.#recoveryTracker(runtimeId);
+    if (
+      tracker.phase === "failed" &&
+      tracker.nextAttemptAt !== null &&
+      Date.parse(tracker.nextAttemptAt) > this.#now().getTime()
+    ) {
+      return;
+    }
+    tracker.phase = "scheduled";
+    tracker.nextAttemptAt = this.#now().toISOString();
+    tracker.lastFailureReason = reason.slice(0, 1_024);
+  }
+
+  #recordRecoveryFailure(runtimeId: string, error: unknown): void {
+    const tracker = this.#recoveryTracker(runtimeId);
+    tracker.phase = "failed";
+    tracker.consecutiveFailures += 1;
+    tracker.lastFailureReason = String(error).slice(0, 1_024);
+    const exponent = Math.min(tracker.consecutiveFailures - 1, 20);
+    const delayMs = Math.min(
+      this.#recoveryBaseDelayMs * 2 ** exponent,
+      this.#recoveryMaxDelayMs,
+    );
+    tracker.nextAttemptAt =
+      this.#controlled.get(runtimeId)?.driver.state === "disconnected"
+        ? new Date(this.#now().getTime() + delayMs).toISOString()
+        : null;
+  }
+
+  #recoveryDue(runtimeId: string): boolean {
+    const nextAttemptAt = this.#recoveryTracker(runtimeId).nextAttemptAt;
+    return (
+      nextAttemptAt === null ||
+      Date.parse(nextAttemptAt) <= this.#now().getTime()
+    );
+  }
+
+  #isActiveController(controlled: ControlledRuntime): boolean {
+    return (
+      !controlled.retired &&
+      this.#controlled.get(controlled.registration.runtimeId) === controlled
+    );
   }
 
   #hasLease(controlled: ControlledRuntime): boolean {
@@ -3738,6 +3933,7 @@ export class ServiceExternalRuntimeController {
       compatibilityDiagnostic: compatibilityDiagnostic(controlled.registration),
       lastCompatibilityProbe:
         controlled.registration.lastCompatibilityProbe ?? null,
+      recovery: { ...this.#recoveryTracker(controlled.registration.runtimeId) },
       bindingResumeFailures: controlled.bindingResumeFailures.map(
         (failure) => ({ ...failure }),
       ),

@@ -5,7 +5,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.15.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.16.0";
 
 export const EXTERNAL_BINDING_PROFILE_REFRESH_API_REASON_CODES = [
   "external_binding_profile_refresh_invalid_request",
@@ -237,6 +237,20 @@ export interface ExternalRuntimeControllerStatus {
   readonly consumedContractRevision: string | null;
   readonly compatibilityState: ExternalRuntimeRegistration["compatibilityState"];
   readonly lastCompatibilityProbe: ExternalRuntimeRegistration["lastCompatibilityProbe"];
+  readonly recovery: {
+    readonly phase:
+      | "idle"
+      | "scheduled"
+      | "attempting"
+      | "succeeded"
+      | "failed";
+    readonly totalAttempts: number;
+    readonly consecutiveFailures: number;
+    readonly lastAttemptAt: string | null;
+    readonly lastRecoveredAt: string | null;
+    readonly nextAttemptAt: string | null;
+    readonly lastFailureReason: string | null;
+  };
   readonly bindingResumeFailures: readonly {
     readonly bindingId: string;
     readonly nativeThreadId: string;
@@ -924,6 +938,7 @@ function routeSchemas(): Record<string, JsonSchema> {
         "compatibilityState",
         "compatibilityDiagnostic",
         "lastCompatibilityProbe",
+        "recovery",
         "bindingResumeFailures",
       ],
       properties: {
@@ -954,6 +969,34 @@ function routeSchemas(): Record<string, JsonSchema> {
             },
             { type: "null" },
           ],
+        },
+        recovery: {
+          type: "object",
+          required: [
+            "phase",
+            "totalAttempts",
+            "consecutiveFailures",
+            "lastAttemptAt",
+            "lastRecoveredAt",
+            "nextAttemptAt",
+            "lastFailureReason",
+          ],
+          properties: {
+            phase: {
+              type: "string",
+              enum: ["idle", "scheduled", "attempting", "succeeded", "failed"],
+            },
+            totalAttempts: { type: "integer", minimum: 0 },
+            consecutiveFailures: { type: "integer", minimum: 0 },
+            lastAttemptAt: { type: ["string", "null"], format: "date-time" },
+            lastRecoveredAt: {
+              type: ["string", "null"],
+              format: "date-time",
+            },
+            nextAttemptAt: { type: ["string", "null"], format: "date-time" },
+            lastFailureReason: { type: ["string", "null"] },
+          },
+          additionalProperties: false,
         },
         bindingResumeFailures: {
           type: "array",

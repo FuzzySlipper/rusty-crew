@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.15.0",
+    "version": "0.16.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -5355,6 +5355,7 @@
           "compatibilityState",
           "compatibilityDiagnostic",
           "lastCompatibilityProbe",
+          "recovery",
           "bindingResumeFailures"
         ],
         "properties": {
@@ -5385,6 +5386,46 @@
               },
               { "type": "null" }
             ]
+          },
+          "recovery": {
+            "type": "object",
+            "required": [
+              "phase",
+              "totalAttempts",
+              "consecutiveFailures",
+              "lastAttemptAt",
+              "lastRecoveredAt",
+              "nextAttemptAt",
+              "lastFailureReason"
+            ],
+            "properties": {
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "idle",
+                  "scheduled",
+                  "attempting",
+                  "succeeded",
+                  "failed"
+                ]
+              },
+              "totalAttempts": { "type": "integer", "minimum": 0 },
+              "consecutiveFailures": { "type": "integer", "minimum": 0 },
+              "lastAttemptAt": {
+                "type": ["string", "null"],
+                "format": "date-time"
+              },
+              "lastRecoveredAt": {
+                "type": ["string", "null"],
+                "format": "date-time"
+              },
+              "nextAttemptAt": {
+                "type": ["string", "null"],
+                "format": "date-time"
+              },
+              "lastFailureReason": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
           },
           "bindingResumeFailures": {
             "type": "array",
