@@ -4182,6 +4182,13 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "profilePromptSnapshot": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "profileRevision": {
             "default": null,
             "format": "uint64",
@@ -6949,6 +6956,13 @@ export const bridgeWireSchemaArtifact = {
           ]
         },
         "profilePromptHash": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profilePromptSnapshot": {
           "default": null,
           "type": [
             "string",
@@ -20043,6 +20057,13 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "profilePromptSnapshot": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "profileRevision": {
           "default": null,
           "format": "uint64",
@@ -20171,6 +20192,13 @@ export const bridgeWireSchemaArtifact = {
               ]
             },
             "profilePromptHash": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profilePromptSnapshot": {
               "default": null,
               "type": [
                 "string",
@@ -20510,6 +20538,13 @@ export const bridgeWireSchemaArtifact = {
               ]
             },
             "profilePromptHash": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profilePromptSnapshot": {
               "default": null,
               "type": [
                 "string",

@@ -764,6 +764,13 @@ export const API_CAPABILITIES = [
     ["session", "profile"],
   ),
   controlApiCapability(
+    "external.bindings.profile.refresh",
+    "POST",
+    "/v1/external-bindings/{binding_id}/profile-refresh",
+    "Explicitly apply the current profile prompt to a bound Codex agent using optimistic concurrency.",
+    ["session", "profile", "config"],
+  ),
+  controlApiCapability(
     "external.bindings.control",
     "POST",
     "/v1/external-bindings/{binding_id}/controls",

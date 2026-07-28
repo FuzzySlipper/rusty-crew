@@ -22,6 +22,7 @@ import {
   EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES,
   ExternalAgentSessionCreationError,
   ExternalBindingMetadataError,
+  ExternalBindingProfileRefreshError,
   ExternalBindingRestoreError,
   ExternalRuntimeCommandError,
   ExternalThreadLifecycleError,
@@ -104,10 +105,12 @@ export async function handleExternalRuntimeRequest(
         context.controller
           .statuses()
           .find((candidate) => candidate.runtimeId === runtimeId) ?? null,
-      activeBindings: bindings.filter(
-        (binding) =>
-          binding.runtimeId === runtimeId && binding.status === "active",
-      ),
+      activeBindings: bindings
+        .filter(
+          (binding) =>
+            binding.runtimeId === runtimeId && binding.status === "active",
+        )
+        .map(publicExternalBinding),
       activeTurns: activeTurns.filter((turn) => turn.runtimeId === runtimeId),
       pendingInteractions: pendingInteractions.filter(
         (interaction) => interaction.runtimeId === runtimeId,
@@ -213,10 +216,15 @@ export async function handleExternalRuntimeRequest(
       });
     }
     try {
-      return successRoute(
-        requestId,
-        await context.controller.createAgentSession(creationRequest),
-      );
+      const created =
+        await context.controller.createAgentSession(creationRequest);
+      return successRoute(requestId, {
+        ...created,
+        creation: {
+          ...created.creation,
+          binding: publicExternalBinding(created.creation.binding),
+        },
+      });
     } catch (error) {
       return externalAgentSessionCreationFailure(requestId, error);
     }
@@ -248,22 +256,66 @@ export async function handleExternalRuntimeRequest(
   if (url.pathname === "/v1/external-bindings") {
     if (method === "GET") {
       return successRoute(requestId, {
-        bindings: await context.bridge.listExternalBindings(),
+        bindings: (await context.bridge.listExternalBindings()).map(
+          publicExternalBinding,
+        ),
+        profileStates: await context.controller.bindingProfileStates(),
       });
     }
     if (method === "POST") {
       const body = requireRecord(await context.readJsonBody(request));
-      return successRoute(
-        requestId,
-        await context.bridge.bindExternalAgent({
-          binding: body.binding as ExternalAgentBinding,
-          ...(numberValue(body.expectedRevision) === undefined
-            ? {}
-            : { expectedRevision: numberValue(body.expectedRevision) }),
-        }),
-      );
+      const binding = await context.bridge.bindExternalAgent({
+        binding: body.binding as ExternalAgentBinding,
+        ...(numberValue(body.expectedRevision) === undefined
+          ? {}
+          : { expectedRevision: numberValue(body.expectedRevision) }),
+      });
+      return successRoute(requestId, publicExternalBinding(binding));
     }
     return methodNotAllowed(requestId);
+  }
+
+  if (
+    parts[1] === "external-bindings" &&
+    parts.length === 4 &&
+    parts[3] === "profile-refresh"
+  ) {
+    if (method !== "POST") return methodNotAllowed(requestId);
+    try {
+      const body = requireRecord(await context.readJsonBody(request));
+      const expectedProfilePromptHash = boundedRequiredString(
+        body.expectedProfilePromptHash,
+        128,
+        "expectedProfilePromptHash",
+      );
+      if (!/^[a-f0-9]{64}$/.test(expectedProfilePromptHash)) {
+        throw new Error(
+          "expectedProfilePromptHash must be a lowercase SHA-256 digest",
+        );
+      }
+      const receipt =
+        await context.controller.refreshBindingProfileInstructions({
+          bindingId: parts[2] ?? "",
+          expectedBindingRevision: requiredInteger(
+            body.expectedBindingRevision,
+          ),
+          expectedNativeThreadId: boundedRequiredString(
+            body.expectedNativeThreadId,
+            256,
+            "expectedNativeThreadId",
+          ),
+          expectedProfileRevision: requiredInteger(
+            body.expectedProfileRevision,
+          ),
+          expectedProfilePromptHash,
+        });
+      return successRoute(requestId, {
+        ...receipt,
+        binding: publicExternalBinding(receipt.binding),
+      });
+    } catch (error) {
+      return externalBindingProfileRefreshFailure(requestId, error);
+    }
   }
 
   if (
@@ -274,19 +326,18 @@ export async function handleExternalRuntimeRequest(
     if (method !== "POST") return methodNotAllowed(requestId);
     try {
       const body = requireRecord(await context.readJsonBody(request));
-      return successRoute(
-        requestId,
-        await context.controller.restoreBinding({
-          bindingId: parts[2] ?? "",
-          expectedBindingRevision: requiredInteger(
-            body.expectedBindingRevision,
-          ),
-          expectedSessionId: requiredString(body.expectedSessionId),
-          expectedAgentId: requiredString(body.expectedAgentId),
-          expectedProfileId: requiredString(body.expectedProfileId),
-          expectedNativeThreadId: requiredString(body.expectedNativeThreadId),
-        }),
-      );
+      const receipt = await context.controller.restoreBinding({
+        bindingId: parts[2] ?? "",
+        expectedBindingRevision: requiredInteger(body.expectedBindingRevision),
+        expectedSessionId: requiredString(body.expectedSessionId),
+        expectedAgentId: requiredString(body.expectedAgentId),
+        expectedProfileId: requiredString(body.expectedProfileId),
+        expectedNativeThreadId: requiredString(body.expectedNativeThreadId),
+      });
+      return successRoute(requestId, {
+        ...receipt,
+        binding: publicExternalBinding(receipt.binding),
+      });
     } catch (error) {
       return externalBindingRestoreFailure(requestId, error);
     }
@@ -313,15 +364,13 @@ export async function handleExternalRuntimeRequest(
           : boundedRequiredString(body.label, 256, "label");
       const taskRef =
         body.taskRef === null ? null : optionalTaskReference(body.taskRef);
-      return successRoute(
-        requestId,
-        await context.controller.updateBindingMetadata({
-          bindingId: parts[2] ?? "",
-          expectedRevision,
-          label,
-          taskRef,
-        }),
-      );
+      const binding = await context.controller.updateBindingMetadata({
+        bindingId: parts[2] ?? "",
+        expectedRevision,
+        label,
+        taskRef,
+      });
+      return successRoute(requestId, publicExternalBinding(binding));
     } catch (error) {
       return externalBindingMetadataFailure(requestId, error);
     }
@@ -983,6 +1032,40 @@ function externalBindingMetadataFailure(
   });
 }
 
+function externalBindingProfileRefreshFailure(
+  requestId: string,
+  error: unknown,
+): ServiceRouteResult {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!(error instanceof ExternalBindingProfileRefreshError)) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "external_binding_profile_refresh_invalid_request",
+      message,
+      retryable: false,
+    });
+  }
+  const status =
+    error.reasonCode === "external_binding_profile_refresh_not_found"
+      ? 404
+      : error.reasonCode.endsWith("_native_failed") ||
+          error.reasonCode.endsWith("_persist_failed") ||
+          error.reasonCode.endsWith("_profile_unavailable")
+        ? 502
+        : 409;
+  return failure(status, requestId, {
+    code:
+      status === 404
+        ? "not_found"
+        : status === 409
+          ? "conflict"
+          : "failed_precondition",
+    reason_code: error.reasonCode,
+    message,
+    retryable: error.retryable,
+  });
+}
+
 function externalBindingRestoreFailure(
   requestId: string,
   error: unknown,
@@ -1063,6 +1146,14 @@ function booleanParam(url: URL, name: string): boolean | undefined {
   if (value === "true") return true;
   if (value === "false") return false;
   throw new Error(`${name} must be true or false`);
+}
+
+function publicExternalBinding(
+  binding: ExternalAgentBinding,
+): Omit<ExternalAgentBinding, "profilePromptSnapshot"> {
+  const projected = { ...binding };
+  delete projected.profilePromptSnapshot;
+  return projected;
 }
 
 function externalThreadLifecycleFailure(

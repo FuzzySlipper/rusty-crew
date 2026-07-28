@@ -1718,7 +1718,7 @@ async function handleHttpRequest(
           ),
         applyPromptEffects: (record) =>
           withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
-            state.externalRuntimeController.refreshProfileInstructions(
+            state.externalRuntimeController.profileInstructionStatus(
               record.profileId,
             ),
           ),

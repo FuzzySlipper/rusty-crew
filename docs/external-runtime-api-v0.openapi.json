@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.14.0",
+    "version": "0.15.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -1087,6 +1087,73 @@
           "external_binding_restore_native_compensation_failed",
           "external_binding_restore_session_persist_failed",
           "external_binding_restore_binding_persist_failed"
+        ]
+      }
+    },
+    "/v1/external-bindings/{binding_id}/profile-refresh": {
+      "post": {
+        "operationId": "refreshExternalBindingProfile",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalBindingProfileRefreshWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalBindingProfileRefreshReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.bindings.profile.refresh",
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_binding_profile_refresh_invalid_request",
+          "external_binding_profile_refresh_not_found",
+          "external_binding_profile_refresh_inactive",
+          "external_binding_profile_refresh_revision_conflict",
+          "external_binding_profile_refresh_identity_conflict",
+          "external_binding_profile_refresh_profile_unavailable",
+          "external_binding_profile_refresh_profile_revision_conflict",
+          "external_binding_profile_refresh_thread_busy",
+          "external_binding_profile_refresh_native_failed",
+          "external_binding_profile_refresh_persist_failed"
         ]
       }
     },
@@ -3153,6 +3220,10 @@
           "nativeThreadId": { "type": ["string", "null"] },
           "profileId": { "default": null, "type": ["string", "null"] },
           "profilePromptHash": { "default": null, "type": ["string", "null"] },
+          "profilePromptSnapshot": {
+            "default": null,
+            "type": ["string", "null"]
+          },
           "profileRevision": {
             "default": null,
             "format": "uint64",
@@ -5418,11 +5489,17 @@
       },
       "ExternalBindingFleet": {
         "type": "object",
-        "required": ["bindings"],
+        "required": ["bindings", "profileStates"],
         "properties": {
           "bindings": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/ExternalAgentBinding" }
+          },
+          "profileStates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalBindingProfileState"
+            }
           }
         },
         "additionalProperties": false
@@ -5471,6 +5548,82 @@
           "expectedAgentId": { "type": "string", "minLength": 1 },
           "expectedProfileId": { "type": "string", "minLength": 1 },
           "expectedNativeThreadId": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "ExternalBindingProfileState": {
+        "type": "object",
+        "required": [
+          "bindingId",
+          "profileId",
+          "state",
+          "refreshRequired",
+          "appliedProfileRevision",
+          "appliedPromptHash",
+          "currentProfileRevision",
+          "currentPromptHash"
+        ],
+        "properties": {
+          "bindingId": { "type": "string" },
+          "profileId": { "type": ["string", "null"] },
+          "state": {
+            "type": "string",
+            "enum": ["unbound", "current", "stale", "profile_unavailable"]
+          },
+          "refreshRequired": { "type": "boolean" },
+          "appliedProfileRevision": { "type": ["integer", "null"] },
+          "appliedPromptHash": { "type": ["string", "null"] },
+          "currentProfileRevision": { "type": ["integer", "null"] },
+          "currentPromptHash": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ExternalBindingProfileRefreshWrite": {
+        "type": "object",
+        "required": [
+          "expectedBindingRevision",
+          "expectedNativeThreadId",
+          "expectedProfileRevision",
+          "expectedProfilePromptHash"
+        ],
+        "properties": {
+          "expectedBindingRevision": { "type": "integer", "minimum": 0 },
+          "expectedNativeThreadId": { "type": "string", "minLength": 1 },
+          "expectedProfileRevision": { "type": "integer", "minimum": 1 },
+          "expectedProfilePromptHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExternalBindingProfileRefreshReceipt": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "binding",
+          "previousNativeThreadId",
+          "nativeThreadId",
+          "previousNativeThreadArchived",
+          "profileState"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "already_current",
+              "metadata_reconciled",
+              "thread_replaced"
+            ]
+          },
+          "binding": { "$ref": "#/components/schemas/ExternalAgentBinding" },
+          "previousNativeThreadId": { "type": "string" },
+          "nativeThreadId": { "type": "string" },
+          "previousNativeThreadArchived": { "type": "boolean" },
+          "profileState": {
+            "$ref": "#/components/schemas/ExternalBindingProfileState"
+          }
         },
         "additionalProperties": false
       },
@@ -6138,7 +6291,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 31,
+    "operation_count": 32,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

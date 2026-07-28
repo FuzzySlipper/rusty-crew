@@ -5,7 +5,20 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.14.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.15.0";
+
+export const EXTERNAL_BINDING_PROFILE_REFRESH_API_REASON_CODES = [
+  "external_binding_profile_refresh_invalid_request",
+  "external_binding_profile_refresh_not_found",
+  "external_binding_profile_refresh_inactive",
+  "external_binding_profile_refresh_revision_conflict",
+  "external_binding_profile_refresh_identity_conflict",
+  "external_binding_profile_refresh_profile_unavailable",
+  "external_binding_profile_refresh_profile_revision_conflict",
+  "external_binding_profile_refresh_thread_busy",
+  "external_binding_profile_refresh_native_failed",
+  "external_binding_profile_refresh_persist_failed",
+] as const;
 
 export const EXTERNAL_BINDING_RESTORE_API_REASON_CODES = [
   "external_binding_restore_invalid_request",
@@ -68,6 +81,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   rawDetail: "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
   bindings: "/v1/external-bindings",
   bindingRestore: "/v1/external-bindings/{binding_id}/restore",
+  bindingProfileRefresh: "/v1/external-bindings/{binding_id}/profile-refresh",
   bindingMetadata: "/v1/external-bindings/{binding_id}/metadata",
   controls: "/v1/external-bindings/{binding_id}/controls",
   commands: "/v1/external-bindings/{binding_id}/commands",
@@ -507,6 +521,16 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_BINDING_RESTORE_API_REASON_CODES,
   ),
   operation(
+    "external.bindings.profile.refresh",
+    "refreshExternalBindingProfile",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.bindingProfileRefresh,
+    "ExternalBindingProfileRefreshReceipt",
+    "ExternalBindingProfileRefreshWrite",
+    undefined,
+    EXTERNAL_BINDING_PROFILE_REFRESH_API_REASON_CODES,
+  ),
+  operation(
     "external.bindings.control",
     "submitExternalBindingControl",
     "post",
@@ -771,6 +795,7 @@ function rewriteReferences(value: unknown): unknown {
 
 function routeSchemas(): Record<string, JsonSchema> {
   const nullableString = { type: ["string", "null"] };
+  const nullableInteger = { type: ["integer", "null"] };
   return {
     ExternalRuntimeCertificationList: {
       type: "object",
@@ -1020,11 +1045,17 @@ function routeSchemas(): Record<string, JsonSchema> {
     },
     ExternalBindingFleet: {
       type: "object",
-      required: ["bindings"],
+      required: ["bindings", "profileStates"],
       properties: {
         bindings: {
           type: "array",
           items: { $ref: "#/components/schemas/ExternalAgentBinding" },
+        },
+        profileStates: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalBindingProfileState",
+          },
         },
       },
       additionalProperties: false,
@@ -1073,6 +1104,78 @@ function routeSchemas(): Record<string, JsonSchema> {
         expectedAgentId: { type: "string", minLength: 1 },
         expectedProfileId: { type: "string", minLength: 1 },
         expectedNativeThreadId: { type: "string", minLength: 1 },
+      },
+      additionalProperties: false,
+    },
+    ExternalBindingProfileState: {
+      type: "object",
+      required: [
+        "bindingId",
+        "profileId",
+        "state",
+        "refreshRequired",
+        "appliedProfileRevision",
+        "appliedPromptHash",
+        "currentProfileRevision",
+        "currentPromptHash",
+      ],
+      properties: {
+        bindingId: { type: "string" },
+        profileId: nullableString,
+        state: {
+          type: "string",
+          enum: ["unbound", "current", "stale", "profile_unavailable"],
+        },
+        refreshRequired: { type: "boolean" },
+        appliedProfileRevision: nullableInteger,
+        appliedPromptHash: nullableString,
+        currentProfileRevision: nullableInteger,
+        currentPromptHash: nullableString,
+      },
+      additionalProperties: false,
+    },
+    ExternalBindingProfileRefreshWrite: {
+      type: "object",
+      required: [
+        "expectedBindingRevision",
+        "expectedNativeThreadId",
+        "expectedProfileRevision",
+        "expectedProfilePromptHash",
+      ],
+      properties: {
+        expectedBindingRevision: { type: "integer", minimum: 0 },
+        expectedNativeThreadId: { type: "string", minLength: 1 },
+        expectedProfileRevision: { type: "integer", minimum: 1 },
+        expectedProfilePromptHash: {
+          type: "string",
+          minLength: 64,
+          maxLength: 64,
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalBindingProfileRefreshReceipt: {
+      type: "object",
+      required: [
+        "outcome",
+        "binding",
+        "previousNativeThreadId",
+        "nativeThreadId",
+        "previousNativeThreadArchived",
+        "profileState",
+      ],
+      properties: {
+        outcome: {
+          type: "string",
+          enum: ["already_current", "metadata_reconciled", "thread_replaced"],
+        },
+        binding: { $ref: "#/components/schemas/ExternalAgentBinding" },
+        previousNativeThreadId: { type: "string" },
+        nativeThreadId: { type: "string" },
+        previousNativeThreadArchived: { type: "boolean" },
+        profileState: {
+          $ref: "#/components/schemas/ExternalBindingProfileState",
+        },
       },
       additionalProperties: false,
     },

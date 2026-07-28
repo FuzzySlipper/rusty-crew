@@ -2972,6 +2972,13 @@
             "null"
           ]
         },
+        "profilePromptSnapshot": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "profileRevision": {
           "default": null,
           "format": "uint64",

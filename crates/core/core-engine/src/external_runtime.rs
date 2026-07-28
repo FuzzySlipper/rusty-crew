@@ -323,6 +323,14 @@ impl CoreEngine {
             profile_id: Some(profile.profile_id.clone()),
             profile_revision: Some(profile.revision),
             profile_prompt_hash: Some(external_profile_prompt_hash(&profile)),
+            profile_prompt_snapshot: Some(
+                profile
+                    .prompt_soul_markdown
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned(),
+            ),
             message_delivery_policy: external_message_delivery_policy(&profile)?,
             purpose: ExternalBindingPurpose::CrewAgent,
             native_thread_id: None,

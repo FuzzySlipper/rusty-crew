@@ -20,7 +20,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.14.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.15.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(

@@ -715,6 +715,7 @@ export type ExternalAgentBinding = {
   nativeThreadId?: string | null;
   profileId?: string | null;
   profilePromptHash?: string | null;
+  profilePromptSnapshot?: string | null;
   profileRevision?: number | null;
   purpose: ExternalBindingPurpose;
   revision: number;

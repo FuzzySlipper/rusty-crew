@@ -530,6 +530,8 @@ pub struct ExternalAgentBinding {
     #[serde(default)]
     pub profile_prompt_hash: Option<String>,
     #[serde(default)]
+    pub profile_prompt_snapshot: Option<String>,
+    #[serde(default)]
     pub message_delivery_policy: ExternalMessageDeliveryPolicy,
     pub purpose: ExternalBindingPurpose,
     pub native_thread_id: Option<String>,
@@ -1627,6 +1629,7 @@ mod tests {
             profile_id: None,
             profile_revision: None,
             profile_prompt_hash: None,
+            profile_prompt_snapshot: None,
             message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
             purpose: ExternalBindingPurpose::ImportedObserver,
             native_thread_id: Some("thread".into()),

@@ -923,7 +923,7 @@ test("controller atomically creates and idempotently reuses an external agent se
   }
 });
 
-test("profile prompt refresh forks history and preserves Crew identity", async () => {
+test("profile prompt refresh replaces the native thread and preserves Crew identity", async () => {
   const fixture = await externalCreationFixture(false);
   try {
     const created = await fixture.controller.createAgentSession({
@@ -938,7 +938,7 @@ test("profile prompt refresh forks history and preserves Crew identity", async (
       fixture.profileId,
     );
     assert.ok(current);
-    await fixture.bridge.updateProfileRegistryRecord({
+    const updated = await fixture.bridge.updateProfileRegistryRecord({
       write: {
         profileId: current.profileId,
         lifecycleStatus: current.lifecycleStatus,
@@ -958,29 +958,71 @@ test("profile prompt refresh forks history and preserves Crew identity", async (
       expectedRevision: current.revision,
     });
 
-    const receipt = await fixture.controller.refreshProfileInstructions(
+    const stale = await fixture.controller.profileInstructionStatus(
       fixture.profileId,
     );
-    assert.deepEqual(receipt.refreshedBindings, [before.bindingId]);
+    assert.equal(stale.bindings[0]?.state, "stale");
+    const receipt = await fixture.controller.refreshBindingProfileInstructions({
+      bindingId: before.bindingId,
+      expectedBindingRevision: before.revision,
+      expectedNativeThreadId: before.nativeThreadId as string,
+      expectedProfileRevision: updated.revision,
+      expectedProfilePromptHash: createHash("sha256")
+        .update("REFRESHED_PROFILE_SOUL_MARKER")
+        .digest("hex"),
+    });
+    assert.equal(receipt.outcome, "thread_replaced");
     const after = await fixture.bridge.getExternalBinding(before.bindingId);
     assert.ok(after);
     assert.equal(after.sessionId, before.sessionId);
     assert.equal(after.agentId, before.agentId);
     assert.notEqual(after.nativeThreadId, before.nativeThreadId);
-    assert.equal(after.profileRevision, current.revision + 1);
-    const forkRequest = fixture.transport.sent.find(
-      (message) => message.method === "thread/fork",
-    );
+    assert.equal(after.profileRevision, updated.revision);
+    assert.equal(receipt.profileState.state, "current");
+    const replacementRequest = fixture.transport.sent.filter(
+      (message) => message.method === "thread/start",
+    )[1];
+    assert.ok(replacementRequest);
     assert.equal(
-      (forkRequest?.params as Record<string, unknown>).developerInstructions,
+      (replacementRequest.params as Record<string, unknown>)
+        .developerInstructions,
       "REFRESHED_PROFILE_SOUL_MARKER",
     );
     assert.equal(
       Object.hasOwn(
-        forkRequest?.params as Record<string, unknown>,
+        replacementRequest.params as Record<string, unknown>,
         "baseInstructions",
       ),
       false,
+    );
+    const replacementCount = fixture.transport.sent.filter(
+      (message) => message.method === "thread/start",
+    ).length;
+    await assert.rejects(
+      fixture.controller.refreshBindingProfileInstructions({
+        bindingId: before.bindingId,
+        expectedBindingRevision: before.revision,
+        expectedNativeThreadId: before.nativeThreadId as string,
+        expectedProfileRevision: updated.revision,
+        expectedProfilePromptHash: after.profilePromptHash as string,
+      }),
+      /external_binding_profile_refresh_revision_conflict/,
+    );
+    await assert.rejects(
+      fixture.controller.refreshBindingProfileInstructions({
+        bindingId: after.bindingId,
+        expectedBindingRevision: after.revision,
+        expectedNativeThreadId: after.nativeThreadId as string,
+        expectedProfileRevision: updated.revision - 1,
+        expectedProfilePromptHash: after.profilePromptHash as string,
+      }),
+      /external_binding_profile_refresh_profile_revision_conflict/,
+    );
+    assert.equal(
+      fixture.transport.sent.filter(
+        (message) => message.method === "thread/start",
+      ).length,
+      replacementCount,
     );
   } finally {
     await fixture.cleanup();
@@ -1002,7 +1044,7 @@ test("profile lifecycle-only revision repair preserves the native thread", async
       fixture.profileId,
     );
     assert.ok(current);
-    await fixture.bridge.updateProfileRegistryRecord({
+    const updated = await fixture.bridge.updateProfileRegistryRecord({
       write: {
         profileId: current.profileId,
         lifecycleStatus: current.lifecycleStatus,
@@ -1022,15 +1064,24 @@ test("profile lifecycle-only revision repair preserves the native thread", async
       expectedRevision: current.revision,
     });
     const sentBefore = fixture.transport.sent.length;
-    const receipt = await fixture.controller.refreshProfileInstructions(
-      fixture.profileId,
-    );
-    assert.deepEqual(receipt.refreshedBindings, []);
-    assert.deepEqual(receipt.unchangedBindings, [before.bindingId]);
+    const delivery = await fixture.bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "profile-revision-repair-delivery",
+      idempotencyKey: "profile-revision-repair-delivery",
+      messageId: "profile-revision-repair-message",
+      toAddress: created.creation.session.agentId,
+      inputKind: "operator",
+      body: "continue after a profile metadata-only edit",
+      requireWake: true,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(delivery.activation?.type, "external_turn_requested");
+    await fixture.controller.tick();
     const after = await fixture.bridge.getExternalBinding(before.bindingId);
     assert.ok(after);
     assert.equal(after.nativeThreadId, before.nativeThreadId);
-    assert.equal(after.profileRevision, current.revision + 1);
+    assert.equal(after.profileRevision, updated.revision);
     assert.equal(
       fixture.transport.sent
         .slice(sentBefore)
@@ -1038,6 +1089,141 @@ test("profile lifecycle-only revision repair preserves the native thread", async
       false,
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("profile prompt drift keeps turns and restart hydration on the applied snapshot", async () => {
+  const fixture = await externalCreationFixture(false);
+  let reloaded: ServiceExternalRuntimeController | undefined;
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "profile-drift-fail-open",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const before = created.creation.binding;
+    const profile = await fixture.bridge.getProfileRegistryRecord(
+      fixture.profileId,
+    );
+    assert.ok(profile);
+    await fixture.bridge.updateProfileRegistryRecord({
+      write: {
+        profileId: profile.profileId,
+        lifecycleStatus: profile.lifecycleStatus,
+        displayName: profile.displayName,
+        summary: profile.summary,
+        defaultSessionKind: profile.defaultSessionKind,
+        agentId: profile.agentId,
+        ownerId: profile.ownerId,
+        promptSoulMarkdown: "DESIRED_BUT_NOT_APPLIED_PROFILE_SOUL",
+        promptMemoryMarkdown: profile.promptMemoryMarkdown,
+        activeRuntimeSettingsJson: profile.activeRuntimeSettingsJson,
+        sourceAssetRefs: profile.sourceAssetRefs,
+        derivedRuntimeRefs: profile.derivedRuntimeRefs,
+        importExport: profile.importExport,
+        now: new Date().toISOString(),
+      },
+      expectedRevision: profile.revision,
+    });
+
+    const status = await fixture.controller.profileInstructionStatus(
+      fixture.profileId,
+    );
+    assert.equal(status.bindings[0]?.state, "stale");
+    assert.equal(
+      status.bindings[0]?.appliedPromptHash,
+      before.profilePromptHash,
+    );
+
+    const delivery = await fixture.bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "profile-drift-fail-open-delivery",
+      idempotencyKey: "profile-drift-fail-open-delivery",
+      messageId: "profile-drift-fail-open-message",
+      toAddress: created.creation.session.agentId,
+      inputKind: "operator",
+      body: "continue on the already-applied profile prompt",
+      requireWake: true,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(delivery.activation?.type, "external_turn_requested");
+    await fixture.controller.tick();
+    const turnStart = fixture.transport.sent.find(
+      (message) => message.method === "turn/start",
+    );
+    assert.ok(turnStart);
+    const collaborationMode = (turnStart.params as Record<string, unknown>)
+      .collaborationMode as { settings?: Record<string, unknown> };
+    assert.equal(
+      collaborationMode.settings?.developer_instructions,
+      "CREATION_PROFILE_SOUL_MARKER",
+    );
+    const activeTurn = (await fixture.bridge.listActiveExternalTurns())[0];
+    assert.ok(activeTurn?.nativeTurnId);
+    fixture.transport.emit({
+      method: "turn/completed",
+      params: {
+        threadId: before.nativeThreadId,
+        turn: {
+          id: activeTurn.nativeTurnId,
+          items: [],
+          itemsView: "full",
+          status: "completed",
+          error: null,
+          startedAt: 1,
+          completedAt: 2,
+          durationMs: 1_000,
+        },
+      },
+    });
+    await waitUntil(
+      async () => (await fixture.bridge.listActiveExternalTurns()).length === 0,
+      "stale-profile native turn completion",
+    );
+    assert.equal(
+      (await fixture.bridge.getExternalTurn(activeTurn.request.requestId))
+        ?.phase,
+      "completed",
+    );
+    const afterTurn = await fixture.bridge.getExternalBinding(before.bindingId);
+    assert.equal(afterTurn?.nativeThreadId, before.nativeThreadId);
+    assert.equal(afterTurn?.profilePromptHash, before.profilePromptHash);
+
+    await fixture.controller.stop();
+    reloaded = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "profile-drift-reload-controller",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    const sentBeforeReload = fixture.transport.sent.length;
+    await reloaded.connect(fixture.runtimeId);
+    const resume = fixture.transport.sent
+      .slice(sentBeforeReload)
+      .find(
+        (message) =>
+          message.method === "thread/resume" &&
+          (message.params as Record<string, unknown>).threadId ===
+            before.nativeThreadId,
+      );
+    assert.ok(resume);
+    assert.equal(
+      (resume?.params as Record<string, unknown>).developerInstructions,
+      "CREATION_PROFILE_SOUL_MARKER",
+    );
+    const afterReload = await fixture.bridge.getExternalBinding(
+      before.bindingId,
+    );
+    assert.equal(afterReload?.nativeThreadId, before.nativeThreadId);
+    assert.equal(afterReload?.profilePromptHash, before.profilePromptHash);
+  } finally {
+    await reloaded?.stop().catch(() => undefined);
     await fixture.cleanup();
   }
 });
@@ -3108,6 +3294,7 @@ function withoutProfileProvenance(
     profileId: null,
     profileRevision: null,
     profilePromptHash: null,
+    profilePromptSnapshot: null,
   };
 }
 

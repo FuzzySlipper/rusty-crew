@@ -24,7 +24,10 @@ import {
   isCoordinationOperatorRoute,
   type CoordinationOperatorRouteContext,
 } from "../src/service-coordination-operator-routes.js";
-import { ExternalThreadLifecycleError } from "../src/service-external-runtime.js";
+import {
+  ExternalBindingProfileRefreshError,
+  ExternalThreadLifecycleError,
+} from "../src/service-external-runtime.js";
 import { parseExternalRuntimeCommand } from "../src/external-runtime-commands.js";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
@@ -344,7 +347,16 @@ test("external session route translates generated Den task reference wire fields
     controller: {
       async createAgentSession(request: ExternalAgentSessionCreationRequest) {
         captured = request;
-        return { accepted: true };
+        return {
+          creation: {
+            binding: {
+              bindingId: "binding-1",
+              profilePromptSnapshot: "private prompt body",
+            },
+          },
+          runtime: {},
+          thread: {},
+        };
       },
     },
     now: () => "2026-07-11T20:00:00.000Z",
@@ -358,7 +370,10 @@ test("external session route translates generated Den task reference wire fields
     context,
   );
 
-  okData<{ accepted: boolean }>(result as AdminRouteResult);
+  const data = okData<{
+    creation: { binding: Record<string, unknown> };
+  }>(result as AdminRouteResult);
+  assert.equal("profilePromptSnapshot" in data.creation.binding, false);
   assert.deepEqual(captured?.taskRef, {
     projectId: "asha",
     taskId: "4281",
@@ -412,6 +427,105 @@ test("external binding metadata route requires explicit nullable fields", async 
   );
 });
 
+test("external binding fleet exposes profile state without prompt bodies", async () => {
+  const bindings = [{ bindingId: "binding-1" }];
+  const persistedBindings = [
+    { bindingId: "binding-1", profilePromptSnapshot: "private prompt body" },
+  ];
+  const profileStates = [
+    {
+      bindingId: "binding-1",
+      profileId: "profile-1",
+      state: "stale",
+      refreshRequired: true,
+      appliedProfileRevision: 2,
+      appliedPromptHash: "a".repeat(64),
+      currentProfileRevision: 3,
+      currentPromptHash: "b".repeat(64),
+    },
+  ];
+  const result = await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings"),
+    {
+      bridge: {
+        async listExternalBindings() {
+          return persistedBindings;
+        },
+      },
+      controller: {
+        async bindingProfileStates() {
+          return profileStates;
+        },
+      },
+      requestId: () => "req-external-binding-list",
+    } as unknown as ExternalRuntimeRouteContext,
+  );
+  assert.deepEqual(okData(result as AdminRouteResult), {
+    bindings,
+    profileStates,
+  });
+});
+
+test("external binding profile refresh route carries both concurrency guards", async () => {
+  let captured: Record<string, unknown> | undefined;
+  const expectedProfilePromptHash = "c".repeat(64);
+  const context = {
+    bridge: {},
+    controller: {
+      async refreshBindingProfileInstructions(input: Record<string, unknown>) {
+        captured = input;
+        return { outcome: "thread_replaced" };
+      },
+    },
+    requestId: () => "req-external-binding-profile-refresh",
+    readJsonBody: async () => ({
+      expectedBindingRevision: 4,
+      expectedNativeThreadId: "native-thread-1",
+      expectedProfileRevision: 7,
+      expectedProfilePromptHash,
+    }),
+  } as unknown as ExternalRuntimeRouteContext;
+  const url = new URL(
+    "http://local/v1/external-bindings/binding-1/profile-refresh",
+  );
+  const result = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    url,
+    context,
+  );
+  assert.equal((result as AdminRouteResult).status, 200);
+  assert.deepEqual(captured, {
+    bindingId: "binding-1",
+    expectedBindingRevision: 4,
+    expectedNativeThreadId: "native-thread-1",
+    expectedProfileRevision: 7,
+    expectedProfilePromptHash,
+  });
+
+  const conflict = await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    url,
+    {
+      ...context,
+      controller: {
+        async refreshBindingProfileInstructions() {
+          throw new ExternalBindingProfileRefreshError(
+            "external_binding_profile_refresh_revision_conflict",
+            "binding changed",
+            true,
+          );
+        },
+      },
+    } as unknown as ExternalRuntimeRouteContext,
+  );
+  assert.equal((conflict as AdminRouteResult).status, 409);
+  assert.equal(
+    errorReason(conflict as AdminRouteResult),
+    "external_binding_profile_refresh_revision_conflict",
+  );
+});
+
 test("external binding restore route preserves explicit selected identities", async () => {
   let captured: Record<string, unknown> | undefined;
   const context = {
@@ -454,6 +568,7 @@ test("external runtime promotion readiness projects exact Rust-owned blockers", 
     bindingId: "binding-1",
     runtimeId: "runtime-1",
     status: "active",
+    profilePromptSnapshot: "private prompt body",
   };
   const context = {
     bridge: {
@@ -501,7 +616,13 @@ test("external runtime promotion readiness projects exact Rust-owned blockers", 
   assert.deepEqual(okData(result as AdminRouteResult), {
     registration,
     controller: { runtimeId: "runtime-1", driverState: "ready" },
-    activeBindings: [activeBinding],
+    activeBindings: [
+      {
+        bindingId: "binding-1",
+        runtimeId: "runtime-1",
+        status: "active",
+      },
+    ],
     activeTurns: [{ runtimeId: "runtime-1", request: { requestId: "turn-1" } }],
     pendingInteractions: [
       { runtimeId: "runtime-1", interactionId: "interaction-1" },

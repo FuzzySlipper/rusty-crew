@@ -1675,6 +1675,7 @@ pub(super) fn binding() -> ExternalAgentBinding {
         profile_id: Some(ProfileId::new("codex-profile")),
         profile_revision: Some(1),
         profile_prompt_hash: Some("profile-prompt-hash".into()),
+        profile_prompt_snapshot: Some("profile prompt".into()),
         message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
         purpose: ExternalBindingPurpose::CrewAgent,
         native_thread_id: Some("native-thread-7".into()),

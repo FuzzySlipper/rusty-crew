@@ -2722,6 +2722,7 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
         profile_id: Some(state.profile_id.clone()),
         profile_revision: Some(1),
         profile_prompt_hash: Some("profile-prompt-hash".into()),
+        profile_prompt_snapshot: Some("profile prompt".into()),
         message_delivery_policy:
             rusty_crew_core_protocol::ExternalMessageDeliveryPolicy::ImmediateSteer,
         purpose: rusty_crew_core_protocol::ExternalBindingPurpose::CrewAgent,

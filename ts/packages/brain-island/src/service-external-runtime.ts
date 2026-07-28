@@ -110,6 +110,14 @@ interface NativeThreadCatalogEntry {
   readonly archived: boolean;
 }
 
+interface ProfileDeveloperInstructions {
+  readonly revision: number;
+  readonly promptHash: string;
+  readonly developerInstructions: string | null;
+}
+
+type BindingPromptContextMode = "require_current" | "preserve_applied";
+
 export interface ExternalRuntimeRawDetail {
   readonly detailId: string;
   readonly runtimeId: string;
@@ -143,6 +151,35 @@ export interface ExternalBindingResumeFailure {
   readonly nativeThreadId: string;
   readonly reason: string;
   readonly observedAt: string;
+}
+
+export type ExternalBindingProfileStateKind =
+  | "unbound"
+  | "current"
+  | "stale"
+  | "profile_unavailable";
+
+export interface ExternalBindingProfileState {
+  readonly bindingId: string;
+  readonly profileId: string | null;
+  readonly state: ExternalBindingProfileStateKind;
+  readonly refreshRequired: boolean;
+  readonly appliedProfileRevision: number | null;
+  readonly appliedPromptHash: string | null;
+  readonly currentProfileRevision: number | null;
+  readonly currentPromptHash: string | null;
+}
+
+export interface ExternalBindingProfileRefreshReceipt {
+  readonly outcome:
+    | "already_current"
+    | "metadata_reconciled"
+    | "thread_replaced";
+  readonly binding: ExternalAgentBinding;
+  readonly previousNativeThreadId: string;
+  readonly nativeThreadId: string;
+  readonly previousNativeThreadArchived: boolean;
+  readonly profileState: ExternalBindingProfileState;
 }
 
 export class ExternalAgentSessionCreationError extends Error {
@@ -212,6 +249,26 @@ export class ExternalBindingRestoreError extends Error {
   ) {
     super(`${reasonCode}: ${message}`);
     this.name = "ExternalBindingRestoreError";
+  }
+}
+
+export class ExternalBindingProfileRefreshError extends Error {
+  constructor(
+    readonly reasonCode:
+      | "external_binding_profile_refresh_not_found"
+      | "external_binding_profile_refresh_inactive"
+      | "external_binding_profile_refresh_revision_conflict"
+      | "external_binding_profile_refresh_identity_conflict"
+      | "external_binding_profile_refresh_profile_unavailable"
+      | "external_binding_profile_refresh_profile_revision_conflict"
+      | "external_binding_profile_refresh_thread_busy"
+      | "external_binding_profile_refresh_native_failed"
+      | "external_binding_profile_refresh_persist_failed",
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(`${reasonCode}: ${message}`);
+    this.name = "ExternalBindingProfileRefreshError";
   }
 }
 
@@ -968,11 +1025,10 @@ export class ServiceExternalRuntimeController {
     }
   }
 
-  async refreshProfileInstructions(profileId: string): Promise<{
+  async profileInstructionStatus(profileId: string): Promise<{
     profileId: string;
     profileRevision: number;
-    refreshedBindings: string[];
-    unchangedBindings: string[];
+    bindings: ExternalBindingProfileState[];
   }> {
     const profile = await this.#profileDeveloperInstructions(profileId);
     const bindings = (await this.#bridge.listExternalBindings()).filter(
@@ -981,93 +1037,266 @@ export class ServiceExternalRuntimeController {
         binding.status === "active" &&
         binding.profileId === profileId,
     );
-    const refreshedBindings: string[] = [];
-    const unchangedBindings: string[] = [];
-    for (const binding of bindings) {
-      if (
+    return {
+      profileId,
+      profileRevision: profile.revision,
+      bindings: await Promise.all(
+        bindings.map((binding) => this.#bindingProfileState(binding, profile)),
+      ),
+    };
+  }
+
+  async bindingProfileStates(): Promise<ExternalBindingProfileState[]> {
+    const profiles = new Map<string, ProfileDeveloperInstructions>();
+    return Promise.all(
+      (await this.#bridge.listExternalBindings()).map(async (binding) => {
+        if (binding.profileId == null) {
+          return this.#bindingProfileState(binding, null);
+        }
+        let profile: ProfileDeveloperInstructions | null | undefined =
+          profiles.get(binding.profileId);
+        if (profile === undefined) {
+          profile = await this.#profileDeveloperInstructions(
+            binding.profileId,
+          ).catch(() => null);
+          if (profile !== null) profiles.set(binding.profileId, profile);
+        }
+        return this.#bindingProfileState(binding, profile ?? null);
+      }),
+    );
+  }
+
+  async refreshBindingProfileInstructions(input: {
+    bindingId: string;
+    expectedBindingRevision: number;
+    expectedNativeThreadId: string;
+    expectedProfileRevision: number;
+    expectedProfilePromptHash: string;
+  }): Promise<ExternalBindingProfileRefreshReceipt> {
+    const binding = await this.#bridge.getExternalBinding(input.bindingId);
+    if (binding === undefined) {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_not_found",
+        `external binding ${input.bindingId} was not found`,
+      );
+    }
+    if (binding.status !== "active") {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_inactive",
+        `external binding ${input.bindingId} is ${binding.status}`,
+      );
+    }
+    if (binding.revision !== input.expectedBindingRevision) {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_revision_conflict",
+        `external binding ${input.bindingId} revision changed from ${input.expectedBindingRevision} to ${binding.revision}`,
+        true,
+      );
+    }
+    if (
+      typeof binding.nativeThreadId !== "string" ||
+      binding.nativeThreadId !== input.expectedNativeThreadId ||
+      typeof binding.profileId !== "string"
+    ) {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_identity_conflict",
+        "external binding no longer matches the selected native thread and profile",
+        true,
+      );
+    }
+    const profile = await this.#profileDeveloperInstructions(
+      binding.profileId,
+    ).catch((error) => {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_profile_unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+    this.#assertExpectedProfileRefresh(profile, input);
+
+    if (binding.profilePromptHash === profile.promptHash) {
+      const alreadyCurrent =
         binding.profileRevision === profile.revision &&
-        binding.profilePromptHash === profile.promptHash
-      ) {
-        unchangedBindings.push(binding.bindingId);
-        continue;
-      }
-      if (binding.profilePromptHash === profile.promptHash) {
-        await this.#bridge.bindExternalAgent({
-          binding: {
-            ...binding,
-            profileRevision: profile.revision,
-            updatedAt: this.#now().toISOString(),
-          },
-          expectedRevision: binding.revision,
-        });
-        unchangedBindings.push(binding.bindingId);
-        continue;
-      }
-      if (typeof binding.nativeThreadId !== "string") {
-        throw new ExternalAgentSessionCreationError(
-          "external_agent_creation_recovery_required",
-          `external binding ${binding.bindingId} has no native thread to refresh`,
-          true,
-        );
-      }
-      const controlled = await this.#requireControlled(binding.runtimeId);
+        binding.profilePromptSnapshot === storedProfilePromptSnapshot(profile);
+      const saved = alreadyCurrent
+        ? binding
+        : await this.#bridge.bindExternalAgent({
+            binding: {
+              ...binding,
+              profileRevision: profile.revision,
+              profilePromptSnapshot: storedProfilePromptSnapshot(profile),
+              updatedAt: this.#now().toISOString(),
+            },
+            expectedRevision: binding.revision,
+          });
+      return {
+        outcome: alreadyCurrent ? "already_current" : "metadata_reconciled",
+        binding: saved,
+        previousNativeThreadId: binding.nativeThreadId,
+        nativeThreadId: binding.nativeThreadId,
+        previousNativeThreadArchived: false,
+        profileState: await this.#bindingProfileState(saved, profile),
+      };
+    }
+
+    const controlled = await this.#requireControlled(binding.runtimeId);
+    try {
       await this.#assertThreadHasNoCrewWork(
         binding.runtimeId,
         binding.nativeThreadId,
         [binding],
       );
-      const previousThreadId = binding.nativeThreadId;
-      const forked = await controlled.driver.threadFork({
-        threadId: previousThreadId,
-        ...(typeof binding.cwd === "string" ? { cwd: binding.cwd } : {}),
-        approvalPolicy: "never",
-        sandbox: "danger-full-access",
-        developerInstructions: profile.developerInstructions,
-        excludeTurns: true,
-      });
-      const nextThreadId = forked.thread.id;
-      try {
-        await this.#bridge.bindExternalAgent({
-          binding: {
-            ...binding,
-            nativeThreadId: nextThreadId,
-            profileRevision: profile.revision,
-            profilePromptHash: profile.promptHash,
-            updatedAt: this.#now().toISOString(),
-          },
-          expectedRevision: binding.revision,
+    } catch (error) {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_thread_busy",
+        error instanceof Error ? error.message : String(error),
+        true,
+      );
+    }
+    const previousSettings = await this.#effectiveThreadSettings(controlled, {
+      ...binding,
+      nativeThreadId: binding.nativeThreadId,
+    }).catch(() => undefined);
+    const cwd = binding.cwd ?? "/home";
+    const threadSource = `rusty-crew:profile-refresh:${binding.bindingId}:${profile.promptHash}:${binding.nativeThreadId}`;
+    let nextThreadId: string | undefined;
+    let nextSettings: ControlledThreadSettings | undefined;
+    let candidateMayBeDeleted = false;
+    let saved: ExternalAgentBinding | undefined;
+    try {
+      const recovered = await this.#findThreadBySource(
+        controlled,
+        threadSource,
+      );
+      if (recovered === undefined) {
+        const started = await controlled.driver.threadStart({
+          ...(previousSettings === undefined
+            ? {}
+            : {
+                model: previousSettings.model,
+                modelProvider: previousSettings.modelProvider,
+                ...(previousSettings.reasoning_effort === null
+                  ? {}
+                  : {
+                      config: {
+                        model_reasoning_effort:
+                          previousSettings.reasoning_effort,
+                      },
+                    }),
+              }),
+          cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          ephemeral: false,
+          environments: [{ environmentId: "local", cwd }],
+          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+          threadSource,
+          developerInstructions: profile.developerInstructions,
         });
-      } catch (error) {
-        await controlled.driver
-          .threadDelete({ threadId: nextThreadId })
-          .catch(() => undefined);
-        throw error;
+        nextThreadId = started.thread.id;
+        candidateMayBeDeleted = true;
+        nextSettings = {
+          model: started.model,
+          modelProvider: started.modelProvider,
+          reasoning_effort: started.reasoningEffort,
+          developer_instructions: profile.developerInstructions,
+        };
+      } else {
+        nextThreadId = recovered.id;
+        candidateMayBeDeleted = true;
+        const resumed = await controlled.driver.threadResume({
+          threadId: nextThreadId,
+          cwd,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          excludeTurns: true,
+          developerInstructions: profile.developerInstructions,
+        });
+        nextSettings = {
+          ...threadSettingsFromResume(resumed),
+          developer_instructions: profile.developerInstructions,
+        };
       }
-      controlled.threadSettings.delete(previousThreadId);
-      controlled.threadUsage.delete(previousThreadId);
-      controlled.threadSettings.set(nextThreadId, {
-        model: forked.model,
-        modelProvider: forked.modelProvider,
-        reasoning_effort: forked.reasoningEffort,
-        developer_instructions: profile.developerInstructions,
-      });
+      if (
+        previousSettings !== undefined &&
+        nextSettings.modelProvider !== previousSettings.modelProvider
+      ) {
+        throw new Error(
+          `fresh Codex thread selected provider ${nextSettings.modelProvider}; expected ${previousSettings.modelProvider}`,
+        );
+      }
+      if (
+        previousSettings !== undefined &&
+        (nextSettings.model !== previousSettings.model ||
+          nextSettings.reasoning_effort !== previousSettings.reasoning_effort)
+      ) {
+        await controlled.driver.threadSettingsUpdate({
+          threadId: nextThreadId,
+          model: previousSettings.model,
+          effort: previousSettings.reasoning_effort,
+        });
+        nextSettings = {
+          ...(await this.#refreshThreadSettings(controlled, nextThreadId, {
+            model: previousSettings.model,
+            effort: previousSettings.reasoning_effort,
+          })),
+          developer_instructions: profile.developerInstructions,
+        };
+      }
       if (typeof binding.label === "string") {
         await controlled.driver.threadSetName({
           threadId: nextThreadId,
           name: binding.label,
         });
       }
-      await controlled.driver
-        .threadArchive({ threadId: previousThreadId })
-        .then(() => controlled.archivedThreadIds.add(previousThreadId))
-        .catch(() => undefined);
-      refreshedBindings.push(binding.bindingId);
+      const latestProfile = await this.#profileDeveloperInstructions(
+        binding.profileId,
+      );
+      this.#assertExpectedProfileRefresh(latestProfile, input);
+      saved = await this.#bridge.bindExternalAgent({
+        binding: {
+          ...binding,
+          nativeThreadId: nextThreadId,
+          profileRevision: profile.revision,
+          profilePromptHash: profile.promptHash,
+          profilePromptSnapshot: storedProfilePromptSnapshot(profile),
+          updatedAt: this.#now().toISOString(),
+        },
+        expectedRevision: binding.revision,
+      });
+      candidateMayBeDeleted = false;
+    } catch (error) {
+      if (nextThreadId !== undefined && candidateMayBeDeleted) {
+        await controlled.driver
+          .threadDelete({ threadId: nextThreadId })
+          .catch(() => undefined);
+      }
+      if (error instanceof ExternalBindingProfileRefreshError) throw error;
+      throw new ExternalBindingProfileRefreshError(
+        nextThreadId === undefined
+          ? "external_binding_profile_refresh_native_failed"
+          : "external_binding_profile_refresh_persist_failed",
+        error instanceof Error ? error.message : String(error),
+        true,
+      );
     }
+    controlled.threadSettings.delete(binding.nativeThreadId);
+    controlled.threadUsage.delete(binding.nativeThreadId);
+    controlled.threadSettings.set(nextThreadId, nextSettings);
+    const previousNativeThreadArchived = await controlled.driver
+      .threadArchive({ threadId: binding.nativeThreadId })
+      .then(() => {
+        controlled.archivedThreadIds.add(binding.nativeThreadId as string);
+        return true;
+      })
+      .catch(() => false);
     return {
-      profileId,
-      profileRevision: profile.revision,
-      refreshedBindings,
-      unchangedBindings,
+      outcome: "thread_replaced",
+      binding: saved,
+      previousNativeThreadId: binding.nativeThreadId,
+      nativeThreadId: nextThreadId,
+      previousNativeThreadArchived,
+      profileState: await this.#bindingProfileState(saved, profile),
     };
   }
 
@@ -1189,7 +1418,10 @@ export class ServiceExternalRuntimeController {
     }
 
     try {
-      const promptContext = await this.#bindingPromptContext(receipt.binding);
+      const promptContext = await this.#bindingPromptContext(
+        receipt.binding,
+        "preserve_applied",
+      );
       const resumed = await controlled.driver.threadResume({
         threadId: input.expectedNativeThreadId,
         ...(typeof receipt.binding.cwd === "string"
@@ -1198,13 +1430,15 @@ export class ServiceExternalRuntimeController {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         excludeTurns: true,
-        developerInstructions: promptContext.developerInstructions,
+        ...(promptContext.developerInstructions === undefined
+          ? {}
+          : { developerInstructions: promptContext.developerInstructions }),
       });
       controlled.threadSettings.set(input.expectedNativeThreadId, {
         model: resumed.model,
         modelProvider: resumed.modelProvider,
         reasoning_effort: resumed.reasoningEffort,
-        developer_instructions: promptContext.developerInstructions,
+        developer_instructions: promptContext.developerInstructions ?? null,
       });
       if (typeof receipt.binding.label === "string") {
         await controlled.driver.threadSetName({
@@ -1501,7 +1735,10 @@ export class ServiceExternalRuntimeController {
         continue;
       }
       try {
-        const promptContext = await this.#bindingPromptContext(binding);
+        const promptContext = await this.#bindingPromptContext(
+          binding,
+          "preserve_applied",
+        );
         const currentBinding = promptContext.binding;
         if (typeof currentBinding.nativeThreadId !== "string") {
           throw new ExternalAgentSessionCreationError(
@@ -1519,13 +1756,15 @@ export class ServiceExternalRuntimeController {
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           excludeTurns: true,
-          developerInstructions: promptContext.developerInstructions,
+          ...(promptContext.developerInstructions === undefined
+            ? {}
+            : { developerInstructions: promptContext.developerInstructions }),
         });
         controlled.threadSettings.set(nativeThreadId, {
           model: resumed.model,
           modelProvider: resumed.modelProvider,
           reasoning_effort: resumed.reasoningEffort,
-          developer_instructions: promptContext.developerInstructions,
+          developer_instructions: promptContext.developerInstructions ?? null,
         });
         if (typeof currentBinding.label === "string") {
           await controlled.driver.threadSetName({
@@ -1606,12 +1845,26 @@ export class ServiceExternalRuntimeController {
   async #developerInstructionsForBinding(
     binding: ExternalAgentBinding,
   ): Promise<string | null> {
-    return (await this.#bindingPromptContext(binding)).developerInstructions;
+    const promptContext = await this.#bindingPromptContext(
+      binding,
+      "require_current",
+    );
+    if (promptContext.developerInstructions === undefined) {
+      throw new ExternalAgentSessionCreationError(
+        "external_agent_creation_profile_invalid",
+        `external binding ${binding.bindingId} has no recoverable applied profile prompt`,
+        false,
+      );
+    }
+    return promptContext.developerInstructions;
   }
 
-  async #bindingPromptContext(binding: ExternalAgentBinding): Promise<{
+  async #bindingPromptContext(
+    binding: ExternalAgentBinding,
+    mode: BindingPromptContextMode,
+  ): Promise<{
     binding: ExternalAgentBinding;
-    developerInstructions: string | null;
+    developerInstructions: string | null | undefined;
   }> {
     if (
       binding.profileId == null &&
@@ -1644,6 +1897,7 @@ export class ServiceExternalRuntimeController {
           profileId: session.profileId,
           profileRevision: profile.revision,
           profilePromptHash: profile.promptHash,
+          profilePromptSnapshot: storedProfilePromptSnapshot(profile),
           updatedAt: this.#now().toISOString(),
         },
         expectedRevision: binding.revision,
@@ -1664,19 +1918,40 @@ export class ServiceExternalRuntimeController {
         false,
       );
     }
-    const profile = await this.#profileDeveloperInstructions(binding.profileId);
+    const profile = await this.#profileDeveloperInstructions(
+      binding.profileId,
+    ).catch((error) => {
+      if (mode === "preserve_applied") return null;
+      throw error;
+    });
+    if (profile === null) {
+      return {
+        binding,
+        developerInstructions: appliedDeveloperInstructions(binding),
+      };
+    }
     if (profile.promptHash !== binding.profilePromptHash) {
+      if (mode === "preserve_applied") {
+        return {
+          binding,
+          developerInstructions: appliedDeveloperInstructions(binding),
+        };
+      }
       throw new ExternalAgentSessionCreationError(
         "external_agent_creation_profile_revision_conflict",
         `profile ${binding.profileId} prompt changed; refresh the bound Codex thread`,
         false,
       );
     }
-    if (profile.revision !== binding.profileRevision) {
+    if (
+      profile.revision !== binding.profileRevision ||
+      binding.profilePromptSnapshot !== storedProfilePromptSnapshot(profile)
+    ) {
       const repaired = await this.#bridge.bindExternalAgent({
         binding: {
           ...binding,
           profileRevision: profile.revision,
+          profilePromptSnapshot: storedProfilePromptSnapshot(profile),
           updatedAt: this.#now().toISOString(),
         },
         expectedRevision: binding.revision,
@@ -1689,11 +1964,9 @@ export class ServiceExternalRuntimeController {
     return { binding, developerInstructions: profile.developerInstructions };
   }
 
-  async #profileDeveloperInstructions(profileId: string): Promise<{
-    revision: number;
-    promptHash: string;
-    developerInstructions: string | null;
-  }> {
+  async #profileDeveloperInstructions(
+    profileId: string,
+  ): Promise<ProfileDeveloperInstructions> {
     const profile = await this.#bridge.getProfileRegistryRecord(profileId);
     if (profile === undefined || profile.lifecycleStatus !== "active") {
       throw new ExternalAgentSessionCreationError(
@@ -1708,6 +1981,66 @@ export class ServiceExternalRuntimeController {
       promptHash: createHash("sha256").update(soul).digest("hex"),
       developerInstructions: soul === "" ? null : soul,
     };
+  }
+
+  #bindingProfileState(
+    binding: ExternalAgentBinding,
+    profile: ProfileDeveloperInstructions | null,
+  ): ExternalBindingProfileState {
+    if (binding.profileId == null) {
+      return {
+        bindingId: binding.bindingId,
+        profileId: null,
+        state: "unbound",
+        refreshRequired: false,
+        appliedProfileRevision: null,
+        appliedPromptHash: null,
+        currentProfileRevision: null,
+        currentPromptHash: null,
+      };
+    }
+    if (profile === null) {
+      return {
+        bindingId: binding.bindingId,
+        profileId: binding.profileId,
+        state: "profile_unavailable",
+        refreshRequired: true,
+        appliedProfileRevision: binding.profileRevision ?? null,
+        appliedPromptHash: binding.profilePromptHash ?? null,
+        currentProfileRevision: null,
+        currentPromptHash: null,
+      };
+    }
+    const current = binding.profilePromptHash === profile.promptHash;
+    return {
+      bindingId: binding.bindingId,
+      profileId: binding.profileId,
+      state: current ? "current" : "stale",
+      refreshRequired: !current,
+      appliedProfileRevision: binding.profileRevision ?? null,
+      appliedPromptHash: binding.profilePromptHash ?? null,
+      currentProfileRevision: profile.revision,
+      currentPromptHash: profile.promptHash,
+    };
+  }
+
+  #assertExpectedProfileRefresh(
+    profile: ProfileDeveloperInstructions,
+    expected: {
+      expectedProfileRevision: number;
+      expectedProfilePromptHash: string;
+    },
+  ): void {
+    if (
+      profile.revision !== expected.expectedProfileRevision ||
+      profile.promptHash !== expected.expectedProfilePromptHash
+    ) {
+      throw new ExternalBindingProfileRefreshError(
+        "external_binding_profile_refresh_profile_revision_conflict",
+        `profile changed while refresh was being prepared: expected revision ${expected.expectedProfileRevision} and prompt ${expected.expectedProfilePromptHash}, found revision ${profile.revision} and prompt ${profile.promptHash}`,
+        true,
+      );
+    }
   }
 
   async #restoreReadyRegistration(
@@ -1849,11 +2182,25 @@ export class ServiceExternalRuntimeController {
     turn: ExternalTurnCorrelation,
   ): Promise<void> {
     let collaborationMode: CollaborationMode;
+    let currentBinding = binding;
     try {
-      await this.#developerInstructionsForBinding(binding);
+      const promptContext = await this.#bindingPromptContext(
+        binding,
+        "preserve_applied",
+      );
+      currentBinding = promptContext.binding;
+      if (promptContext.developerInstructions !== undefined) {
+        const settings = controlled.threadSettings.get(turn.nativeThreadId);
+        if (settings !== undefined) {
+          controlled.threadSettings.set(turn.nativeThreadId, {
+            ...settings,
+            developer_instructions: promptContext.developerInstructions,
+          });
+        }
+      }
       collaborationMode = await this.#resolveCollaborationMode(
         controlled,
-        binding,
+        currentBinding,
         turn.request.collaborationMode ?? "default",
       );
     } catch (error) {
@@ -1871,7 +2218,7 @@ export class ServiceExternalRuntimeController {
       now: this.#now().toISOString(),
     });
     try {
-      const cwd = binding.cwd ?? "/home";
+      const cwd = currentBinding.cwd ?? "/home";
       const started = await controlled.driver.turnStart({
         threadId: turn.nativeThreadId,
         input: turn.request.input.map((part) =>
@@ -2252,7 +2599,19 @@ export class ServiceExternalRuntimeController {
       developerInstructions: string | null;
     };
     try {
-      promptContext = await this.#bindingPromptContext(binding);
+      const resolved = await this.#bindingPromptContext(
+        binding,
+        "require_current",
+      );
+      if (resolved.developerInstructions === undefined) {
+        throw new Error(
+          `external binding ${binding.bindingId} has no applied developer instructions`,
+        );
+      }
+      promptContext = {
+        binding: resolved.binding,
+        developerInstructions: resolved.developerInstructions,
+      };
     } catch (error) {
       throw new ExternalRuntimeCommandError(
         "external_command_restart_failed",
@@ -2509,23 +2868,30 @@ export class ServiceExternalRuntimeController {
   ): Promise<unknown> {
     switch (request.kind) {
       case "start_or_resume_thread": {
-        const developerInstructions =
-          await this.#developerInstructionsForBinding(binding);
         if (typeof binding.nativeThreadId === "string") {
+          const promptContext = await this.#bindingPromptContext(
+            binding,
+            "preserve_applied",
+          );
+          const developerInstructions = promptContext.developerInstructions;
           const resumed = await controlled.driver.threadResume({
             threadId: binding.nativeThreadId,
             ...(isRecord(request.payload) ? request.payload : {}),
             baseInstructions: undefined,
-            developerInstructions,
+            ...(developerInstructions === undefined
+              ? {}
+              : { developerInstructions }),
           });
           controlled.threadSettings.set(binding.nativeThreadId, {
             model: resumed.model,
             modelProvider: resumed.modelProvider,
             reasoning_effort: resumed.reasoningEffort,
-            developer_instructions: developerInstructions,
+            developer_instructions: developerInstructions ?? null,
           });
           return resumed;
         }
+        const developerInstructions =
+          await this.#developerInstructionsForBinding(binding);
         const cwd = binding.cwd ?? "/home";
         const started = await controlled.driver.threadStart({
           cwd,
@@ -3870,6 +4236,21 @@ function allowedInteractionResponses(method: string): string[] {
   }
   if (method.includes("permissions")) return ["permissions"];
   return ["accept", "acceptForSession", "decline", "cancel"];
+}
+
+function storedProfilePromptSnapshot(
+  profile: ProfileDeveloperInstructions,
+): string {
+  return profile.developerInstructions ?? "";
+}
+
+function appliedDeveloperInstructions(
+  binding: ExternalAgentBinding,
+): string | null | undefined {
+  if (binding.profilePromptSnapshot == null) return undefined;
+  return binding.profilePromptSnapshot === ""
+    ? null
+    : binding.profilePromptSnapshot;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

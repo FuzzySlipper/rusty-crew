@@ -423,6 +423,17 @@
         "public": true
       },
       {
+        "id": "external.bindings.profile.refresh",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/profile-refresh",
+        "description": "Explicitly apply the current profile prompt to a bound Codex agent using optimistic concurrency.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session", "profile", "config"],
+        "public": true
+      },
+      {
         "id": "external.bindings.control",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/controls",
@@ -2780,6 +2791,13 @@
         "capability_id": "external.bindings.restore",
         "method": "POST",
         "path_template": "/v1/external-bindings/{binding_id}/restore",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.bindings.profile.refresh",
+        "method": "POST",
+        "path_template": "/v1/external-bindings/{binding_id}/profile-refresh",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },

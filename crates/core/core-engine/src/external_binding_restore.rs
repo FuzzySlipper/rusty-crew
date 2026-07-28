@@ -156,9 +156,18 @@ impl CoreEngine {
         }
 
         let profile_revision_updated = current.profile_revision != Some(profile.revision);
+        let profile_prompt_snapshot = profile
+            .prompt_soul_markdown
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let profile_prompt_snapshot_updated =
+            current.profile_prompt_snapshot.as_deref() != Some(profile_prompt_snapshot.as_str());
         if current.status == ExternalBindingStatus::Active
             && session.status != SessionStatus::Archived
             && !profile_revision_updated
+            && !profile_prompt_snapshot_updated
         {
             return Ok(ExternalAgentBindingRestoreReceipt {
                 outcome: ExternalAgentBindingRestoreOutcome::AlreadyActive,
@@ -198,6 +207,7 @@ impl CoreEngine {
         let mut restored_binding = current.clone();
         restored_binding.status = ExternalBindingStatus::Active;
         restored_binding.profile_revision = Some(profile.revision);
+        restored_binding.profile_prompt_snapshot = Some(profile_prompt_snapshot);
         restored_binding.updated_at = request.restored_at.clone();
         let restored_binding = match self
             .store
