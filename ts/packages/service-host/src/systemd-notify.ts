@@ -83,7 +83,7 @@ export function watchdogIntervalFromUsec(
 
 function systemdNotify(args: string[]): Promise<void> {
   return new Promise((resolveNotify, rejectNotify) => {
-    const child = spawn("systemd-notify", ["--no-block", ...args], {
+    const child = spawn("systemd-notify", systemdNotifyArguments(args), {
       stdio: "ignore",
     });
     child.once("error", rejectNotify);
@@ -95,4 +95,11 @@ function systemdNotify(args: string[]): Promise<void> {
       rejectNotify(new Error(`systemd-notify exited with status ${code}`));
     });
   });
+}
+
+export function systemdNotifyArguments(args: string[]): string[] {
+  // Keep systemd-notify's default barrier. --no-block lets the helper exit
+  // before systemd attributes the datagram to this unit, which can leave a
+  // healthy Type=notify service stuck in "activating" until start timeout.
+  return [...args];
 }

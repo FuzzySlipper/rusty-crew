@@ -37,6 +37,7 @@ import {
   localHealthBaseUrl,
   preflightServiceHostStorageBoot,
   startRustyCrewServiceHost,
+  systemdNotifyArguments,
   watchdogIntervalFromUsec,
 } from "@rusty-crew/service-host";
 
@@ -2545,6 +2546,10 @@ async function assertSystemdNotifierSmoke(): Promise<void> {
   });
 
   assert.equal(watchdogIntervalFromUsec("4000000"), 2000);
+  assert.deepEqual(systemdNotifyArguments(["--ready", "--status=ready"]), [
+    "--ready",
+    "--status=ready",
+  ]);
   assert.equal(notifier.enabled, true);
   assert.equal(notifier.watchdogIntervalMs, 2000);
   await notifier.ready("ready");

@@ -48,6 +48,7 @@ import {
 export {
   createSystemdNotifier,
   localHealthBaseUrl,
+  systemdNotifyArguments,
   watchdogIntervalFromUsec,
   type SystemdNotifier,
   type SystemdNotifierOptions,
