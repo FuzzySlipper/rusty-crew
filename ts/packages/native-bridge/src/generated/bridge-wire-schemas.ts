@@ -18597,6 +18597,226 @@ export const bridgeWireSchemaArtifact = {
       "title": "UpdateBranchHeadResult",
       "type": "object"
     },
+    "rusty_crew_core_protocol::crew_session::CrewAgentSessionCreationRecord": {
+      "properties": {
+        "outcome": {
+          "enum": [
+            "created",
+            "replayed",
+            "recovered"
+          ],
+          "type": "string"
+        },
+        "profileRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requestFingerprint": {
+          "type": "string"
+        },
+        "session": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "brain_turn_count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "delegation": {
+              "properties": {
+                "correlation_id": {
+                  "type": "string"
+                },
+                "parent_agent_id": {
+                  "type": "string"
+                },
+                "parent_session_id": {
+                  "type": "string"
+                },
+                "requested_task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_action_index": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "source_wake_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "parent_session_id",
+                "parent_agent_id",
+                "source_wake_id",
+                "source_action_index",
+                "correlation_id"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "handle": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "history_window": {
+              "properties": {
+                "max_messages": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "inference_overrides": {
+              "default": {},
+              "properties": {
+                "reasoning_effort": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated"
+              ],
+              "type": "string"
+            },
+            "last_active_at": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "resource_limits": {
+              "properties": {
+                "max_delegation_depth": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max_duration_ms": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "workdir": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "active",
+                "idle",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "tool_profile": {
+              "properties": {
+                "tools": {
+                  "items": {
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "input_schema": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "description"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "tools"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "agent_id",
+            "profile_id",
+            "kind",
+            "resource_limits",
+            "tool_profile",
+            "status",
+            "brain_turn_count",
+            "created_at",
+            "last_active_at"
+          ],
+          "type": "object"
+        },
+        "templateSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "requestFingerprint",
+        "profileRevision",
+        "outcome",
+        "session"
+      ],
+      "title": "CrewAgentSessionCreationRecord",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt": {
       "properties": {
         "activation": {
@@ -25251,6 +25471,7 @@ export const bridgeWireSchemaArtifact = {
     "create_chat_data_bank_scope": "rusty_crew_core_persistence::contracts::CreateChatDataBankScopeResult",
     "create_chat_message_slot": "rusty_crew_core_persistence::contracts::CreateChatMessageSlotResult",
     "create_chat_message_variant": "rusty_crew_core_persistence::contracts::CreateChatMessageVariantResult",
+    "create_crew_agent_session": "rusty_crew_core_protocol::crew_session::CrewAgentSessionCreationRecord",
     "create_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "create_roleplay_mechanic_diagnostic": "rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord",
     "create_roleplay_mechanic_proposal": "rusty_crew_core_persistence::contracts::RoleplayMechanicProposalRecord",

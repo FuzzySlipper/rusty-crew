@@ -189,6 +189,17 @@ export const SLASH_COMMAND_REGISTRY = [
     },
   }),
   slashCommand({
+    name: "archive",
+    description: "Archive the current Crew brain session without replacing it.",
+    readOnly: false,
+    positionalArgs: [OPTIONAL_REASON_ARGUMENT],
+    control: {
+      commandName: "archive_session",
+      pathTemplate: "/v1/admin/control/sessions/{session_id}/archive",
+      reasonCode: "slash_archive_session",
+    },
+  }),
+  slashCommand({
     name: "new",
     description:
       "Archive the current session and create a fresh replacement session.",
@@ -1044,6 +1055,14 @@ export const API_CAPABILITIES = [
     "List Rusty View chat sessions.",
     "chat",
     ["chat", "session"],
+  ),
+  writeCapability(
+    "chat.sessions.create",
+    "POST",
+    RUSTY_VIEW_CHAT_PATHS.sessions,
+    "Create or recover a fresh Rust-owned Crew brain session from an active profile.",
+    "chat",
+    ["chat", "session", "profile"],
   ),
   readCapability(
     "chat.sessions.open",

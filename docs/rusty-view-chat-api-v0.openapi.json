@@ -31,6 +31,7 @@
           {
             "name": "status",
             "in": "query",
+            "description": "Explicit status filter. Archived sessions are excluded when omitted; use archived for history.",
             "schema": { "$ref": "#/components/schemas/ChatSessionStatus" }
           }
         ],
@@ -52,6 +53,48 @@
               }
             }
           }
+        }
+      },
+      "post": {
+        "operationId": "createCrewChatSession",
+        "summary": "Create or recover a fresh Crew brain session from an active profile",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateCrewChatSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created, replayed, or recovered Crew session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/CreateCrewChatSessionResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request or inactive profile" },
+          "404": { "description": "Profile not found" },
+          "409": { "description": "Revision, idempotency, or active-session conflict" }
         }
       }
     },
@@ -1398,6 +1441,46 @@
               "$ref": "#/components/schemas/MemorySurfaceCatalogItem"
             }
           }
+        },
+        "additionalProperties": false
+      },
+      "CreateCrewChatSessionRequest": {
+        "type": "object",
+        "required": ["profile_id", "expected_profile_revision"],
+        "properties": {
+          "profile_id": { "type": "string", "minLength": 1 },
+          "expected_profile_revision": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false
+      },
+      "CrewAgentSessionCreationRecord": {
+        "type": "object",
+        "required": [
+          "requestFingerprint",
+          "profileRevision",
+          "outcome",
+          "session"
+        ],
+        "properties": {
+          "requestFingerprint": { "type": "string" },
+          "profileRevision": { "type": "integer", "minimum": 1 },
+          "templateSessionId": { "type": "string" },
+          "outcome": {
+            "type": "string",
+            "enum": ["created", "replayed", "recovered"]
+          },
+          "session": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      },
+      "CreateCrewChatSessionResult": {
+        "type": "object",
+        "required": ["creation", "applyResult"],
+        "properties": {
+          "creation": {
+            "$ref": "#/components/schemas/CrewAgentSessionCreationRecord"
+          },
+          "applyResult": { "type": "object", "additionalProperties": true }
         },
         "additionalProperties": false
       },

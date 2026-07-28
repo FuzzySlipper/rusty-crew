@@ -270,6 +270,7 @@ export interface NativeBridgeBinding {
   assertNoBufferLeaks(): void
   createSession(config: JsSessionConfig): JsSessionState
   ensureConfiguredSession(config: JsSessionConfig): JsSessionState
+  createCrewAgentSessionJson(inputJson: string): string
   archiveSession(sessionId: string): JsSessionState
   setSessionReasoningEffort(sessionId: string, reasoningEffort?: string | undefined | null): JsSessionState
   listSessionsJson(): string
@@ -825,7 +826,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 278,
+  "manifestOperationCount": 279,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2954,6 +2955,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "JsSessionState",
       "returnKind": "object",
       "operationName": "ensure_configured_session"
+    },
+    {
+      "name": "createCrewAgentSessionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "create_crew_agent_session"
     },
     {
       "name": "archiveSession",

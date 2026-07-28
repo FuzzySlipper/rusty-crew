@@ -894,52 +894,18 @@ export async function queryRustyViewChatSessionSummaries(
   context: RustyViewChatOperationsContext,
   input: ChatSessionSummaryQuery,
 ): Promise<ChatSessionReadFactsPage> {
-  if (input.status === undefined) {
-    const result = await context.bridge.queryChatSessionSummaries({
-      profile_id: input.profileId,
-      page: { limit: input.limit, offset: input.offset },
-    });
-    const page = publicExactPage(result.page);
-    return {
-      ...page,
-      items: page.items.map((facts) => ({
-        ...facts,
-        session: context.projectSessionState?.(facts.session) ?? facts.session,
-      })),
-    };
-  }
-
-  const matching: ChatSessionReadFactsPage["items"] = [];
-  let sourceOffset = 0;
-  for (;;) {
-    const result = await context.bridge.queryChatSessionSummaries({
-      profile_id: input.profileId,
-      page: { limit: 500, offset: sourceOffset },
-    });
-    const page = publicExactPage(result.page);
-    matching.push(
-      ...page.items
-        .map((facts) => ({
-          ...facts,
-          session:
-            context.projectSessionState?.(facts.session) ?? facts.session,
-        }))
-        .filter((facts) => facts.session.status === input.status),
-    );
-    if (page.nextOffset === undefined) break;
-    sourceOffset = page.nextOffset;
-  }
-  const items = matching.slice(input.offset, input.offset + input.limit);
-  const nextOffset =
-    input.offset + items.length < matching.length
-      ? input.offset + items.length
-      : undefined;
+  const result = await context.bridge.queryChatSessionSummaries({
+    profile_id: input.profileId,
+    status: input.status,
+    page: { limit: input.limit, offset: input.offset },
+  });
+  const page = publicExactPage(result.page);
   return {
-    items,
-    total: matching.length,
-    limit: input.limit,
-    offset: input.offset,
-    ...(nextOffset === undefined ? {} : { nextOffset }),
+    ...page,
+    items: page.items.map((facts) => ({
+      ...facts,
+      session: context.projectSessionState?.(facts.session) ?? facts.session,
+    })),
   };
 }
 

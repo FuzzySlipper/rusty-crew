@@ -88,6 +88,14 @@ assert.equal(newSession.controlRequest?.target.sessionId, "session-alpha");
 assert.equal(newSession.controlRequest?.reason, "fresh start");
 assert.equal(newSession.controlRequest?.body.actorId, "human-alpha");
 
+const archive = intercepted(
+  routeSlashCommand(input("/archive done here", primeSession)),
+);
+assert.equal(archive.commandName, "archive");
+assert.equal(archive.controlRequest?.commandName, "archive_session");
+assert.equal(archive.controlRequest?.target.sessionId, "session-alpha");
+assert.equal(archive.controlRequest?.reason, "done here");
+
 const reloadMcp = intercepted(
   routeSlashCommand(input("/reload-mcp catalog refresh", primeSession)),
 );

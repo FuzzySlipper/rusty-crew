@@ -700,6 +700,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
     );
     schema!("bind_external_agent", protocol::ExternalAgentBinding);
     schema!(
+        "create_crew_agent_session",
+        protocol::CrewAgentSessionCreationRecord
+    );
+    schema!(
         "restore_external_agent_binding",
         protocol::ExternalAgentBindingRestoreReceipt
     );

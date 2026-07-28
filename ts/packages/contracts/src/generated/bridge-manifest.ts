@@ -90,6 +90,7 @@ export const bridgeOperations = [
   {"name":"recover_github_gate_wakes","surface":"stable","direction":"ts_to_rust","input":"unit","output":"u32","errors":"core_protocol::CoreError","summary":"Re-emit durable wake-scheduled gate correlations after a Rusty Crew restart."},
   {"name":"github_gate_wait","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionId","output":"Option<core_protocol::GitHubGateWaitRecord>","errors":"core_protocol::CoreError","summary":"Read the current Rust-owned gate correlation for one session without copying Review lifecycle authority."},
   {"name":"github_gate_event_cursor","surface":"stable","direction":"ts_to_rust","input":"unit","output":"u64","errors":"core_protocol::CoreError","summary":"Read the Rust-owned durable Review terminal-event cursor for adapter reconnect."},
+  {"name":"create_crew_agent_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::CrewAgentSessionCreationRequest","output":"core_protocol::CrewAgentSessionCreationRecord","errors":"core_protocol::CoreError","summary":"Idempotently create or recover a Rust-owned Crew brain session from an active profile."},
   {"name":"archive_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionId","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Archive a Rust-owned runtime session without minting a replacement session."},
   {"name":"ensure_configured_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionConfig","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Create, reuse, or safely reactivate a configured durable service session without minting a replacement session ID."},
   {"name":"set_session_reasoning_effort","surface":"stable","direction":"ts_to_rust","input":"(session_id: core_protocol::SessionId, reasoning_effort: Option<String>)","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Set or clear the Rust-owned reasoning-effort override for one durable session."},
@@ -290,4 +291,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "e17912d32c4e71c1c9763b0458440e19b818692d3a9a3a586c2d5fce2a24fb5e" as const;
+export const bridgeWireShapeFingerprint = "d2097f81a9605d5a6ff1ff5067f9d22322cce6f5080e9ae210899f596875a30d" as const;

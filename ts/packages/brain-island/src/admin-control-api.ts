@@ -314,7 +314,7 @@ export async function handleAdminControlRequest(
     outcome = {
       status: "failed",
       summary: errorMessage(error, `control ${parsed.command.name} failed`),
-      reasonCode: "control_executor_failed",
+      reasonCode: controlErrorReasonCode(error),
     };
   }
 
@@ -355,6 +355,16 @@ export async function handleAdminControlRequest(
       terminal: terminalObservation?.status,
     },
   } satisfies AdminControlResponse);
+}
+
+function controlErrorReasonCode(error: unknown): string {
+  if (typeof error !== "object" || error === null) {
+    return "control_executor_failed";
+  }
+  const reasonCode = (error as { reasonCode?: unknown }).reasonCode;
+  return typeof reasonCode === "string" && reasonCode.length > 0
+    ? reasonCode
+    : "control_executor_failed";
 }
 
 export function createMemoryAdminControlAuditSink(): MemoryAdminControlAuditSink {

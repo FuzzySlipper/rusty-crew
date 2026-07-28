@@ -38,6 +38,7 @@ mod bootstrap_sessions;
 mod brain_runtime;
 mod chat_mutations;
 mod chat_read;
+mod crew_sessions;
 mod delegation_fanout;
 mod delegation_lifecycle;
 mod external_binding_restore;

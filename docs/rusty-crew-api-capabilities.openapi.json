@@ -3156,6 +3156,22 @@
         "x-rusty-crew-mutation": "read",
         "x-rusty-crew-stability": "stable",
         "x-rusty-crew-contract-detail": "capability"
+      },
+      "post": {
+        "operationId": "chatSessionsCreate",
+        "summary": "Create or recover a fresh Rust-owned Crew brain session from an active profile.",
+        "tags": ["chat", "session", "profile"],
+        "security": [{ "ChatBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.create",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
       }
     },
     "/v1/chat/sessions/{session_id}": {
@@ -5407,7 +5423,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 217,
+    "capability_count": 218,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

@@ -57,6 +57,7 @@ import { createNativeBridgeRoleplayMethods } from "./roleplay-wrappers.js";
 import { createNativeBridgeRoleplayProposalMethods } from "./roleplay-proposal-wrappers.js";
 import { createNativeBridgeRoleplayMechanicMethods } from "./roleplay-mechanic-wrappers.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
+import { createNativeBridgeCrewSessionMethods } from "./crew-session-wrappers.js";
 import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
 import { createNativeBridgeBrainCatalogMethods } from "./brain-wrappers.js";
@@ -659,6 +660,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     putAgentRoute: unavailable("put_agent_route"),
     deleteAgentRoute: unavailable("delete_agent_route"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
+    createCrewAgentSession: unavailable("create_crew_agent_session"),
     archiveSession: unavailable("archive_session"),
     setSessionReasoningEffort: unavailable("set_session_reasoning_effort"),
     ensureConfiguredSession: unavailable("ensure_configured_session"),
@@ -1574,6 +1576,7 @@ function createNativeBridgeModule(
         .map((eventJson) => toCoreEvent(JSON.parse(eventJson) as RawCoreEvent)),
     createSession: async (config) =>
       binding.createSession(nativeSessionConfig(config)),
+    ...createNativeBridgeCrewSessionMethods(binding),
     ensureConfiguredSession: async (config) =>
       binding.ensureConfiguredSession(nativeSessionConfig(config)),
     archiveSession: async (sessionId) => binding.archiveSession(sessionId),

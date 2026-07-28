@@ -596,6 +596,23 @@ export type CoreEvent = {
 
 export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
 
+export type CrewAgentSessionCreationOutcome = "created" | "replayed" | "recovered";
+
+export type CrewAgentSessionCreationRecord = {
+  outcome: CrewAgentSessionCreationOutcome;
+  profileRevision: number;
+  requestFingerprint: string;
+  session: SessionState;
+  templateSessionId?: string | null;
+};
+
+export type CrewAgentSessionCreationRequest = {
+  expectedProfileRevision: number;
+  idempotencyKey: string;
+  profileId: string;
+  requestedAt: string;
+};
+
 export type DelegatedCompletion = {
   childSessionId: SessionId;
   correlationId?: string | null;

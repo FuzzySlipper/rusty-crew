@@ -2459,6 +2459,70 @@
       ],
       "type": "string"
     },
+    "CrewAgentSessionCreationOutcome": {
+      "enum": [
+        "created",
+        "replayed",
+        "recovered"
+      ],
+      "type": "string"
+    },
+    "CrewAgentSessionCreationRecord": {
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/CrewAgentSessionCreationOutcome"
+        },
+        "profileRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requestFingerprint": {
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "templateSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "requestFingerprint",
+        "profileRevision",
+        "outcome",
+        "session"
+      ],
+      "type": "object"
+    },
+    "CrewAgentSessionCreationRequest": {
+      "properties": {
+        "expectedProfileRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "requestedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "profileId",
+        "expectedProfileRevision",
+        "requestedAt"
+      ],
+      "type": "object"
+    },
     "DelegatedCompletion": {
       "properties": {
         "child_session_id": {
@@ -6574,6 +6638,12 @@
     "core_error": {
       "$ref": "#/$defs/CoreError"
     },
+    "crew_agent_session_creation_record": {
+      "$ref": "#/$defs/CrewAgentSessionCreationRecord"
+    },
+    "crew_agent_session_creation_request": {
+      "$ref": "#/$defs/CrewAgentSessionCreationRequest"
+    },
     "delegated_resource_cleanup_report": {
       "$ref": "#/$defs/DelegatedResourceCleanupReport"
     },
@@ -6818,6 +6888,8 @@
     "agent_round_command",
     "agent_round_start_receipt",
     "agent_correlated_round",
+    "crew_agent_session_creation_request",
+    "crew_agent_session_creation_record",
     "external_runtime_registration",
     "external_controller_context",
     "external_runtime_handshake_observation",

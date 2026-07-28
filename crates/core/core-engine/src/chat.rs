@@ -227,10 +227,10 @@ impl CoreEngine {
                 .profile_id
                 .as_ref()
                 .is_none_or(|profile_id| &session.profile_id == profile_id)
-                && query
-                    .status
-                    .as_deref()
-                    .is_none_or(|status| session_status_wire_value(&session.status) == status)
+                && match query.status.as_deref() {
+                    Some(status) => session_status_wire_value(&session.status) == status,
+                    None => session.status != SessionStatus::Archived,
+                }
         });
         sessions.sort_by(|left, right| left.session_id.0.cmp(&right.session_id.0));
         let total = sessions.len() as u64;

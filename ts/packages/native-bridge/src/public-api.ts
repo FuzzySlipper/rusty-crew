@@ -89,6 +89,7 @@ import type {
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
 } from "./chat-completions-public-api.js";
+import type { NativeCrewSessionBridgeMethods } from "./crew-session-public-api.js";
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
 import type {
   NativeModelProviderCredentialKind,
@@ -1972,7 +1973,8 @@ export interface NativeChatSessionReadResult {
 export interface NativeBridgeModule
   extends
     NativeExternalRuntimeBridgeMethods,
-    NativeAgentCoordinationBridgeMethods {
+    NativeAgentCoordinationBridgeMethods,
+    NativeCrewSessionBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;

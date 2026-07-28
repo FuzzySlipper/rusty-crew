@@ -124,6 +124,8 @@
     "codegen:api-capabilities": "tsx src/generate-api-capability-artifact.ts",
     "check:api-capabilities": "tsx src/generate-api-capability-artifact.ts --check && npm run smoke:review-agent-prompt-guidance",
     "smoke:new-session-lifecycle": "tsx smokes/smoke-new-session-lifecycle.ts",
+    "smoke:crew-session-lifecycle": "tsx smokes/smoke-crew-session-lifecycle.ts",
+    "smoke:crew-session-lifecycle-live": "tsx smokes/crew-session-lifecycle-live-debug-service.ts",
     "smoke:reload-mcp-control": "tsx ../../smokes/brain-island/smoke-reload-mcp-control.ts",
     "smoke:mcp-server-registry-routes": "tsx smokes/mcp-server-registry-routes.ts",
     "smoke:runtime-rebuild-replacement": "tsx ../../smokes/brain-island/smoke-runtime-rebuild-replacement.ts",

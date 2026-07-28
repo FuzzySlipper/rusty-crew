@@ -2878,6 +2878,51 @@
         ],
         "type": "string"
       },
+      "CrewAgentSessionCreationOutcome": {
+        "enum": ["created", "replayed", "recovered"],
+        "type": "string"
+      },
+      "CrewAgentSessionCreationRecord": {
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/CrewAgentSessionCreationOutcome"
+          },
+          "profileRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requestFingerprint": { "type": "string" },
+          "session": { "$ref": "#/components/schemas/SessionState" },
+          "templateSessionId": { "type": ["string", "null"] }
+        },
+        "required": [
+          "requestFingerprint",
+          "profileRevision",
+          "outcome",
+          "session"
+        ],
+        "type": "object"
+      },
+      "CrewAgentSessionCreationRequest": {
+        "properties": {
+          "expectedProfileRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idempotencyKey": { "type": "string" },
+          "profileId": { "type": "string" },
+          "requestedAt": { "type": "string" }
+        },
+        "required": [
+          "idempotencyKey",
+          "profileId",
+          "expectedProfileRevision",
+          "requestedAt"
+        ],
+        "type": "object"
+      },
       "DelegatedCompletion": {
         "properties": {
           "child_session_id": { "type": "string" },

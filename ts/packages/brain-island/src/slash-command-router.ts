@@ -204,6 +204,23 @@ const SLASH_COMMAND_HANDLERS = {
         body: controlBody(input, parsed.args),
       },
     ),
+  archive: (input, parsed) =>
+    intercepted(
+      "archive",
+      "ok",
+      {
+        title: "Archive Session",
+        summary: "Archive the current Crew brain session.",
+        fields: sessionFields(input.session),
+      },
+      {
+        commandName: "archive_session",
+        target: { sessionId: input.session.sessionId },
+        reason: parsed.args || "slash command /archive",
+        reasonCode: "slash_archive_session",
+        body: controlBody(input, parsed.args),
+      },
+    ),
   "reload-mcp": (input, parsed) =>
     intercepted(
       "reload-mcp",

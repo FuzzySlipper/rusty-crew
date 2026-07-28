@@ -145,6 +145,11 @@ import {
   type ServiceProfileAdminMutationContext,
 } from "./service-profile-admin-mutations.js";
 import {
+  archiveCrewSession,
+  createFreshCrewSession,
+  type CrewSessionLifecycleContext,
+} from "./service-crew-session-lifecycle.js";
+import {
   applyServiceRuntimeRebuild as applyServiceRuntimeRebuildFromModule,
   commitRuntimeSessionReplacementInConfig as commitRuntimeSessionReplacementInConfigFromModule,
   planRuntimeSessionReplacementInConfig as planRuntimeSessionReplacementInConfigFromModule,
@@ -569,6 +574,37 @@ function profileAdminMutationContext(
         state.suppressedWakeEvents.delete(sessionId as SessionId);
       }
     },
+  };
+}
+
+function crewSessionLifecycleContext(
+  state: ServiceState,
+): CrewSessionLifecycleContext {
+  return {
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    serviceConfigFile: state.config.paths.serviceConfigFile,
+    inFlightWakes: state.inFlightWakes,
+    now: state.now,
+    readRuntimeConfigFile: () =>
+      readRuntimeConfigFileForMutationFromModule(
+        profileAdminMutationContext(state),
+      ),
+    validateRuntimeConfigFile: (value) =>
+      planRuntimeConfigFileValue(
+        profileAdminMutationContext(state),
+        isRecord(value) ? value : {},
+      ),
+    writeRuntimeConfigFile: (value) =>
+      writeJsonFileAtomicFromModule(
+        state.config.paths.serviceConfigFile,
+        value,
+      ),
+    applyRuntimeConfigFromDisk: (options) =>
+      applyServiceRuntimeConfigFromDisk(state, options),
+    sessionById: (sessionId) => serviceSessionById(state, sessionId),
+    appendChatEvent: (sessionId, event) =>
+      appendChatEventFromModule(chatEventLogContext(state), sessionId, event),
   };
 }
 
@@ -1299,6 +1335,15 @@ async function handleHttpRequest(
       },
       chat: {
         listSessions: () => listProjectedServiceSessions(state),
+        createSession: (input) =>
+          withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+            createFreshCrewSession(crewSessionLifecycleContext(state), {
+              idempotencyKey: input.idempotencyKey,
+              profileId: input.profileId as ProfileId,
+              expectedProfileRevision: input.expectedProfileRevision,
+              requestedAt: state.now(),
+            }),
+          ),
         effectiveSessionDefaults: effectiveDefaultsForChatSession,
         querySessionSummaries: (input) =>
           queryRustyViewChatSessionSummaries(chatOperations, input),
@@ -3669,6 +3714,30 @@ function createServiceControlExecutor(
         summary: `session ${session.sessionId} created`,
         affectedIds: { sessionId: session.sessionId },
         result: session,
+      };
+    },
+    archiveSession: async (command) => {
+      const sessionId = command.target.sessionId as SessionId | undefined;
+      if (sessionId === undefined) {
+        throw new Error("crew_session_archive_session_id_required");
+      }
+      const result = await withRuntimeConfigMutation(() =>
+        archiveCrewSession(crewSessionLifecycleContext(state), {
+          sessionId,
+          ...(command.body.chatCommandName === "archive"
+            ? {
+                commandName: "archive",
+                requestId: command.requestId,
+                actorId: command.actor.operatorId,
+              }
+            : {}),
+        }),
+      );
+      return {
+        status: "completed",
+        summary: `Archived session ${sessionId}.`,
+        affectedIds: { sessionId },
+        result,
       };
     },
     newSession: (() => {

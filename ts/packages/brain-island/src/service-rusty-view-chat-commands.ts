@@ -123,12 +123,15 @@ export async function executeRustyViewChatCommand(
         ...routed.controlRequest.body,
         reason: routed.controlRequest.reason,
         reasonCode: routed.controlRequest.reasonCode,
+        ...(routed.commandName === "archive"
+          ? { chatCommandName: "archive" }
+          : {}),
       },
       requestId: input.requestId,
     });
     const outcome = control.outcome;
     const affected = outcome.affectedIds ?? {};
-    return completeChatCommand(context, input.session.sessionId, {
+    const result: ExecuteChatCommandResult = {
       status: outcome.status === "completed" ? "completed" : "failed",
       command_name: routed.commandName,
       summary: outcome.summary,
@@ -137,7 +140,14 @@ export async function executeRustyViewChatCommand(
       new_session_id: stringRecordValue(affected, "newSessionId"),
       reason_code: outcome.reasonCode,
       response: { outcome, control_status: control.controlStatus },
-    });
+    };
+    const commandEventCursor = nestedString(
+      outcome.result,
+      "commandEventCursor",
+    );
+    return commandEventCursor === undefined
+      ? completeChatCommand(context, input.session.sessionId, result)
+      : { ...result, latest_cursor: commandEventCursor };
   }
   return completeChatCommand(context, input.session.sessionId, {
     status: "failed",
@@ -179,6 +189,9 @@ export function controlUrlForSlashCommand(
   commandName: string,
   sessionId: SessionId,
 ): string {
+  if (commandName === "archive_session") {
+    return `/v1/admin/control/sessions/${sessionId}/archive`;
+  }
   if (commandName === "new_session") {
     return `/v1/admin/control/sessions/${sessionId}/new`;
   }
@@ -189,6 +202,14 @@ export function controlUrlForSlashCommand(
     return `/v1/admin/control/sessions/${sessionId}/effort`;
   }
   return `/v1/admin/control/unsupported/${commandName}`;
+}
+
+function nestedString(value: unknown, key: string): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "string" ? candidate : undefined;
 }
 
 function stringRecordValue(

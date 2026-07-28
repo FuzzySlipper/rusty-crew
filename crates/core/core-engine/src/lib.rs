@@ -8,6 +8,7 @@ mod bootstrap;
 mod brain_runtime;
 mod chat;
 mod chat_store;
+mod crew_sessions;
 mod curator;
 mod delegation;
 mod delegation_store;

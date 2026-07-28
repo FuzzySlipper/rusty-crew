@@ -104,6 +104,33 @@
         "backing_control_command": "set_session_effort"
       },
       {
+        "name": "archive",
+        "aliases": ["/archive"],
+        "description": "Archive the current Crew brain session without replacing it.",
+        "args_schema": {
+          "type": "string",
+          "description": "Optional command arguments."
+        },
+        "positional_args": [
+          {
+            "name": "reason",
+            "description": "Optional operator-facing reason text.",
+            "type": "string",
+            "required": false,
+            "placeholder": "reason"
+          }
+        ],
+        "named_args": [],
+        "surfaces": ["chat-input", "global"],
+        "source": "backend-control",
+        "read_only": false,
+        "mutating": true,
+        "scope": "session",
+        "allowed_session_kinds": ["full"],
+        "requires_control_auth": true,
+        "backing_control_command": "archive_session"
+      },
+      {
         "name": "new",
         "aliases": ["/new"],
         "description": "Archive the current session and create a fresh replacement session.",
@@ -800,6 +827,17 @@
         "mutation": "read",
         "stability": "stable",
         "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions",
+        "description": "Create or recover a fresh Rust-owned Crew brain session from an active profile.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["chat", "session", "profile"],
         "public": true
       },
       {
@@ -3005,6 +3043,13 @@
         "auth_phase": "after_auth"
       },
       {
+        "capability_id": "chat.sessions.create",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
         "capability_id": "chat.sessions.open",
         "method": "GET",
         "path_template": "/v1/chat/sessions/{session_id}",
@@ -4141,6 +4186,7 @@
     "model",
     "effort",
     "new",
+    "archive",
     "reload-mcp"
   ]
 }

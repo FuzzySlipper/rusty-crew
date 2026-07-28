@@ -205,6 +205,23 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_crew_agent_session_json(&self, input_json: String) -> napi::Result<String> {
+        let request = parse_json::<CrewAgentSessionCreationRequest>(
+            &input_json,
+            "Crew agent session creation request",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .create_crew_agent_session(&request)
+                .map_err(to_napi_error)?,
+            "Crew agent session creation record",
+        )
+    }
+
+    #[napi]
     pub fn archive_session(&self, session_id: String) -> napi::Result<JsSessionState> {
         let bridge = self.bridge()?;
         let state = bridge

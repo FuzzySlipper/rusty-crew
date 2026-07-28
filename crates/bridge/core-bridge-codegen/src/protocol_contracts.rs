@@ -74,6 +74,8 @@ struct ProtocolContractRoots {
     agent_round_command: AgentRoundCommand,
     agent_round_start_receipt: AgentRoundStartReceipt,
     agent_correlated_round: AgentCorrelatedRound,
+    crew_agent_session_creation_request: CrewAgentSessionCreationRequest,
+    crew_agent_session_creation_record: CrewAgentSessionCreationRecord,
     external_runtime_registration: ExternalRuntimeRegistration,
     external_controller_context: ExternalControllerContext,
     external_runtime_handshake_observation: ExternalRuntimeHandshakeObservation,

@@ -5,6 +5,7 @@ import {
   directBridgeValidatedOperations,
   withDirectBridgeOutputValidation,
 } from "./direct-binding-validation.js";
+import { toCrewAgentSessionCreationRecord } from "./crew-session-wire.js";
 
 const env = { RUSTY_CREW_BRIDGE_VALIDATE: "1" };
 const session = {
@@ -206,6 +207,29 @@ const invalidBuffer = withDirectBridgeOutputValidation(
   env,
 );
 assert.throws(() => invalidBuffer.getBuffer(), /does not match bytes length/);
+
+const crewCreation = toCrewAgentSessionCreationRecord({
+  request_fingerprint: "fingerprint-1",
+  profile_revision: 7,
+  template_session_id: "template-session" as never,
+  outcome: "created",
+  session: {
+    handle: 4,
+    session_id: "crew-session-1" as never,
+    agent_id: "agent-1" as never,
+    profile_id: "profile-1" as never,
+    kind: "full",
+    resource_limits: { workdir: "/home", max_delegation_depth: 2 },
+    tool_profile: { tools: [] },
+    status: "idle",
+    brain_turn_count: 0,
+    created_at: "2026-07-10T00:00:00Z",
+    last_active_at: "2026-07-10T00:00:00Z",
+  },
+});
+assert.equal(crewCreation.session.sessionId, "crew-session-1");
+assert.equal(crewCreation.session.resourceLimits.workdir, "/home");
+assert.equal(crewCreation.profileRevision, 7);
 
 assert.equal(new Set(directBridgeValidatedOperations).size, 28);
 console.log(

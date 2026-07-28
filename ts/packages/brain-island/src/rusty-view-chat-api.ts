@@ -1,4 +1,8 @@
-import type { SessionId, SessionState } from "@rusty-crew/contracts";
+import type {
+  CrewAgentSessionCreationRecord,
+  SessionId,
+  SessionState,
+} from "@rusty-crew/contracts";
 import type {
   AdminApiEnvelope,
   AdminErrorCode,
@@ -45,6 +49,10 @@ export interface RustyViewChatContext {
   querySessionSummaries?(
     input: ChatSessionSummaryQuery,
   ): Promise<ChatSessionReadFactsPage>;
+  createSession?(input: CreateCrewChatSessionInput): Promise<{
+    creation: CrewAgentSessionCreationRecord;
+    applyResult: unknown;
+  }>;
   readSession?(input: ChatSessionReadInput): Promise<ChatSessionReadProjection>;
   executeCommand?(
     input: ExecuteChatCommandInput,
@@ -260,6 +268,18 @@ export interface ChatActor {
   id: string;
   kind: "human" | "agent" | "system";
   display_name?: string;
+}
+
+export interface CreateCrewChatSessionRequest {
+  profile_id: string;
+  expected_profile_revision: number;
+}
+
+export interface CreateCrewChatSessionInput {
+  profileId: string;
+  expectedProfileRevision: number;
+  idempotencyKey: string;
+  requestId: string;
 }
 
 export interface SendChatMessageRequest {
@@ -1023,6 +1043,9 @@ export async function handleRustyViewChatRequest(
   const method = request.method.toUpperCase();
   const parts = url.pathname.split("/").filter(Boolean);
   if (method !== "GET") {
+    if (method === "POST" && url.pathname === "/v1/chat/sessions") {
+      return handleCreateCrewSession(request, context, requestId);
+    }
     if (
       method === "POST" &&
       partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "messages"])
@@ -1448,6 +1471,144 @@ export async function handleRustyViewChatRequest(
     message: `unknown Rusty View chat route ${url.pathname}`,
     retryable: false,
   });
+}
+
+async function handleCreateCrewSession(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+): Promise<AdminRouteResult> {
+  if (!context.createSession) {
+    return chatFeatureUnavailable(
+      requestId,
+      "crew_session_creation_not_configured",
+    );
+  }
+  const parsed = parseCreateCrewSessionRequest(request.body);
+  if (!parsed.ok) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: parsed.reasonCode,
+      message: parsed.message,
+      retryable: false,
+    });
+  }
+  const idempotencyKey = headerValue(request.headers, "idempotency-key");
+  if (idempotencyKey === undefined || idempotencyKey.trim() === "") {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "crew_agent_session_creation_idempotency_key_required",
+      message: "Idempotency-Key header is required.",
+      retryable: false,
+    });
+  }
+  try {
+    const result = await context.createSession({
+      profileId: parsed.value.profile_id,
+      expectedProfileRevision: parsed.value.expected_profile_revision,
+      idempotencyKey,
+      requestId,
+    });
+    return success(requestId, result);
+  } catch (error) {
+    if (!isCrewSessionLifecycleError(error)) throw error;
+    const conflict =
+      error.reasonCode.endsWith("_conflict") ||
+      error.reasonCode ===
+        "crew_agent_session_creation_active_session_conflict";
+    const notFound = error.reasonCode.endsWith("_not_found");
+    const failedPrecondition =
+      error.reasonCode === "crew_agent_session_creation_runtime_apply_failed";
+    const internalError =
+      error.reasonCode === "crew_agent_session_creation_internal_error";
+    return failure(
+      notFound
+        ? 404
+        : conflict
+          ? 409
+          : failedPrecondition
+            ? 412
+            : internalError
+              ? 500
+              : 400,
+      requestId,
+      {
+        code: notFound
+          ? "not_found"
+          : conflict
+            ? "conflict"
+            : failedPrecondition
+              ? "failed_precondition"
+              : internalError
+                ? "internal_error"
+                : "invalid_input",
+        reason_code: error.reasonCode,
+        message: error.message,
+        retryable: error.retryable,
+      },
+    );
+  }
+}
+
+function parseCreateCrewSessionRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateCrewChatSessionRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_crew_session_creation_body",
+      message: "Crew session creation body must be a JSON object.",
+    };
+  }
+  const record = value as Record<string, unknown>;
+  const profileId = stringValue(record.profile_id);
+  const revision = record.expected_profile_revision;
+  if (profileId === undefined || profileId.trim() === "") {
+    return {
+      ok: false,
+      reasonCode: "crew_agent_session_creation_profile_required",
+      message: "profile_id is required.",
+    };
+  }
+  if (!Number.isSafeInteger(revision) || (revision as number) < 1) {
+    return {
+      ok: false,
+      reasonCode: "crew_agent_session_creation_profile_revision_invalid",
+      message: "expected_profile_revision must be a positive integer.",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      profile_id: profileId,
+      expected_profile_revision: revision as number,
+    },
+  };
+}
+
+function headerValue(
+  headers: Record<string, string | undefined> | undefined,
+  name: string,
+): string | undefined {
+  if (headers === undefined) return undefined;
+  const normalized = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === normalized) return value;
+  }
+  return undefined;
+}
+
+function isCrewSessionLifecycleError(error: unknown): error is Error & {
+  reasonCode: string;
+  retryable: boolean;
+} {
+  return (
+    error instanceof Error &&
+    typeof (error as { reasonCode?: unknown }).reasonCode === "string" &&
+    typeof (error as { retryable?: unknown }).retryable === "boolean"
+  );
 }
 
 async function handleToolCallDebugDetail(

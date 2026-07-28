@@ -820,6 +820,15 @@ errors = "core_protocol::CoreError"
 summary = "Read the Rust-owned durable Review terminal-event cursor for adapter reconnect."
 
 [[operation]]
+name = "create_crew_agent_session"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::CrewAgentSessionCreationRequest"
+output = "core_protocol::CrewAgentSessionCreationRecord"
+errors = "core_protocol::CoreError"
+summary = "Idempotently create or recover a Rust-owned Crew brain session from an active profile."
+
+[[operation]]
 name = "archive_session"
 surface = "stable"
 direction = "ts_to_rust"

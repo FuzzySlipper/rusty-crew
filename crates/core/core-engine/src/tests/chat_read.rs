@@ -201,6 +201,61 @@ fn chat_session_read_sources_survive_engine_restart() {
 }
 
 #[test]
+fn archived_chat_sessions_require_explicit_history_filter() {
+    let data_dir = unique_data_dir("archived-chat-history");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "archived-chat-session",
+            "archived-agent",
+            "archived-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .append_chat_event(&ChatEventLogAppend {
+            session_id: session.session_id.clone(),
+            created_at: "2026-06-19T00:01:00Z".to_string(),
+            kind: "message_created".to_string(),
+            payload_json: json!({"body": "preserved history"}),
+        })
+        .unwrap();
+    engine.archive_session(&session.session_id).unwrap();
+
+    let default_page = engine
+        .query_chat_session_summaries(&ChatSessionSummaryPageQuery {
+            profile_id: None,
+            status: None,
+            page: QueryPage::default(),
+        })
+        .unwrap();
+    assert!(default_page.page.items.is_empty());
+
+    let archived_page = engine
+        .query_chat_session_summaries(&ChatSessionSummaryPageQuery {
+            profile_id: None,
+            status: Some("archived".to_string()),
+            page: QueryPage::default(),
+        })
+        .unwrap();
+    assert_eq!(archived_page.page.items.len(), 1);
+    assert_eq!(archived_page.page.items[0].message_count, 1);
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir);
+    let history = restarted
+        .read_chat_session(&ChatSessionReadQuery {
+            session_id: SessionId::new("archived-chat-session"),
+            cursor: None,
+            limit: 10,
+            include_alternates: false,
+        })
+        .unwrap();
+    assert_eq!(history.session.status, SessionStatus::Archived);
+    assert_eq!(history.events[0].payload_json["body"], "preserved history");
+}
+
+#[test]
 fn chat_read_model_uses_active_alternate_and_forgives_bad_cursors() {
     let engine = test_engine();
     engine

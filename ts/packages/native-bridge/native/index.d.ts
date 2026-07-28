@@ -270,6 +270,7 @@ export declare class NativeBridgeBinding {
   assertNoBufferLeaks(): void
   createSession(config: JsSessionConfig): JsSessionState
   ensureConfiguredSession(config: JsSessionConfig): JsSessionState
+  createCrewAgentSessionJson(inputJson: string): string
   archiveSession(sessionId: string): JsSessionState
   setSessionReasoningEffort(sessionId: string, reasoningEffort?: string | undefined | null): JsSessionState
   listSessionsJson(): string
