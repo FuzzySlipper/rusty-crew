@@ -112,6 +112,33 @@ errors = "core_protocol::CoreError"
 summary = "Settle one Rust-owned logical-turn execution epoch as completed, durably yielded, or failed."
 
 [[operation]]
+name = "logical_turn_diagnostics"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::LogicalTurnDiagnosticQuery"
+output = "core_protocol::LogicalTurnDiagnosticPage"
+errors = "core_protocol::CoreError"
+summary = "Read Rust-owned logical-turn continuation, progress, pause, and terminal diagnostics."
+
+[[operation]]
+name = "resolve_logical_turn_attention"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::LogicalTurnAttentionResolutionRequest"
+output = "core_protocol::LogicalTurnAttentionResolutionReceipt"
+errors = "core_protocol::CoreError"
+summary = "Resolve a paused logical turn through a Rust-owned operator action and queue its continuation."
+
+[[operation]]
+name = "cancel_logical_turn"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::LogicalTurnCancelRequest"
+output = "core_protocol::LogicalTurnCancellationReceipt"
+errors = "core_protocol::CoreError"
+summary = "Cancel an active or yielded logical turn and its provider run using one idempotent Rust operation."
+
+[[operation]]
 name = "submit_brain_event"
 surface = "stable"
 direction = "ts_to_rust"

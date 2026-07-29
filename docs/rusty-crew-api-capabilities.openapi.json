@@ -1909,6 +1909,76 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/logical-turns": {
+      "get": {
+        "operationId": "adminLogicalTurnsList",
+        "summary": "List Rust-owned logical-turn continuation and progress diagnostics.",
+        "tags": ["session", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.logical_turns.list",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/logical-turns/{logical_turn_id}/cancel": {
+      "post": {
+        "operationId": "adminLogicalTurnsCancel",
+        "summary": "Cancel an active or yielded logical turn and its provider run.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "logical_turn_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.logical_turns.cancel",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/logical-turns/{logical_turn_id}/resolve": {
+      "post": {
+        "operationId": "adminLogicalTurnsResolve",
+        "summary": "Resolve operator attention and queue the logical turn to continue.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "logical_turn_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.logical_turns.resolve",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/mcp/servers": {
       "get": {
         "operationId": "adminMcpServers",
@@ -3612,6 +3682,96 @@
         "x-rusty-crew-capability-id": "chat.sessions.jump.resolve",
         "x-rusty-crew-auth": "chat",
         "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/logical-turns": {
+      "get": {
+        "operationId": "chatSessionsLogicalTurnsList",
+        "summary": "List logical-turn continuation and progress diagnostics for one chat session.",
+        "tags": ["chat", "session", "diagnostics"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.logical_turns.list",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/cancel": {
+      "post": {
+        "operationId": "chatSessionsLogicalTurnsCancel",
+        "summary": "Cancel an active or yielded logical turn from its chat session.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "logical_turn_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.logical_turns.cancel",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve": {
+      "post": {
+        "operationId": "chatSessionsLogicalTurnsResolve",
+        "summary": "Resolve operator attention for a chat logical turn and queue it to continue.",
+        "tags": ["chat", "session"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "logical_turn_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.logical_turns.resolve",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "control",
         "x-rusty-crew-stability": "stable",
         "x-rusty-crew-contract-detail": "capability"
       }
@@ -5449,7 +5609,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 219,
+    "capability_count": 225,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

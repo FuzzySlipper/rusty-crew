@@ -104,6 +104,18 @@ export async function executeNativeBrainWake(
         JSON.stringify({
           wake_id: validatedRequest.wakeId,
           outcome: result.outcome ?? "completed",
+          ...(result.transportMetrics === undefined
+            ? {}
+            : {
+                progress: {
+                  providerRequestCount:
+                    result.transportMetrics.providerRequestCount,
+                  toolRoundCount:
+                    "toolRoundCount" in result.transportMetrics
+                      ? result.transportMetrics.toolRoundCount
+                      : result.transportMetrics.continuationRoundCount,
+                },
+              }),
           ...(result.continuationState === undefined
             ? {}
             : { continuation_state: result.continuationState }),
@@ -125,14 +137,28 @@ export async function executeNativeBrainWake(
     });
   } catch (error) {
     try {
-      context.binding.settleBrainWakeJson(
-        JSON.stringify({
-          wake_id: validatedRequest.wakeId,
-          outcome: "failed",
-          reason_code: "brain_wake_failed",
-          summary: errorMessage(error),
-        }),
-      );
+      const settlement = JSON.parse(
+        context.binding.settleBrainWakeJson(
+          JSON.stringify({
+            wake_id: validatedRequest.wakeId,
+            outcome: "failed",
+            reason_code: "brain_wake_failed",
+            summary: errorMessage(error),
+          }),
+        ),
+      ) as { phase?: string };
+      if (settlement.phase === "cancelled") {
+        return validateBridgeValue<BrainWakeAccepted>({
+          operation: "wake_brain",
+          direction: "rust_to_ts",
+          schema: brainWakeAcceptedSchema,
+          value: {
+            wakeId: validatedRequest.wakeId,
+            accepted: true,
+            outcome: "completed",
+          },
+        });
+      }
     } catch (settlementError) {
       throw new Error(
         `${errorMessage(error)}; logical turn failure settlement also failed: ${errorMessage(settlementError)}`,

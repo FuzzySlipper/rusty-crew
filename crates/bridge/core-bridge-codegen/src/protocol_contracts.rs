@@ -79,6 +79,8 @@ struct ProtocolContractRoots {
     logical_turn_cancel_request: LogicalTurnCancelRequest,
     logical_turn_cancellation_receipt: LogicalTurnCancellationReceipt,
     logical_turn_hydration_report: LogicalTurnHydrationReport,
+    logical_turn_diagnostic_query: LogicalTurnDiagnosticQuery,
+    logical_turn_diagnostic_page: LogicalTurnDiagnosticPage,
     memory_governance_decision_input: MemoryGovernanceDecisionInput,
     memory_governance_decision_record: MemoryGovernanceDecisionRecord,
     agent_directory_entry: AgentDirectoryEntry,

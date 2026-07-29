@@ -36,6 +36,11 @@ import type {
   GitHubGateTerminalEvent,
   GitHubGateTerminalReceipt,
   GitHubGateWaitRecord,
+  LogicalTurnAttentionResolutionReceipt,
+  LogicalTurnCancellationReceipt,
+  LogicalTurnDiagnosticPage,
+  LogicalTurnDiagnosticQuery,
+  LogicalTurnResolutionAction,
   ManifestOperationName,
   MemoryGovernanceDecisionInput,
   MemoryGovernanceDecisionRecord,
@@ -2134,6 +2139,22 @@ export interface NativeBridgeModule
   buildBrainWakeRequestForSession(
     input: BrainWakeSessionBufferInput,
   ): Promise<BrainWakeRequest>;
+  logicalTurnDiagnostics(
+    query: LogicalTurnDiagnosticQuery,
+  ): Promise<LogicalTurnDiagnosticPage>;
+  resolveLogicalTurnAttention(input: {
+    logicalTurnId: string;
+    expectedRevision: number;
+    action: LogicalTurnResolutionAction;
+  }): Promise<LogicalTurnAttentionResolutionReceipt>;
+  cancelLogicalTurn(input: {
+    logicalTurnId: string;
+    expectedRevision: number;
+    idempotencyKey: string;
+    reasonCode: string;
+    summary: string;
+    now: string;
+  }): Promise<LogicalTurnCancellationReceipt>;
   diagnosticProjectBodyStateJson(sessionId: string): Promise<Uint8Array>;
   diagnosticSubmitBrainActionsJson(
     wakeId: string,

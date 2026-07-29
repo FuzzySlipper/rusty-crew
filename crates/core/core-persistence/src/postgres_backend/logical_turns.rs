@@ -15,9 +15,10 @@ use rusty_crew_core_protocol::{
     LogicalTurnAttentionRequest, LogicalTurnAttentionResolutionReceipt,
     LogicalTurnAttentionResolutionRequest, LogicalTurnCancelRequest,
     LogicalTurnCancellationReceipt, LogicalTurnCheckpoint, LogicalTurnClaimRequest,
-    LogicalTurnContinuationClaim, LogicalTurnHydrationReport, LogicalTurnId,
-    LogicalTurnLifecycleEvent, LogicalTurnLifecycleEventKind, LogicalTurnOperationRecord,
-    LogicalTurnPhase, LogicalTurnRecord, LogicalTurnYieldReceipt, LogicalTurnYieldRequest,
+    LogicalTurnContinuationClaim, LogicalTurnDiagnosticQuery, LogicalTurnHydrationReport,
+    LogicalTurnId, LogicalTurnLifecycleEvent, LogicalTurnLifecycleEventKind,
+    LogicalTurnOperationRecord, LogicalTurnPhase, LogicalTurnRecord, LogicalTurnYieldReceipt,
+    LogicalTurnYieldRequest,
 };
 
 pub(super) fn apply_postgres_logical_turns(
@@ -182,6 +183,36 @@ impl PostgresBackendStore {
     ) -> CoreResult<Option<LogicalTurnRecord>> {
         let schema = self.quoted_schema();
         load_turn_pg(&mut *self.client()?, &schema, logical_turn_id)
+    }
+
+    pub fn list_logical_turns(
+        &self,
+        query: &LogicalTurnDiagnosticQuery,
+    ) -> CoreResult<Vec<LogicalTurnRecord>> {
+        let schema = self.quoted_schema();
+        let logical_turn_id = query.logical_turn_id.as_ref().map(|value| value.0.as_str());
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        self.client()?
+            .query(
+                &format!(
+                    "SELECT record_json FROM {schema}.logical_brain_turns
+                     WHERE ($1::text IS NULL OR logical_turn_id = $1)
+                       AND ($2::text IS NULL OR session_id = $2)
+                       AND ($3 OR terminal_at IS NULL)
+                     ORDER BY updated_at DESC, logical_turn_id DESC
+                     LIMIT $4"
+                ),
+                &[
+                    &logical_turn_id,
+                    &session_id,
+                    &query.include_terminal,
+                    &(i64::from(query.limit.clamp(1, 500))),
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL logical turn diagnostics", error))?
+            .into_iter()
+            .map(|row| decode_pg(row.get(0), "logical turn diagnostic"))
+            .collect()
     }
 
     pub fn get_logical_turn_checkpoint(
@@ -500,6 +531,24 @@ impl PostgresBackendStore {
             ));
         }
         let expected_revision = record.revision;
+        let mut checkpoint = load_checkpoint_pg(&mut tx, &schema, &record.current_continuation_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "logical turn completion checkpoint is missing",
+                )
+            })?;
+        checkpoint.progress = request.lifecycle_event.progress.clone();
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.logical_brain_turn_checkpoints
+                 SET checkpoint_json = $1 WHERE continuation_id = $2"
+            ),
+            &[&to_json_text(&checkpoint)?, &checkpoint.continuation_id.0],
+        )
+        .map_err(|error| {
+            postgres_error("update completed PostgreSQL logical turn checkpoint", error)
+        })?;
         record.phase = request.lifecycle_event.phase;
         record.active_epoch_id = None;
         record.claim_holder = None;
@@ -551,6 +600,24 @@ impl PostgresBackendStore {
         if !already_terminal {
             require_revision(&record, request.expected_revision)?;
             let expected_revision = record.revision;
+            let progress = current_progress_pg(&mut tx, &schema, &record)?;
+            let mut cancelling = record.clone();
+            cancelling.phase = LogicalTurnPhase::CancelRequested;
+            cancelling.cancellation_generation += 1;
+            cancelling.updated_at = request.now.clone();
+            cancelling.revision += 1;
+            insert_outbox_pg(
+                &mut tx,
+                &schema,
+                &lifecycle_for_record(
+                    &cancelling,
+                    progress.clone(),
+                    LogicalTurnLifecycleEventKind::CancelRequested,
+                    "operator_cancel_requested",
+                    "logical turn cancellation requested",
+                    request.now.clone(),
+                ),
+            )?;
             record.phase = LogicalTurnPhase::Cancelled;
             record.cancellation_generation += 1;
             record.active_epoch_id = None;
@@ -561,7 +628,6 @@ impl PostgresBackendStore {
             record.terminal_at = Some(request.now.clone());
             record.revision += 1;
             update_turn_pg(&mut tx, &schema, &record, expected_revision)?;
-            let progress = current_progress_pg(&mut tx, &schema, &record)?;
             insert_outbox_pg(
                 &mut tx,
                 &schema,

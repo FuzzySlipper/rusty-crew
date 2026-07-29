@@ -97,6 +97,7 @@ import {
 import { handleSchedulerReadRequest } from "./service-scheduler-routes.js";
 import { handleAdminToolsCatalogRequest } from "./service-tool-catalog-routes.js";
 import { handleAdminLocalToolProfilesRequest } from "./service-local-tool-profile-routes.js";
+import { handleLogicalTurnRoute } from "./service-logical-turn-routes.js";
 import type { ServiceBackgroundLoopPort } from "./service-background-loops.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import {
@@ -1281,6 +1282,40 @@ async function handleHttpRequest(
   }
 
   const route = matchServiceApiRoute(url.pathname, "after_auth");
+
+  if (route?.id === "logical_turns") {
+    const result = await handleLogicalTurnRoute(
+      {
+        method: request.method,
+        url,
+        body:
+          (request.method ?? "GET").toUpperCase() === "POST"
+            ? await readJsonBody(request)
+            : undefined,
+        requestId: requestId(request),
+        idempotencyKey: headers(request)["idempotency-key"],
+      },
+      {
+        logicalTurnDiagnostics: (query) =>
+          state.bridge.logicalTurnDiagnostics(query),
+        resolveLogicalTurnAttention: (input) =>
+          state.bridge.resolveLogicalTurnAttention(input),
+        cancelLogicalTurn: (input) => state.bridge.cancelLogicalTurn(input),
+        appendChatLifecycleEvent: async ({ sessionId, kind, payload }) => {
+          await appendChatEventFromModule(
+            chatEventLogContext(state),
+            sessionId as SessionId,
+            {
+              kind,
+              payload,
+            },
+          );
+        },
+        now: state.now,
+      },
+    );
+    return isChatRoute(url.pathname) ? withChatCors(result, request) : result;
+  }
 
   if (route?.id === "admin.control") {
     const body = await readJsonBody(request);

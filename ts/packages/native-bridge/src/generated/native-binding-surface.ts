@@ -264,6 +264,9 @@ export interface NativeBridgeBinding {
   buildBrainWakeRequest(brain: number, sessionId: string, bodyStateJson: Uint8Array, systemPrompt: string, roleAssemblyJson: Uint8Array, wakeId: string): JsBufferedBrainWakeRequest
   buildBrainWakeRequestForSession(brain: number, sessionId: string, systemPrompt: string, roleAssemblyJson: Uint8Array, wakeId: string): JsBufferedBrainWakeRequest
   settleBrainWakeJson(inputJson: string): string
+  logicalTurnDiagnosticsJson(inputJson: string): string
+  resolveLogicalTurnAttentionJson(inputJson: string): string
+  cancelLogicalTurnJson(inputJson: string): string
   applyBrainProviderStateOutputJson(brain: number, sessionId: string, wakeId: string, outputJson: string): void
   providerStateDiagnostics(limit?: number | undefined | null): Array<JsProviderStateDiagnostic>
   getBuffer(handle: number): JsRuntimeBufferView
@@ -828,7 +831,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 280,
+  "manifestOperationCount": 283,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2909,6 +2912,30 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "settle_brain_wake"
+    },
+    {
+      "name": "logicalTurnDiagnosticsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "logical_turn_diagnostics"
+    },
+    {
+      "name": "resolveLogicalTurnAttentionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "resolve_logical_turn_attention"
+    },
+    {
+      "name": "cancelLogicalTurnJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "cancel_logical_turn"
     },
     {
       "name": "applyBrainProviderStateOutputJson",

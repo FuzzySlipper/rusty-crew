@@ -262,6 +262,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn list_logical_turns(
+        &self,
+        query: &LogicalTurnDiagnosticQuery,
+    ) -> CoreResult<Vec<LogicalTurnRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_logical_turns(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_logical_turns(query),
+        }
+    }
+
     pub fn get_logical_turn_checkpoint(
         &self,
         continuation_id: &ContinuationId,

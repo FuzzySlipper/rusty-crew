@@ -489,6 +489,11 @@ export type BrainWakeFailure = {
 
 export type BrainWakeOutcome = "completed" | "continuing";
 
+export type BrainWakeProgressSnapshot = {
+  providerRequestCount: number;
+  toolRoundCount: number;
+};
+
 export type BrainWakeProviderStateInput = {
   expiresAt?: string | null;
   moduleId: string;
@@ -537,6 +542,7 @@ export type BrainWakeSettlementRequest = {
   attention?: BrainWakeAttention | null;
   continuationState?: BrainContinuationPayload | null;
   outcome: BrainWakeSettlementKind;
+  progress?: BrainWakeProgressSnapshot | null;
   reasonCode?: string | null;
   summary?: string | null;
   wakeId: string;
@@ -1210,6 +1216,41 @@ export type LogicalTurnContinuationClaim = {
   replayed: boolean;
 };
 
+export type LogicalTurnDiagnostic = {
+  activeExecutionEpochId?: string | null;
+  admittedAt: string;
+  attention?: LogicalTurnAttention | null;
+  continuationCount: number;
+  currentContinuationId: string;
+  lastLivenessAt: string;
+  lastProgressAt: string;
+  logicalTurnId: string;
+  operatorState: LogicalTurnOperatorState;
+  phase: LogicalTurnPhase;
+  progressClassification: LogicalTurnProgressClassification;
+  providerRequestTotal: number;
+  reasonCode: string;
+  revision: number;
+  sessionId: string;
+  sourceWakeId: string;
+  summary: string;
+  terminalAt?: string | null;
+  toolRoundTotal: number;
+  updatedAt: string;
+};
+
+export type LogicalTurnDiagnosticPage = {
+  items: Array<LogicalTurnDiagnostic>;
+  total: number;
+};
+
+export type LogicalTurnDiagnosticQuery = {
+  includeTerminal?: boolean;
+  limit?: number;
+  logicalTurnId?: string | null;
+  sessionId?: string | null;
+};
+
 export type LogicalTurnFrozenInput = {
   attachmentRefs?: Array<string>;
   bodyStateFingerprint: string;
@@ -1231,14 +1272,17 @@ export type LogicalTurnHydrationReport = {
 };
 
 export type LogicalTurnLifecycleEvent = {
+  continuationCount: number;
   continuationId: string;
   executionEpochId?: string | null;
   kind: LogicalTurnLifecycleEventKind;
   logicalTurnId: string;
   logicalTurnRevision: number;
   occurredAt: string;
+  operatorState: LogicalTurnOperatorState;
   phase: LogicalTurnPhase;
   progress: LogicalTurnProgress;
+  progressClassification: LogicalTurnProgressClassification;
   projectionId: string;
   reasonCode: string;
   sessionId: string;
@@ -1271,6 +1315,8 @@ export type LogicalTurnOperationRecord = {
   updatedAt: string;
 };
 
+export type LogicalTurnOperatorState = "queued_to_continue" | "running" | "paused_for_attention" | "cancelling" | "completed" | "cancelled" | "failed";
+
 export type LogicalTurnPhase = "admitted" | "runnable" | "running" | "yielded" | "attention_required" | "cancel_requested" | "completed" | "cancelled" | "failed";
 
 export type LogicalTurnProgress = {
@@ -1286,6 +1332,8 @@ export type LogicalTurnProgress = {
   semanticRevision: number;
   stateFingerprint: string;
 };
+
+export type LogicalTurnProgressClassification = "admitted" | "provider_progress" | "tool_progress" | "semantic_progress" | "liveness_only" | "no_progress" | "attention_required" | "completed" | "cancelled" | "failed";
 
 export type LogicalTurnRecord = {
   activeEpochId?: string | null;

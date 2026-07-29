@@ -131,6 +131,7 @@ impl NativeBridge {
         &mut self,
         wake_id: &str,
         result: LogicalTurnEpochResult,
+        progress: Option<BrainWakeProgressSnapshot>,
     ) -> CoreResult<Option<LogicalTurnEpochSettlement>> {
         let Some(active) = self.active_logical_wakes.get(wake_id).cloned() else {
             return Ok(None);
@@ -144,11 +145,87 @@ impl NativeBridge {
                 "logical wake binding changed before settlement",
             ));
         }
-        let settlement = self
+        if let Some(record) = self
             .engine()?
-            .settle_logical_turn_epoch(&active.claim, result)?;
+            .get_logical_turn(&active.claim.record.logical_turn_id)?
+        {
+            if record.phase == rusty_crew_core_protocol::LogicalTurnPhase::Cancelled {
+                self.active_logical_wakes.remove(wake_id);
+                return Ok(Some(LogicalTurnEpochSettlement {
+                    outcome: BrainWakeOutcome::Completed,
+                    phase: record.phase,
+                }));
+            }
+        }
+        let settlement = self.engine()?.settle_logical_turn_epoch_with_progress(
+            &active.claim,
+            result,
+            progress,
+        )?;
         self.active_logical_wakes.remove(wake_id);
         Ok(Some(settlement))
+    }
+
+    pub fn logical_turn_diagnostics(
+        &self,
+        query: &LogicalTurnDiagnosticQuery,
+    ) -> CoreResult<LogicalTurnDiagnosticPage> {
+        self.engine()?.logical_turn_diagnostics(query)
+    }
+
+    pub fn resolve_logical_turn_attention_for_operator(
+        &self,
+        logical_turn_id: &LogicalTurnId,
+        expected_revision: u64,
+        action: LogicalTurnResolutionAction,
+    ) -> CoreResult<LogicalTurnAttentionResolutionReceipt> {
+        self.engine()?.resolve_logical_turn_attention_for_operator(
+            logical_turn_id,
+            expected_revision,
+            action,
+        )
+    }
+
+    pub fn cancel_logical_turn(
+        &mut self,
+        request: &LogicalTurnCancelRequest,
+    ) -> CoreResult<LogicalTurnCancellationReceipt> {
+        let active = self
+            .active_logical_wakes
+            .iter()
+            .find(|(_, active)| active.claim.record.logical_turn_id == request.logical_turn_id)
+            .map(|(wake_id, active)| {
+                (
+                    wake_id.clone(),
+                    active.claim.record.binding.brain_module_id.clone(),
+                )
+            });
+        if let Some((wake_id, module_id)) = active {
+            let input_json = serde_json::json!({
+                "wakeId": wake_id,
+                "reasonCode": request.reason_code,
+                "summary": request.summary,
+            })
+            .to_string();
+            let cancellation = match module_id.as_str() {
+                "chat-completions" => cancel_chat_completions_brain_json(
+                    &self.chat_completions_buffered_runs,
+                    input_json,
+                ),
+                "openai-responses" => cancel_openai_responses_brain_json(
+                    &self.openai_responses_buffered_runs,
+                    input_json,
+                ),
+                _ => Ok(String::new()),
+            };
+            cancellation.map_err(|error| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    format!("cancel active logical turn provider run: {error}"),
+                )
+            })?;
+        }
+        self.engine()?.cancel_logical_turn(request)
     }
 
     fn hydrate_provider_state(&self, request: &mut BrainWakeRequest) -> CoreResult<()> {

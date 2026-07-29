@@ -754,6 +754,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     queryExternalRuntimeEvents: unavailable("query_external_runtime_events"),
     buildBrainWakeRequest: unavailable("wake_brain"),
     buildBrainWakeRequestForSession: unavailable("wake_brain"),
+    logicalTurnDiagnostics: unavailable("logical_turn_diagnostics"),
+    resolveLogicalTurnAttention: unavailable("resolve_logical_turn_attention"),
+    cancelLogicalTurn: unavailable("cancel_logical_turn"),
     diagnosticProjectBodyStateJson: unavailable("wake_brain"),
     diagnosticSubmitBrainActionsJson: unavailable("submit_brain_actions"),
     diagnosticCountRows: unavailable("initialize_engine"),
@@ -1617,6 +1620,20 @@ function createNativeBridgeModule(
       );
       return request;
     },
+    logicalTurnDiagnostics: async (query) =>
+      JSON.parse(
+        binding.logicalTurnDiagnosticsJson(JSON.stringify(query)),
+      ) as Awaited<ReturnType<NativeBridgeModule["logicalTurnDiagnostics"]>>,
+    resolveLogicalTurnAttention: async (input) =>
+      JSON.parse(
+        binding.resolveLogicalTurnAttentionJson(JSON.stringify(input)),
+      ) as Awaited<
+        ReturnType<NativeBridgeModule["resolveLogicalTurnAttention"]>
+      >,
+    cancelLogicalTurn: async (input) =>
+      JSON.parse(
+        binding.cancelLogicalTurnJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["cancelLogicalTurn"]>>,
     diagnosticProjectBodyStateJson: async (sessionId) => {
       const bytes = binding.projectBodyStateJson(sessionId);
       validateBridgeJsonText({

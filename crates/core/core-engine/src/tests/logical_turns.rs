@@ -7,6 +7,112 @@ use sha2::{Digest, Sha256};
 const NOW: &str = "2026-06-19T00:00:00Z";
 
 #[test]
+fn logical_turn_diagnostics_preserve_progress_across_restart_and_cancel_yielded_turns() {
+    let data_dir = unique_data_dir("logical-turn-diagnostics-restart");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "diagnostic-session",
+            "diagnostic-agent",
+            "prepared-logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let registration = chat_completions_registration();
+    let first = engine
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "diagnostic-wake",
+            "system prompt".into(),
+            br#"{"messages":[]}"#.to_vec(),
+        )
+        .unwrap();
+    let continuation_payload = json!({
+        "messages": ["tool request", "tool result"],
+        "providerRequestCount": 7,
+        "toolRoundCount": 3
+    });
+    let continuation = BrainContinuationPayload {
+        module_id: "chat-completions".into(),
+        payload_version: "chat-completions-work-quantum-v1".into(),
+        payload_fingerprint: json_sha256(&continuation_payload),
+        payload: continuation_payload,
+    };
+    engine
+        .settle_logical_turn_epoch_with_progress(
+            &first.claim,
+            LogicalTurnEpochResult::Yielded(continuation),
+            Some(BrainWakeProgressSnapshot {
+                provider_request_count: 7,
+                tool_round_count: 3,
+            }),
+        )
+        .unwrap();
+    let logical_turn_id = first.claim.record.logical_turn_id.clone();
+    let page = engine
+        .logical_turn_diagnostics(&LogicalTurnDiagnosticQuery {
+            logical_turn_id: Some(logical_turn_id.clone()),
+            session_id: Some(session.session_id.clone()),
+            include_terminal: false,
+            limit: 10,
+        })
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].continuation_count, 2);
+    assert_eq!(page.items[0].provider_request_total, 7);
+    assert_eq!(page.items[0].tool_round_total, 3);
+    assert_eq!(
+        page.items[0].operator_state,
+        LogicalTurnOperatorState::QueuedToContinue
+    );
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let before_cancel = restarted
+        .logical_turn_diagnostics(&LogicalTurnDiagnosticQuery {
+            logical_turn_id: Some(logical_turn_id.clone()),
+            session_id: None,
+            include_terminal: false,
+            limit: 1,
+        })
+        .unwrap()
+        .items
+        .remove(0);
+    let cancellation = restarted
+        .cancel_logical_turn(&LogicalTurnCancelRequest {
+            logical_turn_id: logical_turn_id.clone(),
+            expected_revision: before_cancel.revision,
+            idempotency_key: "diagnostic-cancel".into(),
+            reason_code: "operator_cancelled".into(),
+            summary: "operator cancelled yielded continuation".into(),
+            now: NOW.into(),
+        })
+        .unwrap();
+    assert!(!cancellation.already_terminal);
+    assert_eq!(cancellation.record.phase, LogicalTurnPhase::Cancelled);
+    assert!(restarted
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    let terminal = restarted
+        .logical_turn_diagnostics(&LogicalTurnDiagnosticQuery {
+            logical_turn_id: Some(logical_turn_id),
+            session_id: Some(session.session_id),
+            include_terminal: true,
+            limit: 1,
+        })
+        .unwrap();
+    assert_eq!(terminal.items[0].provider_request_total, 7);
+    assert_eq!(terminal.items[0].tool_round_total, 3);
+    assert_eq!(
+        terminal.items[0].operator_state,
+        LogicalTurnOperatorState::Cancelled
+    );
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
 fn prepared_chat_turn_yields_and_restart_resumes_frozen_input_exactly_once() {
     let data_dir = unique_data_dir("logical-turn-prepared-restart");
     let engine = test_engine_with_data_dir(data_dir.clone());
@@ -264,6 +370,11 @@ fn operator_attention_survives_restart_and_explicit_retry_resumes_same_turn() {
                 execution_epoch_id: None,
                 kind: LogicalTurnLifecycleEventKind::ContinuationResumed,
                 phase: LogicalTurnPhase::Runnable,
+                continuation_count: attention_record.continuation_sequence + 1,
+                operator_state:
+                    rusty_crew_core_protocol::LogicalTurnOperatorState::QueuedToContinue,
+                progress_classification:
+                    rusty_crew_core_protocol::LogicalTurnProgressClassification::NoProgress,
                 progress: checkpoint.progress.clone(),
                 reason_code: "operator_retry_provider_operation".into(),
                 summary: "operator resolved attention and requested a provider retry".into(),
@@ -577,6 +688,10 @@ fn admission(session_id: &SessionId) -> LogicalTurnAdmissionWrite {
         execution_epoch_id: None,
         kind: LogicalTurnLifecycleEventKind::Admitted,
         phase: LogicalTurnPhase::Admitted,
+        continuation_count: 1,
+        operator_state: rusty_crew_core_protocol::LogicalTurnOperatorState::QueuedToContinue,
+        progress_classification:
+            rusty_crew_core_protocol::LogicalTurnProgressClassification::Admitted,
         progress,
         reason_code: "initial_admission".into(),
         summary: "logical turn admitted".into(),
@@ -637,6 +752,10 @@ fn yield_request(
             execution_epoch_id: claim.record.active_epoch_id.clone(),
             kind: LogicalTurnLifecycleEventKind::ContinuationYielded,
             phase: LogicalTurnPhase::Yielded,
+            continuation_count: claim.record.continuation_sequence + 2,
+            operator_state: rusty_crew_core_protocol::LogicalTurnOperatorState::QueuedToContinue,
+            progress_classification:
+                rusty_crew_core_protocol::LogicalTurnProgressClassification::SemanticProgress,
             progress,
             reason_code: "work_quantum_reached".into(),
             summary: "logical turn yielded and will continue".into(),

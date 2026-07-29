@@ -308,6 +308,106 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/logical-turns": {
+      "get": {
+        "operationId": "listChatSessionLogicalTurns",
+        "summary": "List Rust-owned logical-turn continuation diagnostics",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logical-turn diagnostic page",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiEnvelope" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/cancel": {
+      "post": {
+        "operationId": "cancelChatSessionLogicalTurn",
+        "summary": "Cancel an active or yielded logical turn",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "logical_turn_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["expectedRevision"],
+                "properties": {
+                  "expectedRevision": { "type": "integer", "minimum": 0 },
+                  "reasonCode": { "type": "string" },
+                  "summary": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent logical-turn cancellation receipt"
+          },
+          "409": { "description": "Logical-turn revision conflict" }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve": {
+      "post": {
+        "operationId": "resolveChatSessionLogicalTurn",
+        "summary": "Resolve paused logical-turn attention and continue",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "logical_turn_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["expectedRevision", "action"],
+                "properties": {
+                  "expectedRevision": { "type": "integer", "minimum": 0 },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "retry_unchanged",
+                      "retry_provider_operation"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical-turn attention resolution receipt"
+          },
+          "409": { "description": "Logical-turn revision conflict" }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/messages": {
       "post": {
         "operationId": "sendChatMessage",

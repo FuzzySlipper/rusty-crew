@@ -80,8 +80,11 @@ test("logical turn yields project as continuing rather than terminal chat events
         sessionId: session.sessionId,
         wakeId: "source-wake",
         continuationId: "continuation-2",
+        continuationCount: 2,
         kind: "continuation_yielded",
         phase: "yielded",
+        operatorState: "queued_to_continue",
+        progressClassification: "provider_progress",
         progress: {
           semanticRevision: 2,
           committedProviderOperations: 1,
@@ -105,7 +108,7 @@ test("logical turn yields project as continuing rather than terminal chat events
 
   assert.deepEqual(
     appended.map((event) => event.kind),
-    ["logical_turn_continuing"],
+    ["logical_turn_yielding", "logical_turn_queued_to_continue"],
   );
   assert.equal((appended[0]?.payload as { phase?: string }).phase, "yielded");
 });

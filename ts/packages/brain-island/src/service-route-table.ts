@@ -4,11 +4,13 @@ import { isRoleplayBrowserRoute } from "./service-roleplay-routes.js";
 import { isExternalRuntimeRoute } from "./service-external-runtime-routes.js";
 import { isCoordinationOperatorRoute } from "./service-coordination-operator-routes.js";
 import { isServiceImageGenerationRoute } from "./service-image-generation-routes.js";
+import { isLogicalTurnRoute } from "./service-logical-turn-routes.js";
 
 export type ServiceApiRouteId =
   | "admin.healthz"
   | "browser.cors"
   | "admin.control"
+  | "logical_turns"
   | "chat"
   | "external_runtime"
   | "coordination_operator"
@@ -63,6 +65,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     "after_auth",
     "Admin control command routes",
     (path) => path.startsWith("/v1/admin/control/"),
+  ),
+  route(
+    "logical_turns",
+    105,
+    "after_auth",
+    "Logical-turn diagnostics and operator controls",
+    isLogicalTurnRoute,
   ),
   route("chat", 110, "after_auth", "Rusty View chat routes", isChatRoute),
   route(

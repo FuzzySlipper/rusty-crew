@@ -558,15 +558,38 @@ export async function appendCoreEventsToChatLog(
           logical_turn_id: event.lifecycle.logicalTurnId,
           projection_id: event.lifecycle.projectionId,
           continuation_id: event.lifecycle.continuationId,
+          continuation_count: event.lifecycle.continuationCount,
           execution_epoch_id: event.lifecycle.executionEpochId,
           wake_id: event.lifecycle.wakeId,
           phase: event.lifecycle.phase,
+          operator_state: event.lifecycle.operatorState,
+          progress_classification: event.lifecycle.progressClassification,
           reason_code: event.lifecycle.reasonCode,
           summary: event.lifecycle.summary,
           progress: event.lifecycle.progress,
           logical_turn_revision: event.lifecycle.logicalTurnRevision,
         },
       });
+      if (event.lifecycle.kind === "continuation_yielded") {
+        await context.appendChatEvent(session.sessionId, {
+          kind: "logical_turn_queued_to_continue",
+          payload: {
+            logical_turn_id: event.lifecycle.logicalTurnId,
+            projection_id: `${event.lifecycle.projectionId}:queued`,
+            continuation_id: event.lifecycle.continuationId,
+            continuation_count: event.lifecycle.continuationCount,
+            execution_epoch_id: event.lifecycle.executionEpochId,
+            wake_id: event.lifecycle.wakeId,
+            phase: event.lifecycle.phase,
+            operator_state: event.lifecycle.operatorState,
+            progress_classification: event.lifecycle.progressClassification,
+            reason_code: "continuation_queued",
+            summary: "logical turn is queued to continue",
+            progress: event.lifecycle.progress,
+            logical_turn_revision: event.lifecycle.logicalTurnRevision,
+          },
+        });
+      }
     } else if (
       event.type === "completion_packet_delivered" &&
       event.packet.sessionId === session.sessionId
@@ -915,13 +938,16 @@ function logicalTurnChatEventKind(
 ):
   | "logical_turn_admitted"
   | "logical_turn_continuing"
+  | "logical_turn_yielding"
   | "logical_turn_attention_required"
+  | "logical_turn_cancelling"
   | "logical_turn_completed"
   | "logical_turn_cancelled"
   | "logical_turn_failed"
   | "unknown" {
   switch (kind) {
     case "continuation_yielded":
+      return "logical_turn_yielding";
     case "continuation_resumed":
     case "continuation_claimed":
     case "continuation_checkpointed":
@@ -935,6 +961,8 @@ function logicalTurnChatEventKind(
       return "logical_turn_failed";
     case "cancelled":
       return "logical_turn_cancelled";
+    case "cancel_requested":
+      return "logical_turn_cancelling";
     case "admitted":
       return "logical_turn_admitted";
     default:

@@ -2634,6 +2634,22 @@
         "enum": ["completed", "continuing"],
         "type": "string"
       },
+      "BrainWakeProgressSnapshot": {
+        "properties": {
+          "providerRequestCount": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "toolRoundCount": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["providerRequestCount", "toolRoundCount"],
+        "type": "object"
+      },
       "BrainWakeProviderStateInput": {
         "properties": {
           "expires_at": { "type": ["string", "null"] },
@@ -2773,6 +2789,12 @@
             ]
           },
           "outcome": { "$ref": "#/components/schemas/BrainWakeSettlementKind" },
+          "progress": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/BrainWakeProgressSnapshot" },
+              { "type": "null" }
+            ]
+          },
           "reason_code": { "type": ["string", "null"] },
           "summary": { "type": ["string", "null"] },
           "wake_id": { "type": "string" }
@@ -4389,6 +4411,96 @@
         "required": ["record", "checkpoint", "claimGeneration", "replayed"],
         "type": "object"
       },
+      "LogicalTurnDiagnostic": {
+        "properties": {
+          "activeExecutionEpochId": { "type": ["string", "null"] },
+          "admittedAt": { "type": "string" },
+          "attention": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/LogicalTurnAttention" },
+              { "type": "null" }
+            ]
+          },
+          "continuationCount": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "currentContinuationId": { "type": "string" },
+          "lastLivenessAt": { "type": "string" },
+          "lastProgressAt": { "type": "string" },
+          "logicalTurnId": { "type": "string" },
+          "operatorState": {
+            "$ref": "#/components/schemas/LogicalTurnOperatorState"
+          },
+          "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
+          "progressClassification": {
+            "$ref": "#/components/schemas/LogicalTurnProgressClassification"
+          },
+          "providerRequestTotal": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reasonCode": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "sessionId": { "type": "string" },
+          "sourceWakeId": { "type": "string" },
+          "summary": { "type": "string" },
+          "terminalAt": { "type": ["string", "null"] },
+          "toolRoundTotal": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "logicalTurnId",
+          "sessionId",
+          "sourceWakeId",
+          "currentContinuationId",
+          "continuationCount",
+          "providerRequestTotal",
+          "toolRoundTotal",
+          "phase",
+          "operatorState",
+          "progressClassification",
+          "lastProgressAt",
+          "lastLivenessAt",
+          "reasonCode",
+          "summary",
+          "revision",
+          "admittedAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnDiagnosticPage": {
+        "properties": {
+          "items": {
+            "items": { "$ref": "#/components/schemas/LogicalTurnDiagnostic" },
+            "type": "array"
+          },
+          "total": { "format": "uint32", "minimum": 0, "type": "integer" }
+        },
+        "required": ["items", "total"],
+        "type": "object"
+      },
+      "LogicalTurnDiagnosticQuery": {
+        "properties": {
+          "includeTerminal": { "default": false, "type": "boolean" },
+          "limit": {
+            "default": 100,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "logicalTurnId": { "type": ["string", "null"] },
+          "sessionId": { "type": ["string", "null"] }
+        },
+        "type": "object"
+      },
       "LogicalTurnFrozenInput": {
         "properties": {
           "attachmentRefs": {
@@ -4456,6 +4568,11 @@
       },
       "LogicalTurnLifecycleEvent": {
         "properties": {
+          "continuationCount": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "continuationId": { "type": "string" },
           "executionEpochId": { "type": ["string", "null"] },
           "kind": {
@@ -4468,8 +4585,14 @@
             "type": "integer"
           },
           "occurredAt": { "type": "string" },
+          "operatorState": {
+            "$ref": "#/components/schemas/LogicalTurnOperatorState"
+          },
           "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
           "progress": { "$ref": "#/components/schemas/LogicalTurnProgress" },
+          "progressClassification": {
+            "$ref": "#/components/schemas/LogicalTurnProgressClassification"
+          },
           "projectionId": { "type": "string" },
           "reasonCode": { "type": "string" },
           "sessionId": { "type": "string" },
@@ -4482,8 +4605,11 @@
           "sessionId",
           "wakeId",
           "continuationId",
+          "continuationCount",
           "kind",
           "phase",
+          "operatorState",
+          "progressClassification",
           "progress",
           "reasonCode",
           "summary",
@@ -4563,6 +4689,18 @@
         ],
         "type": "object"
       },
+      "LogicalTurnOperatorState": {
+        "enum": [
+          "queued_to_continue",
+          "running",
+          "paused_for_attention",
+          "cancelling",
+          "completed",
+          "cancelled",
+          "failed"
+        ],
+        "type": "string"
+      },
       "LogicalTurnPhase": {
         "enum": [
           "admitted",
@@ -4637,6 +4775,21 @@
           "lastSemanticProgressAt"
         ],
         "type": "object"
+      },
+      "LogicalTurnProgressClassification": {
+        "enum": [
+          "admitted",
+          "provider_progress",
+          "tool_progress",
+          "semantic_progress",
+          "liveness_only",
+          "no_progress",
+          "attention_required",
+          "completed",
+          "cancelled",
+          "failed"
+        ],
+        "type": "string"
       },
       "LogicalTurnRecord": {
         "properties": {

@@ -593,6 +593,52 @@ export const ADMIN_CONTROL_CAPABILITIES = [
 ] as const satisfies readonly ApiCapabilityDescriptor[];
 
 export const API_CAPABILITIES = [
+  readCapability(
+    "admin.logical_turns.list",
+    "GET",
+    "/v1/admin/logical-turns",
+    "List Rust-owned logical-turn continuation and progress diagnostics.",
+    "admin",
+    ["session", "diagnostics"],
+  ),
+  controlApiCapability(
+    "admin.logical_turns.cancel",
+    "POST",
+    "/v1/admin/logical-turns/{logical_turn_id}/cancel",
+    "Cancel an active or yielded logical turn and its provider run.",
+    ["session"],
+  ),
+  controlApiCapability(
+    "admin.logical_turns.resolve",
+    "POST",
+    "/v1/admin/logical-turns/{logical_turn_id}/resolve",
+    "Resolve operator attention and queue the logical turn to continue.",
+    ["session"],
+  ),
+  readCapability(
+    "chat.sessions.logical_turns.list",
+    "GET",
+    "/v1/chat/sessions/{session_id}/logical-turns",
+    "List logical-turn continuation and progress diagnostics for one chat session.",
+    "chat",
+    ["chat", "session", "diagnostics"],
+  ),
+  mutationCapability(
+    "chat.sessions.logical_turns.cancel",
+    "POST",
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/cancel",
+    "Cancel an active or yielded logical turn from its chat session.",
+    "chat",
+    ["chat", "session"],
+  ),
+  mutationCapability(
+    "chat.sessions.logical_turns.resolve",
+    "POST",
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve",
+    "Resolve operator attention for a chat logical turn and queue it to continue.",
+    "chat",
+    ["chat", "session"],
+  ),
   writeCapability(
     "external.agent_sessions.create",
     "POST",

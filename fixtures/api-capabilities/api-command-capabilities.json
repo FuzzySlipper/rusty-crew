@@ -181,6 +181,72 @@
     ],
     "capabilities": [
       {
+        "id": "admin.logical_turns.list",
+        "method": "GET",
+        "path_template": "/v1/admin/logical-turns",
+        "description": "List Rust-owned logical-turn continuation and progress diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.logical_turns.cancel",
+        "method": "POST",
+        "path_template": "/v1/admin/logical-turns/{logical_turn_id}/cancel",
+        "description": "Cancel an active or yielded logical turn and its provider run.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "admin.logical_turns.resolve",
+        "method": "POST",
+        "path_template": "/v1/admin/logical-turns/{logical_turn_id}/resolve",
+        "description": "Resolve operator attention and queue the logical turn to continue.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "experimental",
+        "tags": ["session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.logical_turns.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/logical-turns",
+        "description": "List logical-turn continuation and progress diagnostics for one chat session.",
+        "auth": "chat",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["chat", "session", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.logical_turns.cancel",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/cancel",
+        "description": "Cancel an active or yielded logical turn from its chat session.",
+        "auth": "chat",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
+        "id": "chat.sessions.logical_turns.resolve",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve",
+        "description": "Resolve operator attention for a chat logical turn and queue it to continue.",
+        "auth": "chat",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["chat", "session"],
+        "public": true
+      },
+      {
         "id": "external.agent_sessions.create",
         "method": "POST",
         "path_template": "/v1/external-agent-sessions",
@@ -2640,6 +2706,48 @@
   },
   "route_coverage": {
     "capability_routes": [
+      {
+        "capability_id": "admin.logical_turns.list",
+        "method": "GET",
+        "path_template": "/v1/admin/logical-turns",
+        "route_id": "logical_turns",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.logical_turns.cancel",
+        "method": "POST",
+        "path_template": "/v1/admin/logical-turns/{logical_turn_id}/cancel",
+        "route_id": "logical_turns",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.logical_turns.resolve",
+        "method": "POST",
+        "path_template": "/v1/admin/logical-turns/{logical_turn_id}/resolve",
+        "route_id": "logical_turns",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.logical_turns.list",
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/{session_id}/logical-turns",
+        "route_id": "logical_turns",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.logical_turns.cancel",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/cancel",
+        "route_id": "logical_turns",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.logical_turns.resolve",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve",
+        "route_id": "logical_turns",
+        "auth_phase": "after_auth"
+      },
       {
         "capability_id": "external.agent_sessions.create",
         "method": "POST",

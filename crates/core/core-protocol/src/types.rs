@@ -909,6 +909,8 @@ pub struct BrainWakeSettlementRequest {
     pub wake_id: String,
     pub outcome: BrainWakeSettlementKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<BrainWakeProgressSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation_state: Option<crate::BrainContinuationPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<BrainWakeAttention>,
@@ -916,6 +918,13 @@ pub struct BrainWakeSettlementRequest {
     pub reason_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BrainWakeProgressSnapshot {
+    pub provider_request_count: u64,
+    pub tool_round_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

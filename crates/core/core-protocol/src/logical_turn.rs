@@ -293,15 +293,136 @@ pub struct LogicalTurnLifecycleEvent {
     pub session_id: SessionId,
     pub wake_id: String,
     pub continuation_id: ContinuationId,
+    pub continuation_count: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_epoch_id: Option<ExecutionEpochId>,
     pub kind: LogicalTurnLifecycleEventKind,
     pub phase: LogicalTurnPhase,
+    pub operator_state: LogicalTurnOperatorState,
+    pub progress_classification: LogicalTurnProgressClassification,
     pub progress: LogicalTurnProgress,
     pub reason_code: String,
     pub summary: String,
     pub occurred_at: IsoTimestamp,
     pub logical_turn_revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LogicalTurnOperatorState {
+    QueuedToContinue,
+    Running,
+    PausedForAttention,
+    Cancelling,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+impl LogicalTurnOperatorState {
+    pub fn for_phase(phase: LogicalTurnPhase) -> Self {
+        match phase {
+            LogicalTurnPhase::Admitted | LogicalTurnPhase::Runnable | LogicalTurnPhase::Yielded => {
+                Self::QueuedToContinue
+            }
+            LogicalTurnPhase::Running => Self::Running,
+            LogicalTurnPhase::AttentionRequired => Self::PausedForAttention,
+            LogicalTurnPhase::CancelRequested => Self::Cancelling,
+            LogicalTurnPhase::Completed => Self::Completed,
+            LogicalTurnPhase::Cancelled => Self::Cancelled,
+            LogicalTurnPhase::Failed => Self::Failed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LogicalTurnProgressClassification {
+    Admitted,
+    ProviderProgress,
+    ToolProgress,
+    SemanticProgress,
+    LivenessOnly,
+    NoProgress,
+    AttentionRequired,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+impl LogicalTurnProgressClassification {
+    pub fn for_state(
+        phase: LogicalTurnPhase,
+        attention_required: bool,
+        progress: &LogicalTurnProgress,
+    ) -> Self {
+        if attention_required {
+            return Self::AttentionRequired;
+        }
+        match phase {
+            LogicalTurnPhase::Completed => Self::Completed,
+            LogicalTurnPhase::Cancelled => Self::Cancelled,
+            LogicalTurnPhase::Failed => Self::Failed,
+            _ if progress.consecutive_no_progress_samples > 0 => Self::NoProgress,
+            _ if progress.committed_tool_operations > 0 => Self::ToolProgress,
+            _ if progress.committed_provider_operations > 0 => Self::ProviderProgress,
+            _ if progress.semantic_revision > 0 => Self::SemanticProgress,
+            LogicalTurnPhase::Admitted => Self::Admitted,
+            _ => Self::LivenessOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnDiagnostic {
+    pub logical_turn_id: LogicalTurnId,
+    pub session_id: SessionId,
+    pub source_wake_id: String,
+    pub current_continuation_id: ContinuationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_execution_epoch_id: Option<ExecutionEpochId>,
+    pub continuation_count: u64,
+    pub provider_request_total: u64,
+    pub tool_round_total: u64,
+    pub phase: LogicalTurnPhase,
+    pub operator_state: LogicalTurnOperatorState,
+    pub progress_classification: LogicalTurnProgressClassification,
+    pub last_progress_at: IsoTimestamp,
+    pub last_liveness_at: IsoTimestamp,
+    pub reason_code: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<LogicalTurnAttention>,
+    pub revision: u64,
+    pub admitted_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnDiagnosticQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_turn_id: Option<LogicalTurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
+    #[serde(default)]
+    pub include_terminal: bool,
+    #[serde(default = "default_logical_turn_diagnostic_limit")]
+    pub limit: u32,
+}
+
+fn default_logical_turn_diagnostic_limit() -> u32 {
+    100
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnDiagnosticPage {
+    pub items: Vec<LogicalTurnDiagnostic>,
+    pub total: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

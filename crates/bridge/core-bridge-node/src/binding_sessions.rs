@@ -186,7 +186,7 @@ impl NativeBridgeBinding {
         };
         let settlement = self
             .bridge()?
-            .settle_brain_wake(&input.wake_id, result)
+            .settle_brain_wake(&input.wake_id, result, input.progress)
             .map_err(to_napi_error)?;
         serialize_json(
             &BrainWakeSettlementReceipt {
@@ -199,6 +199,64 @@ impl NativeBridgeBinding {
             },
             "brain wake settlement",
         )
+    }
+
+    #[napi]
+    pub fn logical_turn_diagnostics_json(&self, input_json: String) -> napi::Result<String> {
+        let query: LogicalTurnDiagnosticQuery =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid logical-turn diagnostic query JSON: {error}"),
+                )
+            })?;
+        let page = self
+            .bridge()?
+            .logical_turn_diagnostics(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "logical-turn diagnostics")
+    }
+
+    #[napi]
+    pub fn resolve_logical_turn_attention_json(&self, input_json: String) -> napi::Result<String> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            logical_turn_id: LogicalTurnId,
+            expected_revision: u64,
+            action: LogicalTurnResolutionAction,
+        }
+        let input: Input = serde_json::from_str(&input_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid logical-turn resolution JSON: {error}"),
+            )
+        })?;
+        let receipt = self
+            .bridge()?
+            .resolve_logical_turn_attention_for_operator(
+                &input.logical_turn_id,
+                input.expected_revision,
+                input.action,
+            )
+            .map_err(to_napi_error)?;
+        serialize_json(&receipt, "logical-turn attention resolution")
+    }
+
+    #[napi]
+    pub fn cancel_logical_turn_json(&self, input_json: String) -> napi::Result<String> {
+        let input: LogicalTurnCancelRequest =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid logical-turn cancellation JSON: {error}"),
+                )
+            })?;
+        let receipt = self
+            .bridge()?
+            .cancel_logical_turn(&input)
+            .map_err(to_napi_error)?;
+        serialize_json(&receipt, "logical-turn cancellation")
     }
 
     #[napi]

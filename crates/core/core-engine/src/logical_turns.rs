@@ -159,6 +159,15 @@ impl CoreEngine {
         claim: &LogicalTurnContinuationClaim,
         result: LogicalTurnEpochResult,
     ) -> CoreResult<LogicalTurnEpochSettlement> {
+        self.settle_logical_turn_epoch_with_progress(claim, result, None)
+    }
+
+    pub fn settle_logical_turn_epoch_with_progress(
+        &self,
+        claim: &LogicalTurnContinuationClaim,
+        result: LogicalTurnEpochResult,
+        progress_snapshot: Option<BrainWakeProgressSnapshot>,
+    ) -> CoreResult<LogicalTurnEpochSettlement> {
         let now = self.now();
         let epoch_id = claim.record.active_epoch_id.clone().ok_or_else(|| {
             CoreError::new(
@@ -195,10 +204,13 @@ impl CoreEngine {
                         .as_bytes()
                     )
                 ));
-                let mut progress = claim.checkpoint.progress.clone();
+                let mut progress = logical_turn_progress(
+                    &claim.checkpoint.progress,
+                    progress_snapshot.as_ref(),
+                    &now,
+                );
                 progress.semantic_revision = progress.semantic_revision.saturating_add(1);
                 progress.state_fingerprint = module_state.payload_fingerprint.clone();
-                progress.last_liveness_at = now.clone();
                 progress.last_semantic_progress_at = now.clone();
                 progress.consecutive_no_progress_samples = 0;
                 let checkpoint = LogicalTurnCheckpoint {
@@ -275,9 +287,12 @@ impl CoreEngine {
                         .as_bytes()
                     )
                 ));
-                let mut progress = claim.checkpoint.progress.clone();
+                let mut progress = logical_turn_progress(
+                    &claim.checkpoint.progress,
+                    progress_snapshot.as_ref(),
+                    &now,
+                );
                 progress.state_fingerprint = module_state.payload_fingerprint.clone();
-                progress.last_liveness_at = now.clone();
                 progress.consecutive_no_progress_samples =
                     attention.consecutive_no_progress_samples;
                 let checkpoint = LogicalTurnCheckpoint {
@@ -340,6 +355,7 @@ impl CoreEngine {
                 LogicalTurnPhase::Completed,
                 "completed",
                 "logical turn completed",
+                logical_turn_progress(&claim.checkpoint.progress, progress_snapshot.as_ref(), &now),
                 now,
             ),
             LogicalTurnEpochResult::Failed {
@@ -352,6 +368,7 @@ impl CoreEngine {
                 LogicalTurnPhase::Failed,
                 &reason_code,
                 &summary,
+                logical_turn_progress(&claim.checkpoint.progress, progress_snapshot.as_ref(), &now),
                 now,
             ),
         }
@@ -379,6 +396,83 @@ impl CoreEngine {
         continuation_id: &ContinuationId,
     ) -> CoreResult<Option<LogicalTurnCheckpoint>> {
         self.store.get_logical_turn_checkpoint(continuation_id)
+    }
+
+    pub fn logical_turn_diagnostics(
+        &self,
+        query: &LogicalTurnDiagnosticQuery,
+    ) -> CoreResult<LogicalTurnDiagnosticPage> {
+        let records = self.store.list_logical_turns(query)?;
+        let mut items = Vec::with_capacity(records.len());
+        for record in records {
+            let checkpoint = self
+                .store
+                .get_logical_turn_checkpoint(&record.current_continuation_id)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::InternalError,
+                        format!(
+                            "logical turn {} has no current checkpoint",
+                            record.logical_turn_id.0
+                        ),
+                    )
+                })?;
+            items.push(logical_turn_diagnostic(record, checkpoint.progress));
+        }
+        Ok(LogicalTurnDiagnosticPage {
+            total: u32::try_from(items.len()).unwrap_or(u32::MAX),
+            items,
+        })
+    }
+
+    pub fn resolve_logical_turn_attention_for_operator(
+        &self,
+        logical_turn_id: &LogicalTurnId,
+        expected_revision: u64,
+        action: LogicalTurnResolutionAction,
+    ) -> CoreResult<LogicalTurnAttentionResolutionReceipt> {
+        if action == LogicalTurnResolutionAction::Cancel {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "cancel attention through the logical-turn cancel operation",
+            ));
+        }
+        let record = self
+            .get_logical_turn(logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        let checkpoint = self
+            .get_logical_turn_checkpoint(&record.current_continuation_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "logical turn current checkpoint is missing",
+                )
+            })?;
+        let now = self.now();
+        let reason_code = format!("operator_resolution_{}", resolution_action_code(action));
+        let summary = format!(
+            "operator resolved logical turn attention with {}",
+            resolution_action_code(action)
+        );
+        self.resolve_logical_turn_attention(&LogicalTurnAttentionResolutionRequest {
+            logical_turn_id: logical_turn_id.clone(),
+            expected_revision,
+            action,
+            lifecycle_event: lifecycle_event(
+                &record,
+                LifecycleEventInput {
+                    continuation_id: record.current_continuation_id.clone(),
+                    execution_epoch_id: None,
+                    kind: LogicalTurnLifecycleEventKind::ContinuationResumed,
+                    phase: LogicalTurnPhase::Runnable,
+                    progress: checkpoint.progress,
+                    reason_code: &reason_code,
+                    summary: &summary,
+                    occurred_at: now.clone(),
+                },
+            ),
+            now,
+        })
     }
 
     pub fn claim_logical_turn(
@@ -737,6 +831,7 @@ impl CoreEngine {
         phase: LogicalTurnPhase,
         reason_code: &str,
         summary: &str,
+        progress: LogicalTurnProgress,
         now: IsoTimestamp,
     ) -> CoreResult<LogicalTurnEpochSettlement> {
         let record = self.complete_logical_turn(&LogicalTurnCompletionRequest {
@@ -752,7 +847,7 @@ impl CoreEngine {
                     execution_epoch_id: Some(epoch_id),
                     kind,
                     phase,
-                    progress: claim.checkpoint.progress.clone(),
+                    progress,
                     reason_code,
                     summary,
                     occurred_at: now.clone(),
@@ -787,6 +882,13 @@ fn lifecycle_event(
     } else {
         record.revision.saturating_add(1)
     };
+    let continuation_count = record.continuation_sequence.saturating_add(
+        if input.continuation_id == record.current_continuation_id {
+            1
+        } else {
+            2
+        },
+    );
     LogicalTurnLifecycleEvent {
         projection_id: TurnProjectionId::new(format!(
             "projection:{}:{}:{reason_code}",
@@ -798,14 +900,127 @@ fn lifecycle_event(
         session_id: record.session_id.clone(),
         wake_id: record.source_wake_id.clone(),
         continuation_id: input.continuation_id,
+        continuation_count,
         execution_epoch_id: input.execution_epoch_id,
         kind: input.kind,
         phase: input.phase,
+        operator_state: LogicalTurnOperatorState::for_phase(input.phase),
+        progress_classification: LogicalTurnProgressClassification::for_state(
+            input.phase,
+            input.phase == LogicalTurnPhase::AttentionRequired,
+            &input.progress,
+        ),
         progress: input.progress,
         reason_code: input.reason_code.to_string(),
         summary: input.summary.to_string(),
         occurred_at: input.occurred_at,
         logical_turn_revision: revision,
+    }
+}
+
+fn logical_turn_progress(
+    previous: &LogicalTurnProgress,
+    snapshot: Option<&BrainWakeProgressSnapshot>,
+    now: &IsoTimestamp,
+) -> LogicalTurnProgress {
+    let mut progress = previous.clone();
+    progress.last_liveness_at = now.clone();
+    if let Some(snapshot) = snapshot {
+        let provider_advanced =
+            snapshot.provider_request_count > progress.committed_provider_operations;
+        let tool_advanced = snapshot.tool_round_count > progress.committed_tool_operations;
+        progress.committed_provider_operations = progress
+            .committed_provider_operations
+            .max(snapshot.provider_request_count);
+        progress.committed_tool_operations = progress
+            .committed_tool_operations
+            .max(snapshot.tool_round_count);
+        if provider_advanced || tool_advanced {
+            progress.last_semantic_progress_at = now.clone();
+        }
+    }
+    progress
+}
+
+fn logical_turn_diagnostic(
+    record: LogicalTurnRecord,
+    progress: LogicalTurnProgress,
+) -> LogicalTurnDiagnostic {
+    let operator_state = LogicalTurnOperatorState::for_phase(record.phase);
+    let progress_classification = LogicalTurnProgressClassification::for_state(
+        record.phase,
+        record.attention.is_some(),
+        &progress,
+    );
+    let (reason_code, summary) = record.attention.as_ref().map_or_else(
+        || match record.phase {
+            LogicalTurnPhase::Admitted | LogicalTurnPhase::Runnable => (
+                "queued_to_continue".to_string(),
+                "logical turn is queued to continue".to_string(),
+            ),
+            LogicalTurnPhase::Running => (
+                "logical_turn_running".to_string(),
+                "logical turn is running".to_string(),
+            ),
+            LogicalTurnPhase::Yielded => (
+                "continuation_queued".to_string(),
+                "logical turn yielded and is queued to continue".to_string(),
+            ),
+            LogicalTurnPhase::CancelRequested => (
+                "operator_cancel_requested".to_string(),
+                "logical turn cancellation is in progress".to_string(),
+            ),
+            LogicalTurnPhase::Completed => (
+                "completed".to_string(),
+                "logical turn completed".to_string(),
+            ),
+            LogicalTurnPhase::Cancelled => (
+                "operator_cancelled".to_string(),
+                "logical turn was cancelled".to_string(),
+            ),
+            LogicalTurnPhase::Failed => (
+                "logical_turn_failed".to_string(),
+                "logical turn failed".to_string(),
+            ),
+            LogicalTurnPhase::AttentionRequired => (
+                "logical_turn_attention_required".to_string(),
+                "logical turn is paused for operator attention".to_string(),
+            ),
+        },
+        |attention| (attention.reason_code.clone(), attention.summary.clone()),
+    );
+    LogicalTurnDiagnostic {
+        logical_turn_id: record.logical_turn_id,
+        session_id: record.session_id,
+        source_wake_id: record.source_wake_id,
+        current_continuation_id: record.current_continuation_id,
+        active_execution_epoch_id: record.active_epoch_id,
+        continuation_count: record.continuation_sequence.saturating_add(1),
+        provider_request_total: progress.committed_provider_operations,
+        tool_round_total: progress.committed_tool_operations,
+        phase: record.phase,
+        operator_state,
+        progress_classification,
+        last_progress_at: progress.last_semantic_progress_at,
+        last_liveness_at: progress.last_liveness_at,
+        reason_code,
+        summary,
+        attention: record.attention,
+        revision: record.revision,
+        admitted_at: record.admitted_at,
+        updated_at: record.updated_at,
+        terminal_at: record.terminal_at,
+    }
+}
+
+fn resolution_action_code(action: LogicalTurnResolutionAction) -> &'static str {
+    match action {
+        LogicalTurnResolutionAction::RetryUnchanged => "retry_unchanged",
+        LogicalTurnResolutionAction::RetryProviderOperation => "retry_provider_operation",
+        LogicalTurnResolutionAction::ConfirmToolCompleted => "confirm_tool_completed",
+        LogicalTurnResolutionAction::ConfirmToolNotCompleted => "confirm_tool_not_completed",
+        LogicalTurnResolutionAction::Rebind => "rebind",
+        LogicalTurnResolutionAction::Cancel => "cancel",
     }
 }
 

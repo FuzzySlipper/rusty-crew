@@ -7,6 +7,11 @@ export const RUSTY_VIEW_CHAT_PATHS = {
   sessions: "/v1/chat/sessions",
   session: "/v1/chat/sessions/{session_id}",
   events: "/v1/chat/sessions/{session_id}/events",
+  logicalTurns: "/v1/chat/sessions/{session_id}/logical-turns",
+  cancelLogicalTurn:
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/cancel",
+  resolveLogicalTurn:
+    "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve",
   context: "/v1/chat/sessions/{session_id}/context",
   stream: "/v1/chat/sessions/{session_id}/stream",
   toolCallDebug: "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}",
@@ -65,7 +70,10 @@ export const RUSTY_VIEW_CHAT_EVENT_KIND_VALUES = [
   "context_compaction_failed",
   "logical_turn_admitted",
   "logical_turn_continuing",
+  "logical_turn_yielding",
+  "logical_turn_queued_to_continue",
   "logical_turn_attention_required",
+  "logical_turn_cancelling",
   "logical_turn_completed",
   "logical_turn_cancelled",
   "logical_turn_failed",

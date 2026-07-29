@@ -152,6 +152,39 @@ impl CoordinationStore {
         load_turn(&conn, logical_turn_id)
     }
 
+    pub fn list_logical_turns(
+        &self,
+        query: &LogicalTurnDiagnosticQuery,
+    ) -> CoreResult<Vec<LogicalTurnRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT record_json FROM logical_brain_turns
+                 WHERE (?1 IS NULL OR logical_turn_id = ?1)
+                   AND (?2 IS NULL OR session_id = ?2)
+                   AND (?3 = 1 OR terminal_at IS NULL)
+                 ORDER BY updated_at DESC, logical_turn_id DESC
+                 LIMIT ?4",
+            )
+            .map_err(|error| persistence_error("prepare logical turn diagnostic query", error))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    query.logical_turn_id.as_ref().map(|value| value.0.as_str()),
+                    query.session_id.as_ref().map(|value| value.0.as_str()),
+                    i64::from(query.include_terminal),
+                    i64::from(query.limit.clamp(1, 500)),
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| persistence_error("query logical turn diagnostics", error))?;
+        rows.map(|row| {
+            row.map_err(|error| persistence_error("read logical turn diagnostic", error))
+                .and_then(|raw| decode(&raw, "logical turn diagnostic"))
+        })
+        .collect()
+    }
+
     pub fn get_logical_turn_checkpoint(
         &self,
         continuation_id: &ContinuationId,
@@ -456,6 +489,20 @@ impl CoordinationStore {
             ));
         }
         let expected_revision = record.revision;
+        let mut checkpoint =
+            load_checkpoint(&tx, &record.current_continuation_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "logical turn completion checkpoint is missing",
+                )
+            })?;
+        checkpoint.progress = request.lifecycle_event.progress.clone();
+        tx.execute(
+            "UPDATE logical_brain_turn_checkpoints SET checkpoint_json = ?1
+             WHERE continuation_id = ?2",
+            params![to_json_text(&checkpoint)?, checkpoint.continuation_id.0],
+        )
+        .map_err(|error| persistence_error("update completed logical turn checkpoint", error))?;
         record.phase = request.lifecycle_event.phase;
         record.active_epoch_id = None;
         record.claim_holder = None;
@@ -506,6 +553,23 @@ impl CoordinationStore {
         if !already_terminal {
             require_revision(&record, request.expected_revision)?;
             let expected_revision = record.revision;
+            let progress = current_progress(&tx, &record)?;
+            let mut cancelling = record.clone();
+            cancelling.phase = LogicalTurnPhase::CancelRequested;
+            cancelling.cancellation_generation += 1;
+            cancelling.updated_at = request.now.clone();
+            cancelling.revision += 1;
+            insert_outbox(
+                &tx,
+                &lifecycle_for_record(
+                    &cancelling,
+                    progress.clone(),
+                    LogicalTurnLifecycleEventKind::CancelRequested,
+                    "operator_cancel_requested",
+                    "logical turn cancellation requested",
+                    request.now.clone(),
+                ),
+            )?;
             record.phase = LogicalTurnPhase::Cancelled;
             record.cancellation_generation += 1;
             record.active_epoch_id = None;
@@ -518,7 +582,7 @@ impl CoordinationStore {
             update_turn(&tx, &record, expected_revision)?;
             let lifecycle = lifecycle_for_record(
                 &record,
-                current_progress(&tx, &record)?,
+                progress,
                 LogicalTurnLifecycleEventKind::Cancelled,
                 &request.reason_code,
                 &request.summary,
@@ -1254,9 +1318,17 @@ pub(crate) fn lifecycle_for_record(
         session_id: record.session_id.clone(),
         wake_id: record.source_wake_id.clone(),
         continuation_id: record.current_continuation_id.clone(),
+        continuation_count: record.continuation_sequence.saturating_add(1),
         execution_epoch_id: record.active_epoch_id.clone(),
         kind,
         phase: record.phase,
+        operator_state: rusty_crew_core_protocol::LogicalTurnOperatorState::for_phase(record.phase),
+        progress_classification:
+            rusty_crew_core_protocol::LogicalTurnProgressClassification::for_state(
+                record.phase,
+                record.attention.is_some(),
+                &progress,
+            ),
         progress,
         reason_code: reason_code.to_string(),
         summary: summary.to_string(),
