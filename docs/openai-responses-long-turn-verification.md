@@ -1,19 +1,15 @@
 # OpenAI Responses long-turn verification
 
-> Known limitation: the finite continuation guard documented below is an
-> emergency compatibility posture, not the target lifecycle. The code-backed
-> removal plan is in `active-turn-termination-guard-inventory.md` and task
-> 6362. Healthy progress must ultimately yield and durably continue.
-
-Rusty Crew's native Responses loop permits up to 64 continuation rounds by
-default. Operators can set a different bounded service-wide value with
-`RUSTY_CREW_OPENAI_RESPONSES_MAX_CONTINUATION_ROUNDS` (1 through 512). This is
-a loop guard, not a time limit. Session/service wake-duration policy and
-explicit cancellation remain the time and operator-control boundaries.
+Rusty Crew's native Responses loop durably yields after 64 continuation rounds
+by default. Operators can set a different positive service-wide work quantum
+with `RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS`. This is a
+scheduling quantum, not a logical-turn limit. Explicit cancellation remains the
+operator-control boundary.
 
 Provider request deadlines remain disabled by default. When explicitly set,
 `RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS` applies to each HTTP
-request independently of the continuation guard and wake-duration policy.
+request independently of the continuation work quantum and wake-duration
+policy.
 
 Terminal provenance uses distinct reason codes:
 
@@ -21,12 +17,11 @@ Terminal provenance uses distinct reason codes:
 - `wake_timeout`: session/service wake-duration deadline;
 - `provider_response_failed` or `provider_response_incomplete`: provider
   terminal rejection;
-- `responses_continuation_limit_exceeded`: Responses loop guard;
 - `provider_request_cancelled`: explicit or wake-policy cancellation.
 
 The admin diagnostics response reports the effective
-`maxContinuationRounds`, provider request timeout mode, and retained Responses
-wake metrics. Failed metrics include `terminalFailureReasonCode` and
+`workQuantumContinuationRounds`, provider request timeout mode, and retained
+Responses wake metrics. Failed metrics include `terminalFailureReasonCode` and
 `terminalFailureSource`.
 
 ## Verification
@@ -55,6 +50,15 @@ The candidate configuration must retain `http://127.0.0.1:9348`,
 `rusty-crew-debug.service`, `provider_protocol: responses`, and an explicit
 session reasoning effort. Never point this certification at port 9347 or
 `rusty-crew.service`.
+
+Task 6367 was certified on the debug service with the work quantum temporarily
+set to `1`, provider `responses-proxy-cert-5389`, and session
+`chat-cert-ms61f7kh-session`. The one logical turn recorded the lifecycle
+`admitted -> continuation_claimed -> continuation_yielded ->
+continuation_claimed -> completed` under one source wake. Its yielded
+checkpoint used `openai-responses-continuation-v1`, retained the completed tool
+round, and resumed to one terminal assistant message without duplicating tool
+calls. The debug service was restored to the default quantum `64` afterward.
 
 Task 5963 was reproduced on the debug service with run
 `run-20260718-022414-c785c55b`: 13 successful local tool calls and nine

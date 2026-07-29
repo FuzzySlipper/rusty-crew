@@ -126,13 +126,11 @@ RUSTY_CREW_ADMIN_AUTH_MODE=bearer
 RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS=1000
 RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
 RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=64
-RUSTY_CREW_OPENAI_RESPONSES_MAX_CONTINUATION_ROUNDS=512
+RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS=64
 ```
 
-The Chat Completions value controls how often a healthy turn durably yields; it
-does not cap the logical turn. Keep the Responses ceiling at `512` until its
-durable yield/continuation path lands. Neither setting substitutes for explicit
-cancellation.
+Both values control how often a healthy turn durably yields; neither caps the
+logical turn or substitutes for explicit cancellation.
 
 For trusted development on this machine/LAN, tokenless admin can be enabled
 explicitly:

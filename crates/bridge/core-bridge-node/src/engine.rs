@@ -77,7 +77,7 @@ impl NativeBridge {
             .strategy
             .as_ref()
             .map(|strategy| strategy.module_id.as_str());
-        if module_id != Some("chat-completions") {
+        if !matches!(module_id, Some("chat-completions" | "openai-responses")) {
             let body_state = self.engine()?.prepare_body_state_for_wake(&session_id)?;
             let body_state_json = serde_json::to_vec(&body_state).map_err(|error| {
                 CoreError::new(

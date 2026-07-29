@@ -99,6 +99,81 @@ fn prepared_chat_turn_yields_and_restart_resumes_frozen_input_exactly_once() {
 }
 
 #[test]
+fn prepared_responses_turn_restores_opaque_checkpoint_after_restart() {
+    let data_dir = unique_data_dir("logical-turn-responses-restart");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "prepared-responses-session",
+            "prepared-responses-agent",
+            "prepared-responses-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .enqueue_body_follow_up_message(
+            &session.session_id,
+            AgentId::new("operator"),
+            "responses input",
+            Some("responses-message".into()),
+        )
+        .unwrap();
+    let registration = openai_responses_registration();
+    let first = engine
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "responses-source-wake",
+            "responses system prompt".into(),
+            br#"{"instructions":"responses role"}"#.to_vec(),
+        )
+        .unwrap();
+    let payload = json!({
+        "strategy": "replay",
+        "continuation_items": [{"type":"function_call_output","call_id":"call-1"}],
+        "last_response_id": "resp-1",
+        "provider_request_count": 65
+    });
+    let continuation = BrainContinuationPayload {
+        module_id: "openai-responses".into(),
+        payload_version: "openai-responses-continuation-v1".into(),
+        payload_fingerprint: json_sha256(&payload),
+        payload,
+    };
+    let settlement = engine
+        .settle_logical_turn_epoch(
+            &first.claim,
+            LogicalTurnEpochResult::Yielded(continuation.clone()),
+        )
+        .unwrap();
+    assert_eq!(settlement.outcome, BrainWakeOutcome::Continuing);
+    let logical_turn_id = first.claim.record.logical_turn_id.clone();
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let resumed = restarted
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "replacement-wake",
+            "replacement system prompt".into(),
+            br#"{"instructions":"replacement role"}"#.to_vec(),
+        )
+        .unwrap();
+    assert_eq!(resumed.claim.record.logical_turn_id, logical_turn_id);
+    assert_eq!(resumed.continuation_state, Some(continuation));
+    assert_eq!(resumed.system_prompt, "responses system prompt");
+    assert_eq!(
+        resumed.role_assembly_json,
+        br#"{"instructions":"responses role"}"#
+    );
+    restarted
+        .settle_logical_turn_epoch(&resumed.claim, LogicalTurnEpochResult::Completed)
+        .unwrap();
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
 fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
     let data_dir = unique_data_dir("logical-turn-restart");
     let engine = test_engine_with_data_dir(data_dir.clone());
@@ -485,6 +560,28 @@ fn chat_completions_registration() -> BrainImplementationRegistration {
             max_output_tokens: None,
         },
         strategy: None,
+        provider_state_scope: None,
+    }
+}
+
+fn openai_responses_registration() -> BrainImplementationRegistration {
+    BrainImplementationRegistration {
+        implementation_id: BrainImplementationId::new("openai-responses"),
+        profile_id: ProfileId::new("prepared-responses-profile"),
+        tool_profile: ToolProfile { tools: Vec::new() },
+        model_config: BrainModelConfig {
+            provider: "test-provider".into(),
+            model_name: "test-model".into(),
+            temperature_milli: None,
+            max_output_tokens: None,
+        },
+        strategy: Some(rusty_crew_core_protocol::BrainStrategyMetadata {
+            module_id: "openai-responses".into(),
+            strategy_id: "replay".into(),
+            provider_state: rusty_crew_core_protocol::BrainProviderStateStrategyMetadata {
+                mode: ProviderStateMode::Optional,
+            },
+        }),
         provider_state_scope: None,
     }
 }

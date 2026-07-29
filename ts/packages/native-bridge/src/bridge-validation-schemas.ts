@@ -381,6 +381,17 @@ export const brainWakeRequestSchema = Type.Object(
     roleAssembly: Type.Number(),
     wakeId: Type.String(),
     providerState: Type.Optional(providerStateInputSchema),
+    continuationState: Type.Optional(
+      Type.Object(
+        {
+          moduleId: Type.String(),
+          payloadVersion: Type.String(),
+          payloadFingerprint: Type.String(),
+          payload: Type.Unknown(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     providerStateAbsence: Type.Optional(Type.String()),
   },
   { additionalProperties: true },
@@ -1149,10 +1160,16 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
     config: Type.Object(
       {
         model: Type.String(),
+        strategyId: Type.Optional(
+          Type.Union([
+            Type.Literal("replay"),
+            Type.Literal("previous-response-chain"),
+          ]),
+        ),
         instructions: Type.Optional(Type.String()),
         providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
-        maxContinuationRounds: Type.Optional(
-          Type.Number({ minimum: 1, maximum: 512 }),
+        workQuantumContinuationRounds: Type.Optional(
+          Type.Number({ minimum: 1 }),
         ),
       },
       { additionalProperties: true },
@@ -1466,6 +1483,8 @@ export const rawOpenAiResponsesBrainRunResultSchema = Type.Object(
     provider_state: Type.Optional(
       Type.Union([rawProviderStateOutputSchema, Type.Null()]),
     ),
+    yielded: Type.Optional(Type.Boolean()),
+    continuation_state: Type.Optional(Type.Unknown()),
     transport_metrics: Type.Optional(openAiResponsesTransportMetricsSchema),
     credential_secret_update: Type.Optional(
       Type.Object(

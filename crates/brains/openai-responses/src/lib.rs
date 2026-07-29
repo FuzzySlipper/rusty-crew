@@ -16,8 +16,8 @@ pub use openai_oauth::{
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
-    AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
-    BrainProviderStatusLevel, BrainWakeFailure, BrainWakeProviderStateInput,
+    AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainContinuationPayload, BrainEvent,
+    BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure, BrainWakeProviderStateInput,
     BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, BrainWakeRequest,
     BrainWakeStreamItem, CompletionPacket, CompletionStatus, CoreError, CoreErrorKind, CoreEvent,
     CoreResult, ExternalEventPayload, ProviderStateAbsenceReason, ProviderStateMode,
@@ -26,6 +26,7 @@ use rusty_crew_core_protocol::{
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -39,7 +40,8 @@ pub const REPLAY_STRATEGY_ID: &str = "replay";
 pub const PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID: &str = "previous-response-chain";
 pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v1";
 pub const MAX_REPEATED_FUNCTION_CALLS: usize = 3;
-pub const DEFAULT_MAX_CONTINUATION_ROUNDS: usize = 64;
+pub const DEFAULT_WORK_QUANTUM_CONTINUATION_ROUNDS: usize = 64;
+pub const CONTINUATION_PAYLOAD_VERSION: &str = "openai-responses-continuation-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesBrainConfig {
@@ -55,7 +57,7 @@ pub struct ResponsesBrainConfig {
     pub prompt_cache_key: Option<String>,
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
-    pub max_continuation_rounds: usize,
+    pub work_quantum_continuation_rounds: usize,
 }
 
 impl ResponsesBrainConfig {
@@ -73,7 +75,7 @@ impl ResponsesBrainConfig {
             prompt_cache_key: None,
             max_output_tokens: None,
             provider_request_timeout_ms: None,
-            max_continuation_rounds: DEFAULT_MAX_CONTINUATION_ROUNDS,
+            work_quantum_continuation_rounds: DEFAULT_WORK_QUANTUM_CONTINUATION_ROUNDS,
         }
     }
 
@@ -85,7 +87,8 @@ impl ResponsesBrainConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResponsesBrainStrategy {
     Replay,
     PreviousResponseChain,
@@ -96,6 +99,16 @@ impl ResponsesBrainStrategy {
         match self {
             Self::Replay => REPLAY_STRATEGY_ID,
             Self::PreviousResponseChain => PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID,
+        }
+    }
+
+    fn from_strategy_id(strategy_id: &str) -> Result<Self, ResponsesStreamError> {
+        match strategy_id {
+            REPLAY_STRATEGY_ID => Ok(Self::Replay),
+            PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID => Ok(Self::PreviousResponseChain),
+            other => Err(ResponsesStreamError::ContinuationStateInvalid(format!(
+                "unknown Responses continuation strategy {other}"
+            ))),
         }
     }
 }
@@ -945,8 +958,10 @@ pub enum ResponsesStreamError {
         arguments_json: String,
         limit: usize,
     },
-    #[error("responses continuation round limit exceeded after {limit} rounds")]
-    ContinuationLimitExceeded { limit: usize },
+    #[error("Responses continuation state is invalid: {0}")]
+    ContinuationStateInvalid(String),
+    #[error("Responses continuation checkpoint failed: {0}")]
+    ContinuationCheckpointFailed(String),
     #[error("provider transport error: {0}")]
     Transport(String),
 }
@@ -958,7 +973,8 @@ impl ResponsesStreamError {
             Self::Cancelled => "provider_request_cancelled",
             Self::ResponseFailed(_) => "provider_response_failed",
             Self::ResponseIncomplete(_) => "provider_response_incomplete",
-            Self::ContinuationLimitExceeded { .. } => "responses_continuation_limit_exceeded",
+            Self::ContinuationStateInvalid(_) => "responses_continuation_state_invalid",
+            Self::ContinuationCheckpointFailed(_) => "responses_continuation_checkpoint_failed",
             Self::RepeatedFunctionCall { .. } => "responses_repeated_function_call",
             Self::ClosedBeforeComplete => "provider_stream_closed_before_complete",
             Self::MissingField(_) | Self::UnknownEvent(_) => "provider_protocol_error",
@@ -971,7 +987,8 @@ impl ResponsesStreamError {
         match self {
             Self::RequestTimeout | Self::Cancelled | Self::Transport(_) => "provider_transport",
             Self::ResponseFailed(_) | Self::ResponseIncomplete(_) => "provider_response",
-            Self::ContinuationLimitExceeded { .. }
+            Self::ContinuationStateInvalid(_)
+            | Self::ContinuationCheckpointFailed(_)
             | Self::RepeatedFunctionCall { .. }
             | Self::FunctionCallOutputMismatch { .. } => "responses_loop",
             Self::ClosedBeforeComplete | Self::MissingField(_) | Self::UnknownEvent(_) => {
@@ -993,6 +1010,205 @@ pub struct PendingResponsesFunctionCall {
 pub struct NeutralToolOutput {
     pub output: String,
     pub is_error: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponsesContinuationStateV1 {
+    strategy: ResponsesBrainStrategy,
+    base_history: ResponsesContinuationProjection,
+    continuation_items: Vec<ResponsesContinuationInputItem>,
+    committed_output_items: Vec<ResponsesOutputItem>,
+    last_response_id: Option<String>,
+    last_usage: Option<ResponsesTokenUsage>,
+    repeated_function_calls: Vec<ResponsesRepeatedFunctionCall>,
+    provider_state: Option<BrainWakeProviderStateInput>,
+    provider_state_absence: Option<ProviderStateAbsenceReason>,
+    metrics: ResponsesContinuationMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponsesContinuationProjection {
+    input_items: Vec<ResponsesContinuationInputItem>,
+    replay_hints: Vec<ResponsesContinuationInputItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ResponsesContinuationInputItem {
+    UserMessage {
+        content: String,
+    },
+    AssistantMessage {
+        content: String,
+    },
+    Reasoning {
+        id: Option<String>,
+        summary: Option<String>,
+        encrypted_content: Option<String>,
+    },
+    FunctionCall {
+        id: Option<String>,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    FunctionCallOutput {
+        call_id: String,
+        output: String,
+        is_error: bool,
+    },
+    ReplayHint {
+        raw_json: Value,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponsesRepeatedFunctionCall {
+    name: String,
+    arguments_json: String,
+    count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponsesContinuationMetrics {
+    selected_strategy_id: String,
+    effective_strategy_id: String,
+    fallback_reason: Option<PreviousResponseChainFallbackReason>,
+    provider_request_count: u64,
+    continuation_round_count: u64,
+    provider_request_payload_bytes: u64,
+    provider_request_debug_samples: Vec<Value>,
+    provider_event_counts: HashMap<String, u64>,
+    first_text_delta_latency_ms: Option<u64>,
+    elapsed_turn_duration_ms: u64,
+}
+
+impl From<&ResponsesInputItem> for ResponsesContinuationInputItem {
+    fn from(item: &ResponsesInputItem) -> Self {
+        match item {
+            ResponsesInputItem::UserMessage { content } => Self::UserMessage {
+                content: content.clone(),
+            },
+            ResponsesInputItem::AssistantMessage { content } => Self::AssistantMessage {
+                content: content.clone(),
+            },
+            ResponsesInputItem::Reasoning {
+                id,
+                summary,
+                encrypted_content,
+            } => Self::Reasoning {
+                id: id.clone(),
+                summary: summary.clone(),
+                encrypted_content: encrypted_content.clone(),
+            },
+            ResponsesInputItem::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            } => Self::FunctionCall {
+                id: id.clone(),
+                call_id: call_id.clone(),
+                name: name.clone(),
+                arguments: arguments.clone(),
+            },
+            ResponsesInputItem::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            } => Self::FunctionCallOutput {
+                call_id: call_id.clone(),
+                output: output.clone(),
+                is_error: *is_error,
+            },
+            ResponsesInputItem::ReplayHint { raw_json } => Self::ReplayHint {
+                raw_json: raw_json.clone(),
+            },
+        }
+    }
+}
+
+impl From<ResponsesContinuationInputItem> for ResponsesInputItem {
+    fn from(item: ResponsesContinuationInputItem) -> Self {
+        match item {
+            ResponsesContinuationInputItem::UserMessage { content } => {
+                Self::UserMessage { content }
+            }
+            ResponsesContinuationInputItem::AssistantMessage { content } => {
+                Self::AssistantMessage { content }
+            }
+            ResponsesContinuationInputItem::Reasoning {
+                id,
+                summary,
+                encrypted_content,
+            } => Self::Reasoning {
+                id,
+                summary,
+                encrypted_content,
+            },
+            ResponsesContinuationInputItem::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            } => Self::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            },
+            ResponsesContinuationInputItem::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            } => Self::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            },
+            ResponsesContinuationInputItem::ReplayHint { raw_json } => {
+                Self::ReplayHint { raw_json }
+            }
+        }
+    }
+}
+
+impl From<&ResponsesReplayProjection> for ResponsesContinuationProjection {
+    fn from(projection: &ResponsesReplayProjection) -> Self {
+        Self {
+            input_items: projection
+                .input_items
+                .iter()
+                .map(ResponsesContinuationInputItem::from)
+                .collect(),
+            replay_hints: projection
+                .replay_hints
+                .iter()
+                .map(ResponsesContinuationInputItem::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<ResponsesContinuationProjection> for ResponsesReplayProjection {
+    fn from(projection: ResponsesContinuationProjection) -> Self {
+        Self {
+            input_items: projection
+                .input_items
+                .into_iter()
+                .map(ResponsesInputItem::from)
+                .collect(),
+            replay_hints: projection
+                .replay_hints
+                .into_iter()
+                .map(ResponsesInputItem::from)
+                .collect(),
+        }
+    }
 }
 
 pub trait ResponsesClient {
@@ -1042,6 +1258,7 @@ struct ResponsesTransportMetricsBuilder {
     provider_request_debug_samples: Vec<Value>,
     provider_event_counts: HashMap<String, u64>,
     first_text_delta_latency_ms: Option<u64>,
+    prior_turn_duration_ms: u64,
     turn_started_at: Instant,
 }
 
@@ -1058,6 +1275,23 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_debug_samples: Vec::new(),
             provider_event_counts: HashMap::new(),
             first_text_delta_latency_ms: None,
+            prior_turn_duration_ms: 0,
+            turn_started_at: Instant::now(),
+        }
+    }
+
+    fn restore(state: ResponsesContinuationMetrics) -> Self {
+        Self {
+            selected_strategy_id: strategy_id_static(&state.selected_strategy_id),
+            effective_strategy_id: strategy_id_static(&state.effective_strategy_id),
+            fallback_reason: state.fallback_reason,
+            provider_request_count: state.provider_request_count,
+            continuation_round_count: state.continuation_round_count,
+            provider_request_payload_bytes: state.provider_request_payload_bytes,
+            provider_request_debug_samples: state.provider_request_debug_samples,
+            provider_event_counts: state.provider_event_counts,
+            first_text_delta_latency_ms: state.first_text_delta_latency_ms,
+            prior_turn_duration_ms: state.elapsed_turn_duration_ms,
             turn_started_at: Instant::now(),
         }
     }
@@ -1111,10 +1345,36 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_debug_samples: self.provider_request_debug_samples.clone(),
             provider_event_counts: self.provider_event_counts.clone(),
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
-            total_turn_duration_ms: duration_ms(self.turn_started_at.elapsed()),
+            total_turn_duration_ms: self
+                .prior_turn_duration_ms
+                .saturating_add(duration_ms(self.turn_started_at.elapsed())),
             terminal_failure_reason_code: None,
             terminal_failure_source: None,
         }
+    }
+
+    fn checkpoint(&self) -> ResponsesContinuationMetrics {
+        ResponsesContinuationMetrics {
+            selected_strategy_id: self.selected_strategy_id.to_string(),
+            effective_strategy_id: self.effective_strategy_id.to_string(),
+            fallback_reason: self.fallback_reason,
+            provider_request_count: self.provider_request_count,
+            continuation_round_count: self.continuation_round_count,
+            provider_request_payload_bytes: self.provider_request_payload_bytes,
+            provider_request_debug_samples: self.provider_request_debug_samples.clone(),
+            provider_event_counts: self.provider_event_counts.clone(),
+            first_text_delta_latency_ms: self.first_text_delta_latency_ms,
+            elapsed_turn_duration_ms: self
+                .prior_turn_duration_ms
+                .saturating_add(duration_ms(self.turn_started_at.elapsed())),
+        }
+    }
+}
+
+fn strategy_id_static(strategy_id: &str) -> &'static str {
+    match strategy_id {
+        PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID => PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID,
+        _ => REPLAY_STRATEGY_ID,
     }
 }
 
@@ -1655,46 +1915,104 @@ where
         history: ResponsesReplayProjection,
         mut sink: BrainWakeItemSink<'_>,
     ) -> CoreResult<ResponsesBrainWakeResult> {
-        let mut metrics = ResponsesTransportMetricsBuilder::new(&self.request_builder.config);
         let mut items = Vec::new();
-        push_stream_item(&mut items, event(&request, BrainEvent::Started), &mut sink);
-        if let Some(absence) = &request.provider_state_absence {
-            if matches!(
-                absence,
-                ProviderStateAbsenceReason::Missing
-                    | ProviderStateAbsenceReason::Expired
-                    | ProviderStateAbsenceReason::Invalidated
-                    | ProviderStateAbsenceReason::LoadFailed
-            ) {
-                push_stream_item(
-                    &mut items,
-                    event(
-                        &request,
-                        BrainEvent::ProviderStatus {
-                            level: BrainProviderStatusLevel::Info,
-                            message: format!(
-                                "responses replay starting without provider state: {absence:?}"
-                            ),
-                            metadata_json: None,
-                        },
-                    ),
-                    &mut sink,
-                );
+        let restored = match request.continuation_state.as_ref() {
+            Some(payload) => match responses_continuation_state(payload) {
+                Ok(state) => Some(state),
+                Err(error) => {
+                    let metrics =
+                        ResponsesTransportMetricsBuilder::new(&self.request_builder.config)
+                            .finish();
+                    return Ok(failed_result(&request, items, error, metrics, &mut sink));
+                }
+            },
+            None => None,
+        };
+        if let Some(state) = restored.as_ref() {
+            self.request_builder.config.strategy = state.strategy;
+        }
+        let mut metrics = restored
+            .as_ref()
+            .map(|state| ResponsesTransportMetricsBuilder::restore(state.metrics.clone()))
+            .unwrap_or_else(|| ResponsesTransportMetricsBuilder::new(&self.request_builder.config));
+        if restored.is_none() {
+            push_stream_item(&mut items, event(&request, BrainEvent::Started), &mut sink);
+        }
+        let provider_state = restored
+            .as_ref()
+            .and_then(|state| state.provider_state.clone())
+            .or_else(|| request.provider_state.clone());
+        let provider_state_absence = restored
+            .as_ref()
+            .and_then(|state| state.provider_state_absence.clone())
+            .or_else(|| request.provider_state_absence.clone());
+        if restored.is_none() {
+            if let Some(absence) = &provider_state_absence {
+                if matches!(
+                    absence,
+                    ProviderStateAbsenceReason::Missing
+                        | ProviderStateAbsenceReason::Expired
+                        | ProviderStateAbsenceReason::Invalidated
+                        | ProviderStateAbsenceReason::LoadFailed
+                ) {
+                    push_stream_item(
+                        &mut items,
+                        event(
+                            &request,
+                            BrainEvent::ProviderStatus {
+                                level: BrainProviderStatusLevel::Info,
+                                message: format!(
+                                    "responses replay starting without provider state: {absence:?}"
+                                ),
+                                metadata_json: None,
+                            },
+                        ),
+                        &mut sink,
+                    );
+                }
             }
         }
 
-        let mut continuation_items = Vec::new();
-        let mut committed_output_items = Vec::new();
-        let mut last_response_id = None;
-        let mut last_usage = None;
-        let base_history = history;
-        let mut repeated_function_calls = HashMap::new();
+        let mut continuation_items: Vec<ResponsesInputItem> = restored
+            .as_ref()
+            .map(|state| {
+                state
+                    .continuation_items
+                    .clone()
+                    .into_iter()
+                    .map(ResponsesInputItem::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut committed_output_items = restored
+            .as_ref()
+            .map(|state| state.committed_output_items.clone())
+            .unwrap_or_default();
+        let mut last_response_id = restored
+            .as_ref()
+            .and_then(|state| state.last_response_id.clone());
+        let mut last_usage = restored.as_ref().and_then(|state| state.last_usage.clone());
+        let base_history = restored
+            .as_ref()
+            .map(|state| ResponsesReplayProjection::from(state.base_history.clone()))
+            .unwrap_or(history);
+        let mut repeated_function_calls: HashMap<(String, String), usize> = restored
+            .as_ref()
+            .map(|state| {
+                state
+                    .repeated_function_calls
+                    .iter()
+                    .map(|call| ((call.name.clone(), call.arguments_json.clone()), call.count))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut epoch_continuation_round_count = 0usize;
 
-        for _ in 0..=self.request_builder.config.max_continuation_rounds {
+        loop {
             let planned_request = self.request_builder.build_for_strategy(
                 &request,
-                request.provider_state.as_ref(),
-                request.provider_state_absence.as_ref(),
+                provider_state.as_ref(),
+                provider_state_absence.as_ref(),
                 base_history.clone(),
                 continuation_items.clone(),
             );
@@ -1742,7 +2060,7 @@ where
                         );
                         let replay_request = self.request_builder.build_replay(
                             &request,
-                            request.provider_state.as_ref(),
+                            provider_state.as_ref(),
                             base_history.clone(),
                             continuation_items.clone(),
                         );
@@ -1819,6 +2137,26 @@ where
                             ));
                         }
                         metrics.observe_continuation_round();
+                        epoch_continuation_round_count += 1;
+                        if epoch_continuation_round_count
+                            >= self.request_builder.config.work_quantum_continuation_rounds
+                        {
+                            return Ok(yield_responses_wake(
+                                &request,
+                                &self.request_builder.config,
+                                items,
+                                &mut sink,
+                                &base_history,
+                                continuation_items,
+                                committed_output_items,
+                                last_response_id,
+                                last_usage,
+                                repeated_function_calls,
+                                provider_state,
+                                provider_state_absence,
+                                metrics,
+                            ));
+                        }
                         continue;
                     }
                     return Ok(failed_result(
@@ -1871,17 +2209,27 @@ where
                 ));
             }
             metrics.observe_continuation_round();
+            epoch_continuation_round_count += 1;
+            if epoch_continuation_round_count
+                >= self.request_builder.config.work_quantum_continuation_rounds
+            {
+                return Ok(yield_responses_wake(
+                    &request,
+                    &self.request_builder.config,
+                    items,
+                    &mut sink,
+                    &base_history,
+                    continuation_items,
+                    committed_output_items,
+                    last_response_id,
+                    last_usage,
+                    repeated_function_calls,
+                    provider_state,
+                    provider_state_absence,
+                    metrics,
+                ));
+            }
         }
-
-        Ok(failed_result(
-            &request,
-            items,
-            ResponsesStreamError::ContinuationLimitExceeded {
-                limit: self.request_builder.config.max_continuation_rounds,
-            },
-            metrics.finish(),
-            &mut sink,
-        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2044,6 +2392,8 @@ pub struct ResponsesBrainWakeResult {
     pub stream: BrainWakeStream,
     pub provider_state: Option<BrainWakeProviderStateOutput>,
     pub transport_metrics: ResponsesTransportMetrics,
+    pub yielded: bool,
+    pub continuation_state: Option<BrainContinuationPayload>,
 }
 
 struct CompletedResponsesAttempt {
@@ -2090,7 +2440,120 @@ fn finish_responses_wake(
         stream: BrainWakeStream::from_items(items),
         provider_state: Some(provider_state),
         transport_metrics,
+        yielded: false,
+        continuation_state: None,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn yield_responses_wake(
+    request: &BrainWakeRequest,
+    config: &ResponsesBrainConfig,
+    items: Vec<BrainWakeStreamItem>,
+    sink: &mut BrainWakeItemSink<'_>,
+    base_history: &ResponsesReplayProjection,
+    continuation_items: Vec<ResponsesInputItem>,
+    committed_output_items: Vec<ResponsesOutputItem>,
+    last_response_id: Option<String>,
+    last_usage: Option<ResponsesTokenUsage>,
+    repeated_function_calls: HashMap<(String, String), usize>,
+    provider_state: Option<BrainWakeProviderStateInput>,
+    provider_state_absence: Option<ProviderStateAbsenceReason>,
+    metrics: ResponsesTransportMetricsBuilder,
+) -> ResponsesBrainWakeResult {
+    let continuation_state = ResponsesContinuationStateV1 {
+        strategy: config.strategy,
+        base_history: ResponsesContinuationProjection::from(base_history),
+        continuation_items: continuation_items
+            .iter()
+            .map(ResponsesContinuationInputItem::from)
+            .collect(),
+        committed_output_items,
+        last_response_id,
+        last_usage,
+        repeated_function_calls: repeated_function_calls
+            .into_iter()
+            .map(
+                |((name, arguments_json), count)| ResponsesRepeatedFunctionCall {
+                    name,
+                    arguments_json,
+                    count,
+                },
+            )
+            .collect(),
+        provider_state,
+        provider_state_absence,
+        metrics: metrics.checkpoint(),
+    };
+    let continuation_state = match responses_continuation_output(continuation_state) {
+        Ok(state) => state,
+        Err(error) => {
+            return failed_result(request, items, error, metrics.finish(), sink);
+        }
+    };
+    ResponsesBrainWakeResult {
+        stream: BrainWakeStream::from_items(items),
+        provider_state: None,
+        transport_metrics: metrics.finish(),
+        yielded: true,
+        continuation_state: Some(continuation_state),
+    }
+}
+
+fn responses_continuation_output(
+    state: ResponsesContinuationStateV1,
+) -> Result<BrainContinuationPayload, ResponsesStreamError> {
+    let payload = serde_json::to_value(state)
+        .map_err(|error| ResponsesStreamError::ContinuationCheckpointFailed(error.to_string()))?;
+    let payload_fingerprint = responses_json_fingerprint(&payload)
+        .map_err(|error| ResponsesStreamError::ContinuationCheckpointFailed(error.to_string()))?;
+    Ok(BrainContinuationPayload {
+        module_id: MODULE_ID.to_string(),
+        payload_version: CONTINUATION_PAYLOAD_VERSION.to_string(),
+        payload_fingerprint,
+        payload,
+    })
+}
+
+fn responses_continuation_state(
+    payload: &BrainContinuationPayload,
+) -> Result<ResponsesContinuationStateV1, ResponsesStreamError> {
+    if payload.module_id != MODULE_ID {
+        return Err(ResponsesStreamError::ContinuationStateInvalid(format!(
+            "continuation module {} does not match {MODULE_ID}",
+            payload.module_id
+        )));
+    }
+    if payload.payload_version != CONTINUATION_PAYLOAD_VERSION {
+        return Err(ResponsesStreamError::ContinuationStateInvalid(format!(
+            "unsupported continuation payload version {}",
+            payload.payload_version
+        )));
+    }
+    let fingerprint = responses_json_fingerprint(&payload.payload)
+        .map_err(|error| ResponsesStreamError::ContinuationStateInvalid(error.to_string()))?;
+    if fingerprint != payload.payload_fingerprint {
+        return Err(ResponsesStreamError::ContinuationStateInvalid(
+            "continuation payload fingerprint mismatch".to_string(),
+        ));
+    }
+    let state: ResponsesContinuationStateV1 = serde_json::from_value(payload.payload.clone())
+        .map_err(|error| ResponsesStreamError::ContinuationStateInvalid(error.to_string()))?;
+    ResponsesBrainStrategy::from_strategy_id(&state.metrics.selected_strategy_id)?;
+    ResponsesBrainStrategy::from_strategy_id(&state.metrics.effective_strategy_id)?;
+    if state.strategy.strategy_id() != state.metrics.selected_strategy_id {
+        return Err(ResponsesStreamError::ContinuationStateInvalid(
+            "continuation strategy and metrics selection disagree".to_string(),
+        ));
+    }
+    Ok(state)
+}
+
+fn responses_json_fingerprint(value: &Value) -> Result<String, serde_json::Error> {
+    let bytes = serde_json::to_vec(value)?;
+    let mut digest = Sha256::new();
+    digest.update(bytes);
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn provider_state_output(
@@ -2219,6 +2682,8 @@ fn failed_result(
         stream: BrainWakeStream::from_items(items),
         provider_state: None,
         transport_metrics,
+        yielded: false,
+        continuation_state: None,
     }
 }
 
@@ -3299,7 +3764,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_limit_has_its_own_typed_failure_provenance() {
+    fn continuation_quantum_preserves_previous_response_strategy_without_repeating_tools() {
         let tool_call = |index| {
             Ok(vec![
                 ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
@@ -3314,11 +3779,27 @@ mod tests {
                 },
             ])
         };
-        let client = FakeResponsesClient::new(vec![tool_call(0), tool_call(1), tool_call(2)])
-            .expect_function_output("call-0")
-            .expect_function_output("call-0");
-        let mut config = ResponsesBrainConfig::replay("gpt-5");
-        config.max_continuation_rounds = 2;
+        let client = FakeResponsesClient::new(vec![
+            tool_call(0),
+            tool_call(1),
+            Ok(vec![
+                ResponsesEvent::TextDelta("continued to completion".to_string()),
+                ResponsesEvent::Completed {
+                    response_id: "response-final".to_string(),
+                    usage: Some(ResponsesTokenUsage {
+                        input_tokens: 30,
+                        cached_input_tokens: 10,
+                        output_tokens: 5,
+                        reasoning_output_tokens: 2,
+                        total_tokens: 35,
+                    }),
+                },
+            ]),
+        ])
+        .expect_function_output("call-0")
+        .expect_function_output("call-0");
+        let mut config = ResponsesBrainConfig::previous_response_chain("gpt-5");
+        config.work_quantum_continuation_rounds = 1;
         let mut brain = brain_with_config(
             client,
             MapToolExecutor::new([(
@@ -3331,26 +3812,108 @@ mod tests {
             config,
         );
 
-        let result = brain.wake(wake_request(None, None)).unwrap();
-        let items = result.stream.drain_until_terminal().unwrap();
-        let failure = items.iter().find_map(|item| match item {
-            BrainWakeStreamItem::WakeFailed { failure } => Some(failure),
-            _ => None,
-        });
+        let history = ResponsesReplayProjection {
+            input_items: vec![ResponsesInputItem::UserMessage {
+                content: "original frozen request".to_string(),
+            }],
+            replay_hints: Vec::new(),
+        };
+        let first = brain
+            .wake_with_history(wake_request(None, None), history)
+            .unwrap();
+        assert!(first.yielded);
+        assert!(first.provider_state.is_none());
         assert_eq!(
-            failure.and_then(|failure| failure.reason_code.as_deref()),
-            Some("responses_continuation_limit_exceeded")
+            first.transport_metrics.selected_strategy_id,
+            PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID
         );
         assert_eq!(
-            result
-                .transport_metrics
-                .terminal_failure_reason_code
-                .as_deref(),
-            Some("responses_continuation_limit_exceeded")
+            first.transport_metrics.effective_strategy_id,
+            REPLAY_STRATEGY_ID
         );
+        assert!(!first
+            .stream
+            .drain_until_closed()
+            .unwrap()
+            .iter()
+            .any(BrainWakeStreamItem::is_terminal));
+
+        let replacement_provider_state = provider_state(provider_state_payload(
+            "replacement-response",
+            vec![ResponsesOutputItem::Message {
+                id: None,
+                text: "replacement provider state".to_string(),
+            }],
+        ));
+        let mut second_request = wake_request(Some(replacement_provider_state), None);
+        second_request.continuation_state = first.continuation_state;
+        let second = brain
+            .wake_with_history(
+                second_request,
+                ResponsesReplayProjection {
+                    input_items: vec![ResponsesInputItem::UserMessage {
+                        content: "replacement body state".to_string(),
+                    }],
+                    replay_hints: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert!(second.yielded);
+        assert_eq!(second.transport_metrics.provider_request_count, 2);
+        assert_eq!(second.transport_metrics.continuation_round_count, 2);
+        assert!(!second
+            .stream
+            .drain_until_closed()
+            .unwrap()
+            .iter()
+            .any(BrainWakeStreamItem::is_terminal));
+
+        let mut final_request = wake_request(None, None);
+        final_request.continuation_state = second.continuation_state;
+        let completed = brain
+            .wake_with_history(final_request, ResponsesReplayProjection::default())
+            .unwrap();
+        let terminal_items = completed.stream.drain_until_terminal().unwrap();
+        assert!(!completed.yielded);
+        assert_eq!(completed.transport_metrics.provider_request_count, 3);
+        assert_eq!(completed.transport_metrics.continuation_round_count, 2);
+        assert!(matches!(
+            completed.provider_state.as_ref(),
+            Some(BrainWakeProviderStateOutput::Replace { state })
+                if state.strategy_id == PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID
+        ));
+        assert!(matches!(
+            terminal_items.last(),
+            Some(BrainWakeStreamItem::Actions { .. })
+        ));
+        assert!(terminal_items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::TextDelta { text } if text == "continued to completion")
+        )));
+        assert!(brain.client.requests().iter().all(|request| {
+            !request.input.iter().any(|item| {
+                matches!(
+                    item,
+                    ResponsesInputItem::UserMessage { content }
+                        if content == "replacement body state"
+                )
+            })
+        }));
+        let tool_call_ids = brain
+            .client
+            .requests()
+            .iter()
+            .flat_map(|request| request.input.iter())
+            .filter_map(|item| match item {
+                ResponsesInputItem::FunctionCallOutput { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            result.transport_metrics.terminal_failure_source.as_deref(),
-            Some("responses_loop")
+            tool_call_ids,
+            vec!["call-0", "call-0", "call-1"],
+            "each resumed request should contain one copy of every completed function result"
         );
     }
 

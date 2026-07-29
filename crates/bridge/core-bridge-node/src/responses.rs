@@ -20,6 +20,8 @@ struct JsOpenAiResponsesBrainRunInput {
     provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default)]
     provider_state_absence: Option<String>,
+    #[serde(default)]
+    continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
     config: JsOpenAiResponsesBrainConfig,
     #[serde(default)]
     client: JsOpenAiResponsesClientConfig,
@@ -38,6 +40,8 @@ struct JsOpenAiResponsesNeutralTool {
 struct JsOpenAiResponsesBrainConfig {
     model: String,
     #[serde(default)]
+    strategy_id: Option<String>,
+    #[serde(default)]
     instructions: Option<String>,
     #[serde(default)]
     reasoning_effort: Option<String>,
@@ -46,7 +50,7 @@ struct JsOpenAiResponsesBrainConfig {
     #[serde(default)]
     provider_request_timeout_ms: Option<u64>,
     #[serde(default)]
-    max_continuation_rounds: Option<usize>,
+    work_quantum_continuation_rounds: Option<usize>,
     #[serde(default)]
     wake_timeout_ms: Option<u64>,
 }
@@ -95,6 +99,8 @@ struct OpenAiResponsesBrainRunOutput {
     #[cfg_attr(not(test), allow(dead_code))]
     stream: Vec<BrainWakeStreamItem>,
     provider_state: Option<BrainWakeProviderStateOutput>,
+    yielded: bool,
+    continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
     transport_metrics: ResponsesTransportMetrics,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
 }
@@ -135,6 +141,7 @@ struct JsOpenAiResponsesCancelInput {
 pub(crate) struct OpenAiResponsesBufferedRunPayload {
     transport_metrics: Option<ResponsesTransportMetrics>,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
+    continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
     provider_finished: bool,
     provider_cancellation: ResponsesProviderCancellation,
 }
@@ -288,6 +295,8 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
             "terminal": terminal,
             "terminal_reason_code": terminal_reason_code,
             "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
+            "yielded": terminal && run.coordinator.phase() == BufferedBrainTurnPhase::Yielded,
+            "continuation_state": terminal.then(|| run.payload.continuation_state.clone()).flatten(),
             "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
             "credential_secret_update": terminal.then(|| run.payload.credential_secret_update.clone()).flatten(),
             "error": error,
@@ -397,12 +406,22 @@ fn run_openai_responses_brain_buffered(
     let sink_wake_id = wake_id.clone();
     let sink_buffered_runs = Arc::clone(&buffered_runs);
     let mut sink = move |item: BrainWakeStreamItem| {
-        let _ = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
+        if let Err(error) = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
             if run.coordinator.phase().is_terminal() {
                 return;
             }
-            let _ = run.coordinator.enqueue_provider_stream_item(item);
-        });
+            if let Err(error) = run.coordinator.enqueue_provider_stream_item(item) {
+                eprintln!(
+                    "openai-responses wake {} could not enqueue a live stream item: {}",
+                    sink_wake_id, error
+                );
+            }
+        }) {
+            eprintln!(
+                "openai-responses wake {} could not access its buffered run while streaming: {}",
+                sink_wake_id, error
+            );
+        }
     };
     let result = run_openai_responses_brain_with_buffered_tools(
         Arc::clone(&buffered_runs),
@@ -419,8 +438,12 @@ fn run_openai_responses_brain_buffered(
                             let _ = run.coordinator.set_provider_state_output(provider_state);
                         }
                     }
+                    run.payload.continuation_state = output.continuation_state;
                     run.payload.transport_metrics = Some(output.transport_metrics);
                     run.payload.credential_secret_update = output.credential_secret_update;
+                    if output.yielded && !run.coordinator.phase().is_terminal() {
+                        let _ = run.coordinator.yield_turn();
+                    }
                     if !run.coordinator.phase().is_terminal() {
                         let _ = run.coordinator.fail(
                             "provider_stream_missing_terminal",
@@ -552,6 +575,8 @@ pub(crate) fn run_openai_responses_brain_json_blocking(input_json: String) -> na
     let output = json!({
         "stream": output.stream,
         "provider_state": output.provider_state,
+        "yielded": output.yielded,
+        "continuation_state": output.continuation_state,
         "transport_metrics": output.transport_metrics,
         "credential_secret_update": output.credential_secret_update,
     });
@@ -705,7 +730,21 @@ where
                 format!("invalid OpenAI Responses brain input JSON: {error}"),
             )
         })?;
-    let mut config = ResponsesBrainConfig::replay(input.config.model);
+    let continuation_epoch = input.continuation_state.is_some();
+    let mut config = match input.config.strategy_id.as_deref() {
+        None | Some(rusty_crew_openai_responses_brain::REPLAY_STRATEGY_ID) => {
+            ResponsesBrainConfig::replay(input.config.model)
+        }
+        Some(rusty_crew_openai_responses_brain::PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID) => {
+            ResponsesBrainConfig::previous_response_chain(input.config.model)
+        }
+        Some(strategy_id) => {
+            return Err(napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("unsupported OpenAI Responses strategy {strategy_id}"),
+            ));
+        }
+    };
     config.instructions = input.config.instructions;
     config.reasoning = input.config.reasoning_effort.map(|effort| {
         rusty_crew_openai_responses_brain::ResponsesReasoningConfig {
@@ -715,14 +754,14 @@ where
     });
     config.max_output_tokens = input.config.max_output_tokens;
     config.provider_request_timeout_ms = input.config.provider_request_timeout_ms;
-    if let Some(max_continuation_rounds) = input.config.max_continuation_rounds {
-        if max_continuation_rounds == 0 || max_continuation_rounds > 512 {
+    if let Some(work_quantum_continuation_rounds) = input.config.work_quantum_continuation_rounds {
+        if work_quantum_continuation_rounds == 0 {
             return Err(napi::Error::new(
                 napi::Status::InvalidArg,
-                "OpenAI Responses max_continuation_rounds must be between 1 and 512",
+                "OpenAI Responses work_quantum_continuation_rounds must be positive",
             ));
         }
-        config.max_continuation_rounds = max_continuation_rounds;
+        config.work_quantum_continuation_rounds = work_quantum_continuation_rounds;
     }
     let descriptors = if input.tools.is_empty() {
         input
@@ -758,7 +797,7 @@ where
         system_prompt: RuntimeBufferHandle::new(0),
         role_assembly: RuntimeBufferHandle::new(0),
         wake_id: input.wake_id,
-        continuation_state: None,
+        continuation_state: input.continuation_state,
         provider_state: input.provider_state,
         provider_state_absence: input
             .provider_state_absence
@@ -770,7 +809,7 @@ where
     let mut credential_secret_update = None;
     let result = match input.client {
         JsOpenAiResponsesClientConfig::Fake => {
-            let client = fake_responses_client_for_body(&input.body_state);
+            let client = fake_responses_client_for_body(&input.body_state, continuation_epoch);
             let mut brain = ResponsesReplayBrain::new(client, tool_executor, config, descriptors);
             if let Some(sink) = &mut sink {
                 brain.wake_with_history_and_stream_sink(request, history, *sink)
@@ -842,18 +881,28 @@ where
         }
     }
     .map_err(to_napi_error)?;
-    Ok(OpenAiResponsesBrainRunOutput {
-        stream: result
+    let stream = if result.yielded {
+        result.stream.drain_until_closed().map_err(to_napi_error)?
+    } else {
+        result
             .stream
             .drain_until_terminal()
-            .map_err(to_napi_error)?,
+            .map_err(to_napi_error)?
+    };
+    Ok(OpenAiResponsesBrainRunOutput {
+        stream,
         provider_state: result.provider_state,
+        yielded: result.yielded,
+        continuation_state: result.continuation_state,
         transport_metrics: result.transport_metrics,
         credential_secret_update,
     })
 }
 
-fn fake_responses_client_for_body(body: &BodyState) -> FakeResponsesClient {
+fn fake_responses_client_for_body(
+    body: &BodyState,
+    continuation_epoch: bool,
+) -> FakeResponsesClient {
     if let Ok(raw_delay_ms) = std::env::var("RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS") {
         if let Ok(delay_ms) = raw_delay_ms.parse::<u64>() {
             if delay_ms > 0 {
@@ -871,6 +920,16 @@ fn fake_responses_client_for_body(body: &BodyState) -> FakeResponsesClient {
             },
         ])]);
     };
+    if continuation_epoch {
+        return FakeResponsesClient::new(vec![Ok(vec![
+            ResponsesEvent::TextDelta("responses module scaffold wake completed".to_string()),
+            ResponsesEvent::Completed {
+                response_id: "fake-response-final".to_string(),
+                usage: Some(fake_responses_usage(true)),
+            },
+        ])])
+        .expect_function_output("fake-call");
+    }
     FakeResponsesClient::new(vec![
         Ok(vec![
             ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {

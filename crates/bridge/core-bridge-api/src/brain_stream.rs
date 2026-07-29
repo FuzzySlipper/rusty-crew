@@ -87,6 +87,17 @@ impl BrainWakeStream {
             }
         }
     }
+
+    pub fn drain_until_closed(&self) -> CoreResult<Vec<BrainWakeStreamItem>> {
+        let mut items = Vec::new();
+        loop {
+            match self.receiver.recv() {
+                Ok(Ok(item)) => items.push(item),
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Ok(items),
+            }
+        }
+    }
 }
 
 impl BrainWakeStreamSender {

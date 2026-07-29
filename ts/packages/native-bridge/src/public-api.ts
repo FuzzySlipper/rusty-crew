@@ -289,13 +289,15 @@ export interface OpenAiResponsesBrainRunInput {
   }>;
   providerState?: BrainWakeProviderStateInput;
   providerStateAbsence?: ProviderStateAbsenceReason;
+  continuationState?: BrainContinuationPayload;
   config: {
     model: string;
+    strategyId?: "replay" | "previous-response-chain";
     instructions?: string;
     reasoningEffort?: string;
     maxOutputTokens?: number;
     providerRequestTimeoutMs?: number;
-    maxContinuationRounds?: number;
+    workQuantumContinuationRounds?: number;
     wakeTimeoutMs?: number;
   };
   client?:

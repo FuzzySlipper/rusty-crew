@@ -503,9 +503,9 @@ fn native_bridge_hydrates_and_updates_provider_state_around_wakes() {
     assert!(hydrated.request.provider_state_absence.is_none());
 
     let changed_scope_handle = bridge
-        .register_brain_implementation(provider_state_brain_registration_with_scope(
+        .replace_brain_implementation(provider_state_brain_registration_with_scope(
             "optional-provider-brain-changed-scope",
-            "optional-provider-profile-changed-scope",
+            "optional-provider-profile",
             ProviderStateMode::Optional,
             "changed-profile-fingerprint",
             "provider-fingerprint",
@@ -525,10 +525,17 @@ fn native_bridge_hydrates_and_updates_provider_state_around_wakes() {
         invalidated.request.provider_state_absence,
         Some(rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Invalidated)
     );
+    let restored_scope_handle = bridge
+        .replace_brain_implementation(provider_state_brain_registration(
+            "optional-provider-brain-restored-scope",
+            "optional-provider-profile",
+            ProviderStateMode::Optional,
+        ))
+        .unwrap();
 
     bridge
         .apply_provider_state_output(
-            optional_handle,
+            restored_scope_handle,
             &SessionId::new("optional-provider-session"),
             "wake-2b",
             BrainWakeProviderStateOutput::Replace {
@@ -547,7 +554,7 @@ fn native_bridge_hydrates_and_updates_provider_state_around_wakes() {
 
     bridge
         .apply_provider_state_output(
-            optional_handle,
+            restored_scope_handle,
             &SessionId::new("optional-provider-session"),
             "wake-2",
             BrainWakeProviderStateOutput::Clear {
@@ -557,7 +564,7 @@ fn native_bridge_hydrates_and_updates_provider_state_around_wakes() {
         .unwrap();
     let after_clear = bridge
         .build_brain_wake_request_for_session(
-            optional_handle,
+            restored_scope_handle,
             SessionId::new("optional-provider-session"),
             "system".to_string(),
             b"{}".to_vec(),
@@ -957,6 +964,174 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
             .count(),
         1
     );
+}
+
+#[test]
+fn openai_responses_buffered_bridge_yields_and_resumes_without_repeating_tools() {
+    let mut bridge = NativeBridge::new();
+    bridge
+        .initialize_engine(EngineConfig {
+            engine_data_dir: std::env::temp_dir()
+                .join(format!(
+                    "rusty-crew-native-responses-continuation-{}",
+                    std::process::id()
+                ))
+                .to_string_lossy()
+                .to_string(),
+            clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                at: "2026-07-29T00:00:00Z".to_string(),
+            },
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1000,
+            storage: None,
+        })
+        .unwrap();
+    bridge
+        .create_session(SessionConfig {
+            session_id: SessionId::new("responses-continuation-session"),
+            agent_id: AgentId::new("responses-continuation-agent"),
+            profile_id: ProfileId::new("responses-continuation-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile {
+                tools: vec![ToolDescriptor {
+                    name: "read_file".to_string(),
+                    description: "Read one file".to_string(),
+                    input_schema: None,
+                }],
+            },
+            history_window: None,
+        })
+        .unwrap();
+    let body_state: serde_json::Value = serde_json::from_slice(
+        &bridge
+            .project_body_state_json(SessionId::new("responses-continuation-session"))
+            .unwrap(),
+    )
+    .unwrap();
+    let registry = bridge.openai_responses_buffered_runs();
+    let first_wake_id = "responses-continuation-epoch-1";
+    crate::responses::start_openai_responses_brain_json(
+        Arc::clone(&registry),
+        serde_json::json!({
+            "wakeId": first_wake_id,
+            "sessionId": "responses-continuation-session",
+            "bodyState": body_state,
+            "config": {
+                "model": "fake-responses-model",
+                "strategyId": "replay",
+                "workQuantumContinuationRounds": 1
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let tool_request = (0..100)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &crate::responses::drain_openai_responses_brain_stream_json(
+                    &registry,
+                    first_wake_id.to_string(),
+                    Some(64),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let request = drain["tool_requests"].as_array().unwrap().first().cloned();
+            if request.is_none() {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            request
+        })
+        .expect("first Responses epoch should request its host tool");
+    crate::responses::submit_openai_responses_tool_output_json(
+        &registry,
+        serde_json::json!({
+            "wakeId": first_wake_id,
+            "callId": tool_request["call_id"],
+            "output": "file contents",
+            "status": "succeeded",
+            "retryable": false
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let yielded = (0..100)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &crate::responses::drain_openai_responses_brain_stream_json(
+                    &registry,
+                    first_wake_id.to_string(),
+                    Some(64),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            if drain["terminal"] == true {
+                Some(drain)
+            } else {
+                thread::sleep(std::time::Duration::from_millis(5));
+                None
+            }
+        })
+        .expect("first Responses epoch should yield after its work quantum");
+    assert_eq!(yielded["yielded"], true);
+    assert!(yielded["continuation_state"].is_object());
+    assert!(!yielded["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["type"] == "actions" || item["type"] == "wake_failed"));
+
+    let second_wake_id = "responses-continuation-epoch-2";
+    crate::responses::start_openai_responses_brain_json(
+        Arc::clone(&registry),
+        serde_json::json!({
+            "wakeId": second_wake_id,
+            "sessionId": "responses-continuation-session",
+            "bodyState": body_state,
+            "continuationState": yielded["continuation_state"],
+            "config": {
+                "model": "fake-responses-model",
+                "strategyId": "replay",
+                "workQuantumContinuationRounds": 1
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let completed = (0..100)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &crate::responses::drain_openai_responses_brain_stream_json(
+                    &registry,
+                    second_wake_id.to_string(),
+                    Some(64),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert!(drain["tool_requests"].as_array().unwrap().is_empty());
+            if drain["terminal"] == true {
+                Some(drain)
+            } else {
+                thread::sleep(std::time::Duration::from_millis(5));
+                None
+            }
+        })
+        .expect("resumed Responses epoch should complete");
+    assert_eq!(completed["yielded"], false);
+    assert!(completed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["type"] == "actions"));
 }
 
 #[test]

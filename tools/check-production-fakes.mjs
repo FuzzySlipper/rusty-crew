@@ -50,9 +50,9 @@ const allowed = [
   {
     id: "responses-module-scaffold-success",
     path: "crates/bridge/core-bridge-node/src/responses.rs",
-    count: 2,
+    count: 3,
     reason:
-      "fake Responses client protocol output reachable only through explicit smoke/test input; production hosts always request live mode",
+      "fake Responses client protocol output, including continuation completion, is reachable only through explicit smoke/test input; production hosts always request live mode",
   },
 ];
 

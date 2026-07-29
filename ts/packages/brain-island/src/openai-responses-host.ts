@@ -20,7 +20,7 @@ import type { BrainHostContext } from "./brain-host-context.js";
 import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
-import { responsesMaxContinuationRounds } from "./responses-continuation-policy.js";
+import { responsesWorkQuantumContinuationRounds } from "./responses-continuation-policy.js";
 
 export type OpenAiResponsesClientConfig = NonNullable<
   OpenAiResponsesBrainRunInput["client"]
@@ -179,6 +179,8 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   brainStreamItemCounts?: Record<string, number>;
   streamRetentionMetrics?: import("@rusty-crew/native-bridge").NativeBufferedBrainStreamRetentionMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
+  outcome: "completed" | "yielded";
+  continuationState?: import("@rusty-crew/contracts").BrainContinuationPayload;
 }> {
   const bridge = context.bridge;
   if (bridge === undefined) {
@@ -210,20 +212,12 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
 export async function createOpenAiResponsesBrainHost(
   context: BrainHostContext,
   client?: OpenAiResponsesClientConfig,
+  strategyId: "replay" | "previous-response-chain" = "replay",
 ): Promise<BrainHostExecutor> {
   let responsesClientConfig =
     client ?? (await openAiResponsesClientConfig(context));
   return {
-    async wake(
-      wake,
-      options,
-    ): Promise<{
-      events: BrainEventEnvelope[];
-      actions: BrainAction[];
-      providerState?: BrainWakeProviderStateOutput;
-      transportMetrics?: OpenAiResponsesTransportMetrics;
-      credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
-    }> {
+    async wake(wake, options) {
       if (context.bridge === undefined) {
         throw new Error("openai-responses brain requires native bridge");
       }
@@ -234,8 +228,10 @@ export async function createOpenAiResponsesBrainHost(
         bodyState: wake.state,
         providerState: wake.providerState,
         providerStateAbsence: wake.providerStateAbsence,
+        continuationState: wake.continuationState,
         config: {
           model: context.profile.profile.modelConfig.modelName,
+          strategyId,
           instructions: responsesInstructions(wake),
           reasoningEffort:
             wake.state.session.inferenceOverrides?.reasoningEffort ??
@@ -244,7 +240,8 @@ export async function createOpenAiResponsesBrainHost(
           ...(requestTimeoutMs === undefined
             ? {}
             : { providerRequestTimeoutMs: requestTimeoutMs }),
-          maxContinuationRounds: responsesMaxContinuationRounds(),
+          workQuantumContinuationRounds:
+            responsesWorkQuantumContinuationRounds(),
           wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
         },
         client: responsesClientConfig,

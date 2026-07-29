@@ -1,29 +1,145 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type {
+  AgentId,
+  ProfileId,
+  SessionHandle,
+  SessionId,
+} from "@rusty-crew/contracts";
+import type {
+  NativeBridgeModule,
+  OpenAiResponsesBrainRunInput,
+} from "@rusty-crew/native-bridge";
 
+import type { BrainHostContext } from "../src/brain-host-context.js";
+import { createOpenAiResponsesBrainHost } from "../src/openai-responses-host.js";
 import {
-  DEFAULT_RESPONSES_MAX_CONTINUATION_ROUNDS,
-  responsesMaxContinuationRounds,
+  DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
+  responsesWorkQuantumContinuationRounds,
 } from "../src/responses-continuation-policy.js";
+import type { BrainWakeInput } from "../src/index.js";
 
-const variable = "RUSTY_CREW_OPENAI_RESPONSES_MAX_CONTINUATION_ROUNDS";
+const variable = "RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS";
 
 test("Responses continuation policy uses the durable default", () => {
   assert.equal(
-    responsesMaxContinuationRounds({}),
-    DEFAULT_RESPONSES_MAX_CONTINUATION_ROUNDS,
+    responsesWorkQuantumContinuationRounds({}),
+    DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
   );
 });
 
-test("Responses continuation policy accepts an explicit bounded limit", () => {
-  assert.equal(responsesMaxContinuationRounds({ [variable]: " 96 " }), 96);
+test("Responses continuation policy accepts an explicit work quantum", () => {
+  assert.equal(
+    responsesWorkQuantumContinuationRounds({ [variable]: " 96 " }),
+    96,
+  );
+  assert.equal(
+    responsesWorkQuantumContinuationRounds({ [variable]: "1000000" }),
+    1_000_000,
+  );
 });
 
-test("Responses continuation policy rejects zero and unreasonable limits", () => {
-  for (const value of ["0", "-1", "1.5", "513", "many"]) {
+test("Responses continuation policy rejects non-positive and invalid quanta", () => {
+  for (const value of ["0", "-1", "1.5", "many"]) {
     assert.throws(
-      () => responsesMaxContinuationRounds({ [variable]: value }),
+      () => responsesWorkQuantumContinuationRounds({ [variable]: value }),
       new RegExp(variable),
     );
   }
 });
+
+test("Responses host forwards strategy quantum and continuation to Rust", async () => {
+  let captured: OpenAiResponsesBrainRunInput | undefined;
+  const bridge = {
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
+    ) => {
+      if (input.moduleId !== "openai-responses") {
+        throw new Error(`unexpected module ${input.moduleId}`);
+      }
+      captured = input.providerInput;
+      return { moduleId: input.moduleId, wakeId: input.providerInput.wakeId };
+    },
+    drainBrainRun: async () => ({
+      items: [],
+      toolRequests: [],
+      terminal: true,
+      yielded: true,
+      continuationState: continuationState,
+    }),
+  } as unknown as NativeBridgeModule;
+  const context = {
+    bridge,
+    profile: {
+      profile: {
+        profileId: "responses-continuation-profile" as ProfileId,
+        modelConfig: {
+          provider: "test",
+          modelName: "test-model",
+          api: "responses",
+        },
+      },
+      skills: [],
+      toolSelection: { toolProfile: { tools: [] } },
+    },
+  } as unknown as BrainHostContext;
+  const brain = await createOpenAiResponsesBrainHost(
+    context,
+    { mode: "fake" },
+    "previous-response-chain",
+  );
+
+  const result = await brain.wake(responsesWake());
+
+  assert.equal(
+    captured?.config.workQuantumContinuationRounds,
+    DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
+  );
+  assert.equal(captured?.config.strategyId, "previous-response-chain");
+  assert.deepEqual(captured?.continuationState, continuationState);
+  assert.equal(result.outcome, "yielded");
+  assert.deepEqual(result.continuationState, continuationState);
+});
+
+const continuationState = {
+  moduleId: "openai-responses",
+  payloadVersion: "openai-responses-continuation-v1",
+  payloadFingerprint: "checkpoint-fingerprint",
+  payload: { cursor: 1 },
+};
+
+function responsesWake(): BrainWakeInput {
+  const sessionId = "responses-continuation-session" as SessionId;
+  return {
+    wakeId: "responses-continuation-wake",
+    sessionId,
+    systemPrompt: "system",
+    roleAssembly: {},
+    continuationState,
+    state: {
+      session: {
+        handle: 1 as SessionHandle,
+        sessionId,
+        agentId: "responses-continuation-agent" as AgentId,
+        profileId: "responses-continuation-profile" as ProfileId,
+        kind: "full",
+        resourceLimits: { maxDelegationDepth: 0 },
+        toolProfile: { tools: [] },
+        status: "idle",
+        brainTurnCount: 0,
+        createdAt: "2026-07-29T00:00:00Z",
+        lastActiveAt: "2026-07-29T00:00:00Z",
+      },
+      pendingMessages: [],
+      recentEvents: [],
+      childCompletions: [],
+      fanOutGroups: [],
+      deltaPolicy: {
+        mode: "frozen_snapshot_next_wake",
+        queueOwner: "body",
+        queuedMessageTtlMs: 5_000,
+        maxQueuedMessages: 32,
+      },
+    },
+  };
+}

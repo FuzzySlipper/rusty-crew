@@ -2,7 +2,6 @@ import type {
   BrainAction,
   BrainContinuationPayload,
   BrainWakeProviderStateOutput,
-  BrainWakeProviderStateInput,
   BrainWakeFailure,
   BrainWakeStreamItem,
   CompletionPacket,
@@ -16,7 +15,6 @@ import type {
   NativeBufferedBrainRunDrain,
   OpenAiResponsesTransportMetrics,
   NativeOpenAiOauthExchangeError,
-  OpenAiResponsesBrainRunInput,
   ChatCompletionsBrainRunInput,
   ChatCompletionsTransportMetrics,
   NativeBrainWakeProviderStateInput,
@@ -37,7 +35,12 @@ import {
   chatCompletionsTransportMetricsFromRaw,
   type RawChatCompletionsTransportMetrics,
 } from "./chat-completions-metrics-wire.js";
+import { toNativeProviderStateInput } from "./brain-provider-input-wire.js";
 export { chatCompletionsTransportMetricsFromRaw };
+export {
+  toNativeOpenAiResponsesBrainRunInput,
+  toNativeProviderStateInput,
+} from "./brain-provider-input-wire.js";
 
 export function assertCanonicalBrainRunModule(
   moduleId: string,
@@ -101,37 +104,6 @@ export function toNativeBrainAction(action: BrainAction): unknown {
   }
 }
 
-export function toNativeOpenAiResponsesBrainRunInput(
-  input: OpenAiResponsesBrainRunInput,
-): unknown {
-  return {
-    wakeId: input.wakeId,
-    sessionId: input.sessionId,
-    bodyState: toNativeBodyState(input.bodyState),
-    tools: input.tools?.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-    providerState: input.providerState
-      ? toNativeProviderStateInput(input.providerState)
-      : undefined,
-    providerStateAbsence: input.providerStateAbsence,
-    config: input.config,
-    client:
-      input.client?.mode === "live"
-        ? {
-            mode: "live",
-            base_url: input.client.baseUrl,
-            api_key: input.client.apiKey,
-            auth_kind: input.client.authKind,
-            provider_alias: input.client.providerAlias,
-            oauth_credential_secret: input.client.oauthCredentialSecret,
-          }
-        : { mode: "fake" },
-  };
-}
-
 export function toNativeChatCompletionsBrainRunInput(
   input: ChatCompletionsBrainRunInput,
 ): unknown {
@@ -165,20 +137,6 @@ export function toNativeChatCompletionsBrainRunInput(
             api_key: input.client.apiKey,
           }
         : { mode: "fake" },
-  };
-}
-
-export function toNativeProviderStateInput(
-  state: BrainWakeProviderStateInput,
-): NativeBrainWakeProviderStateInput {
-  return {
-    module_id: state.moduleId,
-    strategy_id: state.strategyId,
-    profile_fingerprint: state.profileFingerprint,
-    provider_fingerprint: state.providerFingerprint,
-    payload_version: state.payloadVersion,
-    payload: state.payload,
-    expires_at: state.expiresAt ?? undefined,
   };
 }
 
@@ -230,6 +188,8 @@ export function toOpenAiResponsesBrainRunResult(
     providerState: raw.provider_state
       ? toBrainWakeProviderStateOutput(raw.provider_state)
       : undefined,
+    outcome: raw.yielded ? "yielded" : "completed",
+    continuationState: raw.continuation_state ?? undefined,
     transportMetrics: raw.transport_metrics,
     credentialSecretUpdate: raw.credential_secret_update
       ? {
@@ -271,6 +231,8 @@ export function toRawOpenAiResponsesBrainRunResult(
     provider_state: result.providerState
       ? toRawBrainWakeProviderStateOutput(result.providerState)
       : undefined,
+    yielded: result.outcome === "yielded",
+    continuation_state: result.continuationState,
     transport_metrics: result.transportMetrics,
     credential_secret_update: result.credentialSecretUpdate
       ? {
@@ -554,6 +516,8 @@ export function toRawBufferedBrainRunDrainResult(
 export interface RawOpenAiResponsesBrainRunResult {
   stream: RawBrainWakeStreamItem[];
   provider_state?: RawBrainWakeProviderStateOutput | null;
+  yielded?: boolean;
+  continuation_state?: BrainContinuationPayload | null;
   transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
 }
@@ -603,6 +567,8 @@ export interface RawOpenAiResponsesBufferedDrainResult {
     arguments_json: string;
   }>;
   terminal: boolean;
+  yielded?: boolean;
+  continuation_state?: BrainContinuationPayload | null;
   provider_state?: RawBrainWakeProviderStateOutput;
   transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;

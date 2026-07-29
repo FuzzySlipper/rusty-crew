@@ -13,8 +13,13 @@ export async function createBuiltInBrainHost(
   switch (selection.moduleId) {
     case "chat-completions":
       return createChatCompletionsBrainHost(context);
-    case "openai-responses":
-      return createOpenAiResponsesBrainHost(context);
+    case "openai-responses": {
+      const strategy = selection.strategy ?? "replay";
+      if (strategy !== "replay" && strategy !== "previous-response-chain") {
+        throw new Error(`Unsupported OpenAI Responses strategy ${strategy}`);
+      }
+      return createOpenAiResponsesBrainHost(context, undefined, strategy);
+    }
     default:
       throw new Error(
         `Rust selected brain ${selection.moduleId} has no production host executor`,
