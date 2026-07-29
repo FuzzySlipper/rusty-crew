@@ -218,6 +218,14 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn requeue_logical_turn_continuations(&self) -> napi::Result<f64> {
+        Ok(self
+            .bridge()?
+            .requeue_logical_turn_continuations()
+            .map_err(to_napi_error)? as f64)
+    }
+
+    #[napi]
     pub fn resolve_logical_turn_attention_json(&self, input_json: String) -> napi::Result<String> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]

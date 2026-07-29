@@ -475,6 +475,19 @@ fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
         restarted.logical_turn_continuation_tickets().unwrap().len(),
         1
     );
+    let (_wake_subscription, wake_events) = restarted
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::BrainWakeRequested],
+            session_id: Some(session.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+    assert_eq!(restarted.requeue_logical_turn_continuations().unwrap(), 1);
+    assert!(matches!(
+        wake_events.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::BrainWakeRequested { session_id } if session_id == session.session_id
+    ));
     std::fs::remove_dir_all(data_dir).unwrap();
 }
 
@@ -538,6 +551,166 @@ fn logical_turn_cancellation_fences_restart_resurrection() {
 }
 
 #[test]
+fn logical_turn_cancellation_fences_an_active_running_epoch() {
+    let data_dir = unique_data_dir("logical-turn-running-cancel");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "logical-running-cancel-session",
+            "logical-running-cancel-agent",
+            "logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .admit_logical_turn(&admission(&session.session_id))
+        .unwrap();
+    let claim = engine
+        .claim_logical_turn(&LogicalTurnClaimRequest {
+            logical_turn_id: LogicalTurnId::new("turn-1"),
+            expected_revision: 1,
+            continuation_id: ContinuationId::new("continuation-0"),
+            execution_epoch_id: ExecutionEpochId::new("epoch-running"),
+            claim_holder: "service-running".into(),
+            claim_expires_at: "2026-06-19T00:01:00Z".into(),
+            now: NOW.into(),
+        })
+        .unwrap();
+    assert_eq!(claim.record.phase, LogicalTurnPhase::Running);
+
+    let cancelled = engine
+        .cancel_logical_turn(&LogicalTurnCancelRequest {
+            logical_turn_id: claim.record.logical_turn_id,
+            expected_revision: claim.record.revision,
+            idempotency_key: "cancel-running".into(),
+            reason_code: "operator_cancelled".into(),
+            summary: "operator cancelled active running epoch".into(),
+            now: NOW.into(),
+        })
+        .unwrap();
+    assert_eq!(cancelled.record.phase, LogicalTurnPhase::Cancelled);
+    assert!(cancelled.record.active_epoch_id.is_none());
+    assert!(engine
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    assert!(restarted
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        restarted
+            .get_logical_turn(&LogicalTurnId::new("turn-1"))
+            .unwrap()
+            .unwrap()
+            .phase,
+        LogicalTurnPhase::Cancelled
+    );
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
+#[ignore = "focused >512-continuation certification"]
+fn sqlite_logical_turn_survives_over_512_yields_restart_and_cancel() {
+    let data_dir = unique_data_dir("logical-turn-513-sqlite");
+    let mut engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "logical-513-sqlite-session",
+            "logical-513-sqlite-agent",
+            "logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .admit_logical_turn(&admission(&session.session_id))
+        .unwrap();
+
+    for sequence in 1..=513u64 {
+        let turn = engine
+            .get_logical_turn(&LogicalTurnId::new("turn-1"))
+            .unwrap()
+            .unwrap();
+        let claim = engine
+            .claim_logical_turn(&LogicalTurnClaimRequest {
+                logical_turn_id: turn.logical_turn_id,
+                expected_revision: turn.revision,
+                continuation_id: turn.current_continuation_id,
+                execution_epoch_id: ExecutionEpochId::new(format!("epoch-sqlite-{sequence}")),
+                claim_holder: "service-sqlite".into(),
+                claim_expires_at: "2026-06-19T00:01:00Z".into(),
+                now: NOW.into(),
+            })
+            .unwrap();
+        let request = yield_request_at(&claim, sequence);
+        let yielded = engine.yield_logical_turn(&request).unwrap();
+        assert_eq!(yielded.record.continuation_sequence, sequence);
+        if sequence == 257 {
+            assert!(engine.yield_logical_turn(&request).unwrap().replayed);
+        }
+        if sequence % 128 == 0 {
+            drop(engine);
+            engine = test_engine_with_data_dir(data_dir.clone());
+            assert_eq!(
+                engine
+                    .get_logical_turn(&LogicalTurnId::new("turn-1"))
+                    .unwrap()
+                    .unwrap()
+                    .phase,
+                LogicalTurnPhase::Runnable
+            );
+        }
+    }
+
+    let diagnostic = engine
+        .logical_turn_diagnostics(&LogicalTurnDiagnosticQuery {
+            logical_turn_id: Some(LogicalTurnId::new("turn-1")),
+            session_id: Some(session.session_id),
+            include_terminal: false,
+            limit: 1,
+        })
+        .unwrap()
+        .items
+        .remove(0);
+    assert_eq!(diagnostic.continuation_count, 514);
+    assert_eq!(diagnostic.provider_request_total, 514);
+    assert_eq!(diagnostic.tool_round_total, 513);
+    assert_eq!(
+        diagnostic.operator_state,
+        LogicalTurnOperatorState::QueuedToContinue
+    );
+    engine
+        .cancel_logical_turn(&LogicalTurnCancelRequest {
+            logical_turn_id: diagnostic.logical_turn_id,
+            expected_revision: diagnostic.revision,
+            idempotency_key: "cancel-sqlite-513".into(),
+            reason_code: "certification_cancelled".into(),
+            summary: "cancel SQLite turn after 513 continuations".into(),
+            now: NOW.into(),
+        })
+        .unwrap();
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    assert!(restarted
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        restarted
+            .get_logical_turn(&LogicalTurnId::new("turn-1"))
+            .unwrap()
+            .unwrap()
+            .phase,
+        LogicalTurnPhase::Cancelled
+    );
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
 #[cfg(feature = "postgres")]
 #[ignore = "requires local PostgreSQL dev database env"]
 fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
@@ -562,7 +735,7 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
             statement_timeout_ms: None,
         }),
     };
-    let engine = CoreEngine::initialize(config.clone()).unwrap();
+    let mut engine = CoreEngine::initialize(config.clone()).unwrap();
     let session = engine
         .create_session(session_config(
             "logical-postgres-session",
@@ -574,28 +747,47 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
     engine
         .admit_logical_turn(&admission(&session.session_id))
         .unwrap();
-    let claim = engine
-        .claim_logical_turn(&LogicalTurnClaimRequest {
-            logical_turn_id: LogicalTurnId::new("turn-1"),
-            expected_revision: 1,
-            continuation_id: ContinuationId::new("continuation-0"),
-            execution_epoch_id: ExecutionEpochId::new("epoch-pg-1"),
-            claim_holder: "service-pg".into(),
-            claim_expires_at: "2026-06-19T00:01:00Z".into(),
-            now: NOW.into(),
-        })
-        .unwrap();
-    let yielded = engine.yield_logical_turn(&yield_request(&claim)).unwrap();
-    assert_eq!(yielded.record.phase, LogicalTurnPhase::Yielded);
-    drop(engine);
+    for sequence in 1..=513u64 {
+        let turn = engine
+            .get_logical_turn(&LogicalTurnId::new("turn-1"))
+            .unwrap()
+            .unwrap();
+        let claim = engine
+            .claim_logical_turn(&LogicalTurnClaimRequest {
+                logical_turn_id: turn.logical_turn_id,
+                expected_revision: turn.revision,
+                continuation_id: turn.current_continuation_id,
+                execution_epoch_id: ExecutionEpochId::new(format!("epoch-pg-{sequence}")),
+                claim_holder: "service-pg".into(),
+                claim_expires_at: "2026-06-19T00:01:00Z".into(),
+                now: NOW.into(),
+            })
+            .unwrap();
+        let request = yield_request_at(&claim, sequence);
+        let yielded = engine.yield_logical_turn(&request).unwrap();
+        assert_eq!(yielded.record.continuation_sequence, sequence);
+        if sequence == 257 {
+            assert!(engine.yield_logical_turn(&request).unwrap().replayed);
+            drop(engine);
+            engine = CoreEngine::initialize(config.clone()).unwrap();
+            assert_eq!(
+                engine
+                    .get_logical_turn(&LogicalTurnId::new("turn-1"))
+                    .unwrap()
+                    .unwrap()
+                    .phase,
+                LogicalTurnPhase::Runnable
+            );
+        }
+    }
 
-    let restarted = CoreEngine::initialize(config).unwrap();
-    let turn = restarted
+    let turn = engine
         .get_logical_turn(&LogicalTurnId::new("turn-1"))
         .unwrap()
         .unwrap();
-    assert_eq!(turn.phase, LogicalTurnPhase::Runnable);
-    restarted
+    assert_eq!(turn.continuation_sequence, 513);
+    assert_eq!(turn.phase, LogicalTurnPhase::Yielded);
+    engine
         .cancel_logical_turn(&LogicalTurnCancelRequest {
             logical_turn_id: turn.logical_turn_id,
             expected_revision: turn.revision,
@@ -605,6 +797,21 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
             now: NOW.into(),
         })
         .unwrap();
+    drop(engine);
+
+    let restarted = CoreEngine::initialize(config).unwrap();
+    assert!(restarted
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        restarted
+            .get_logical_turn(&LogicalTurnId::new("turn-1"))
+            .unwrap()
+            .unwrap()
+            .phase,
+        LogicalTurnPhase::Cancelled
+    );
     drop(restarted);
 
     postgres::Client::connect(&database_url, postgres::NoTls)
@@ -715,11 +922,21 @@ fn admission(session_id: &SessionId) -> LogicalTurnAdmissionWrite {
 fn yield_request(
     claim: &rusty_crew_core_protocol::LogicalTurnContinuationClaim,
 ) -> LogicalTurnYieldRequest {
-    let progress = progress(1, "yielded");
+    yield_request_at(claim, 1)
+}
+
+fn yield_request_at(
+    claim: &rusty_crew_core_protocol::LogicalTurnContinuationClaim,
+    sequence: u64,
+) -> LogicalTurnYieldRequest {
+    let fingerprint = format!("yielded-{sequence}");
+    let mut progress = progress(sequence, &fingerprint);
+    progress.committed_provider_operations = sequence + 1;
+    progress.committed_tool_operations = sequence;
     let checkpoint = LogicalTurnCheckpoint {
-        continuation_id: ContinuationId::new("continuation-1"),
+        continuation_id: ContinuationId::new(format!("continuation-{sequence}")),
         logical_turn_id: claim.record.logical_turn_id.clone(),
-        sequence: 1,
+        sequence,
         parent_continuation_id: Some(claim.record.current_continuation_id.clone()),
         completed_epoch_id: claim.record.active_epoch_id.clone(),
         binding_generation: claim.record.binding_generation,
@@ -727,11 +944,11 @@ fn yield_request(
         module_state: BrainContinuationPayload {
             module_id: "test-brain".into(),
             payload_version: "1".into(),
-            payload_fingerprint: "yielded".into(),
-            payload: json!({"cursor": 1}),
+            payload_fingerprint: fingerprint,
+            payload: json!({"cursor": sequence}),
         },
-        operation_cursor: 1,
-        projection_cursor: 1,
+        operation_cursor: sequence,
+        projection_cursor: sequence,
         progress: progress.clone(),
         yield_reason: ContinuationYieldReason::WorkQuantumReached,
         created_at: NOW.into(),
@@ -744,7 +961,10 @@ fn yield_request(
         expected_cancellation_generation: claim.record.cancellation_generation,
         checkpoint: checkpoint.clone(),
         lifecycle_event: LogicalTurnLifecycleEvent {
-            projection_id: TurnProjectionId::new("projection:turn-1:3:yielded"),
+            projection_id: TurnProjectionId::new(format!(
+                "projection:turn-1:{}:yielded",
+                claim.record.revision + 1
+            )),
             logical_turn_id: claim.record.logical_turn_id.clone(),
             session_id: claim.record.session_id.clone(),
             wake_id: claim.record.source_wake_id.clone(),
@@ -752,7 +972,7 @@ fn yield_request(
             execution_epoch_id: claim.record.active_epoch_id.clone(),
             kind: LogicalTurnLifecycleEventKind::ContinuationYielded,
             phase: LogicalTurnPhase::Yielded,
-            continuation_count: claim.record.continuation_sequence + 2,
+            continuation_count: sequence + 1,
             operator_state: rusty_crew_core_protocol::LogicalTurnOperatorState::QueuedToContinue,
             progress_classification:
                 rusty_crew_core_protocol::LogicalTurnProgressClassification::SemanticProgress,

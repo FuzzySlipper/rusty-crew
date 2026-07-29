@@ -5498,6 +5498,85 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "focused >512-round continuation certification"]
+    fn minimal_loop_completes_over_512_rounds_across_many_work_quanta() {
+        const TOOL_ROUNDS: usize = 513;
+        const WORK_QUANTUM: usize = 7;
+
+        let mut scripts = (1..=TOOL_ROUNDS)
+            .map(|round| {
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call(
+                        "lookup",
+                        &format!(r#"{{"round":{round}}}"#),
+                    )),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ])
+            })
+            .collect::<Vec<_>>();
+        scripts.push(Ok(vec![
+            ChatCompletionsEvent::ContentDelta("513-round turn complete".to_string()),
+            ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ]));
+        let outputs = (1..=TOOL_ROUNDS)
+            .map(|round| ChatCompletionsToolOutput::ok(format!("result {round}")))
+            .collect();
+        let mut brain =
+            loop_with(scripts, outputs).with_loop_config(ChatCompletionsBrainLoopConfig {
+                work_quantum_tool_rounds: WORK_QUANTUM,
+                no_progress_attention_threshold: DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
+            });
+
+        let mut continuation_state = None;
+        let mut yielded_epochs = 0usize;
+        let mut streamed_tool_finishes = 0usize;
+        let completed = loop {
+            let output = brain.wake(ChatCompletionsBrainLoopInput {
+                context: context(),
+                messages: if continuation_state.is_none() {
+                    vec![ChatCompletionMessage::user(
+                        "complete more than 512 distinct tool rounds",
+                    )]
+                } else {
+                    vec![ChatCompletionMessage::user(
+                        "replacement input must not enter the resumed turn",
+                    )]
+                },
+                input_images: Vec::new(),
+                provider_state: None,
+                continuation_state,
+                final_message_fallback: None,
+            });
+            streamed_tool_finishes += events(&output.stream)
+                .iter()
+                .filter(|event| matches!(event, BrainEvent::ToolCallFinished { .. }))
+                .count();
+            if output.yielded {
+                assert!(!output.completed);
+                assert!(!output.stream.iter().any(BrainWakeStreamItem::is_terminal));
+                yielded_epochs += 1;
+                continuation_state = output.continuation_state;
+                continue;
+            }
+            break output;
+        };
+
+        assert!(completed.completed);
+        assert_eq!(completed.tool_round_count, TOOL_ROUNDS);
+        assert_eq!(completed.provider_request_count, TOOL_ROUNDS + 1);
+        assert_eq!(streamed_tool_finishes, TOOL_ROUNDS);
+        assert!(yielded_epochs > 64);
+        assert_eq!(terminal_kind(&completed.stream), "actions");
+        assert!(events(&completed.stream).contains(&BrainEvent::TextDelta {
+            text: "513-round turn complete".to_string(),
+        }));
+    }
+
+    #[test]
     fn minimal_loop_allows_tool_error_recovery() {
         let context = context();
         let mut brain = loop_with(

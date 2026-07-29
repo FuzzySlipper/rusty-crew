@@ -2142,6 +2142,7 @@ export interface NativeBridgeModule
   logicalTurnDiagnostics(
     query: LogicalTurnDiagnosticQuery,
   ): Promise<LogicalTurnDiagnosticPage>;
+  requeueLogicalTurnContinuations(): Promise<number>;
   resolveLogicalTurnAttention(input: {
     logicalTurnId: string;
     expectedRevision: number;

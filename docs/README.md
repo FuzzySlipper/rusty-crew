@@ -49,6 +49,9 @@ Operator setup references:
 - `active-turn-termination-guard-inventory.md` — code-backed inventory of
   every known active-turn hard stop, the live/debug effective posture, and the
   migration from finite ceilings to durable continuation.
+- `logical-turn-continuation-live-certification.md` — deterministic,
+  SQLite/PostgreSQL, restart, cancellation, and live-provider evidence for the
+  durable continuation campaign, with browser closure tracked separately.
 - `review-agent-inbox-and-prompt-guidance.md` — copy-ready reviewer and
   requester prompts plus the durable serial inbox contract.
 

@@ -84,6 +84,7 @@ export interface ServiceWakeDispatchContext {
     | "wakeBrain"
   >;
   inFlightWakes: Set<SessionId>;
+  deferredWakeSessions: Set<SessionId>;
   toolCallDebugStore: ToolCallDebugStore;
   wakeTimeout: RustyCrewRuntimeConfig["wakeTimeout"];
   brainForProfile(profileId: ProfileId): BrainImplementationHandle | undefined;
@@ -164,6 +165,7 @@ export async function dispatchWake(
   let dispatchActivityStarted = false;
   let dispatchFinish: RuntimeActivityFinish | undefined;
   if (context.inFlightWakes.has(sessionId)) {
+    context.deferredWakeSessions.add(sessionId);
     return {
       sessionId,
       status: "skipped",
@@ -510,6 +512,27 @@ export async function dispatchWake(
         });
     }
     context.inFlightWakes.delete(sessionId);
+    if (context.deferredWakeSessions.delete(sessionId)) {
+      queueMicrotask(() => {
+        void dispatchWake(
+          context,
+          { type: "brain_wake_requested", sessionId },
+          source,
+          observationContext,
+          options,
+        ).catch((error: unknown) => {
+          context.recordEvent({
+            source: "service-host",
+            eventType: "deferred_wake_dispatch_failed",
+            severity: "error",
+            summary: errorMessage(
+              error,
+              `deferred wake for ${sessionId} failed`,
+            ),
+          });
+        });
+      });
+    }
   }
 }
 

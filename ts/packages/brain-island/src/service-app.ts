@@ -470,6 +470,7 @@ interface ServiceState {
   readonly wakeSubscription: SubscriptionHandle;
   readonly timers: Set<NodeJS.Timeout>;
   readonly inFlightWakes: Set<SessionId>;
+  readonly deferredWakeSessions: Set<SessionId>;
   readonly runtimePauses: Map<string, RuntimePauseRecord>;
   readonly claimedDeliveryIntentIds: Set<number>;
   readonly unmatchedDeliveryIntentIds: Set<number>;
@@ -1068,6 +1069,7 @@ export async function createRustyCrewServiceApp(
       wakeSubscription,
       timers: new Set(),
       inFlightWakes: new Set(),
+      deferredWakeSessions: new Set(),
       runtimePauses: new Map(),
       claimedDeliveryIntentIds: new Set(),
       unmatchedDeliveryIntentIds: new Set(),
@@ -1105,6 +1107,15 @@ export async function createRustyCrewServiceApp(
           sessionIds: chatRestartReconciliation.sessionsReconciled,
           eventsAppended: chatRestartReconciliation.eventsAppended,
         },
+      });
+    }
+    const requeuedLogicalTurns =
+      await state.bridge.requeueLogicalTurnContinuations();
+    if (requeuedLogicalTurns > 0) {
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "logical_turn_continuations_requeued",
+        summary: `Requeued ${requeuedLogicalTurns} durable logical turn continuation(s) after event subscription startup.`,
       });
     }
     await state.externalRuntimeController.start();
@@ -5905,6 +5916,7 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
   return {
     bridge: state.bridge,
     inFlightWakes: state.inFlightWakes,
+    deferredWakeSessions: state.deferredWakeSessions,
     toolCallDebugStore: state.toolCallDebugStore,
     get wakeTimeout() {
       return state.runtimeConfig.wakeTimeout;

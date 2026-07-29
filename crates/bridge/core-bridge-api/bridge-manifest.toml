@@ -121,6 +121,15 @@ errors = "core_protocol::CoreError"
 summary = "Read Rust-owned logical-turn continuation, progress, pause, and terminal diagnostics."
 
 [[operation]]
+name = "requeue_logical_turn_continuations"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::Unit"
+output = "u32"
+errors = "core_protocol::CoreError"
+summary = "Republish Rust-owned runnable logical-turn tickets after the service event subscription is ready."
+
+[[operation]]
 name = "resolve_logical_turn_attention"
 surface = "stable"
 direction = "ts_to_rust"

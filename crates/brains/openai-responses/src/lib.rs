@@ -4189,6 +4189,103 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "focused >512-round continuation certification"]
+    fn continuation_quantum_completes_over_512_rounds_without_duplicate_tools() {
+        const TOOL_ROUNDS: usize = 513;
+        const WORK_QUANTUM: usize = 7;
+
+        let mut scripts = (0..TOOL_ROUNDS)
+            .map(|index| {
+                Ok(vec![
+                    ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                        id: Some(format!("item-{index}")),
+                        call_id: format!("call-{index}"),
+                        name: "lookup".to_string(),
+                        arguments: format!(r#"{{"step":{index}}}"#),
+                    }),
+                    ResponsesEvent::Completed {
+                        response_id: format!("response-{index}"),
+                        usage: None,
+                    },
+                ])
+            })
+            .collect::<Vec<_>>();
+        scripts.push(Ok(vec![
+            ResponsesEvent::TextDelta("513-round Responses turn complete".to_string()),
+            ResponsesEvent::Completed {
+                response_id: "response-final".to_string(),
+                usage: None,
+            },
+        ]));
+        let mut client = FakeResponsesClient::new(scripts);
+        for _ in 0..TOOL_ROUNDS {
+            client = client.expect_function_output("call-0");
+        }
+        let mut config = ResponsesBrainConfig::replay("gpt-5");
+        config.work_quantum_continuation_rounds = WORK_QUANTUM;
+        let mut brain = brain_with_config(
+            client,
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "evidence".to_string(),
+                    is_error: false,
+                },
+            )]),
+            config,
+        );
+
+        let mut continuation_state = None;
+        let mut yielded_epochs = 0usize;
+        let mut streamed_tool_finishes = 0usize;
+        let completed = loop {
+            let mut request = wake_request(None, None);
+            request.continuation_state = continuation_state;
+            let output = brain.wake(request).unwrap();
+            let items = if output.yielded {
+                output.stream.drain_until_closed().unwrap()
+            } else {
+                output.stream.drain_until_terminal().unwrap()
+            };
+            streamed_tool_finishes += items
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item,
+                        BrainWakeStreamItem::Event { event }
+                            if matches!(event.event, BrainEvent::ToolCallFinished { .. })
+                    )
+                })
+                .count();
+            if output.yielded {
+                assert!(!items.iter().any(BrainWakeStreamItem::is_terminal));
+                yielded_epochs += 1;
+                continuation_state = output.continuation_state;
+                continue;
+            }
+            break (output, items);
+        };
+
+        assert_eq!(completed.0.transport_metrics.continuation_round_count, 513);
+        assert_eq!(completed.0.transport_metrics.provider_request_count, 514);
+        assert_eq!(streamed_tool_finishes, TOOL_ROUNDS);
+        assert!(yielded_epochs > 64);
+        assert_eq!(
+            completed.0.transport_metrics.terminal_failure_reason_code,
+            None
+        );
+        assert!(matches!(
+            completed.1.last(),
+            Some(BrainWakeStreamItem::Actions { .. })
+        ));
+        assert!(completed.1.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::TextDelta { text } if text == "513-round Responses turn complete")
+        )));
+    }
+
+    #[test]
     fn provider_failure_and_closed_stream_do_not_commit_provider_state() {
         for script in [
             Ok(vec![ResponsesEvent::Failed("rate limited".to_string())]),

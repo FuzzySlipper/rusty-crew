@@ -131,10 +131,42 @@ test("restart reconciliation repairs only authoritative event-log turns", async 
   assert.equal(appended[0]?.payload.wake_id, "wake-event-log");
 });
 
+test("restart reconciliation leaves a durable continuing logical turn nonterminal", async () => {
+  const appended: Array<{ kind: string; payload: Record<string, unknown> }> =
+    [];
+  const bridge = reconciliationBridge(
+    "event_log",
+    [
+      event(1, "message_created", { role: "user" }),
+      event(2, "assistant_turn_started", { wake_id: "wake-yielded" }),
+      event(3, "tool_call_completed", {
+        wake_id: "wake-yielded",
+        tool_name: "read_file",
+      }),
+      event(4, "logical_turn_queued_to_continue", {
+        logical_turn_id: "turn-1",
+        operator_state: "queued_to_continue",
+      }),
+    ],
+    appended,
+    true,
+  );
+
+  const report = await reconcileInterruptedChatTurns({
+    bridge,
+    now: () => "2026-07-29T00:00:01.000Z",
+  });
+
+  assert.deepEqual(report.sessionsReconciled, []);
+  assert.equal(report.eventsAppended, 0);
+  assert.deepEqual(appended, []);
+});
+
 function reconciliationBridge(
   source: "event_log" | "pending_messages",
   events: ChatEvent[],
   appended: Array<{ kind: string; payload: Record<string, unknown> }>,
+  hasActiveLogicalTurn = false,
 ): Parameters<typeof reconcileInterruptedChatTurns>[0]["bridge"] {
   return {
     async queryChatSessionSummaries() {
@@ -172,6 +204,12 @@ function reconciliationBridge(
           offset: 0,
           next_offset: null,
         },
+      } as never;
+    },
+    async logicalTurnDiagnostics() {
+      return {
+        items: hasActiveLogicalTurn ? [{ logicalTurnId: "turn-1" }] : [],
+        total: hasActiveLogicalTurn ? 1 : 0,
       } as never;
     },
     async appendChatEvent(input) {

@@ -173,6 +173,10 @@ impl NativeBridge {
         self.engine()?.logical_turn_diagnostics(query)
     }
 
+    pub fn requeue_logical_turn_continuations(&self) -> CoreResult<u32> {
+        self.engine()?.requeue_logical_turn_continuations()
+    }
+
     pub fn resolve_logical_turn_attention_for_operator(
         &self,
         logical_turn_id: &LogicalTurnId,

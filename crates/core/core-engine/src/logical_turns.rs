@@ -561,6 +561,23 @@ impl CoreEngine {
         self.store.list_logical_turn_tickets()
     }
 
+    pub fn requeue_logical_turn_continuations(&self) -> CoreResult<u32> {
+        let mut requeued = 0_u32;
+        for ticket in self.store.list_logical_turn_tickets()? {
+            if self
+                .sessions
+                .get_session(&ticket.session_id)
+                .is_ok_and(|session| session.status != SessionStatus::Archived)
+            {
+                self.bus.publish(CoreEvent::BrainWakeRequested {
+                    session_id: ticket.session_id,
+                })?;
+                requeued = requeued.saturating_add(1);
+            }
+        }
+        Ok(requeued)
+    }
+
     pub fn load_logical_turn_frozen_content(
         &self,
         content_ref: &str,
@@ -574,17 +591,7 @@ impl CoreEngine {
         let now = self.now();
         let report = self.store.hydrate_logical_turns(&now)?;
         self.flush_logical_turn_outbox()?;
-        for ticket in self.store.list_logical_turn_tickets()? {
-            if self
-                .sessions
-                .get_session(&ticket.session_id)
-                .is_ok_and(|session| session.status != SessionStatus::Archived)
-            {
-                self.bus.publish(CoreEvent::BrainWakeRequested {
-                    session_id: ticket.session_id,
-                })?;
-            }
-        }
+        self.requeue_logical_turn_continuations()?;
         Ok(report)
     }
 

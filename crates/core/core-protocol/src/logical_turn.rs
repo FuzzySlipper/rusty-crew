@@ -6,7 +6,7 @@
 
 use crate::{IsoTimestamp, ProfileId, SessionId};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 
 macro_rules! string_id {
@@ -285,7 +285,7 @@ pub enum LogicalTurnLifecycleEventKind {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LogicalTurnLifecycleEvent {
     pub projection_id: TurnProjectionId,
@@ -305,6 +305,66 @@ pub struct LogicalTurnLifecycleEvent {
     pub summary: String,
     pub occurred_at: IsoTimestamp,
     pub logical_turn_revision: u64,
+}
+
+impl<'de> Deserialize<'de> for LogicalTurnLifecycleEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PersistedLifecycleEvent {
+            projection_id: TurnProjectionId,
+            logical_turn_id: LogicalTurnId,
+            session_id: SessionId,
+            wake_id: String,
+            continuation_id: ContinuationId,
+            continuation_count: Option<u64>,
+            execution_epoch_id: Option<ExecutionEpochId>,
+            kind: LogicalTurnLifecycleEventKind,
+            phase: LogicalTurnPhase,
+            operator_state: Option<LogicalTurnOperatorState>,
+            progress_classification: Option<LogicalTurnProgressClassification>,
+            progress: LogicalTurnProgress,
+            reason_code: String,
+            summary: String,
+            occurred_at: IsoTimestamp,
+            logical_turn_revision: u64,
+        }
+
+        let persisted = PersistedLifecycleEvent::deserialize(deserializer)?;
+        let attention_required = persisted.kind == LogicalTurnLifecycleEventKind::AttentionRequired;
+        let operator_state = persisted
+            .operator_state
+            .unwrap_or_else(|| LogicalTurnOperatorState::for_phase(persisted.phase));
+        let progress_classification = persisted.progress_classification.unwrap_or_else(|| {
+            LogicalTurnProgressClassification::for_state(
+                persisted.phase,
+                attention_required,
+                &persisted.progress,
+            )
+        });
+
+        Ok(Self {
+            projection_id: persisted.projection_id,
+            logical_turn_id: persisted.logical_turn_id,
+            session_id: persisted.session_id,
+            wake_id: persisted.wake_id,
+            continuation_id: persisted.continuation_id,
+            continuation_count: persisted.continuation_count.unwrap_or(0),
+            execution_epoch_id: persisted.execution_epoch_id,
+            kind: persisted.kind,
+            phase: persisted.phase,
+            operator_state,
+            progress_classification,
+            progress: persisted.progress,
+            reason_code: persisted.reason_code,
+            summary: persisted.summary,
+            occurred_at: persisted.occurred_at,
+            logical_turn_revision: persisted.logical_turn_revision,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -583,5 +643,46 @@ mod tests {
         .unwrap();
         assert_eq!(serialized["logicalTurnId"], "turn-1");
         assert!(serialized.get("timeoutMs").is_none());
+    }
+
+    #[test]
+    fn lifecycle_events_hydrate_from_the_pre_diagnostics_persisted_shape() {
+        let event: LogicalTurnLifecycleEvent = serde_json::from_value(serde_json::json!({
+            "projectionId": "projection-1",
+            "logicalTurnId": "turn-1",
+            "sessionId": "session-1",
+            "wakeId": "wake-1",
+            "continuationId": "continuation-2",
+            "executionEpochId": "epoch-1",
+            "kind": "continuation_yielded",
+            "phase": "yielded",
+            "progress": {
+                "semanticRevision": 3,
+                "committedProviderOperations": 2,
+                "committedToolOperations": 1,
+                "committedProjectionCursor": 4,
+                "assistantContentBytes": 5,
+                "acceptedActionCount": 0,
+                "delegatedCompletionCount": 0,
+                "stateFingerprint": "state-1",
+                "lastLivenessAt": "2026-07-29T00:00:01Z",
+                "lastSemanticProgressAt": "2026-07-29T00:00:01Z"
+            },
+            "reasonCode": "logical_turn_yielded",
+            "summary": "Turn yielded",
+            "occurredAt": "2026-07-29T00:00:01Z",
+            "logicalTurnRevision": 2
+        }))
+        .unwrap();
+
+        assert_eq!(event.continuation_count, 0);
+        assert_eq!(
+            event.operator_state,
+            LogicalTurnOperatorState::QueuedToContinue
+        );
+        assert_eq!(
+            event.progress_classification,
+            LogicalTurnProgressClassification::ToolProgress
+        );
     }
 }

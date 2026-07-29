@@ -147,6 +147,10 @@ const directOutputByMethod = {
     rawNullableGitHubGateWaitRecordSchema,
   ),
   githubGateEventCursor: value("github_gate_event_cursor", nativeHandleSchema),
+  requeueLogicalTurnContinuations: value(
+    "requeue_logical_turn_continuations",
+    nativeHandleSchema,
+  ),
   subscribeEvents: value("subscribe_events", nativeHandleSchema),
   getBuffer: runtimeBufferView(),
 } as const satisfies Record<string, DirectOutputDescriptor>;

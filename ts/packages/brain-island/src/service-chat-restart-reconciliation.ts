@@ -12,7 +12,10 @@ const INTERRUPTION_SUMMARY =
 
 type RestartReconciliationBridge = Pick<
   NativeBridgeModule,
-  "appendChatEvent" | "queryChatSessionSummaries" | "readChatSession"
+  | "appendChatEvent"
+  | "logicalTurnDiagnostics"
+  | "queryChatSessionSummaries"
+  | "readChatSession"
 >;
 
 export interface ChatRestartReconciliationReport {
@@ -49,6 +52,12 @@ export async function reconcileInterruptedChatTurns(input: {
       const events = read.events.map(nativeChatEventToChatEvent);
       const repair = interruptedTurnRepair(events, facts.session.sessionId);
       if (repair === undefined) continue;
+      const activeLogicalTurns = await input.bridge.logicalTurnDiagnostics({
+        sessionId: facts.session.sessionId,
+        includeTerminal: false,
+        limit: 1,
+      });
+      if (activeLogicalTurns.items.length > 0) continue;
       for (const event of repair.events) {
         await input.bridge.appendChatEvent({
           session_id: facts.session.sessionId,

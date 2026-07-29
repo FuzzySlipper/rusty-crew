@@ -265,6 +265,7 @@ export declare class NativeBridgeBinding {
   buildBrainWakeRequestForSession(brain: number, sessionId: string, systemPrompt: string, roleAssemblyJson: Buffer, wakeId: string): JsBufferedBrainWakeRequest
   settleBrainWakeJson(inputJson: string): string
   logicalTurnDiagnosticsJson(inputJson: string): string
+  requeueLogicalTurnContinuations(): number
   resolveLogicalTurnAttentionJson(inputJson: string): string
   cancelLogicalTurnJson(inputJson: string): string
   applyBrainProviderStateOutputJson(brain: number, sessionId: string, wakeId: string, outputJson: string): void
