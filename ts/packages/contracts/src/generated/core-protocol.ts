@@ -18,6 +18,14 @@ export type BrainImplementationId = Brand<string, "BrainImplementationId">;
 
 export type ConversationBranchId = Brand<string, "ConversationBranchId">;
 
+export type ContinuationId = Brand<string, "ContinuationId">;
+
+export type ExecutionEpochId = Brand<string, "ExecutionEpochId">;
+
+export type BrainOperationId = Brand<string, "BrainOperationId">;
+
+export type LogicalTurnId = Brand<string, "LogicalTurnId">;
+
 export type MemoryRecordShapeId = Brand<string, "MemoryRecordShapeId">;
 
 export type MemorySpaceId = Brand<string, "MemorySpaceId">;
@@ -31,6 +39,8 @@ export type RunId = Brand<string, "RunId">;
 export type SessionId = Brand<string, "SessionId">;
 
 export type TaskId = Brand<string, "TaskId">;
+
+export type TurnProjectionId = Brand<string, "TurnProjectionId">;
 
 export type ExternalBindingId = Brand<string, "ExternalBindingId">;
 
@@ -390,6 +400,13 @@ export type BrainActionBatch = {
   wakeId: string;
 };
 
+export type BrainContinuationPayload = {
+  moduleId: string;
+  payload: unknown;
+  payloadFingerprint: string;
+  payloadVersion: string;
+};
+
 export type BrainEvent = {
   type: "started";
 } | {
@@ -545,6 +562,8 @@ export type ContextCompactionArtifactQuery = {
   session_id?: SessionId;
   strategy_id?: string | null;
 };
+
+export type ContinuationYieldReason = "initial_admission" | "work_quantum_reached" | "scheduler_fairness" | "provider_retry" | "buffer_pressure" | "restart_recovery" | "operator_requested";
 
 export type CoreError = {
   kind: CoreErrorKind;
@@ -1066,6 +1085,204 @@ export type ExternalTurnTerminalError = {
 export type FanOutFailurePolicy = "fail_fast" | "fail_soft";
 
 export type FanOutGroupStatus = "in_progress" | "completed" | "partial_failure" | "failed_fast";
+
+export type LogicalTurnAdmission = {
+  initialCheckpoint: LogicalTurnCheckpoint;
+  lifecycleEvent: LogicalTurnLifecycleEvent;
+  record: LogicalTurnRecord;
+};
+
+export type LogicalTurnAttention = {
+  evidenceRefs?: Array<string>;
+  reason: LogicalTurnAttentionReason;
+  reasonCode: string;
+  requiredAt: string;
+  resolutionActions?: Array<LogicalTurnResolutionAction>;
+  retryUnchangedSafe: boolean;
+  summary: string;
+};
+
+export type LogicalTurnAttentionReason = "no_progress" | "tool_outcome_unknown" | "provider_configuration_required" | "provider_credential_required" | "provider_protocol_failure" | "checkpoint_version_unsupported" | "rebind_incompatible" | "storage_repair_required" | "invariant_repair_required";
+
+export type LogicalTurnBindingSnapshot = {
+  brainModuleId: string;
+  brainStrategyId: string;
+  credentialId?: string | null;
+  credentialRevision?: number | null;
+  profileId: string;
+  profileRevision: number;
+  promptFingerprint: string;
+  providerAlias: string;
+  providerFingerprint: string;
+  providerRevision: number;
+  toolRegistryRevision: string;
+  toolSelectionFingerprint: string;
+};
+
+export type LogicalTurnCancelRequest = {
+  expectedRevision: number;
+  idempotencyKey: string;
+  logicalTurnId: string;
+  now: string;
+  reasonCode: string;
+  summary: string;
+};
+
+export type LogicalTurnCancellationReceipt = {
+  alreadyTerminal: boolean;
+  record: LogicalTurnRecord;
+  replayed: boolean;
+};
+
+export type LogicalTurnCheckpoint = {
+  bindingGeneration: number;
+  completedEpochId?: string | null;
+  continuationId: string;
+  createdAt: string;
+  frozenInput: LogicalTurnFrozenInput;
+  logicalTurnId: string;
+  moduleState: BrainContinuationPayload;
+  operationCursor: number;
+  parentContinuationId?: string | null;
+  progress: LogicalTurnProgress;
+  projectionCursor: number;
+  sequence: number;
+  yieldReason: ContinuationYieldReason;
+};
+
+export type LogicalTurnClaimRequest = {
+  claimExpiresAt: string;
+  claimHolder: string;
+  continuationId: string;
+  executionEpochId: string;
+  expectedRevision: number;
+  logicalTurnId: string;
+  now: string;
+};
+
+export type LogicalTurnContinuationClaim = {
+  checkpoint: LogicalTurnCheckpoint;
+  claimGeneration: number;
+  record: LogicalTurnRecord;
+  replayed: boolean;
+};
+
+export type LogicalTurnFrozenInput = {
+  attachmentRefs?: Array<string>;
+  bodyStateFingerprint: string;
+  bodyStateRef: string;
+  roleAssemblyFingerprint: string;
+  roleAssemblyRef: string;
+  systemPromptFingerprint: string;
+  systemPromptRef: string;
+  transcriptCursor: number;
+};
+
+export type LogicalTurnHydrationReport = {
+  alreadyRunnable: number;
+  attentionRequired: number;
+  hydratedAt: string;
+  inspected: number;
+  madeRunnable: number;
+  terminalSkipped: number;
+};
+
+export type LogicalTurnLifecycleEvent = {
+  continuationId: string;
+  executionEpochId?: string | null;
+  kind: LogicalTurnLifecycleEventKind;
+  logicalTurnId: string;
+  logicalTurnRevision: number;
+  occurredAt: string;
+  phase: LogicalTurnPhase;
+  progress: LogicalTurnProgress;
+  projectionId: string;
+  reasonCode: string;
+  sessionId: string;
+  summary: string;
+  wakeId: string;
+};
+
+export type LogicalTurnLifecycleEventKind = "admitted" | "continuation_claimed" | "continuation_progress" | "continuation_checkpointed" | "continuation_yielded" | "continuation_resumed" | "attention_required" | "rebind_requested" | "rebound" | "cancel_requested" | "completed" | "cancelled" | "failed";
+
+export type LogicalTurnOperationKind = "provider_request" | "host_tool_execution";
+
+export type LogicalTurnOperationPhase = "planned" | "leased" | "completed" | "outcome_unknown" | "superseded" | "completed_after_cancel";
+
+export type LogicalTurnOperationRecord = {
+  continuationId: string;
+  createdAt: string;
+  executionEpochId: string;
+  idempotencyKey: string;
+  kind: LogicalTurnOperationKind;
+  leaseExpiresAt?: string | null;
+  leaseGeneration?: number | null;
+  leaseHolder?: string | null;
+  logicalTurnId: string;
+  operationId: string;
+  phase: LogicalTurnOperationPhase;
+  reasonCode?: string | null;
+  requestFingerprint: string;
+  resultRef?: string | null;
+  revision: number;
+  updatedAt: string;
+};
+
+export type LogicalTurnPhase = "admitted" | "runnable" | "running" | "yielded" | "attention_required" | "cancel_requested" | "completed" | "cancelled" | "failed";
+
+export type LogicalTurnProgress = {
+  acceptedActionCount: number;
+  assistantContentBytes: number;
+  committedProjectionCursor: number;
+  committedProviderOperations: number;
+  committedToolOperations: number;
+  consecutiveNoProgressSamples?: number;
+  delegatedCompletionCount: number;
+  lastLivenessAt: string;
+  lastSemanticProgressAt: string;
+  semanticRevision: number;
+  stateFingerprint: string;
+};
+
+export type LogicalTurnRecord = {
+  activeEpochId?: string | null;
+  admittedAt: string;
+  attention?: LogicalTurnAttention | null;
+  binding: LogicalTurnBindingSnapshot;
+  bindingGeneration: number;
+  cancellationGeneration: number;
+  claimExpiresAt?: string | null;
+  claimGeneration?: number | null;
+  claimHolder?: string | null;
+  continuationSequence: number;
+  currentContinuationId: string;
+  logicalTurnId: string;
+  phase: LogicalTurnPhase;
+  revision: number;
+  sessionId: string;
+  sourceWakeId: string;
+  terminalAt?: string | null;
+  updatedAt: string;
+};
+
+export type LogicalTurnResolutionAction = "retry_unchanged" | "retry_provider_operation" | "confirm_tool_completed" | "confirm_tool_not_completed" | "rebind" | "cancel";
+
+export type LogicalTurnYieldReceipt = {
+  checkpoint: LogicalTurnCheckpoint;
+  record: LogicalTurnRecord;
+  replayed: boolean;
+};
+
+export type LogicalTurnYieldRequest = {
+  checkpoint: LogicalTurnCheckpoint;
+  expectedCancellationGeneration: number;
+  expectedClaimGeneration: number;
+  expectedEpochId: string;
+  expectedRevision: number;
+  lifecycleEvent: LogicalTurnLifecycleEvent;
+  logicalTurnId: string;
+  now: string;
+};
 
 export type MemoryConflictPolicy = "expected_revision" | "supersession" | "merge" | "immutable" | "domain_specific";
 
