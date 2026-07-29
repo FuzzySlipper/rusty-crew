@@ -1355,6 +1355,7 @@ dependencies = [
 name = "rusty-crew-core-engine"
 version = "0.1.0"
 dependencies = [
+ "postgres",
  "rusty-crew-core-body",
  "rusty-crew-core-bus",
  "rusty-crew-core-config",

@@ -66,6 +66,47 @@ pub struct PersistedEvent {
     pub event: CoreEvent,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalTurnContentWrite {
+    pub content_ref: String,
+    pub fingerprint: String,
+    pub content_kind: String,
+    pub content: Vec<u8>,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalTurnAdmissionWrite {
+    pub admission: LogicalTurnAdmission,
+    pub frozen_content: Vec<LogicalTurnContentWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogicalTurnContinuationTicket {
+    pub logical_turn_id: LogicalTurnId,
+    pub continuation_id: ContinuationId,
+    pub session_id: SessionId,
+    pub reason: ContinuationYieldReason,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalTurnOutboxRecord {
+    pub event: LogicalTurnLifecycleEvent,
+    pub delivered_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalTurnCompletionRequest {
+    pub logical_turn_id: LogicalTurnId,
+    pub expected_revision: u64,
+    pub expected_epoch_id: ExecutionEpochId,
+    pub expected_claim_generation: u64,
+    pub expected_cancellation_generation: u64,
+    pub lifecycle_event: LogicalTurnLifecycleEvent,
+    pub now: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryPage {
     pub limit: Option<u32>,
@@ -3218,6 +3259,13 @@ pub enum DiagnosticTable {
     EventWakeIndex,
     RuntimeCounters,
     RuntimeActivities,
+    LogicalBrainTurns,
+    LogicalBrainTurnCheckpoints,
+    LogicalBrainTurnOperations,
+    LogicalBrainTurnProjectionOutbox,
+    LogicalBrainTurnTickets,
+    LogicalBrainTurnCancelReceipts,
+    LogicalBrainTurnBlobs,
     RuntimeSearch,
     QueuedMessages,
     RuntimeImportBatches,
@@ -3289,6 +3337,13 @@ impl DiagnosticTable {
         Self::EventWakeIndex,
         Self::RuntimeCounters,
         Self::RuntimeActivities,
+        Self::LogicalBrainTurns,
+        Self::LogicalBrainTurnCheckpoints,
+        Self::LogicalBrainTurnOperations,
+        Self::LogicalBrainTurnProjectionOutbox,
+        Self::LogicalBrainTurnTickets,
+        Self::LogicalBrainTurnCancelReceipts,
+        Self::LogicalBrainTurnBlobs,
         Self::RuntimeSearch,
         Self::QueuedMessages,
         Self::RuntimeImportBatches,
@@ -3360,6 +3415,13 @@ impl DiagnosticTable {
             "event_wake_index" => Ok(Self::EventWakeIndex),
             "runtime_counters" => Ok(Self::RuntimeCounters),
             "runtime_activities" => Ok(Self::RuntimeActivities),
+            "logical_brain_turns" => Ok(Self::LogicalBrainTurns),
+            "logical_brain_turn_checkpoints" => Ok(Self::LogicalBrainTurnCheckpoints),
+            "logical_brain_turn_operations" => Ok(Self::LogicalBrainTurnOperations),
+            "logical_brain_turn_projection_outbox" => Ok(Self::LogicalBrainTurnProjectionOutbox),
+            "logical_brain_turn_tickets" => Ok(Self::LogicalBrainTurnTickets),
+            "logical_brain_turn_cancel_receipts" => Ok(Self::LogicalBrainTurnCancelReceipts),
+            "logical_brain_turn_blobs" => Ok(Self::LogicalBrainTurnBlobs),
             "runtime_search_fts" => Ok(Self::RuntimeSearch),
             "queued_messages" => Ok(Self::QueuedMessages),
             "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
@@ -3436,6 +3498,13 @@ impl DiagnosticTable {
             Self::EventWakeIndex => "event_wake_index",
             Self::RuntimeCounters => "runtime_counters",
             Self::RuntimeActivities => "runtime_activities",
+            Self::LogicalBrainTurns => "logical_brain_turns",
+            Self::LogicalBrainTurnCheckpoints => "logical_brain_turn_checkpoints",
+            Self::LogicalBrainTurnOperations => "logical_brain_turn_operations",
+            Self::LogicalBrainTurnProjectionOutbox => "logical_brain_turn_projection_outbox",
+            Self::LogicalBrainTurnTickets => "logical_brain_turn_tickets",
+            Self::LogicalBrainTurnCancelReceipts => "logical_brain_turn_cancel_receipts",
+            Self::LogicalBrainTurnBlobs => "logical_brain_turn_blobs",
             Self::RuntimeSearch => "runtime_search_fts",
             Self::QueuedMessages => "queued_messages",
             Self::RuntimeImportBatches => "runtime_import_batches",

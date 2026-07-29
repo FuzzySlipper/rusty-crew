@@ -25,6 +25,12 @@ import {
   toNativeCoordinationObservedCoreEvent,
   type RawCoordinationObservedCoreEvent,
 } from "./coordination-event-wire.js";
+import {
+  toDelegationLifecycleEvent,
+  toNativeDelegationLifecycleEvent,
+  type RawDelegationLifecycleEvent,
+  type RawLogicalTurnLifecycleEvent,
+} from "./lifecycle-event-wire.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
 
 export function toNativeBodyState(state: BodyState): unknown {
@@ -132,13 +138,7 @@ export function toNativeCoreEvent(event: CoreEvent): unknown {
     case "delegation_lifecycle_observed":
       return {
         type: event.type,
-        lifecycle: {
-          parent_session_id: event.lifecycle.parentSessionId,
-          delegated_session_id: event.lifecycle.delegatedSessionId,
-          run_id: event.lifecycle.runId,
-          phase: event.lifecycle.phase,
-          detail: event.lifecycle.detail,
-        },
+        lifecycle: toNativeDelegationLifecycleEvent(event.lifecycle),
       };
     case "external_event_injected":
       return {
@@ -149,6 +149,8 @@ export function toNativeCoreEvent(event: CoreEvent): unknown {
       return { type: event.type, update: toNativeDenDataUpdate(event.update) };
     case "brain_wake_requested":
       return { type: event.type, session_id: event.sessionId };
+    case "logical_turn_lifecycle_observed":
+      return { type: event.type, lifecycle: event.lifecycle };
     case "brain_event_observed":
       return {
         type: event.type,
@@ -417,6 +419,8 @@ export function toCoreEvent(event: RawCoreEvent): CoreEvent {
       };
     case "brain_wake_requested":
       return { type: event.type, sessionId: event.session_id };
+    case "logical_turn_lifecycle_observed":
+      return { type: event.type, lifecycle: event.lifecycle };
     case "brain_event_observed":
       return {
         type: event.type,
@@ -440,18 +444,6 @@ export function toCoreEvent(event: RawCoreEvent): CoreEvent {
         },
       };
   }
-}
-
-export function toDelegationLifecycleEvent(
-  lifecycle: RawDelegationLifecycleEvent,
-): Extract<CoreEvent, { type: "delegation_lifecycle_observed" }>["lifecycle"] {
-  return {
-    parentSessionId: lifecycle.parent_session_id,
-    delegatedSessionId: lifecycle.delegated_session_id,
-    runId: lifecycle.run_id,
-    phase: lifecycle.phase,
-    detail: lifecycle.detail,
-  };
 }
 
 export function toDelegatedSessionRuntimeStatus(
@@ -672,6 +664,10 @@ export type RawCoreEvent =
     }
   | { type: "brain_wake_requested"; session_id: SessionId }
   | {
+      type: "logical_turn_lifecycle_observed";
+      lifecycle: RawLogicalTurnLifecycleEvent;
+    }
+  | {
       type: "brain_event_observed";
       session_id: SessionId;
       wake_id?: string;
@@ -693,17 +689,6 @@ export type RawCoreEvent =
         summary: string;
       };
     };
-
-export interface RawDelegationLifecycleEvent {
-  parent_session_id: SessionId;
-  delegated_session_id: SessionId;
-  run_id?: RunId;
-  phase: Extract<
-    CoreEvent,
-    { type: "delegation_lifecycle_observed" }
-  >["lifecycle"]["phase"];
-  detail?: string;
-}
 
 export interface RawDelegatedSessionRuntimeStatus {
   session: RawSessionState;

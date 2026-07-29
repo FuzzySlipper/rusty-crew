@@ -57,3 +57,55 @@ test("chat terminal events keep completion before turn finished", async () => {
   });
   assert.deepEqual(appended[1]?.payload, { wake_id: wakeId });
 });
+
+test("logical turn yields project as continuing rather than terminal chat events", async () => {
+  const appended: Array<{ kind: string; payload: unknown }> = [];
+  const context = {
+    appendChatEvent: async (
+      _sessionId: string,
+      event: { kind: string; payload: unknown },
+    ) => {
+      appended.push(event);
+      return event;
+    },
+  } as unknown as ServiceWakeDispatchContext;
+  const session = { sessionId: "session-1" } as SessionState;
+
+  await appendCoreEventsToChatLog(context, session, "dispatch-wake", [
+    {
+      type: "logical_turn_lifecycle_observed",
+      lifecycle: {
+        projectionId: "projection-1",
+        logicalTurnId: "turn-1",
+        sessionId: session.sessionId,
+        wakeId: "source-wake",
+        continuationId: "continuation-2",
+        kind: "continuation_yielded",
+        phase: "yielded",
+        progress: {
+          semanticRevision: 2,
+          committedProviderOperations: 1,
+          committedToolOperations: 0,
+          committedProjectionCursor: 1,
+          assistantContentBytes: 128,
+          acceptedActionCount: 0,
+          delegatedCompletionCount: 0,
+          stateFingerprint: "progress-2",
+          lastLivenessAt: "2026-07-29T00:00:00Z",
+          lastSemanticProgressAt: "2026-07-29T00:00:00Z",
+          consecutiveNoProgressSamples: 0,
+        },
+        reasonCode: "work_quantum_reached",
+        summary: "turn will continue",
+        occurredAt: "2026-07-29T00:00:00Z",
+        logicalTurnRevision: 3,
+      },
+    },
+  ]);
+
+  assert.deepEqual(
+    appended.map((event) => event.kind),
+    ["logical_turn_continuing"],
+  );
+  assert.equal((appended[0]?.payload as { phase?: string }).phase, "yielded");
+});

@@ -20,6 +20,7 @@ mod external_runtime_certification;
 mod external_runtime_compatibility;
 mod github_gate;
 mod github_gate_wait;
+mod logical_turns;
 mod maintenance;
 mod memory;
 mod memory_spaces;
@@ -99,11 +100,12 @@ use rusty_crew_core_persistence::{
     CuratorMutationRecord, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
     DeleteChatMessageVariantRequest, DurableMessageRecord,
     EnsureActiveChatConversationBranchRequest, EnsureActiveChatConversationBranchResult, ExactPage,
-    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateDiagnostic,
+    LogicalTurnAdmissionWrite, LogicalTurnCompletionRequest, LogicalTurnContinuationTicket,
+    LogicalTurnOutboxRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateDiagnostic,
     ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
     ProviderWireStateWrite, QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState,
     RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest,
@@ -140,7 +142,10 @@ use rusty_crew_core_protocol::{
     DelegationLineage, DenDataUpdate, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
     ExternalTurnPhase, FanOutFailurePolicy, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
     GitHubGateTerminalReceipt, GitHubGateWaitPhase, GitHubGateWaitRecord, GitHubGateWakeResult,
-    IsoTimestamp, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
+    IsoTimestamp, LogicalTurnAdmission, LogicalTurnCancelRequest, LogicalTurnCancellationReceipt,
+    LogicalTurnClaimRequest, LogicalTurnContinuationClaim, LogicalTurnHydrationReport,
+    LogicalTurnId, LogicalTurnOperationRecord, LogicalTurnRecord, LogicalTurnYieldReceipt,
+    LogicalTurnYieldRequest, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
     MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor,
     MessageSlotId, MessageVariantId, ModelProviderCredentialLink,
     ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink, ModelProviderQuery,

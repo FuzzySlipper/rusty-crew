@@ -240,6 +240,172 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn insert_logical_turn_admission(
+        &self,
+        write: &LogicalTurnAdmissionWrite,
+    ) -> CoreResult<LogicalTurnAdmission> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.insert_logical_turn_admission(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.insert_logical_turn_admission(write),
+        }
+    }
+
+    pub fn get_logical_turn(
+        &self,
+        logical_turn_id: &LogicalTurnId,
+    ) -> CoreResult<Option<LogicalTurnRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_logical_turn(logical_turn_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_logical_turn(logical_turn_id),
+        }
+    }
+
+    pub fn get_logical_turn_checkpoint(
+        &self,
+        continuation_id: &ContinuationId,
+    ) -> CoreResult<Option<LogicalTurnCheckpoint>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_logical_turn_checkpoint(continuation_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_logical_turn_checkpoint(continuation_id),
+        }
+    }
+
+    pub fn load_logical_turn_content(&self, content_ref: &str) -> CoreResult<Option<Vec<u8>>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_logical_turn_content(content_ref),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_logical_turn_content(content_ref),
+        }
+    }
+
+    pub fn claim_logical_turn(
+        &self,
+        request: &LogicalTurnClaimRequest,
+    ) -> CoreResult<LogicalTurnContinuationClaim> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.claim_logical_turn(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.claim_logical_turn(request),
+        }
+    }
+
+    pub fn yield_logical_turn(
+        &self,
+        request: &LogicalTurnYieldRequest,
+    ) -> CoreResult<LogicalTurnYieldReceipt> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.yield_logical_turn(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.yield_logical_turn(request),
+        }
+    }
+
+    pub fn complete_logical_turn(
+        &self,
+        request: &LogicalTurnCompletionRequest,
+    ) -> CoreResult<LogicalTurnRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.complete_logical_turn(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.complete_logical_turn(request),
+        }
+    }
+
+    pub fn cancel_logical_turn(
+        &self,
+        request: &LogicalTurnCancelRequest,
+    ) -> CoreResult<LogicalTurnCancellationReceipt> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.cancel_logical_turn(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.cancel_logical_turn(request),
+        }
+    }
+
+    pub fn insert_logical_turn_operation(
+        &self,
+        operation: &LogicalTurnOperationRecord,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.insert_logical_turn_operation(operation),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.insert_logical_turn_operation(operation),
+        }
+    }
+
+    pub fn update_logical_turn_operation(
+        &self,
+        operation: &LogicalTurnOperationRecord,
+        expected_revision: u64,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.update_logical_turn_operation(operation, expected_revision)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.update_logical_turn_operation(operation, expected_revision)
+            }
+        }
+    }
+
+    pub fn list_logical_turn_operations(
+        &self,
+        logical_turn_id: &LogicalTurnId,
+    ) -> CoreResult<Vec<LogicalTurnOperationRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_logical_turn_operations(logical_turn_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_logical_turn_operations(logical_turn_id),
+        }
+    }
+
+    pub fn list_logical_turn_tickets(&self) -> CoreResult<Vec<LogicalTurnContinuationTicket>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_logical_turn_tickets(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_logical_turn_tickets(),
+        }
+    }
+
+    pub fn list_pending_logical_turn_outbox(&self) -> CoreResult<Vec<LogicalTurnOutboxRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_pending_logical_turn_outbox(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_pending_logical_turn_outbox(),
+        }
+    }
+
+    pub fn mark_logical_turn_outbox_delivered(
+        &self,
+        projection_id: &str,
+        delivered_at: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.mark_logical_turn_outbox_delivered(projection_id, delivered_at)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.mark_logical_turn_outbox_delivered(projection_id, delivered_at)
+            }
+        }
+    }
+
+    pub fn hydrate_logical_turns(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<LogicalTurnHydrationReport> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.hydrate_logical_turns(now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.hydrate_logical_turns(now),
+        }
+    }
+
     pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
         match self {
             Self::Sqlite(sqlite) => sqlite.save_queued_message(record),

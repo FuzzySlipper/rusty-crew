@@ -39,7 +39,10 @@ impl BodyProjector {
         );
         let recent_events = self
             .bus
-            .recent_events_for_session(session_id, self.recent_event_limit)?;
+            .recent_events_for_session(session_id, self.recent_event_limit)?
+            .into_iter()
+            .filter(|event| !matches!(event, CoreEvent::LogicalTurnLifecycleObserved { .. }))
+            .collect();
 
         Ok(BodyState {
             session,

@@ -10,6 +10,7 @@ mod chat_events;
 mod conversation_attachment;
 mod curator;
 mod external_runtime;
+mod logical_turns;
 mod memory_lore;
 mod pool;
 mod profile_config;
@@ -1474,7 +1475,7 @@ impl PostgresBackendStore {
             backend_label: "PostgreSQL durable backend".to_string(),
             schema: self.schema.clone(),
             repository_coverage:
-                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,runtime_activities,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers,external_agent_runtime"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,runtime_activities,logical_turns,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers,external_agent_runtime"
                     .to_string(),
             schema_version: self.schema_version()?,
             supported_schema_version: POSTGRES_SCHEMA_VERSION,
@@ -1547,6 +1548,34 @@ impl PostgresBackendStore {
                 RuntimeStorageTableCount {
                     table: "runtime_activities".to_string(),
                     rows: self.table_rows("runtime_activities")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turns".to_string(),
+                    rows: self.table_rows("logical_brain_turns")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turn_checkpoints".to_string(),
+                    rows: self.table_rows("logical_brain_turn_checkpoints")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turn_operations".to_string(),
+                    rows: self.table_rows("logical_brain_turn_operations")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turn_projection_outbox".to_string(),
+                    rows: self.table_rows("logical_brain_turn_projection_outbox")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turn_tickets".to_string(),
+                    rows: self.table_rows("logical_brain_turn_tickets")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turn_cancel_receipts".to_string(),
+                    rows: self.table_rows("logical_brain_turn_cancel_receipts")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "logical_brain_turn_blobs".to_string(),
+                    rows: self.table_rows("logical_brain_turn_blobs")?,
                 },
                 RuntimeStorageTableCount {
                     table: "module_simple_kv_entries".to_string(),
@@ -2781,6 +2810,9 @@ fn postgres_event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
         CoreEvent::BrainWakeRequested { session_id }
         | CoreEvent::BrainEventObserved { session_id, .. }
         | CoreEvent::BrainActionsAccepted { session_id, .. } => vec![session_id.clone()],
+        CoreEvent::LogicalTurnLifecycleObserved { lifecycle } => {
+            vec![lifecycle.session_id.clone()]
+        }
         CoreEvent::CompletionPacketDelivered { packet } => vec![packet.session_id.clone()],
         CoreEvent::AgentRoundObserved { round } => round
             .sender_session_id
@@ -2812,6 +2844,7 @@ fn postgres_event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { .. }
         | CoreEvent::BrainActionsAccepted { .. }
         | CoreEvent::CompletionPacketDelivered { .. } => Vec::new(),
@@ -2838,6 +2871,7 @@ fn postgres_event_correlation_ids(event: &CoreEvent) -> Vec<String> {
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { .. }
         | CoreEvent::BrainActionsAccepted { .. }
         | CoreEvent::CompletionPacketDelivered { .. } => Vec::new(),
@@ -2864,6 +2898,7 @@ fn postgres_event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { wake_id: None, .. }
         | CoreEvent::BrainActionsAccepted { .. }
         | CoreEvent::CompletionPacketDelivered { .. } => Vec::new(),
@@ -2914,7 +2949,8 @@ fn postgres_event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> 
         | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::AgentRoundObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
-        | CoreEvent::DenDataUpdated { .. } => Vec::new(),
+        | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::LogicalTurnLifecycleObserved { .. } => Vec::new(),
     }
 }
 
@@ -9146,6 +9182,7 @@ fn core_event_kind_from_debug_str(raw: &str) -> CoreResult<crate::CoreEventKind>
         "SessionCreated" => Ok(crate::CoreEventKind::SessionCreated),
         "SessionArchived" => Ok(crate::CoreEventKind::SessionArchived),
         "BrainWakeRequested" => Ok(crate::CoreEventKind::BrainWakeRequested),
+        "LogicalTurnLifecycleObserved" => Ok(crate::CoreEventKind::LogicalTurnLifecycleObserved),
         "BrainEventObserved" => Ok(crate::CoreEventKind::BrainEventObserved),
         "BrainActionsAccepted" => Ok(crate::CoreEventKind::BrainActionsAccepted),
         "DelegationLifecycleObserved" => Ok(crate::CoreEventKind::DelegationLifecycleObserved),

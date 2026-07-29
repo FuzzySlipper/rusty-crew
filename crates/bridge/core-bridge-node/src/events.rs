@@ -214,6 +214,9 @@ pub(crate) fn parse_event_kind(
         }
         "den_data_updated" => Ok(rusty_crew_core_bridge_api::CoreEventKind::DenDataUpdated),
         "brain_wake_requested" => Ok(rusty_crew_core_bridge_api::CoreEventKind::BrainWakeRequested),
+        "logical_turn_lifecycle_observed" => {
+            Ok(rusty_crew_core_bridge_api::CoreEventKind::LogicalTurnLifecycleObserved)
+        }
         "brain_event_observed" => Ok(rusty_crew_core_bridge_api::CoreEventKind::BrainEventObserved),
         "brain_actions_accepted" => {
             Ok(rusty_crew_core_bridge_api::CoreEventKind::BrainActionsAccepted)

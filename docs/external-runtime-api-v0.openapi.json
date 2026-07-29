@@ -2925,6 +2925,19 @@
           },
           {
             "properties": {
+              "lifecycle": {
+                "$ref": "#/components/schemas/LogicalTurnLifecycleEvent"
+              },
+              "type": {
+                "const": "logical_turn_lifecycle_observed",
+                "type": "string"
+              }
+            },
+            "required": ["type", "lifecycle"],
+            "type": "object"
+          },
+          {
+            "properties": {
               "event": { "$ref": "#/components/schemas/BrainEvent" },
               "session_id": { "type": "string" },
               "type": { "const": "brain_event_observed", "type": "string" },
@@ -2966,6 +2979,7 @@
           "external_event_injected",
           "den_data_updated",
           "brain_wake_requested",
+          "logical_turn_lifecycle_observed",
           "brain_event_observed",
           "brain_actions_accepted",
           "completion_packet_delivered"

@@ -89,6 +89,20 @@ owns = [
 notes = "Provider wire-state payloads, expiry, invalidation, and diagnostics."
 
 [[scope]]
+id = "logical_turn_continuations"
+label = "Logical Turn Continuations"
+owns = [
+  "logical_brain_turns",
+  "logical_brain_turn_checkpoints",
+  "logical_brain_turn_operations",
+  "logical_brain_turn_projection_outbox",
+  "logical_brain_turn_tickets",
+  "logical_brain_turn_cancel_receipts",
+  "logical_brain_turn_blobs",
+]
+notes = "Rust-owned logical turn lifecycle, immutable continuation checkpoints, resumable tickets, cancellation fences, frozen input blobs, operations, and idempotent projection outbox records."
+
+[[scope]]
 id = "external_agent_runtime"
 label = "External Agent Runtime"
 owns = [

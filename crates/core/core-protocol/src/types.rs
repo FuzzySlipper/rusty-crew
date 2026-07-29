@@ -585,6 +585,7 @@ pub enum CoreEventKind {
     ExternalEventInjected,
     DenDataUpdated,
     BrainWakeRequested,
+    LogicalTurnLifecycleObserved,
     BrainEventObserved,
     BrainActionsAccepted,
     CompletionPacketDelivered,
@@ -602,6 +603,7 @@ impl CoreEventKind {
             CoreEvent::ExternalEventInjected { .. } => Self::ExternalEventInjected,
             CoreEvent::DenDataUpdated { .. } => Self::DenDataUpdated,
             CoreEvent::BrainWakeRequested { .. } => Self::BrainWakeRequested,
+            CoreEvent::LogicalTurnLifecycleObserved { .. } => Self::LogicalTurnLifecycleObserved,
             CoreEvent::BrainEventObserved { .. } => Self::BrainEventObserved,
             CoreEvent::BrainActionsAccepted { .. } => Self::BrainActionsAccepted,
             CoreEvent::CompletionPacketDelivered { .. } => Self::CompletionPacketDelivered,
@@ -801,6 +803,9 @@ pub enum CoreEvent {
     },
     BrainWakeRequested {
         session_id: SessionId,
+    },
+    LogicalTurnLifecycleObserved {
+        lifecycle: crate::LogicalTurnLifecycleEvent,
     },
     BrainEventObserved {
         session_id: SessionId,

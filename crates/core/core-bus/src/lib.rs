@@ -239,6 +239,9 @@ fn event_mentions_session(event: &CoreEvent, session_id: &SessionId) -> bool {
             session_id: archived,
         } => archived == session_id,
         CoreEvent::BrainWakeRequested { session_id: wake } => wake == session_id,
+        CoreEvent::LogicalTurnLifecycleObserved { lifecycle } => {
+            &lifecycle.session_id == session_id
+        }
         CoreEvent::BrainEventObserved {
             session_id: observed,
             ..
@@ -280,6 +283,7 @@ fn event_mentions_agent(event: &CoreEvent, agent_id: &AgentId) -> bool {
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { .. }
         | CoreEvent::BrainActionsAccepted { .. }
         | CoreEvent::CompletionPacketDelivered { .. } => false,
@@ -300,6 +304,7 @@ fn event_mentions_adapter(
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { .. }
         | CoreEvent::BrainActionsAccepted { .. }
         | CoreEvent::CompletionPacketDelivered { .. } => false,

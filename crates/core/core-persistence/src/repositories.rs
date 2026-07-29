@@ -270,6 +270,16 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         ],
     },
     RepositoryGroupDescriptor {
+        group_id: "logical_turns",
+        label: "Logical Brain Turns",
+        correctness_sensitive: true,
+        backend_requirements: &[TXN, JSON, ROW_CLAIMS, SIZE, PLAN],
+        notes: &[
+            "Owns durable logical turns, immutable continuation checkpoints, operation fencing, and lifecycle projection outbox records.",
+            "Claims, yields, cancellation, and restart hydration must remain atomic so a process restart cannot resurrect cancelled work.",
+        ],
+    },
+    RepositoryGroupDescriptor {
         group_id: "runtime_activities",
         label: "Runtime Activities",
         correctness_sensitive: true,

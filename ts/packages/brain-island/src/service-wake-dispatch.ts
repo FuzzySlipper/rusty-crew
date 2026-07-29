@@ -539,6 +539,25 @@ export async function appendCoreEventsToChatLog(
         event.event,
       );
     } else if (
+      event.type === "logical_turn_lifecycle_observed" &&
+      event.lifecycle.sessionId === session.sessionId
+    ) {
+      await context.appendChatEvent(session.sessionId, {
+        kind: logicalTurnChatEventKind(event.lifecycle.kind),
+        payload: {
+          logical_turn_id: event.lifecycle.logicalTurnId,
+          projection_id: event.lifecycle.projectionId,
+          continuation_id: event.lifecycle.continuationId,
+          execution_epoch_id: event.lifecycle.executionEpochId,
+          wake_id: event.lifecycle.wakeId,
+          phase: event.lifecycle.phase,
+          reason_code: event.lifecycle.reasonCode,
+          summary: event.lifecycle.summary,
+          progress: event.lifecycle.progress,
+          logical_turn_revision: event.lifecycle.logicalTurnRevision,
+        },
+      });
+    } else if (
       event.type === "completion_packet_delivered" &&
       event.packet.sessionId === session.sessionId
     ) {
@@ -823,6 +842,7 @@ async function observeWakeEvents<T>(
 ): Promise<{ accepted: T; events: CoreEvent[] }> {
   const subscription = await context.bridge.subscribeEvents({
     eventKinds: [
+      "logical_turn_lifecycle_observed",
       "brain_event_observed",
       "brain_actions_accepted",
       "completion_packet_delivered",
@@ -874,6 +894,41 @@ async function observeWakeEvents<T>(
     return { accepted: result.value, events };
   } finally {
     await context.bridge.unsubscribeEvents(subscription).catch(() => undefined);
+  }
+}
+
+function logicalTurnChatEventKind(
+  kind: Extract<
+    CoreEvent,
+    { type: "logical_turn_lifecycle_observed" }
+  >["lifecycle"]["kind"],
+):
+  | "logical_turn_admitted"
+  | "logical_turn_continuing"
+  | "logical_turn_attention_required"
+  | "logical_turn_completed"
+  | "logical_turn_cancelled"
+  | "logical_turn_failed"
+  | "unknown" {
+  switch (kind) {
+    case "continuation_yielded":
+    case "continuation_resumed":
+    case "continuation_claimed":
+    case "continuation_checkpointed":
+    case "continuation_progress":
+      return "logical_turn_continuing";
+    case "attention_required":
+      return "logical_turn_attention_required";
+    case "completed":
+      return "logical_turn_completed";
+    case "failed":
+      return "logical_turn_failed";
+    case "cancelled":
+      return "logical_turn_cancelled";
+    case "admitted":
+      return "logical_turn_admitted";
+    default:
+      return "unknown";
   }
 }
 

@@ -5,6 +5,7 @@ pub(crate) mod conversations;
 pub(crate) mod curator;
 pub(crate) mod events;
 pub(crate) mod external_runtime;
+pub(crate) mod logical_turns;
 pub(crate) mod memory;
 pub(crate) mod queued_messages;
 pub(crate) mod roleplay_lore;

@@ -19,3 +19,6 @@ rusty-crew-roleplay-core = { path = "../../roleplay/roleplay-core" }
 serde_json.workspace = true
 sha2.workspace = true
 time.workspace = true
+
+[dev-dependencies]
+postgres.workspace = true

@@ -15,10 +15,16 @@ use rusty_crew_core_persistence::{
 use rusty_crew_core_protocol::SessionHistoryWindow;
 use rusty_crew_core_protocol::{
     AdapterId, AgentDirectoryRuntimeKind, AgentId, AgentMessage, AttachmentLinkId, BrainAction,
-    BrainEvent, CompletionPacket, CompletionStatus, ConversationBranchId, ConversationSnapshotId,
-    CoreErrorKind, CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase,
-    ExternalEventPayload, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind, TaskId,
+    BrainContinuationPayload, BrainEvent, CompletionPacket, CompletionStatus, ContinuationId,
+    ContinuationYieldReason, ConversationBranchId, ConversationSnapshotId, CoreErrorKind,
+    CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase, ExecutionEpochId,
+    ExternalEventPayload, LogicalTurnAdmission, LogicalTurnBindingSnapshot,
+    LogicalTurnCancelRequest, LogicalTurnCheckpoint, LogicalTurnClaimRequest,
+    LogicalTurnFrozenInput, LogicalTurnId, LogicalTurnLifecycleEvent,
+    LogicalTurnLifecycleEventKind, LogicalTurnPhase, LogicalTurnProgress, LogicalTurnRecord,
+    LogicalTurnYieldRequest, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind, TaskId,
     ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
+    TurnProjectionId,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +35,7 @@ static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(1);
 mod chat_support;
 mod delegation_support;
 mod github_gate;
+mod logical_turns;
 mod memory_spaces;
 use chat_support::*;
 use delegation_support::*;

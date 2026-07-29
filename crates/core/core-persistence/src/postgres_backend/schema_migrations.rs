@@ -1,9 +1,10 @@
 //! PostgreSQL schema migration catalog and application logic.
 
+use super::logical_turns::apply_postgres_logical_turns;
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 40;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 41;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -215,6 +216,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 40,
         description: "add typed runtime activity accounting",
         apply: Some(apply_postgres_runtime_activities),
+    },
+    PostgresSchemaMigration {
+        version: 41,
+        description: "add durable logical brain turn continuation",
+        apply: Some(apply_postgres_logical_turns),
     },
 ];
 

@@ -600,6 +600,9 @@ export type CoreEvent = {
   sessionId: SessionId;
   type: "brain_wake_requested";
 } | {
+  lifecycle: LogicalTurnLifecycleEvent;
+  type: "logical_turn_lifecycle_observed";
+} | {
   event: BrainEvent;
   sessionId: SessionId;
   type: "brain_event_observed";
@@ -613,7 +616,7 @@ export type CoreEvent = {
   type: "completion_packet_delivered";
 };
 
-export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
+export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "logical_turn_lifecycle_observed" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
 
 export type CrewAgentSessionCreationOutcome = "created" | "replayed" | "recovered";
 

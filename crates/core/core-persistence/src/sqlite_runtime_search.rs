@@ -193,6 +193,7 @@ fn core_event_kind_from_debug_str(raw: &str) -> rusqlite::Result<CoreEventKind> 
         "ExternalEventInjected" => Ok(CoreEventKind::ExternalEventInjected),
         "DenDataUpdated" => Ok(CoreEventKind::DenDataUpdated),
         "BrainWakeRequested" => Ok(CoreEventKind::BrainWakeRequested),
+        "LogicalTurnLifecycleObserved" => Ok(CoreEventKind::LogicalTurnLifecycleObserved),
         "BrainEventObserved" => Ok(CoreEventKind::BrainEventObserved),
         "BrainActionsAccepted" => Ok(CoreEventKind::BrainActionsAccepted),
         "CompletionPacketDelivered" => Ok(CoreEventKind::CompletionPacketDelivered),
