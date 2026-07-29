@@ -125,7 +125,13 @@ RUSTY_CREW_ADMIN_ALLOW_LAN=true
 RUSTY_CREW_ADMIN_AUTH_MODE=bearer
 RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS=1000
 RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
+RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS=512
+RUSTY_CREW_OPENAI_RESPONSES_MAX_CONTINUATION_ROUNDS=512
 ```
+
+Keep both continuation ceilings at `512` until the brain loops support durable
+yield/continuation. Lower values can terminate healthy long-running work and
+must not be used as an operational substitute for explicit cancellation.
 
 For trusted development on this machine/LAN, tokenless admin can be enabled
 explicitly:

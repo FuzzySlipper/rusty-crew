@@ -148,6 +148,12 @@ cargo run --release -p rusty-crew-core-bridge-node --bin measure_brain_event_thr
   later design explicitly proves safe interruption.
 - **Boring bridge contracts:** keep napi and manifest operations small,
   explicit, and measured.
+- **No hard-stop ceilings for healthy turns:** duration, provider-round, and
+  tool-round guards must not terminate an otherwise progressing agent turn.
+  Prefer explicit operator cancellation, bounded per-operation timeouts, or a
+  durable yield/continuation handoff. Any temporary finite guard must be
+  operator-visible, configured to the supported maximum in deployment
+  templates, and paired with a tracked removal or continuation task.
 
 ## TypeScript House Style
 
