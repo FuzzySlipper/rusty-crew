@@ -65,6 +65,7 @@ export const nativeMappingInventory = {
         ],
         "BrainWakeAccepted": [
           "accepted",
+          "outcome",
           "wake_id"
         ],
         "BrainWakeFailure": [

@@ -31,7 +31,10 @@ await native.submitBrainHostResult({
   retryable: false,
 });
 
-const stream = await drainUntilTerminal(native, started.wakeId);
+const stream = [
+  ...firstDrain.items,
+  ...(await drainUntilTerminal(native, started.wakeId)),
+];
 const events = stream.flatMap((item) =>
   item.type === "event" ? [item.event.event] : [],
 );
@@ -70,7 +73,7 @@ assert.equal(stream.at(-1)?.type, "actions");
 const hostIsolation = await runSameWakeHostIsolationScenario();
 const cleanup = await runExplicitCleanupScenario();
 const singleDeniedContinuation = await runSingleDeniedContinuationScenario();
-const repeatedFailureStop = await runRepeatedFailureStopScenario();
+const repeatedFailureRecovery = await runRepeatedFailureRecoveryScenario();
 const longContinuation = await runLongContinuationScenario();
 
 console.log(
@@ -83,7 +86,7 @@ console.log(
       hostIsolation,
       cleanup,
       singleDeniedContinuation,
-      repeatedFailureStop,
+      repeatedFailureRecovery,
       longContinuation,
     },
     null,
@@ -121,7 +124,7 @@ function chatCompletionsWakeInput(
       model: "deepseek-flash",
       wakeTimeoutMs: 10_000,
       providerRequestTimeoutMs: 10_000,
-      maxToolRounds: 64,
+      workQuantumToolRounds: 64,
     },
     client: { mode: "fake" as const },
   };
@@ -238,10 +241,10 @@ async function runSingleDeniedContinuationScenario(): Promise<{
   return { providerContinued, toolResultWasError };
 }
 
-async function runRepeatedFailureStopScenario(): Promise<{
+async function runRepeatedFailureRecoveryScenario(): Promise<{
   submittedFailureCount: number;
-  stoppedByRustPolicy: boolean;
-  completionSuppressed: boolean;
+  providerContinued: boolean;
+  completionEmitted: boolean;
 }> {
   const host = await loadNativeBridge();
   const wakeId = "chat-completions-repeated-failure-wake";
@@ -266,20 +269,19 @@ async function runRepeatedFailureStopScenario(): Promise<{
       action: "failed",
     });
   }
-  const terminal = await drainTerminalReceipt(host, wakeId, {
-    allowTerminalError: true,
-  });
-  const stoppedByRustPolicy =
-    terminal.error?.includes("repeated repeat_failure_tool failure") === true;
-  const completionSuppressed = !terminal.stream.some(
+  const terminal = await drainTerminalReceipt(host, wakeId);
+  const completionEmitted = terminal.stream.some(
     (item) => item.type === "actions",
   );
-  assert.equal(stoppedByRustPolicy, true);
-  assert.equal(completionSuppressed, true);
+  const providerContinued = streamText(terminal.stream).includes(
+    "recovered after repeated tool failure guidance",
+  );
+  assert.equal(providerContinued, true);
+  assert.equal(completionEmitted, true);
   return {
     submittedFailureCount: 2,
-    stoppedByRustPolicy,
-    completionSuppressed,
+    providerContinued,
+    completionEmitted,
   };
 }
 
@@ -442,18 +444,21 @@ async function waitForToolRequest(
   nativeBridge: NativeBridgeModule,
   wakeId: string,
 ): Promise<{
+  items: BrainWakeStreamItem[];
   toolRequests: Awaited<
     ReturnType<NativeBridgeModule["drainBrainRun"]>
   >["toolRequests"];
 }> {
+  const items: BrainWakeStreamItem[] = [];
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const drained = await nativeBridge.drainBrainRun({
       moduleId: "chat-completions",
       wakeId,
       maxItems: 32,
     });
+    items.push(...drained.items);
     if (drained.toolRequests.length > 0) {
-      return { toolRequests: drained.toolRequests };
+      return { items, toolRequests: drained.toolRequests };
     }
     await delay(25);
   }

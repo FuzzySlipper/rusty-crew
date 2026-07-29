@@ -860,15 +860,53 @@ pub struct BrainWakeRequest {
     pub role_assembly: RuntimeBufferHandle,
     pub wake_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation_state: Option<crate::BrainContinuationPayload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state_absence: Option<ProviderStateAbsenceReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainWakeOutcome {
+    Completed,
+    Continuing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeAccepted {
     pub wake_id: String,
     pub accepted: bool,
+    pub outcome: BrainWakeOutcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainWakeSettlementKind {
+    Completed,
+    Yielded,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BrainWakeSettlementRequest {
+    pub wake_id: String,
+    pub outcome: BrainWakeSettlementKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation_state: Option<crate::BrainContinuationPayload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BrainWakeSettlementReceipt {
+    pub managed: bool,
+    pub outcome: BrainWakeOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<crate::LogicalTurnPhase>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

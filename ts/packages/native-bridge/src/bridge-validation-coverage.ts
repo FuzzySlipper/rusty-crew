@@ -15,12 +15,12 @@ export interface RustBridgeValidationFixtureSummary {
   }>;
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 279;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 280;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 44;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 186;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 279;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 280;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 0;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
@@ -55,6 +55,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "query_chat_events",
   "save_context_compaction_artifact",
   "save_session_activity_digest",
+  "settle_brain_wake",
   "start_brain_run",
   "submit_brain_host_result",
   "cancel_brain_run",

@@ -15,12 +15,12 @@ use rusty_crew_core_persistence::{
 use rusty_crew_core_protocol::SessionHistoryWindow;
 use rusty_crew_core_protocol::{
     AdapterId, AgentDirectoryRuntimeKind, AgentId, AgentMessage, AttachmentLinkId, BrainAction,
-    BrainContinuationPayload, BrainEvent, CompletionPacket, CompletionStatus, ContinuationId,
-    ContinuationYieldReason, ConversationBranchId, ConversationSnapshotId, CoreErrorKind,
-    CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase, ExecutionEpochId,
-    ExternalEventPayload, LogicalTurnAdmission, LogicalTurnBindingSnapshot,
-    LogicalTurnCancelRequest, LogicalTurnCheckpoint, LogicalTurnClaimRequest,
-    LogicalTurnFrozenInput, LogicalTurnId, LogicalTurnLifecycleEvent,
+    BrainContinuationPayload, BrainEvent, BrainImplementationId, BrainImplementationRegistration,
+    BrainModelConfig, CompletionPacket, CompletionStatus, ContinuationId, ContinuationYieldReason,
+    ConversationBranchId, ConversationSnapshotId, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
+    DelegationLifecyclePhase, ExecutionEpochId, ExternalEventPayload, LogicalTurnAdmission,
+    LogicalTurnBindingSnapshot, LogicalTurnCancelRequest, LogicalTurnCheckpoint,
+    LogicalTurnClaimRequest, LogicalTurnFrozenInput, LogicalTurnId, LogicalTurnLifecycleEvent,
     LogicalTurnLifecycleEventKind, LogicalTurnPhase, LogicalTurnProgress, LogicalTurnRecord,
     LogicalTurnYieldRequest, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind, TaskId,
     ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor, ToolProfile,

@@ -2578,9 +2578,10 @@
       "BrainWakeAccepted": {
         "properties": {
           "accepted": { "type": "boolean" },
+          "outcome": { "$ref": "#/components/schemas/BrainWakeOutcome" },
           "wake_id": { "type": "string" }
         },
-        "required": ["wake_id", "accepted"],
+        "required": ["wake_id", "accepted", "outcome"],
         "type": "object"
       },
       "BrainWakeFailure": {
@@ -2593,6 +2594,10 @@
         },
         "required": ["wake_id", "session_id", "kind", "message"],
         "type": "object"
+      },
+      "BrainWakeOutcome": {
+        "enum": ["completed", "continuing"],
+        "type": "string"
       },
       "BrainWakeProviderStateInput": {
         "properties": {
@@ -2673,6 +2678,12 @@
         "properties": {
           "body_state": { "format": "uint64", "minimum": 0, "type": "integer" },
           "brain": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "continuation_state": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/BrainContinuationPayload" },
+              { "type": "null" }
+            ]
+          },
           "provider_state": {
             "anyOf": [
               { "$ref": "#/components/schemas/BrainWakeProviderStateInput" },

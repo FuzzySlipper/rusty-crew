@@ -263,6 +263,7 @@ export interface NativeBridgeBinding {
   unregisterBrainImplementationForProfile(profileId: string): number
   buildBrainWakeRequest(brain: number, sessionId: string, bodyStateJson: Uint8Array, systemPrompt: string, roleAssemblyJson: Uint8Array, wakeId: string): JsBufferedBrainWakeRequest
   buildBrainWakeRequestForSession(brain: number, sessionId: string, systemPrompt: string, roleAssemblyJson: Uint8Array, wakeId: string): JsBufferedBrainWakeRequest
+  settleBrainWakeJson(inputJson: string): string
   applyBrainProviderStateOutputJson(brain: number, sessionId: string, wakeId: string, outputJson: string): void
   providerStateDiagnostics(limit?: number | undefined | null): Array<JsProviderStateDiagnostic>
   getBuffer(handle: number): JsRuntimeBufferView
@@ -342,6 +343,7 @@ export interface JsBufferedBrainWakeRequest {
   bodyState: number
   systemPrompt: number
   roleAssembly: number
+  continuationStateJson?: string
   providerStateJson?: string
   providerStateAbsence?: string
 }
@@ -826,7 +828,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 279,
+  "manifestOperationCount": 280,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2899,6 +2901,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "JsBufferedBrainWakeRequest",
       "returnKind": "object",
       "operationName": null
+    },
+    {
+      "name": "settleBrainWakeJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "settle_brain_wake"
     },
     {
       "name": "applyBrainProviderStateOutputJson",

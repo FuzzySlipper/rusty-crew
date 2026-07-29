@@ -15,7 +15,6 @@ import {
   actionBatchReceiptSchema,
   brainActionBatchSchema,
   brainEventEnvelopeSchema,
-  brainWakeAcceptedSchema,
   brainWakeRequestSchema,
   chatEventLogEventSchema,
   chatEventLogPageSchema,
@@ -50,6 +49,7 @@ import {
 import { withGeneratedBridgeOutputValidation } from "./generated-binding-validation.js";
 import { withDirectBridgeOutputValidation } from "./direct-binding-validation.js";
 import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
+import { executeNativeBrainWake } from "./brain-wake-execution.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 import { createNativeBridgeCuratorMethods } from "./curator-wrappers.js";
 import { createNativeBridgeSchedulerMethods } from "./scheduler-wrappers.js";
@@ -160,6 +160,7 @@ import type {
   AgentMessage,
   BrainAction,
   BrainActionBatch,
+  BrainContinuationPayload,
   BrainEvent,
   BrainEventEnvelope,
   BrainImplementationHandle,
@@ -167,7 +168,6 @@ import type {
   BrainProviderStateScope,
   BrainWakeProviderStateOutput,
   BrainWakeProviderStateInput,
-  BrainWakeAccepted,
   BrainWakeFailure,
   BrainWakeRequest,
   BrainWakeStreamItem,
@@ -234,7 +234,6 @@ import type {
 } from "@rusty-crew/contracts";
 
 export * from "./public-api.js";
-import { brainWakeStreamItemsFromExecutionResult } from "./public-api.js";
 import type {
   NativeSessionConfigInput,
   BridgeBufferClient,
@@ -1007,6 +1006,17 @@ function providerStateFromBufferedWake(buffered: {
   };
 }
 
+function continuationStateFromBufferedWake(buffered: {
+  continuationStateJson?: string;
+}): Pick<BrainWakeRequest, "continuationState"> {
+  if (buffered.continuationStateJson === undefined) return {};
+  return {
+    continuationState: JSON.parse(
+      buffered.continuationStateJson,
+    ) as BrainContinuationPayload,
+  };
+}
+
 function providerStateInputFromNativeJson(
   raw: string,
 ): BrainWakeProviderStateInput {
@@ -1401,71 +1411,24 @@ function createNativeBridgeModule(
       );
       return {};
     },
-    wakeBrain: async (request, options) => {
-      const validatedRequest = validateBridgeValue<BrainWakeRequest>({
-        operation: "wake_brain",
-        direction: "ts_to_rust",
-        schema: brainWakeRequestSchema,
-        value: request,
-      });
-      const executor = wakeExecutors.get(validatedRequest.brain);
-      if (!executor) {
-        throw new Error(
-          `brain implementation handle ${validatedRequest.brain} is not registered in the TS runtime`,
-        );
-      }
-
-      const result = await executor.wake(validatedRequest, module, options);
-      for (const item of brainWakeStreamItemsFromExecutionResult(
-        validatedRequest,
-        result,
-      )) {
-        switch (item.type) {
-          case "event":
-            await module.submitBrainEvent(item.event);
-            break;
-          case "actions":
-            await module.submitBrainActions(item.batch);
-            break;
-          case "wake_failed":
-            throw new Error(
-              `brain wake ${item.failure.wakeId} failed: ${item.failure.message}`,
-            );
-        }
-      }
-      if (result.providerState !== undefined) {
-        try {
-          binding.applyBrainProviderStateOutputJson(
-            validatedRequest.brain,
-            validatedRequest.sessionId,
-            validatedRequest.wakeId,
-            JSON.stringify(result.providerState),
-          );
-        } catch (error) {
-          observeProviderStateFailure(
-            providerStateObservations,
-            validatedRequest,
-            brainRegistrations.get(validatedRequest.brain),
-            "save_failed",
-          );
-          await module.submitBrainEvent({
-            wakeId: validatedRequest.wakeId,
-            sessionId: validatedRequest.sessionId,
-            event: {
-              type: "provider_status",
-              level: "degraded",
-              message: `provider state save failed: ${errorMessage(error)}`,
-            },
-          });
-        }
-      }
-      return validateBridgeValue<BrainWakeAccepted>({
-        operation: "wake_brain",
-        direction: "rust_to_ts",
-        schema: brainWakeAcceptedSchema,
-        value: { wakeId: validatedRequest.wakeId, accepted: true },
-      });
-    },
+    wakeBrain: (request, options) =>
+      executeNativeBrainWake(
+        {
+          binding,
+          module,
+          wakeExecutors,
+          brainRegistrations,
+          observeProviderStateSaveFailure: (wake, registration, status) =>
+            observeProviderStateFailure(
+              providerStateObservations,
+              wake,
+              registration,
+              status,
+            ),
+        },
+        request,
+        options,
+      ),
     submitBrainEvent: async (event) => {
       const validatedEvent = validateBridgeValue<BrainEventEnvelope>({
         operation: "submit_brain_event",
@@ -1607,6 +1570,7 @@ function createNativeBridgeModule(
         systemPrompt: buffered.systemPrompt as RuntimeBufferHandle,
         roleAssembly: buffered.roleAssembly as RuntimeBufferHandle,
         wakeId: input.wakeId,
+        ...continuationStateFromBufferedWake(buffered),
         ...providerStateFromBufferedWake(buffered),
       };
       validateBridgeValue<BrainWakeRequest>({
@@ -1637,6 +1601,7 @@ function createNativeBridgeModule(
         systemPrompt: buffered.systemPrompt as RuntimeBufferHandle,
         roleAssembly: buffered.roleAssembly as RuntimeBufferHandle,
         wakeId: input.wakeId,
+        ...continuationStateFromBufferedWake(buffered),
         ...providerStateFromBufferedWake(buffered),
       };
       validateBridgeValue<BrainWakeRequest>({

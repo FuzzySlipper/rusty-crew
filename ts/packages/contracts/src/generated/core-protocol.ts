@@ -465,6 +465,7 @@ export type BrainStrategyMetadata = {
 
 export type BrainWakeAccepted = {
   accepted: boolean;
+  outcome: BrainWakeOutcome;
   wakeId: string;
 };
 
@@ -475,6 +476,8 @@ export type BrainWakeFailure = {
   sessionId: SessionId;
   wakeId: string;
 };
+
+export type BrainWakeOutcome = "completed" | "continuing";
 
 export type BrainWakeProviderStateInput = {
   expiresAt?: string | null;
@@ -509,6 +512,7 @@ export type BrainWakeProviderStateUpdate = {
 export type BrainWakeRequest = {
   bodyState: RuntimeBufferHandle;
   brain: BrainImplementationHandle;
+  continuationState?: BrainContinuationPayload | null;
   providerState?: BrainWakeProviderStateInput | null;
   providerStateAbsence?: ProviderStateAbsenceReason | null;
   roleAssembly: RuntimeBufferHandle;

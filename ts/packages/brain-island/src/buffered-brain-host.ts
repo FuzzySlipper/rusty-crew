@@ -1,5 +1,6 @@
 import type {
   BrainAction,
+  BrainContinuationPayload,
   BrainEventEnvelope,
   BrainWakeProviderStateOutput,
   BrainWakeStreamItem,
@@ -50,6 +51,8 @@ export interface BufferedBrainHostRunResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
+  outcome: "completed" | "yielded";
+  continuationState?: BrainContinuationPayload;
   transportMetrics?:
     | OpenAiResponsesTransportMetrics
     | ChatCompletionsTransportMetrics;
@@ -271,13 +274,14 @@ export async function runBufferedBrainHost(options: {
             streamRetentionMetrics,
           );
         }
-        const plannedActions = options.planActions
-          ? await options.planActions({
-              wake: options.wake,
-              events,
-              toolActions: [...selectionActions.actions, ...streamActions],
-            })
-          : [];
+        const plannedActions =
+          !drained.yielded && options.planActions
+            ? await options.planActions({
+                wake: options.wake,
+                events,
+                toolActions: [...selectionActions.actions, ...streamActions],
+              })
+            : [];
         return {
           events: options.submitEvent ? [] : events,
           actions: [
@@ -286,6 +290,8 @@ export async function runBufferedBrainHost(options: {
             ...plannedActions,
           ],
           providerState: drained.providerState,
+          outcome: drained.yielded ? "yielded" : "completed",
+          continuationState: drained.continuationState,
           transportMetrics: drained.transportMetrics,
           credentialSecretUpdate: drained.credentialSecretUpdate,
           brainEventCounts,

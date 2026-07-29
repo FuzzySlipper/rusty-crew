@@ -46,7 +46,7 @@ The live and debug admin diagnostics were read from
 | Whole-wake policy | `wakeTimeout.mode=disabled` | `wakeTimeout.mode=disabled` |
 | Session `turnTimeoutMs` | no loaded session override | no loaded session override |
 | Provider request deadline | every loaded module reports `disabled` | every loaded module reports `disabled` |
-| Chat Completions continuation guard | `512` | `512` |
+| Chat Completions work quantum | `64` | `64` |
 | Responses continuation guard | `512` | `512` |
 | Active buffered runs | one progressing Chat Completions run | none |
 
@@ -56,14 +56,16 @@ items, 429 retained items, 2,519 coalesced deltas, and zero dropped items. That
 is direct evidence that disabled wall-clock limits and stream coalescing permit
 healthy long work today. It does not remove the latent hard stops below.
 
-Both deployed `service.env` files and `ops/systemd/service.env.example`
-currently raise the two continuation variables to the emergency maximum of
-`512`:
+The deployed services and `ops/systemd/service.env.example` distinguish the
+durable Chat Completions scheduling quantum from the remaining emergency
+Responses ceiling:
 
-- `RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS`
+- `RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=64`
 - `RUSTY_CREW_OPENAI_RESPONSES_MAX_CONTINUATION_ROUNDS`
 
-Those values reduce immediate failures but are not the target design.
+Crossing the Chat Completions quantum persists and resumes the same logical
+turn; it is no longer a terminal guard. Task 6367 owns the equivalent Responses
+change.
 
 ## Whole Logical Turn And Continuation Guards
 
@@ -71,7 +73,7 @@ Those values reduce immediate failures but are not the target design.
 | --- | --- | --- | --- | --- | --- | --- |
 | Service wake timeout | TypeScript `service-wake-dispatch.ts`, `wake-timeout.ts`, and `buffered-brain-host.ts`; session/profile `turnTimeoutMs`, profile `runtime.maxTurnDurationMs`, or service wake policy | disabled when absent; config validator caps configured turn timeout at 24 hours | elapsed wall time only | aborts observation/provider hook and records `wake_timeout` | no logical-turn continuation checkpoint | Remove as a healthy-turn terminal. Preserve explicit cancel; use yield/attention for real no-progress. Tasks 6365 and 6372. |
 | Buffered coordinator wake timeout | Rust `brain-runtime::BufferedBrainTurnCoordinator::timeout_if_due_at` | optional milliseconds from the same effective wake policy | elapsed wall time only | transitions run to `TimedOut`, clears pending tool state, reason `wake_timeout` | active registry is process memory | Delete duplicated terminal authority when durable continuation lands. Tasks 6365 and 6372. |
-| Chat Completions tool rounds | Rust `chat-completions`; TS `chat-completions-continuation-policy.ts` supplies config | 64 default; 512 hard maximum | counts tool rounds, even when each round makes progress | `chat_completions_continuation_limit_exceeded`; provider state is omitted on this branch | loop messages/counters are wake-local; only selected terminal paths emit provider state | Replace with a bounded execution quantum and durable yield/continue. Task 6366. |
+| Chat Completions tool rounds | Rust `chat-completions`; TS `chat-completions-continuation-policy.ts` supplies config | 64-round scheduling quantum; no turn maximum | completed tool rounds | atomically checkpoints and yields after the quantum; the next epoch resumes the same logical turn | messages, reasoning, tool history, counters, images, and diagnostics are held in the Rust-owned durable continuation payload | Landed in task 6366. The quantum is scheduling policy only and cannot fail healthy progress. |
 | Responses continuation rounds | Rust `openai-responses`; TS `responses-continuation-policy.ts` supplies config | 64 default; 512 hard maximum | counts continuation requests, even when each round makes progress | `responses_continuation_limit_exceeded` | continuation items, response id, usage, and repeated-call map are wake-local until terminal provider-state output | Replace with the same durable execution quantum. Task 6367. |
 | Chat repeated identical tool calls | Rust `chat-completions`, key `(name, arguments_json)` | profile loop config, currently 3 | no state/result/progress comparison | generic failed wake after the fourth identical call | counter is wake-local | Make progress-aware; send correction feedback, then pause for attention only after demonstrated no progress. Task 6368. |
 | Responses repeated identical function calls | Rust `openai-responses`, `MAX_REPEATED_FUNCTION_CALLS` | fixed at 3 | no state/result/progress comparison | `responses_repeated_function_call` | map is wake-local | Same progress-aware no-progress policy as Chat Completions. Task 6368. |

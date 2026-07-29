@@ -63,6 +63,15 @@ impl NativeBridgeBinding {
             body_state: handle_to_u32(buffered.request.body_state)?,
             system_prompt: handle_to_u32(buffered.request.system_prompt)?,
             role_assembly: handle_to_u32(buffered.request.role_assembly)?,
+            continuation_state_json: buffered
+                .request
+                .continuation_state
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })?,
             provider_state_json: buffered
                 .request
                 .provider_state
@@ -90,7 +99,7 @@ impl NativeBridgeBinding {
         role_assembly_json: napi::bindgen_prelude::Buffer,
         wake_id: String,
     ) -> napi::Result<JsBufferedBrainWakeRequest> {
-        let bridge = self.bridge()?;
+        let mut bridge = self.bridge()?;
         let buffered = bridge
             .build_brain_wake_request_for_session(
                 BrainImplementationHandle::new(brain as u64),
@@ -104,6 +113,15 @@ impl NativeBridgeBinding {
             body_state: handle_to_u32(buffered.request.body_state)?,
             system_prompt: handle_to_u32(buffered.request.system_prompt)?,
             role_assembly: handle_to_u32(buffered.request.role_assembly)?,
+            continuation_state_json: buffered
+                .request
+                .continuation_state
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })?,
             provider_state_json: buffered
                 .request
                 .provider_state
@@ -120,6 +138,51 @@ impl NativeBridgeBinding {
                 .map(provider_state_absence_reason_as_str)
                 .map(str::to_string),
         })
+    }
+
+    #[napi]
+    pub fn settle_brain_wake_json(&self, input_json: String) -> napi::Result<String> {
+        let input: BrainWakeSettlementRequest =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid brain wake settlement JSON: {error}"),
+                )
+            })?;
+        let result = match input.outcome {
+            BrainWakeSettlementKind::Completed => LogicalTurnEpochResult::Completed,
+            BrainWakeSettlementKind::Yielded => {
+                LogicalTurnEpochResult::Yielded(input.continuation_state.ok_or_else(|| {
+                    napi::Error::new(
+                        napi::Status::InvalidArg,
+                        "yielded brain wake requires continuation state",
+                    )
+                })?)
+            }
+            BrainWakeSettlementKind::Failed => LogicalTurnEpochResult::Failed {
+                reason_code: input
+                    .reason_code
+                    .unwrap_or_else(|| "brain_wake_failed".to_string()),
+                summary: input
+                    .summary
+                    .unwrap_or_else(|| "brain wake failed".to_string()),
+            },
+        };
+        let settlement = self
+            .bridge()?
+            .settle_brain_wake(&input.wake_id, result)
+            .map_err(to_napi_error)?;
+        serialize_json(
+            &BrainWakeSettlementReceipt {
+                managed: settlement.is_some(),
+                outcome: settlement
+                    .as_ref()
+                    .map(|settlement| settlement.outcome)
+                    .unwrap_or(BrainWakeOutcome::Completed),
+                phase: settlement.map(|settlement| settlement.phase),
+            },
+            "brain wake settlement",
+        )
     }
 
     #[napi]

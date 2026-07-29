@@ -5,6 +5,7 @@ import type {
   AgentMessage,
   BrainAction,
   BrainActionBatch,
+  BrainContinuationPayload,
   BrainEvent,
   BrainEventEnvelope,
   BrainImplementationHandle,
@@ -156,6 +157,8 @@ export interface BrainWakeExecutionResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
+  outcome?: "completed" | "yielded";
+  continuationState?: BrainContinuationPayload;
   stream?: BrainWakeStreamItem[];
   transportMetrics?:
     | OpenAiResponsesTransportMetrics
@@ -190,6 +193,8 @@ export interface NativeBufferedBrainRunDrain {
   }>;
   streamRetentionMetrics: NativeBufferedBrainStreamRetentionMetrics;
   terminal: boolean;
+  yielded?: boolean;
+  continuationState?: BrainContinuationPayload;
   terminalReasonCode?: string;
   providerState?: BrainWakeProviderStateOutput;
   transportMetrics?:
@@ -319,6 +324,7 @@ export interface ChatCompletionsBrainRunInput {
   messages: ChatCompletionsChatCompletionMessage[];
   inputImages?: ChatCompletionsInputImage[];
   providerState?: BrainWakeProviderStateInput;
+  continuationState?: BrainContinuationPayload;
   tools?: Array<{
     name: string;
     description: string;
@@ -340,7 +346,7 @@ export interface ChatCompletionsBrainRunInput {
     reasoningBudgetTokens?: number;
     providerStateStrategyId?: string;
     maxOutputTokens?: number;
-    maxToolRounds?: number;
+    workQuantumToolRounds?: number;
     repeatedToolCallLimit?: number;
     finalMessageFallbackText?: string;
   };
@@ -389,41 +395,7 @@ export interface BrainWakeExecutor {
   ): Promise<BrainWakeExecutionResult> | BrainWakeExecutionResult;
 }
 
-export function brainWakeStreamItemsFromExecutionResult(
-  request: BrainWakeRequest,
-  result: BrainWakeExecutionResult,
-): BrainWakeStreamItem[] {
-  if (result.stream !== undefined) {
-    assertTerminalBrainWakeStream(request, result.stream);
-    return result.stream;
-  }
-
-  return [
-    ...result.events.map(
-      (event): BrainWakeStreamItem => ({ type: "event", event }),
-    ),
-    {
-      type: "actions",
-      batch: {
-        wakeId: request.wakeId,
-        sessionId: request.sessionId,
-        actions: result.actions,
-      },
-    },
-  ];
-}
-
-function assertTerminalBrainWakeStream(
-  request: BrainWakeRequest,
-  stream: readonly BrainWakeStreamItem[],
-): void {
-  const terminal = stream.at(-1);
-  if (terminal?.type !== "actions" && terminal?.type !== "wake_failed") {
-    throw new Error(
-      `brain wake ${request.wakeId} stream must end with actions or wake_failed`,
-    );
-  }
-}
+export { brainWakeStreamItemsFromExecutionResult } from "./brain-wake-stream.js";
 
 export interface BrainWakeBufferInput {
   brain: BrainImplementationHandle;

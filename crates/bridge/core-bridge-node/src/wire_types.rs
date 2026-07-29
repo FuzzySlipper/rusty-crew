@@ -636,6 +636,7 @@ pub struct JsBufferedBrainWakeRequest {
     pub body_state: u32,
     pub system_prompt: u32,
     pub role_assembly: u32,
+    pub continuation_state_json: Option<String>,
     pub provider_state_json: Option<String>,
     pub provider_state_absence: Option<String>,
 }

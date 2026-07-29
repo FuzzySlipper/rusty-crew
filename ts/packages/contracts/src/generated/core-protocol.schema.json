@@ -1817,13 +1817,17 @@
         "accepted": {
           "type": "boolean"
         },
+        "outcome": {
+          "$ref": "#/$defs/BrainWakeOutcome"
+        },
         "wake_id": {
           "type": "string"
         }
       },
       "required": [
         "wake_id",
-        "accepted"
+        "accepted",
+        "outcome"
       ],
       "type": "object"
     },
@@ -1855,6 +1859,13 @@
         "message"
       ],
       "type": "object"
+    },
+    "BrainWakeOutcome": {
+      "enum": [
+        "completed",
+        "continuing"
+      ],
+      "type": "string"
     },
     "BrainWakeProviderStateInput": {
       "properties": {
@@ -1987,6 +1998,16 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "continuation_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BrainContinuationPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "provider_state": {
           "anyOf": [

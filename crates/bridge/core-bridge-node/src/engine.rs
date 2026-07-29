@@ -51,6 +51,7 @@ impl NativeBridge {
         })?;
         let summary = engine.shutdown_with_timeout(request.drain_timeout_ms)?;
         self.subscriptions.clear();
+        self.active_logical_wakes.clear();
         Ok(summary)
     }
 
@@ -64,28 +65,90 @@ impl NativeBridge {
     }
 
     pub fn build_brain_wake_request_for_session(
-        &self,
+        &mut self,
         brain: BrainImplementationHandle,
         session_id: rusty_crew_core_bridge_api::SessionId,
         system_prompt: String,
         role_assembly_json: Vec<u8>,
         wake_id: String,
     ) -> CoreResult<rusty_crew_core_bridge_api::BufferedBrainWakeRequest> {
-        let body_state = self.engine()?.prepare_body_state_for_wake(&session_id)?;
-        let body_state_json = serde_json::to_vec(&body_state).map_err(|error| {
-            CoreError::new(
-                CoreErrorKind::InternalError,
-                format!("serialize body state: {error}"),
-            )
-        })?;
-        self.build_brain_wake_request(BrainWakeBufferInput {
-            brain,
-            session_id,
-            body_state_json,
+        let registration = self.brain_registrations.get(brain)?.clone();
+        let module_id = registration
+            .strategy
+            .as_ref()
+            .map(|strategy| strategy.module_id.as_str());
+        if module_id != Some("chat-completions") {
+            let body_state = self.engine()?.prepare_body_state_for_wake(&session_id)?;
+            let body_state_json = serde_json::to_vec(&body_state).map_err(|error| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    format!("serialize body state: {error}"),
+                )
+            })?;
+            return self.build_brain_wake_request(BrainWakeBufferInput {
+                brain,
+                session_id,
+                body_state_json,
+                system_prompt,
+                role_assembly_json,
+                wake_id,
+            });
+        }
+        if self.active_logical_wakes.contains_key(&wake_id) {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("logical wake {wake_id} is already active"),
+            ));
+        }
+        let prepared = self.engine()?.prepare_logical_turn_wake(
+            &registration,
+            &session_id,
+            &wake_id,
             system_prompt,
             role_assembly_json,
+        )?;
+        let mut buffered = self.build_brain_wake_request(BrainWakeBufferInput {
+            brain,
+            session_id: session_id.clone(),
+            body_state_json: prepared.body_state_json,
+            system_prompt: prepared.system_prompt,
+            role_assembly_json: prepared.role_assembly_json,
+            wake_id: wake_id.clone(),
+        })?;
+        buffered.request.continuation_state = prepared.continuation_state;
+        self.active_logical_wakes.insert(
             wake_id,
-        })
+            ActiveLogicalWake {
+                brain,
+                session_id,
+                claim: prepared.claim,
+            },
+        );
+        Ok(buffered)
+    }
+
+    pub fn settle_brain_wake(
+        &mut self,
+        wake_id: &str,
+        result: LogicalTurnEpochResult,
+    ) -> CoreResult<Option<LogicalTurnEpochSettlement>> {
+        let Some(active) = self.active_logical_wakes.get(wake_id).cloned() else {
+            return Ok(None);
+        };
+        let registration = self.brain_registrations.get(active.brain)?;
+        if registration.profile_id != active.claim.record.binding.profile_id
+            || active.session_id != active.claim.record.session_id
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "logical wake binding changed before settlement",
+            ));
+        }
+        let settlement = self
+            .engine()?
+            .settle_logical_turn_epoch(&active.claim, result)?;
+        self.active_logical_wakes.remove(wake_id);
+        Ok(Some(settlement))
     }
 
     fn hydrate_provider_state(&self, request: &mut BrainWakeRequest) -> CoreResult<()> {

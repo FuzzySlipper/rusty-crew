@@ -263,6 +263,7 @@ export declare class NativeBridgeBinding {
   unregisterBrainImplementationForProfile(profileId: string): number
   buildBrainWakeRequest(brain: number, sessionId: string, bodyStateJson: Buffer, systemPrompt: string, roleAssemblyJson: Buffer, wakeId: string): JsBufferedBrainWakeRequest
   buildBrainWakeRequestForSession(brain: number, sessionId: string, systemPrompt: string, roleAssemblyJson: Buffer, wakeId: string): JsBufferedBrainWakeRequest
+  settleBrainWakeJson(inputJson: string): string
   applyBrainProviderStateOutputJson(brain: number, sessionId: string, wakeId: string, outputJson: string): void
   providerStateDiagnostics(limit?: number | undefined | null): Array<JsProviderStateDiagnostic>
   getBuffer(handle: number): JsRuntimeBufferView
@@ -344,6 +345,7 @@ export interface JsBufferedBrainWakeRequest {
   bodyState: number
   systemPrompt: number
   roleAssembly: number
+  continuationStateJson?: string
   providerStateJson?: string
   providerStateAbsence?: string
 }

@@ -758,6 +758,7 @@ where
         system_prompt: RuntimeBufferHandle::new(0),
         role_assembly: RuntimeBufferHandle::new(0),
         wake_id: input.wake_id,
+        continuation_state: None,
         provider_state: input.provider_state,
         provider_state_absence: input
             .provider_state_absence

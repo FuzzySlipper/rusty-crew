@@ -1,8 +1,102 @@
 use super::*;
 use rusty_crew_core_persistence::{LogicalTurnAdmissionWrite, LogicalTurnContentWrite};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 const NOW: &str = "2026-06-19T00:00:00Z";
+
+#[test]
+fn prepared_chat_turn_yields_and_restart_resumes_frozen_input_exactly_once() {
+    let data_dir = unique_data_dir("logical-turn-prepared-restart");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "prepared-logical-session",
+            "prepared-logical-agent",
+            "prepared-logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .enqueue_body_follow_up_message(
+            &session.session_id,
+            AgentId::new("operator"),
+            "original user input",
+            Some("original-message".into()),
+        )
+        .unwrap();
+    let registration = chat_completions_registration();
+    let first = engine
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "wake-original",
+            "original system prompt".into(),
+            br#"{"messages":["original role message"]}"#.to_vec(),
+        )
+        .unwrap();
+    assert!(first.continuation_state.is_none());
+    assert!(String::from_utf8_lossy(&first.body_state_json).contains("original user input"));
+
+    let continuation_payload = json!({
+        "messages": ["original user input", "assistant tool call", "tool result"],
+        "reasoning": "retained reasoning",
+        "provider_request_count": 65
+    });
+    let continuation = BrainContinuationPayload {
+        module_id: "chat-completions".into(),
+        payload_version: "chat-completions-work-quantum-v1".into(),
+        payload_fingerprint: json_sha256(&continuation_payload),
+        payload: continuation_payload.clone(),
+    };
+    let settlement = engine
+        .settle_logical_turn_epoch(
+            &first.claim,
+            LogicalTurnEpochResult::Yielded(continuation.clone()),
+        )
+        .unwrap();
+    assert_eq!(settlement.outcome, BrainWakeOutcome::Continuing);
+    let logical_turn_id = first.claim.record.logical_turn_id.clone();
+    let frozen_body = first.body_state_json;
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let resumed = restarted
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "wake-that-must-not-replace-source",
+            "replacement prompt that must be ignored".into(),
+            br#"{"messages":["replacement role message"]}"#.to_vec(),
+        )
+        .unwrap();
+    assert_eq!(resumed.claim.record.logical_turn_id, logical_turn_id);
+    assert_eq!(resumed.system_prompt, "original system prompt");
+    assert_eq!(
+        resumed.role_assembly_json,
+        br#"{"messages":["original role message"]}"#
+    );
+    assert_eq!(resumed.body_state_json, frozen_body);
+    assert_eq!(resumed.continuation_state, Some(continuation));
+
+    let completed = restarted
+        .settle_logical_turn_epoch(&resumed.claim, LogicalTurnEpochResult::Completed)
+        .unwrap();
+    assert_eq!(completed.outcome, BrainWakeOutcome::Completed);
+    assert!(restarted
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        restarted
+            .get_logical_turn(&logical_turn_id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        LogicalTurnPhase::Completed
+    );
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
 
 #[test]
 fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
@@ -377,4 +471,25 @@ fn progress(revision: u64, fingerprint: &str) -> LogicalTurnProgress {
         last_semantic_progress_at: NOW.into(),
         ..LogicalTurnProgress::default()
     }
+}
+
+fn chat_completions_registration() -> BrainImplementationRegistration {
+    BrainImplementationRegistration {
+        implementation_id: BrainImplementationId::new("chat-completions"),
+        profile_id: ProfileId::new("prepared-logical-profile"),
+        tool_profile: ToolProfile { tools: Vec::new() },
+        model_config: BrainModelConfig {
+            provider: "test-provider".into(),
+            model_name: "test-model".into(),
+            temperature_milli: None,
+            max_output_tokens: None,
+        },
+        strategy: None,
+        provider_state_scope: None,
+    }
+}
+
+fn json_sha256(value: &serde_json::Value) -> String {
+    let bytes = serde_json::to_vec(value).unwrap();
+    format!("{:x}", Sha256::digest(bytes))
 }

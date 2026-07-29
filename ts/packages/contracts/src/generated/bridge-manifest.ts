@@ -11,6 +11,7 @@ export const bridgeOperations = [
   {"name":"replace_brain_implementation","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainImplementationRegistration","output":"core_protocol::BrainImplementationHandle","errors":"core_protocol::CoreError","summary":"Replace a registered profile brain implementation in place for safe runtime rebuilds."},
   {"name":"unregister_brain_implementation_for_profile","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ProfileId","output":"core_protocol::BrainImplementationHandle","errors":"core_protocol::CoreError","summary":"Remove a registered profile brain implementation after its sessions have been drained or archived."},
   {"name":"wake_brain","surface":"stable","direction":"rust_to_ts","input":"core_protocol::BrainWakeRequest","output":"core_protocol::BrainWakeAccepted","errors":"core_protocol::CoreError","summary":"Rust invokes the TS brain island with a frozen body-state snapshot."},
+  {"name":"settle_brain_wake","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainWakeSettlementRequest","output":"core_protocol::BrainWakeSettlementReceipt","errors":"core_protocol::CoreError","summary":"Settle one Rust-owned logical-turn execution epoch as completed, durably yielded, or failed."},
   {"name":"submit_brain_event","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainEventEnvelope","output":"core_protocol::EventReceipt","errors":"core_protocol::CoreError","summary":"TS streams brain events produced during a Rust-driven wake."},
   {"name":"submit_brain_actions","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainActionBatch","output":"core_protocol::ActionBatchReceipt","errors":"core_protocol::CoreError","summary":"TS returns the structured brain action batch; Rust validates and executes it internally."},
   {"name":"apply_brain_provider_state_output","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainWakeProviderStateOutput","output":"()","errors":"core_protocol::CoreError","summary":"Apply provider-owned wire-state replacement or clear output for a brain wake."},
@@ -291,4 +292,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "d2097f81a9605d5a6ff1ff5067f9d22322cce6f5080e9ae210899f596875a30d" as const;
+export const bridgeWireShapeFingerprint = "d2a2efbbf3e99880ceaaf45d7b4a1c97e07b7c5f2364c79c9d93be2a688679ce" as const;

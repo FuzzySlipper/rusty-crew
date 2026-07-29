@@ -120,7 +120,7 @@ try {
     );
     assert.equal(
       applyResult.brainDiagnosticsByProfileId["chat-profile"]?.modelProvider
-        ?.maxContinuationRounds,
+        ?.workQuantumToolRounds,
       64,
     );
     assert.equal(
@@ -184,7 +184,7 @@ try {
           "chat-completions",
           "roleplay_narrator",
           "roleplay_narrator",
-          "unused",
+          "optional",
           "default-local-tools",
           "native_neutral_tools",
         ],
@@ -194,7 +194,7 @@ try {
           "chat-completions",
           "default",
           "default",
-          "unused",
+          "optional",
           "default-local-tools",
           "native_neutral_tools",
         ],

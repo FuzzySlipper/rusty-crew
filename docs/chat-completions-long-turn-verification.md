@@ -1,36 +1,30 @@
 # Chat Completions long-turn verification
 
-> Known limitation: the finite continuation guard documented below is an
-> emergency compatibility posture, not the target lifecycle. The code-backed
-> removal plan is in `active-turn-termination-guard-inventory.md` and task
-> 6362. Healthy progress must ultimately yield and durably continue.
+Rusty Crew's native Chat Completions loop durably yields after 64 completed tool
+rounds by default. Operators can set another positive scheduling quantum with
+`RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS`. TypeScript resolves the
+policy and sends `workQuantumToolRounds` across the native boundary; Rust keeps
+64 as the defensive default for direct bridge callers.
 
-Rusty Crew's native Chat Completions loop permits up to 64 tool continuation
-rounds by default. Operators can set a different bounded service-wide value
-with `RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS` (1 through 512). The
-TypeScript brain host resolves this policy and sends `maxToolRounds` explicitly
-across the native boundary. Rust also retains 64 as the defensive default for
-direct bridge callers.
+Crossing the quantum is not terminal. Rust atomically persists the logical-turn
+checkpoint, publishes the next wake, and resumes messages, reasoning, tool
+calls/results, diagnostics, and cancellation identity in another execution
+epoch. No finite healthy-progress round limit remains. Repeated identical calls
+still use the separate no-progress policy.
 
-The continuation budget is a loop guard, not a time limit. Explicit
-cancellation and configured session/service wake-duration policy remain
-independent. Repeated calls with the same tool name and arguments continue to
-use the separate repeated-call circuit breaker.
-
-The admin diagnostics response reports the effective policy as
-`modelProvider.maxContinuationRounds`. Exhaustion terminates with reason code
-`chat_completions_continuation_limit_exceeded` and includes the effective
-round count in the message.
+Admin diagnostics report the effective policy as
+`modelProvider.workQuantumToolRounds`. Yielded epochs report `continuing`; they
+do not emit a failed or completed assistant-turn terminal.
 
 ## Deterministic verification
 
-The Rust loop regression completes twelve distinct tool rounds, and the native
-bridge smoke drives the same twelve-round exchange through buffered tool
+The Rust loop regression crosses multiple one-round quanta before completion,
+and the native bridge smoke drives twelve rounds through buffered tool
 submission:
 
 ```bash
 cargo test -p rusty-crew-chat-completions-brain \
-  minimal_loop_completes_more_than_eight_distinct_tool_rounds
+  minimal_loop_yields_and_resumes_beyond_each_work_quantum
 npm run build:native
 npm run smoke:chat-completions-rust-bridge \
   -w @rusty-crew/brain-island

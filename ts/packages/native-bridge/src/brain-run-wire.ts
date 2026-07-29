@@ -1,5 +1,6 @@
 import type {
   BrainAction,
+  BrainContinuationPayload,
   BrainWakeProviderStateOutput,
   BrainWakeProviderStateInput,
   BrainWakeFailure,
@@ -149,6 +150,7 @@ export function toNativeChatCompletionsBrainRunInput(
     providerState: input.providerState
       ? toNativeProviderStateInput(input.providerState)
       : undefined,
+    continuationState: input.continuationState,
     tools: input.tools?.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -447,6 +449,10 @@ export function toBufferedBrainRunDrainResult(
       raw.stream_retention_metrics,
     ),
     terminal: raw.terminal,
+    ...(raw.yielded === undefined ? {} : { yielded: raw.yielded }),
+    ...(raw.continuation_state == null
+      ? {}
+      : { continuationState: raw.continuation_state }),
     ...(raw.terminal_reason_code == null
       ? {}
       : { terminalReasonCode: raw.terminal_reason_code }),
@@ -507,6 +513,10 @@ export function toRawBufferedBrainRunDrainResult(
       result.streamRetentionMetrics,
     ),
     terminal: result.terminal,
+    ...(result.yielded === undefined ? {} : { yielded: result.yielded }),
+    ...(result.continuationState === undefined
+      ? {}
+      : { continuation_state: result.continuationState }),
     ...(result.terminalReasonCode === undefined
       ? {}
       : { terminal_reason_code: result.terminalReasonCode }),
@@ -610,6 +620,8 @@ export interface RawChatCompletionsBufferedDrainResult {
     arguments_json: string;
   }>;
   terminal: boolean;
+  yielded?: boolean;
+  continuation_state?: BrainContinuationPayload | null;
   provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?: RawChatCompletionsTransportMetrics;
   error?: string | null;
@@ -629,6 +641,8 @@ export interface RawBufferedBrainRunDrainResult {
   }>;
   stream_retention_metrics: streamRetention.RawBufferedBrainStreamRetentionMetrics;
   terminal: boolean;
+  yielded?: boolean;
+  continuation_state?: BrainContinuationPayload | null;
   terminal_reason_code?: string | null;
   provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?:

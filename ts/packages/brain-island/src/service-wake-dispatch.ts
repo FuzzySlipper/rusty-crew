@@ -36,7 +36,7 @@ import {
 export interface ServiceWakeDispatchReport {
   sessionId: SessionId;
   wakeId?: string;
-  status: "completed" | "skipped" | "failed";
+  status: "completed" | "continuing" | "skipped" | "failed";
   summary: string;
   reasonCode?: string;
   completionPacket?: CompletionPacket;
@@ -330,14 +330,21 @@ export async function dispatchWake(
     const accepted = observed.accepted;
     const completionPacket = wakeCompletionPacket(observed.events);
     const completionSummary = wakeCompletionSummary(observed.events);
+    const continuing = accepted.outcome === "continuing";
     const report: ServiceWakeDispatchReport = {
       sessionId,
       wakeId,
-      status: accepted.accepted ? "completed" : "failed",
+      status: accepted.accepted
+        ? continuing
+          ? "continuing"
+          : "completed"
+        : "failed",
       summary:
         completionSummary ??
         (accepted.accepted
-          ? `wake ${wakeId} completed for ${session.agentId}`
+          ? continuing
+            ? `wake ${wakeId} yielded and will continue for ${session.agentId}`
+            : `wake ${wakeId} completed for ${session.agentId}`
           : `wake ${wakeId} was rejected for ${session.agentId}`),
       reasonCode: accepted.accepted ? undefined : "wake_rejected",
       completionPacket,
@@ -514,7 +521,10 @@ function runtimeDispatchFinish(
   }
   return {
     activityId: `dispatch:${report.wakeId}`,
-    status: report.status === "completed" ? "completed" : "failed",
+    status:
+      report.status === "completed" || report.status === "continuing"
+        ? "completed"
+        : "failed",
     phase: report.status,
     reasonCode: report.reasonCode,
     summary: `wake dispatch ${report.status}`,

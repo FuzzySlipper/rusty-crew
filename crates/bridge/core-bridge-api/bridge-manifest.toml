@@ -103,6 +103,15 @@ buffer_contract = "BrainWakeRequest carries body_state, system_prompt, and role_
 delta_policy = "BodyState.delta_policy is frozen_snapshot_next_wake. Mid-turn deltas are not injected into the active provider stream; fresh deltas may be considered by the body-owned next-wake queue with a 5000 ms default TTL and 32 message cap. Expired queued messages are dropped, not replayed."
 
 [[operation]]
+name = "settle_brain_wake"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BrainWakeSettlementRequest"
+output = "core_protocol::BrainWakeSettlementReceipt"
+errors = "core_protocol::CoreError"
+summary = "Settle one Rust-owned logical-turn execution epoch as completed, durably yielded, or failed."
+
+[[operation]]
 name = "submit_brain_event"
 surface = "stable"
 direction = "ts_to_rust"

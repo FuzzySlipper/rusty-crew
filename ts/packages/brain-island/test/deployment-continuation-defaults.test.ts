@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { MAX_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS } from "../src/chat-completions-continuation-policy.js";
+import { DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS } from "../src/chat-completions-continuation-policy.js";
 import { MAX_RESPONSES_MAX_CONTINUATION_ROUNDS } from "../src/responses-continuation-policy.js";
 
 const serviceEnvExample = new URL(
@@ -10,16 +10,17 @@ const serviceEnvExample = new URL(
   import.meta.url,
 );
 
-test("deployment template keeps temporary continuation ceilings at implementation maxima", async () => {
+test("deployment template separates Chat Completions work quantum from the remaining Responses ceiling", async () => {
   const contents = await readFile(serviceEnvExample, "utf8");
 
   assert.match(
     contents,
     new RegExp(
-      `^RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS=${MAX_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS}$`,
+      `^RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=${DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS}$`,
       "m",
     ),
   );
+  assert.doesNotMatch(contents, /RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS/);
   assert.match(
     contents,
     new RegExp(

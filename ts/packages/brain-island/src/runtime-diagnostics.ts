@@ -228,6 +228,7 @@ export interface RuntimeBrainModuleDiagnostics {
     clientMode?: "fake" | "live" | string;
     providerRequestTimeoutMode?: "disabled" | "configured";
     providerRequestTimeoutMs?: number;
+    workQuantumToolRounds?: number;
     maxContinuationRounds?: number;
     modelId: string;
     status?: string;

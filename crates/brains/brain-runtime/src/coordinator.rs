@@ -21,6 +21,7 @@ pub enum BufferedBrainTurnPhase {
     Created,
     Running,
     AwaitingHostTools,
+    Yielded,
     Completed,
     Failed,
     Cancelled,
@@ -31,7 +32,7 @@ impl BufferedBrainTurnPhase {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::TimedOut
+            Self::Yielded | Self::Completed | Self::Failed | Self::Cancelled | Self::TimedOut
         )
     }
 }
@@ -772,6 +773,22 @@ impl BufferedBrainTurnCoordinator {
         Ok(())
     }
 
+    pub fn yield_turn(&mut self) -> Result<(), BufferedBrainTurnError> {
+        self.yield_turn_at(OffsetDateTime::now_utc())
+    }
+
+    pub fn yield_turn_at(&mut self, now: OffsetDateTime) -> Result<(), BufferedBrainTurnError> {
+        self.require_phase(BufferedBrainTurnPhase::Running, "yield")?;
+        self.phase = BufferedBrainTurnPhase::Yielded;
+        self.terminal = Some(BufferedBrainTurnTerminal {
+            reason_code: "work_quantum_reached".to_string(),
+            summary: "brain execution epoch yielded for durable continuation".to_string(),
+            occurred_at: format_rfc3339(now),
+        });
+        self.record_transition_at(now);
+        Ok(())
+    }
+
     pub fn fail(
         &mut self,
         reason_code: impl Into<String>,
@@ -1106,6 +1123,7 @@ fn buffered_brain_turn_phase_name(phase: BufferedBrainTurnPhase) -> &'static str
         BufferedBrainTurnPhase::Created => "created",
         BufferedBrainTurnPhase::Running => "running",
         BufferedBrainTurnPhase::AwaitingHostTools => "awaiting_host_tools",
+        BufferedBrainTurnPhase::Yielded => "yielded",
         BufferedBrainTurnPhase::Completed => "completed",
         BufferedBrainTurnPhase::Failed => "failed",
         BufferedBrainTurnPhase::Cancelled => "cancelled",

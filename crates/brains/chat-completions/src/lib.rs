@@ -8,14 +8,16 @@
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_protocol::{
-    BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure,
-    BrainWakeProviderStateInput, BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate,
-    BrainWakeStreamItem, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
-    ChatCompletionsWireDialect, CoreErrorKind, ModelProviderRecord, SessionId,
+    BrainActionBatch, BrainContinuationPayload, BrainEvent, BrainEventEnvelope,
+    BrainProviderStatusLevel, BrainWakeFailure, BrainWakeProviderStateInput,
+    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, BrainWakeStreamItem,
+    ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
+    CoreErrorKind, ModelProviderRecord, SessionId,
 };
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Read;
 use std::sync::{
@@ -26,7 +28,8 @@ use std::time::{Duration, Instant};
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "chat-completions";
-pub const DEFAULT_MAX_TOOL_ROUNDS: usize = 64;
+pub const DEFAULT_WORK_QUANTUM_TOOL_ROUNDS: usize = 64;
+pub const CONTINUATION_PAYLOAD_VERSION: &str = "chat-completions-continuation-v1";
 pub const DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES: usize = 1;
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
 pub const OUTPUT_LIMIT_EXCEEDED_REASON_CODE: &str = "chat_completions_output_limit_exceeded";
@@ -948,7 +951,7 @@ pub trait ChatCompletionsNeutralToolExecutor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatCompletionsBrainLoopConfig {
-    pub max_tool_rounds: usize,
+    pub work_quantum_tool_rounds: usize,
     pub repeated_tool_call_limit: usize,
     pub max_malformed_tool_call_recoveries: usize,
 }
@@ -956,7 +959,7 @@ pub struct ChatCompletionsBrainLoopConfig {
 impl Default for ChatCompletionsBrainLoopConfig {
     fn default() -> Self {
         Self {
-            max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
+            work_quantum_tool_rounds: DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
             repeated_tool_call_limit: 3,
             max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
         }
@@ -969,6 +972,7 @@ pub struct ChatCompletionsBrainLoopInput {
     pub messages: Vec<ChatCompletionMessage>,
     pub input_images: Vec<ChatCompletionsInputImage>,
     pub provider_state: Option<BrainWakeProviderStateInput>,
+    pub continuation_state: Option<BrainContinuationPayload>,
     pub final_message_fallback: Option<ChatCompletionsFinalMessage>,
 }
 
@@ -976,11 +980,13 @@ pub struct ChatCompletionsBrainLoopInput {
 pub struct ChatCompletionsBrainLoopOutput {
     pub stream: Vec<BrainWakeStreamItem>,
     pub completed: bool,
+    pub yielded: bool,
     pub provider_request_count: usize,
     pub tool_round_count: usize,
     pub provider_event_counts: BTreeMap<String, usize>,
     pub provider_request_debug_samples: Vec<Value>,
     pub provider_state: Option<BrainWakeProviderStateOutput>,
+    pub continuation_state: Option<BrainContinuationPayload>,
 }
 
 type BrainWakeItemSink<'a> = Option<&'a mut dyn FnMut(BrainWakeStreamItem)>;
@@ -1047,6 +1053,7 @@ where
             messages,
             input_images: Vec::new(),
             provider_state: None,
+            continuation_state: None,
             final_message_fallback: None,
         })
     }
@@ -1070,52 +1077,118 @@ where
     ) -> ChatCompletionsBrainLoopOutput {
         let mut mapper = ChatCompletionsEventMapper::new();
         let mut stream = Vec::new();
-        extend_stream_items(&mut stream, mapper.map_started(&input.context), &mut sink);
-        let mut messages = match chat_completions_messages_with_provider_state(
-            &self.request_builder.config,
-            input.provider_state.as_ref(),
-            input.messages,
-        ) {
-            Ok(messages) => messages,
-            Err(message) => {
-                push_stream_item(
-                    &mut stream,
-                    wake_failed_item_with_reason(
-                        &input.context,
-                        CoreErrorKind::InvalidInput,
-                        "chat_completions_provider_state_invalid",
-                        message,
-                    ),
-                    &mut sink,
-                );
-                return ChatCompletionsBrainLoopOutput {
-                    stream,
-                    completed: false,
-                    provider_request_count: 0,
-                    tool_round_count: 0,
-                    provider_event_counts: BTreeMap::new(),
-                    provider_request_debug_samples: Vec::new(),
-                    provider_state: None,
-                };
+        let restored = match input.continuation_state.as_ref() {
+            Some(state) => match chat_completions_continuation_state(state) {
+                Ok(state) => Some(state),
+                Err(message) => {
+                    push_stream_item(
+                        &mut stream,
+                        wake_failed_item_with_reason(
+                            &input.context,
+                            CoreErrorKind::InvalidInput,
+                            "chat_completions_continuation_state_invalid",
+                            message,
+                        ),
+                        &mut sink,
+                    );
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        provider_request_count: 0,
+                        tool_round_count: 0,
+                        provider_event_counts: BTreeMap::new(),
+                        provider_request_debug_samples: Vec::new(),
+                        provider_state: None,
+                        continuation_state: None,
+                    };
+                }
+            },
+            None => None,
+        };
+        if restored.is_none() {
+            extend_stream_items(&mut stream, mapper.map_started(&input.context), &mut sink);
+        }
+        let fresh_messages = if restored.is_some() {
+            Vec::new()
+        } else {
+            match chat_completions_messages_with_provider_state(
+                &self.request_builder.config,
+                input.provider_state.as_ref(),
+                input.messages,
+            ) {
+                Ok(messages) => messages,
+                Err(message) => {
+                    push_stream_item(
+                        &mut stream,
+                        wake_failed_item_with_reason(
+                            &input.context,
+                            CoreErrorKind::InvalidInput,
+                            "chat_completions_provider_state_invalid",
+                            message,
+                        ),
+                        &mut sink,
+                    );
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        provider_request_count: 0,
+                        tool_round_count: 0,
+                        provider_event_counts: BTreeMap::new(),
+                        provider_request_debug_samples: Vec::new(),
+                        provider_state: None,
+                        continuation_state: None,
+                    };
+                }
             }
         };
-        let mut durable_messages = messages.clone();
-        let mut repeated_calls: HashMap<(String, String), usize> = HashMap::new();
-        let mut provider_request_count = 0;
-        let mut tool_round_count = 0;
-        let mut malformed_tool_call_recovery_count = 0;
-        let mut provider_event_counts = BTreeMap::new();
-        let mut provider_request_debug_samples = Vec::new();
+        let mut messages = restored
+            .as_ref()
+            .map(|state| state.messages.clone())
+            .unwrap_or_else(|| fresh_messages.clone());
+        let mut durable_messages = restored
+            .as_ref()
+            .map(|state| state.durable_messages.clone())
+            .unwrap_or(fresh_messages);
+        let mut repeated_calls: HashMap<(String, String), usize> = restored
+            .as_ref()
+            .map(|state| {
+                state
+                    .repeated_calls
+                    .iter()
+                    .map(|call| ((call.name.clone(), call.arguments_json.clone()), call.count))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut provider_request_count = restored
+            .as_ref()
+            .map_or(0, |state| state.provider_request_count);
+        let mut tool_round_count = restored.as_ref().map_or(0, |state| state.tool_round_count);
+        let mut epoch_tool_round_count = 0;
+        let mut malformed_tool_call_recovery_count = restored
+            .as_ref()
+            .map_or(0, |state| state.malformed_tool_call_recovery_count);
+        let mut provider_event_counts = restored
+            .as_ref()
+            .map(|state| state.provider_event_counts.clone())
+            .unwrap_or_default();
+        let mut provider_request_debug_samples = restored
+            .as_ref()
+            .map(|state| state.provider_request_debug_samples.clone())
+            .unwrap_or_default();
+        let input_images = restored
+            .as_ref()
+            .map(|state| state.input_images.clone())
+            .unwrap_or(input.input_images);
 
         loop {
             provider_request_count += 1;
             let request = self
                 .request_builder
-                .build_with_images(messages.clone(), &input.input_images);
-            provider_request_debug_samples.push(chat_completions_debug_request(
-                &request,
-                &input.input_images,
-            ));
+                .build_with_images(messages.clone(), &input_images);
+            provider_request_debug_samples
+                .push(chat_completions_debug_request(&request, &input_images));
             let mut assistant_text = String::new();
             let mut assistant_reasoning = String::new();
             let mut tool_calls = Vec::new();
@@ -1176,11 +1249,13 @@ where
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
+                    yielded: false,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
                     provider_request_debug_samples,
                     provider_state,
+                    continuation_state: None,
                 };
             }
 
@@ -1264,11 +1339,13 @@ where
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
+                    yielded: false,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
                     provider_request_debug_samples,
                     provider_state,
+                    continuation_state: None,
                 };
             }
 
@@ -1287,11 +1364,13 @@ where
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: false,
+                    yielded: false,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
                     provider_request_debug_samples,
                     provider_state: None,
+                    continuation_state: None,
                 };
             }
 
@@ -1328,39 +1407,18 @@ where
                 return ChatCompletionsBrainLoopOutput {
                     stream,
                     completed: true,
+                    yielded: false,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
                     provider_request_debug_samples,
                     provider_state,
+                    continuation_state: None,
                 };
             }
 
-            if tool_round_count >= self.config.max_tool_rounds {
-                push_stream_item(
-                    &mut stream,
-                    wake_failed_item_with_reason(
-                        &input.context,
-                        CoreErrorKind::BrainUnavailable,
-                        "chat_completions_continuation_limit_exceeded",
-                        format!(
-                            "chat-completions exceeded {} tool continuation rounds",
-                            self.config.max_tool_rounds
-                        ),
-                    ),
-                    &mut sink,
-                );
-                return ChatCompletionsBrainLoopOutput {
-                    stream,
-                    completed: false,
-                    provider_request_count,
-                    tool_round_count,
-                    provider_event_counts,
-                    provider_request_debug_samples,
-                    provider_state: None,
-                };
-            }
             tool_round_count += 1;
+            epoch_tool_round_count += 1;
 
             let assistant_tool_message =
                 assistant_tool_call_message(&assistant_text, &assistant_reasoning, &tool_calls);
@@ -1386,11 +1444,13 @@ where
                     return ChatCompletionsBrainLoopOutput {
                         stream,
                         completed: false,
+                        yielded: false,
                         provider_request_count,
                         tool_round_count,
                         provider_event_counts,
                         provider_request_debug_samples,
                         provider_state: None,
+                        continuation_state: None,
                     };
                 }
 
@@ -1432,11 +1492,13 @@ where
                     return ChatCompletionsBrainLoopOutput {
                         stream,
                         completed: false,
+                        yielded: false,
                         provider_request_count,
                         tool_round_count,
                         provider_event_counts,
                         provider_request_debug_samples,
                         provider_state: None,
+                        continuation_state: None,
                     };
                 }
                 let tool_message = ChatCompletionMessage::tool(
@@ -1447,6 +1509,55 @@ where
                 );
                 messages.push(tool_message.clone());
                 durable_messages.push(tool_message);
+            }
+            if epoch_tool_round_count >= self.config.work_quantum_tool_rounds {
+                let continuation_state = match chat_completions_continuation_output(
+                    messages,
+                    durable_messages,
+                    input_images,
+                    repeated_calls,
+                    provider_request_count,
+                    tool_round_count,
+                    malformed_tool_call_recovery_count,
+                    provider_event_counts.clone(),
+                    provider_request_debug_samples.clone(),
+                ) {
+                    Ok(state) => state,
+                    Err(message) => {
+                        push_stream_item(
+                            &mut stream,
+                            wake_failed_item_with_reason(
+                                &input.context,
+                                CoreErrorKind::InternalError,
+                                "chat_completions_continuation_checkpoint_failed",
+                                message,
+                            ),
+                            &mut sink,
+                        );
+                        return ChatCompletionsBrainLoopOutput {
+                            stream,
+                            completed: false,
+                            yielded: false,
+                            provider_request_count,
+                            tool_round_count,
+                            provider_event_counts,
+                            provider_request_debug_samples,
+                            provider_state: None,
+                            continuation_state: None,
+                        };
+                    }
+                };
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    yielded: true,
+                    provider_request_count,
+                    tool_round_count,
+                    provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
+                    continuation_state: Some(continuation_state),
+                };
             }
         }
     }
@@ -2015,6 +2126,103 @@ struct ChatCompletionsProviderStateV1 {
     strategy_id: String,
     payload_version: String,
     messages: Vec<ChatCompletionMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct ChatCompletionsContinuationStateV1 {
+    kind: String,
+    payload_version: String,
+    messages: Vec<ChatCompletionMessage>,
+    durable_messages: Vec<ChatCompletionMessage>,
+    input_images: Vec<ChatCompletionsInputImage>,
+    repeated_calls: Vec<RepeatedToolCallState>,
+    provider_request_count: usize,
+    tool_round_count: usize,
+    malformed_tool_call_recovery_count: usize,
+    provider_event_counts: BTreeMap<String, usize>,
+    provider_request_debug_samples: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RepeatedToolCallState {
+    name: String,
+    arguments_json: String,
+    count: usize,
+}
+
+fn chat_completions_continuation_state(
+    state: &BrainContinuationPayload,
+) -> Result<ChatCompletionsContinuationStateV1, String> {
+    if state.module_id != MODULE_ID || state.payload_version != CONTINUATION_PAYLOAD_VERSION {
+        return Err(format!(
+            "unsupported chat-completions continuation identity {} {}",
+            state.module_id, state.payload_version
+        ));
+    }
+    let fingerprint = continuation_payload_fingerprint(&state.payload)?;
+    if fingerprint != state.payload_fingerprint {
+        return Err("chat-completions continuation fingerprint mismatch".to_string());
+    }
+    let payload: ChatCompletionsContinuationStateV1 = serde_json::from_value(state.payload.clone())
+        .map_err(|error| format!("chat-completions continuation payload is malformed: {error}"))?;
+    if payload.kind != MODULE_ID || payload.payload_version != CONTINUATION_PAYLOAD_VERSION {
+        return Err("chat-completions continuation payload identity mismatch".to_string());
+    }
+    Ok(payload)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn chat_completions_continuation_output(
+    messages: Vec<ChatCompletionMessage>,
+    durable_messages: Vec<ChatCompletionMessage>,
+    input_images: Vec<ChatCompletionsInputImage>,
+    repeated_calls: HashMap<(String, String), usize>,
+    provider_request_count: usize,
+    tool_round_count: usize,
+    malformed_tool_call_recovery_count: usize,
+    provider_event_counts: BTreeMap<String, usize>,
+    provider_request_debug_samples: Vec<Value>,
+) -> Result<BrainContinuationPayload, String> {
+    let mut repeated_calls = repeated_calls
+        .into_iter()
+        .map(|((name, arguments_json), count)| RepeatedToolCallState {
+            name,
+            arguments_json,
+            count,
+        })
+        .collect::<Vec<_>>();
+    repeated_calls.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.arguments_json.cmp(&right.arguments_json))
+    });
+    let payload = serde_json::to_value(ChatCompletionsContinuationStateV1 {
+        kind: MODULE_ID.to_string(),
+        payload_version: CONTINUATION_PAYLOAD_VERSION.to_string(),
+        messages,
+        durable_messages,
+        input_images,
+        repeated_calls,
+        provider_request_count,
+        tool_round_count,
+        malformed_tool_call_recovery_count,
+        provider_event_counts,
+        provider_request_debug_samples,
+    })
+    .map_err(|error| format!("serialize chat-completions continuation payload: {error}"))?;
+    let payload_fingerprint = continuation_payload_fingerprint(&payload)?;
+    Ok(BrainContinuationPayload {
+        module_id: MODULE_ID.to_string(),
+        payload_version: CONTINUATION_PAYLOAD_VERSION.to_string(),
+        payload_fingerprint,
+        payload,
+    })
+}
+
+fn continuation_payload_fingerprint(payload: &Value) -> Result<String, String> {
+    serde_json::to_vec(payload)
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+        .map_err(|error| format!("fingerprint chat-completions continuation payload: {error}"))
 }
 
 fn chat_completions_messages_with_provider_state(
@@ -3698,6 +3906,7 @@ mod tests {
                 messages: vec![ChatCompletionMessage::user("use a tool")],
                 input_images: Vec::new(),
                 provider_state: None,
+                continuation_state: None,
                 final_message_fallback: None,
             },
             &mut sink,
@@ -3897,6 +4106,7 @@ mod tests {
             ],
             input_images: Vec::new(),
             provider_state: Some(provider_state),
+            continuation_state: None,
             final_message_fallback: None,
         });
         let messages = second.provider_request_debug_samples[0]["messages"]
@@ -4017,6 +4227,7 @@ mod tests {
             messages: vec![ChatCompletionMessage::user("second question")],
             input_images: Vec::new(),
             provider_state: Some(provider_state_input(state)),
+            continuation_state: None,
             final_message_fallback: None,
         });
         let second_request = &second.provider_request_debug_samples[0];
@@ -4091,6 +4302,7 @@ mod tests {
                 payload: state.payload,
                 expires_at: None,
             }),
+            continuation_state: None,
             final_message_fallback: None,
         });
         let request = &second.provider_request_debug_samples[0];
@@ -4176,6 +4388,7 @@ mod tests {
             messages: vec![ChatCompletionMessage::user("new question")],
             input_images: Vec::new(),
             provider_state: Some(prior_state),
+            continuation_state: None,
             final_message_fallback: None,
         });
 
@@ -4239,6 +4452,7 @@ mod tests {
                 payload: state.payload,
                 expires_at: None,
             }),
+            continuation_state: None,
             final_message_fallback: None,
         });
         let next_messages = next.provider_request_debug_samples[0]["messages"]
@@ -4953,7 +5167,7 @@ mod tests {
             .collect();
         let mut brain =
             loop_with(scripts, outputs).with_loop_config(ChatCompletionsBrainLoopConfig {
-                max_tool_rounds: DEFAULT_MAX_TOOL_ROUNDS,
+                work_quantum_tool_rounds: DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
                 repeated_tool_call_limit: 3,
                 max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
             });
@@ -4973,7 +5187,7 @@ mod tests {
     }
 
     #[test]
-    fn minimal_loop_reports_a_stable_continuation_limit_reason() {
+    fn minimal_loop_yields_and_resumes_beyond_each_work_quantum() {
         let mut brain = loop_with(
             vec![
                 Ok(vec![
@@ -4988,28 +5202,79 @@ mod tests {
                         finish_reason: Some("tool_calls".to_string()),
                     },
                 ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("continued to completion".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
             ],
-            vec![ChatCompletionsToolOutput::ok("first result")],
+            vec![
+                ChatCompletionsToolOutput::ok("first result"),
+                ChatCompletionsToolOutput::ok("second result"),
+            ],
         )
         .with_loop_config(ChatCompletionsBrainLoopConfig {
-            max_tool_rounds: 1,
+            work_quantum_tool_rounds: 1,
             repeated_tool_call_limit: 3,
             max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
         });
 
-        let output = brain.wake_with_messages(
-            context(),
-            vec![ChatCompletionMessage::user("exceed the tool limit")],
-        );
+        let first = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: vec![ChatCompletionMessage::user("continue across epochs")],
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: None,
+            final_message_fallback: None,
+        });
+        assert!(first.yielded);
+        assert!(!first.completed);
+        assert!(!first.stream.iter().any(BrainWakeStreamItem::is_terminal));
 
-        assert!(!output.completed);
-        assert_eq!(output.tool_round_count, 1);
-        assert!(matches!(
-            output.stream.last(),
-            Some(BrainWakeStreamItem::WakeFailed { failure })
-                if failure.reason_code.as_deref()
-                    == Some("chat_completions_continuation_limit_exceeded")
-        ));
+        let second = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: vec![ChatCompletionMessage::user(
+                "replacement input must not join the resumed turn",
+            )],
+            input_images: Vec::new(),
+            provider_state: Some(BrainWakeProviderStateInput {
+                module_id: "wrong-module".into(),
+                strategy_id: "wrong-strategy".into(),
+                profile_fingerprint: "wrong-profile".into(),
+                provider_fingerprint: "wrong-provider".into(),
+                payload_version: "wrong-version".into(),
+                payload: json!({"invalid": true}),
+                expires_at: None,
+            }),
+            continuation_state: first.continuation_state,
+            final_message_fallback: None,
+        });
+        assert!(second.yielded);
+        assert_eq!(second.tool_round_count, 2);
+        assert!(!second.provider_request_debug_samples[1]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| {
+                message["content"] == "replacement input must not join the resumed turn"
+            }));
+
+        let completed = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: Vec::new(),
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: second.continuation_state,
+            final_message_fallback: None,
+        });
+        assert!(completed.completed);
+        assert!(!completed.yielded);
+        assert_eq!(completed.tool_round_count, 2);
+        assert_eq!(completed.provider_request_count, 3);
+        assert!(events(&completed.stream).contains(&BrainEvent::TextDelta {
+            text: "continued to completion".to_string(),
+        }));
     }
 
     #[test]
@@ -5149,6 +5414,7 @@ mod tests {
             messages: vec![ChatCompletionMessage::user("hi")],
             input_images: Vec::new(),
             provider_state: None,
+            continuation_state: None,
             final_message_fallback: Some(ChatCompletionsFinalMessage {
                 text: Some("final-only".to_string()),
                 ..ChatCompletionsFinalMessage::default()

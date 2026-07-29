@@ -90,7 +90,7 @@ import type {
 } from "./rusty-view-chat-api.js";
 
 export interface RustyViewChatWakeReport {
-  status: "completed" | "rejected" | "skipped" | "failed";
+  status: "completed" | "continuing" | "rejected" | "skipped" | "failed";
   wakeId?: string;
   summary: string;
   reasonCode?: string;
@@ -259,7 +259,10 @@ export async function submitRustyViewChatMessage(
     });
   }
   const result: SendChatMessageResult = {
-    status: wakeReport.status === "completed" ? "accepted" : "rejected",
+    status:
+      wakeReport.status === "completed" || wakeReport.status === "continuing"
+        ? "accepted"
+        : "rejected",
     message_id: messageId,
     slot_id: slotId,
     primary_variant_id: primaryVariantId,

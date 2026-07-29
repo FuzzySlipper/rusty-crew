@@ -11,15 +11,16 @@ use rusty_crew_brain_runtime::{
 use rusty_crew_core_bridge_api::{
     manifest_summary, wire_shape_fingerprint, ActionBatchReceipt, BrainActionBatch,
     BrainEventEnvelope, BrainImplementationHandle, BrainImplementationRegistration,
-    BrainWakeAccepted, BrainWakeBufferInput, BrainWakeProviderStateOutput, BrainWakeRequest,
-    BridgeManifestSummary, CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate,
-    EngineConfig, EngineHandle, EngineStorageConfig, EventReceipt, EventSubscription,
-    ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration, ProfileId,
-    RuntimeActivityBegin, RuntimeActivityCensus, RuntimeActivityCensusQuery, RuntimeActivityFinish,
-    RuntimeActivityId, RuntimeActivityKind, RuntimeActivityLiveEvidence, RuntimeActivityOwner,
-    RuntimeActivityProgress, RuntimeActivityRecord, RuntimeActivityStatus, RuntimeBufferHandle,
-    RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest, ShutdownSummary,
-    SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
+    BrainWakeAccepted, BrainWakeBufferInput, BrainWakeOutcome, BrainWakeProviderStateOutput,
+    BrainWakeRequest, BrainWakeSettlementKind, BrainWakeSettlementReceipt,
+    BrainWakeSettlementRequest, BridgeManifestSummary, CoreError, CoreErrorKind, CoreEvent,
+    CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EngineStorageConfig, EventReceipt,
+    EventSubscription, ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration,
+    ProfileId, RuntimeActivityBegin, RuntimeActivityCensus, RuntimeActivityCensusQuery,
+    RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind, RuntimeActivityLiveEvidence,
+    RuntimeActivityOwner, RuntimeActivityProgress, RuntimeActivityRecord, RuntimeActivityStatus,
+    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
+    ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
     plan_channel_ingress_route, plan_create_profile, plan_delegated_role_lifecycle,
@@ -31,7 +32,7 @@ use rusty_crew_core_config::{
     ProfileRegistryMutationRequest, ReloadMcpControlPlan, ReloadMcpControlPlanInput,
     RuntimeConfigPlan, RuntimeConfigValidationInput, RuntimeGraphPlanInput,
 };
-use rusty_crew_core_engine::CoreEngine;
+use rusty_crew_core_engine::{CoreEngine, LogicalTurnEpochResult, LogicalTurnEpochSettlement};
 use rusty_crew_core_persistence::{
     ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, AttachmentQuery,
     AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery, ChatEventLogAppend,
@@ -197,6 +198,7 @@ use responses::{normalize_responses_tool_schema, run_openai_responses_brain_json
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub(crate) use sessions::*;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 pub(crate) use storage_admin::*;
 use time::format_description::well_known::Rfc3339;
@@ -213,6 +215,14 @@ pub struct NativeBridge {
     subscriptions: SubscriptionRegistry,
     openai_responses_buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
     chat_completions_buffered_runs: Arc<ChatCompletionsBufferedRunRegistry>,
+    active_logical_wakes: HashMap<String, ActiveLogicalWake>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveLogicalWake {
+    brain: BrainImplementationHandle,
+    session_id: SessionId,
+    claim: rusty_crew_core_protocol::LogicalTurnContinuationClaim,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,6 +261,7 @@ impl NativeBridge {
             chat_completions_buffered_runs: Arc::new(ChatCompletionsBufferedRunRegistry::new(
                 "chat-completions",
             )),
+            active_logical_wakes: HashMap::new(),
         }
     }
 

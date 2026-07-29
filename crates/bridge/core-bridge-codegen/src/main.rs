@@ -3416,6 +3416,7 @@ fn sample_brain_wake_request() -> BrainWakeRequest {
         system_prompt: RuntimeBufferHandle::new(43),
         role_assembly: RuntimeBufferHandle::new(44),
         wake_id: "validation-wake".to_owned(),
+        continuation_state: None,
         provider_state: Some(sample_brain_provider_state_input()),
         provider_state_absence: None,
     }
@@ -3425,6 +3426,7 @@ fn sample_brain_wake_accepted() -> BrainWakeAccepted {
     BrainWakeAccepted {
         wake_id: "validation-wake".to_owned(),
         accepted: true,
+        outcome: BrainWakeOutcome::Completed,
     }
 }
 

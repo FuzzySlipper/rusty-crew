@@ -3582,6 +3582,7 @@ mod tests {
             system_prompt: RuntimeBufferHandle::new(2),
             role_assembly: RuntimeBufferHandle::new(3),
             wake_id: "wake-responses".to_string(),
+            continuation_state: None,
             provider_state,
             provider_state_absence: absence,
         }

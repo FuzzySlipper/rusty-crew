@@ -1202,6 +1202,17 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
     sessionId: Type.String(),
     messages: Type.Array(chatCompletionMessageSchema),
     providerState: Type.Optional(providerStateInputSchema),
+    continuationState: Type.Optional(
+      Type.Object(
+        {
+          moduleId: Type.String(),
+          payloadVersion: Type.String(),
+          payloadFingerprint: Type.String(),
+          payload: Type.Unknown(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     tools: Type.Optional(
       Type.Array(
         Type.Object(
@@ -1248,9 +1259,7 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
         reasoningBudgetTokens: Type.Optional(Type.Number({ minimum: 1 })),
         providerStateStrategyId: Type.Optional(Type.String()),
         maxOutputTokens: Type.Optional(Type.Number()),
-        maxToolRounds: Type.Optional(
-          Type.Integer({ minimum: 1, maximum: 512 }),
-        ),
+        workQuantumToolRounds: Type.Optional(Type.Integer({ minimum: 1 })),
         repeatedToolCallLimit: Type.Optional(Type.Number()),
         finalMessageFallbackText: Type.Optional(Type.String()),
       },
@@ -1501,6 +1510,8 @@ export const rawChatCompletionsBufferedDrainResultSchema = Type.Object(
       ),
     ),
     terminal: Type.Boolean(),
+    yielded: Type.Optional(Type.Boolean()),
+    continuation_state: Type.Optional(Type.Unknown()),
     transport_metrics: Type.Optional(
       Type.Union([Type.Null(), chatCompletionsTransportMetricsSchema]),
     ),
@@ -1562,6 +1573,8 @@ export const rawBufferedBrainRunDrainSchema = Type.Object(
       { additionalProperties: false },
     ),
     terminal: Type.Boolean(),
+    yielded: Type.Optional(Type.Boolean()),
+    continuation_state: Type.Optional(Type.Unknown()),
     terminal_reason_code: Type.Optional(
       Type.Union([Type.String(), Type.Null()]),
     ),

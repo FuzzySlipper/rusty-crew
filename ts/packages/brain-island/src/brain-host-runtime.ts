@@ -2,6 +2,7 @@ import type {
   AgentMessage as RustyAgentMessage,
   BodyState,
   BrainAction,
+  BrainContinuationPayload,
   BrainEventEnvelope,
   BrainImplementationHandle,
   BrainImplementationRegistration,
@@ -33,6 +34,7 @@ export interface BrainWakeInput {
   systemPrompt: string;
   roleAssembly: BrainRoleAssembly;
   providerState?: BrainWakeProviderStateInput;
+  continuationState?: BrainContinuationPayload;
   providerStateAbsence?: ProviderStateAbsenceReason;
 }
 
@@ -44,6 +46,8 @@ export interface BrainWakeResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
+  outcome?: "completed" | "yielded";
+  continuationState?: BrainContinuationPayload;
   stream?: BrainWakeStreamItem[];
   transportMetrics?:
     | OpenAiResponsesTransportMetrics

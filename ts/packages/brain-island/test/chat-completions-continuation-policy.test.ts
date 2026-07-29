@@ -15,21 +15,21 @@ import type {
 import type { BrainHostContext } from "../src/brain-host-context.js";
 import {
   chatCompletionsContinuationDiagnostics,
-  chatCompletionsMaxToolRounds,
-  DEFAULT_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS,
+  chatCompletionsWorkQuantumToolRounds,
+  DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
 } from "../src/chat-completions-continuation-policy.js";
 import { createChatCompletionsBrainHost } from "../src/chat-completions-host.js";
 import type { BrainWakeInput } from "../src/index.js";
 
-const variable = "RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS";
+const variable = "RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS";
 
-test("Chat Completions continuation policy uses the durable default", () => {
+test("Chat Completions continuation policy uses the scheduling default", () => {
   assert.equal(
-    chatCompletionsMaxToolRounds({}),
-    DEFAULT_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS,
+    chatCompletionsWorkQuantumToolRounds({}),
+    DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
   );
   assert.deepEqual(chatCompletionsContinuationDiagnostics("chat-completions"), {
-    maxContinuationRounds: DEFAULT_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS,
+    workQuantumToolRounds: DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
   });
   assert.deepEqual(
     chatCompletionsContinuationDiagnostics("openai-responses"),
@@ -37,20 +37,23 @@ test("Chat Completions continuation policy uses the durable default", () => {
   );
 });
 
-test("Chat Completions continuation policy accepts an explicit bounded limit", () => {
-  assert.equal(chatCompletionsMaxToolRounds({ [variable]: " 96 " }), 96);
+test("Chat Completions continuation policy accepts a large scheduling quantum", () => {
+  assert.equal(
+    chatCompletionsWorkQuantumToolRounds({ [variable]: " 100000 " }),
+    100_000,
+  );
 });
 
-test("Chat Completions continuation policy rejects zero and unreasonable limits", () => {
-  for (const value of ["0", "-1", "1.5", "513", "many"]) {
+test("Chat Completions continuation policy rejects non-positive or invalid quanta", () => {
+  for (const value of ["0", "-1", "1.5", "9007199254740992", "many"]) {
     assert.throws(
-      () => chatCompletionsMaxToolRounds({ [variable]: value }),
+      () => chatCompletionsWorkQuantumToolRounds({ [variable]: value }),
       new RegExp(variable),
     );
   }
 });
 
-test("Chat Completions host sends the continuation budget to the native boundary", async () => {
+test("Chat Completions host sends the work quantum to the native boundary", async () => {
   let capturedConfig: ChatCompletionsBrainRunInput["config"] | undefined;
   const bridge = {
     startBrainRun: async (
@@ -88,8 +91,8 @@ test("Chat Completions host sends the continuation budget to the native boundary
   await brain.wake(continuationWake());
 
   assert.equal(
-    capturedConfig?.maxToolRounds,
-    DEFAULT_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS,
+    capturedConfig?.workQuantumToolRounds,
+    DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
   );
 });
 

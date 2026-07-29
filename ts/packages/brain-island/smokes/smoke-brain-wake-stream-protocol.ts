@@ -87,6 +87,16 @@ try {
       }),
     /must end with actions or wake_failed/,
   );
+  assert.deepEqual(
+    brainWakeStreamItemsFromExecutionResult(request, {
+      events: streamItems
+        .filter((item) => item.type === "event")
+        .map((item) => item.event),
+      actions: [],
+      outcome: "yielded",
+    }).map((item) => item.type),
+    ["event"],
+  );
 
   await native.createSession({
     sessionId,
@@ -187,7 +197,7 @@ try {
     wakeId,
   });
   const accepted = await native.wakeBrain(buffered);
-  assert.deepEqual(accepted, { wakeId, accepted: true });
+  assert.deepEqual(accepted, { wakeId, accepted: true, outcome: "completed" });
 
   const observed = await native.drainSubscriptionEvents(eventSubscription, 8);
   assert.equal(observed.length, 5);

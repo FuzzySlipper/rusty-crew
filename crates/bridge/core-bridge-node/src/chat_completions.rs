@@ -11,7 +11,8 @@ use rusty_crew_chat_completions_brain::{
     ChatCompletionsFinalMessage, ChatCompletionsInputImage, ChatCompletionsNeutralToolExecutor,
     ChatCompletionsToolOutput, FakeChatCompletionsClient, LiveChatCompletionsClient,
     NeutralBrainTool as ChatCompletionsNeutralBrainTool, PendingChatFunctionCall,
-    ProviderCancellation, DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES, DEFAULT_MAX_TOOL_ROUNDS,
+    ProviderCancellation, DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
+    DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
 };
 use rusty_crew_core_protocol::{
     BrainWakeProviderStateInput, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
@@ -31,6 +32,8 @@ struct JsChatCompletionsBrainRunInput {
     input_images: Vec<ChatCompletionsInputImage>,
     #[serde(default)]
     provider_state: Option<BrainWakeProviderStateInput>,
+    #[serde(default)]
+    continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
     #[serde(default)]
     tools: Vec<JsChatCompletionsNeutralTool>,
     config: JsChatCompletionsBrainConfig,
@@ -71,7 +74,7 @@ struct JsChatCompletionsBrainConfig {
     #[serde(default)]
     max_output_tokens: Option<u32>,
     #[serde(default)]
-    max_tool_rounds: Option<usize>,
+    work_quantum_tool_rounds: Option<usize>,
     #[serde(default)]
     repeated_tool_call_limit: Option<usize>,
     #[serde(default)]
@@ -135,6 +138,7 @@ pub(crate) struct ChatCompletionsBufferedRunPayload {
     transport_metrics: Option<ChatCompletionsTransportMetrics>,
     provider_finished: bool,
     provider_cancellation: ProviderCancellation,
+    continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
 }
 
 pub(crate) type ChatCompletionsBufferedRunRegistry =
@@ -226,6 +230,8 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
                 "terminal_reason_code": terminal_reason_code,
                 "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
                 "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
+                "yielded": terminal && run.coordinator.phase() == rusty_crew_brain_runtime::BufferedBrainTurnPhase::Yielded,
+                "continuation_state": terminal.then(|| run.payload.continuation_state.clone()).flatten(),
                 "error": error,
                 "cancellation": terminal.then(|| run.coordinator.cancellation()).flatten(),
             });
@@ -369,6 +375,10 @@ fn run_chat_completions_brain_buffered(
                     if let Some(provider_state) = output.provider_state {
                         let _ = run.coordinator.set_provider_state_output(provider_state);
                     }
+                    run.payload.continuation_state = output.continuation_state;
+                    if output.yielded && !run.coordinator.phase().is_terminal() {
+                        let _ = run.coordinator.yield_turn();
+                    }
                     if !run.coordinator.phase().is_terminal() {
                         let _ = run.coordinator.fail(
                             "provider_stream_missing_terminal",
@@ -411,10 +421,10 @@ fn run_chat_completions_brain_with_buffered_tools(
         )
     })?;
     let loop_config = ChatCompletionsBrainLoopConfig {
-        max_tool_rounds: input
+        work_quantum_tool_rounds: input
             .config
-            .max_tool_rounds
-            .unwrap_or(DEFAULT_MAX_TOOL_ROUNDS),
+            .work_quantum_tool_rounds
+            .unwrap_or(DEFAULT_WORK_QUANTUM_TOOL_ROUNDS),
         repeated_tool_call_limit: input.config.repeated_tool_call_limit.unwrap_or(3),
         max_malformed_tool_call_recoveries: input
             .config
@@ -447,6 +457,7 @@ fn run_chat_completions_brain_with_buffered_tools(
         messages: input.messages,
         input_images: input.input_images,
         provider_state: input.provider_state,
+        continuation_state: input.continuation_state,
         final_message_fallback,
     };
     match input.client {
@@ -616,7 +627,7 @@ fn fake_chat_completions_client(tool_name: Option<&str>) -> FakeChatCompletionsC
             fake_chat_completions_tool_call_script(tool_name, "fake-chat-call-2", "{}"),
             Ok(vec![
                 ChatCompletionsEvent::ContentDelta(
-                    "chat-completions should not reach post-policy completion".to_string(),
+                    "chat-completions recovered after repeated tool failure guidance".to_string(),
                 ),
                 ChatCompletionsEvent::Finished {
                     finish_reason: Some("stop".to_string()),

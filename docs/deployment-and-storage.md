@@ -106,16 +106,16 @@ RUSTY_CREW_ADMIN_TOKEN=replace-with-local-token
 
 RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS=1000
 RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
-RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS=512
+RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=64
 RUSTY_CREW_OPENAI_RESPONSES_MAX_CONTINUATION_ROUNDS=512
 ```
 
-The continuation values are temporary compatibility ceilings and should remain
-at the implementation maximum. They are not intended as normal turn limits:
-healthy long-running work should eventually yield into a durable continuation
-instead of failing at a provider/tool-round count. Provider-request and session
-turn timeouts may be left unset when explicit user cancellation is the desired
-lifecycle policy.
+The Chat Completions value is a scheduling quantum: after that many tool rounds,
+Rust persists the logical-turn checkpoint and resumes it in another execution
+epoch. It cannot terminate healthy progress. The Responses value remains a
+temporary compatibility ceiling until its durable continuation path lands.
+Provider-request and session turn timeouts may be left unset when explicit user
+cancellation is the desired lifecycle policy.
 
 `0.0.0.0` is appropriate for the current trusted-LAN deployment. Use an
 appropriate interface and bearer auth for other environments. Explicit
