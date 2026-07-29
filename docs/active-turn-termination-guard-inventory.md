@@ -78,6 +78,36 @@ Those values reduce immediate failures but are not the target design.
 | Malformed Chat Completions tool calls | Rust `chat-completions` | one recovery by default | detects provider-output correction, not task progress | after recovery exhaustion: `chat_completions_malformed_provider_stream` or `chat_completions_output_limit_exceeded` | malformed fragments and generated correction text intentionally are not durable; earlier completed rounds can be | Keep model-visible correction. Exhaustion should preserve state and request attention instead of killing the logical turn. Task 6368. |
 | Chat `finish_reason=length` | Rust `chat-completions` | provider-controlled output limit | provider operation ended with partial output | `chat_completions_output_limit_exceeded` unless a complete actionable tool call exists | partial events are visible; provider state is missing on the direct no-action branch | Treat as a bounded provider operation. Preserve partial progress, compact or continue when possible, otherwise pause with actionable diagnostics. Tasks 6366 and 6368. |
 
+## Wake Dispatch And Provider-State Preflight Guards
+
+These guards run around, or immediately before, the provider loop. They have no
+operator-configurable duration or count. The live/debug diagnostics therefore
+do not expose an effective limit for them; when exercised, their evidence is in
+the runtime activity record, service events, and persisted chat projection.
+
+| Guard | Current owner and configuration | Progress interaction | Current terminal reason and event | Persistence and restart | Live/debug visibility | Intended disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| Native wake rejection | TypeScript `service-wake-dispatch.ts` consumes the bridge `BrainWakeAccepted.accepted` result; no configuration | can occur only after event observation and the wake callback return, so observed progress may already exist | dispatch report becomes failed with `wake_rejected`; service event is `brain_wake_dispatched` at error severity and runtime activity finishes failed | observed core/chat events remain durable, but this branch does not synthesize the failed chat terminal fallback and has no continuation checkpoint | runtime activity and recent service events show the rejection; chat shows only events already observed | Treat rejection as a typed admission/action result. Preserve observed progress, distinguish a retryable rejection from operator attention, and never use it as an unclassified logical-turn failure. The current native wrapper normally returns `accepted=true` or throws, but the stable contract and production dispatch branch permit rejection. |
+| Buffered/native brain terminal | TypeScript `service-wake-dispatch.ts` catches `BufferedBrainWakeError`; the exact reason originates in the Rust buffered brain stream; no shared configuration | depends on the originating Rust terminal and may follow provider or tool progress | dispatch report uses the originating reason code; service event is `brain_wake_failed` and runtime activity finishes failed | observed events remain durable; the chat fallback records failed `assistant_message_completed` and `assistant_turn_finished`, but active buffered state is not restart-hydrated | chat terminal payload, runtime activity, recent service events, and buffered-run diagnostics expose the failure while available | Classify each Rust reason by recoverable operation, yield/continue, attention, or explicit cancellation. Do not collapse a progressing run into terminal failure. |
+| Generic wake dispatch exception | TypeScript `service-wake-dispatch.ts` catch-all; no configuration | may happen before provider work while loading profile/context, building the role/wake request, or subscribing; it can also happen _after_ a successful brain wake while publishing tool activity, running post-turn maintenance, or persisting the session activity digest | dispatch report reason is `wake_dispatch_failed`; service event is `brain_wake_failed` and runtime activity finishes failed | when a wake id exists, the chat fallback persists failed terminal events unless terminal events already exist; no resumable preflight/side-effect checkpoint exists | chat terminal payload, runtime activity, and recent service events expose the generic reason, but do not identify the failed stage reliably | Split preparation, execution, and post-turn side effects into typed stages. Preflight contract/configuration errors request operator attention; retryable bridge failures yield/retry; observation and maintenance failures degrade their own projection and must not retroactively fail a completed logical turn. Tasks 6365, 6369, and 6372. |
+| Chat Completions provider-state validation | Rust `chat-completions::chat_completions_messages_with_provider_state`; strict module id, strategy id, payload version, payload decoding, and embedded identity checks; no permissive fallback or configuration | terminates before the first provider request (`provider_request_count=0`), so this attempt makes no provider progress | emits `WakeFailed` with `chat_completions_provider_state_invalid`; buffered propagation reaches the TypeScript `BufferedBrainWakeError`/`brain_wake_failed` path | the output supplies no replacement state, so the previously stored invalid/incompatible provider state remains and can fail again after restart until explicitly cleared or corrected | failed chat terminal and runtime activity retain the reason; provider-state diagnostics can identify the stored row, while provider request debug samples are empty because no request was sent | Preserve strict validation, but classify it as operator attention with actionable identity/version diagnostics and an explicit clear/rebuild repair. It must not silently discard state or repeatedly retry the same invalid preflight. Tasks 6366 and 6369. |
+
+Adjacent dispatch gates were included in the scan but are not active-turn
+termination guards:
+
+- `wake_already_in_flight` skips a duplicate request while the original turn
+  remains active.
+- `wake_session_missing`, `wake_session_archived`, runtime pause, and
+  `wake_brain_missing` reject dispatch before an active wake id is allocated.
+- runtime-activity begin/finish recording failures are warnings and do not stop
+  the wake; subscription cleanup failures are also ignored after observation.
+
+The remaining catch-all is itself a lifecycle defect: it spans preparation,
+the provider callback, event observation, projection, and post-turn side
+effects. The continuation campaign must replace that broad terminal envelope
+with stage-specific outcomes rather than merely preserving
+`wake_dispatch_failed`.
+
 ## Provider And Tool Operation Guards
 
 | Guard | Current owner and surface | Default / maximum | Progress signal | Current terminal behavior | Persistence and restart | Intended disposition |
@@ -172,6 +202,11 @@ The accepted contract is `adr/0026-durable-logical-turn-continuation.md`.
 - Delegated `maxDurationMs` measures age, not inactivity or progress.
 - Provider/tool operation failures are inconsistently separated from logical
   turn failure.
+- Native wake rejection lacks a durable failed-terminal chat fallback, and the
+  generic dispatch catch can misclassify a post-completion projection or
+  maintenance failure as a failed logical turn.
+- Invalid Chat Completions provider state fails before any provider request and
+  remains restart-stable until an operator clears or rebuilds it.
 - current diagnostics report active runs and effective policies, but there is
   no first-class `yielded`, `continuation_pending`, `attention_required`, or
   resumed-epoch lifecycle projection yet.
@@ -198,8 +233,10 @@ The accepted contract is `adr/0026-durable-logical-turn-continuation.md`.
 - `crates/brains/openai-responses/src/lib.rs`
 - `crates/core/core-config/src/lib.rs`
 - `crates/core/core-engine/src/delegation.rs`
+- `crates/core/core-engine/src/provider_runtime.rs`
 - `crates/core/core-protocol/src/types.rs`
 - `crates/core/core-tool-registry/src/lib.rs`
+- `ts/packages/native-bridge/src/index.ts`
 - `ts/packages/brain-island/src/service-wake-dispatch.ts`
 - `ts/packages/brain-island/src/wake-timeout.ts`
 - `ts/packages/brain-island/src/chat-completions-continuation-policy.ts`
