@@ -41,7 +41,6 @@ export interface ProfileRuntimeConfig {
   maxTurns?: number;
   defaultResourceLimits?: ResourceLimits;
   maxTokensPerTurn?: number;
-  maxTurnDurationMs?: number;
 }
 
 export interface ProfilePromptFragments {
@@ -92,7 +91,6 @@ export interface SessionMemoryPromptConfig {
 export interface ProfileSessionDefaultsConfig {
   ownerId?: string;
   maxHistoryMessages?: number;
-  turnTimeoutMs?: number;
 }
 
 export interface ProfileChannelDefaultsConfig {
@@ -204,11 +202,9 @@ export const profileRuntimeGraphWireFieldPaths = [
   "profiles[].runtime.default_resource_limits.max_duration_ms",
   "profiles[].runtime.default_resource_limits.workdir",
   "profiles[].runtime.max_tokens_per_turn",
-  "profiles[].runtime.max_turn_duration_ms",
   "profiles[].session_defaults",
   "profiles[].session_defaults.max_history_messages",
   "profiles[].session_defaults.owner_id",
-  "profiles[].session_defaults.turn_timeout_ms",
 ] as const;
 
 export const profilePromptAssetConfigPaths = [
@@ -456,6 +452,24 @@ export async function loadProfileConfigWithSource(
       profileId,
       profilePath,
       "profile root must be an object",
+    );
+  }
+  const retiredField =
+    isRecord(parsed.runtime) &&
+    Object.hasOwn(parsed.runtime, "maxTurnDurationMs")
+      ? "runtime.maxTurnDurationMs"
+      : isRecord(parsed.runtimeConfig) &&
+          Object.hasOwn(parsed.runtimeConfig, "maxTurnDurationMs")
+        ? "runtimeConfig.maxTurnDurationMs"
+        : isRecord(parsed.sessionDefaults) &&
+            Object.hasOwn(parsed.sessionDefaults, "turnTimeoutMs")
+          ? "sessionDefaults.turnTimeoutMs"
+          : undefined;
+  if (retiredField !== undefined) {
+    throw invalidProfile(
+      profileId,
+      profilePath,
+      `${retiredField} is retired; profile turns have no finite lifetime`,
     );
   }
 
@@ -801,7 +815,6 @@ function validateProfileConfig(
       ? {
           maxTurns: optionalNumber(parsed.runtime.maxTurns),
           maxTokensPerTurn: optionalNumber(parsed.runtime.maxTokensPerTurn),
-          maxTurnDurationMs: optionalNumber(parsed.runtime.maxTurnDurationMs),
           defaultResourceLimits: isRecord(parsed.runtime.defaultResourceLimits)
             ? {
                 workdir: optionalString(
@@ -820,7 +833,6 @@ function validateProfileConfig(
         ? {
             maxTurns: optionalNumber(runtimeConfig.maxIterations),
             maxTokensPerTurn: optionalNumber(runtimeConfig.maxTokensPerTurn),
-            maxTurnDurationMs: optionalNumber(runtimeConfig.maxTurnDurationMs),
             defaultResourceLimits: {
               maxDurationMs: optionalNumber(runtimeConfig.maxDurationMs),
             },
@@ -881,7 +893,6 @@ function validateProfileConfig(
           maxHistoryMessages: optionalNumber(
             parsed.sessionDefaults.maxHistoryMessages,
           ),
-          turnTimeoutMs: optionalNumber(parsed.sessionDefaults.turnTimeoutMs),
         }
       : undefined,
     channelDefaults: isRecord(parsed.channelDefaults)

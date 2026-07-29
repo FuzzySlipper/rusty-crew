@@ -122,7 +122,6 @@ function chatCompletionsWakeInput(
     ],
     config: {
       model: "deepseek-flash",
-      wakeTimeoutMs: 10_000,
       providerRequestTimeoutMs: 10_000,
       workQuantumToolRounds: 64,
     },

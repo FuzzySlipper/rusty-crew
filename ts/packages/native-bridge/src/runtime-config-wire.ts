@@ -430,7 +430,6 @@ export function toNativeCreateProfilePlan(
             : undefined,
           maxHistoryMessages:
             plan.runtime_session.max_history_messages ?? undefined,
-          turnTimeoutMs: plan.runtime_session.turn_timeout_ms ?? undefined,
         }
       : undefined,
     profileMcpConfig: plan.profile_mcp_config
@@ -482,7 +481,6 @@ export function toRuntimeConfigDraft(
           }
         : undefined,
       maxHistoryMessages: session.max_history_messages ?? undefined,
-      turnTimeoutMs: session.turn_timeout_ms ?? undefined,
     })),
     scheduledJobs: draft.scheduled_jobs.map(toScheduledJobDraft),
     channelBindings: draft.channel_bindings.map((binding) => ({
@@ -603,7 +601,6 @@ export interface RawCreateProfilePlan {
       max_messages?: number;
     };
     max_history_messages?: number;
-    turn_timeout_ms?: number;
   };
   profile_mcp_config?: {
     binding_id?: string;
@@ -786,7 +783,6 @@ export interface RawSessionConfigDraft {
     max_messages?: number;
   };
   max_history_messages?: number;
-  turn_timeout_ms?: number;
 }
 
 export interface RawScheduledJobConfigDraft {

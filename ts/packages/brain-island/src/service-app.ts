@@ -134,7 +134,6 @@ import {
   defaultProfileBrainForModelProvider,
   decommissionServiceProfile as decommissionServiceProfileFromModule,
   deleteServiceProfile as deleteServiceProfileFromModule,
-  patchServiceWakeTimeout as patchServiceWakeTimeoutFromModule,
   planServiceProfileUpdate as planServiceProfileUpdateFromModule,
   planServiceRuntimeConfigDraft as planServiceRuntimeConfigDraftFromModule,
   readRuntimeConfigFileForMutation as readRuntimeConfigFileForMutationFromModule,
@@ -342,7 +341,6 @@ import {
 import {
   applyRustyCrewRuntimeConfig,
   effectiveSessionDefaults,
-  effectiveWakeTimeoutMs,
   loadRustyCrewRuntimeConfig,
   preflightRustyCrewRuntimeConfig,
   rebuildConfiguredBrainRuntime,
@@ -2806,14 +2804,7 @@ async function effectiveSessionDefaultsById(
         );
         return [
           session.sessionId,
-          {
-            ...effectiveSessionDefaults(configured ?? {}, profile),
-            wakeTimeoutMs: effectiveWakeTimeoutMs({
-              session: configured,
-              profile,
-              service: state.runtimeConfig.wakeTimeout,
-            }),
-          },
+          effectiveSessionDefaults(configured ?? {}, profile),
         ] as const;
       } catch {
         return [
@@ -4038,22 +4029,6 @@ function createServiceControlExecutor(
           : "runtime config draft rejected",
         result,
         reasonCode: result.ok ? undefined : "runtime_config_draft_invalid",
-      };
-    },
-    patchWakeTimeout: async (command) => {
-      const result = await withRuntimeConfigMutation(() =>
-        patchServiceWakeTimeoutFromModule(
-          profileAdminMutationContext(state),
-          command,
-        ),
-      );
-      return {
-        status: "completed",
-        summary:
-          result.wakeTimeout.mode === "default"
-            ? `wake timeout set to ${result.wakeTimeout.defaultMs}ms`
-            : "wake timeout disabled",
-        result,
       };
     },
     planRuntimeRebuild: async (command) => {
@@ -5918,9 +5893,6 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
     inFlightWakes: state.inFlightWakes,
     deferredWakeSessions: state.deferredWakeSessions,
     toolCallDebugStore: state.toolCallDebugStore,
-    get wakeTimeout() {
-      return state.runtimeConfig.wakeTimeout;
-    },
     brainForProfile: (profileId) =>
       state.runtimeConfigApplyResult.brainHandlesByProfileId[profileId],
     configuredSessionForRuntimeSession: (session) =>

@@ -156,10 +156,6 @@
           "reason": "Intentionally omitted to prove profile resource-limit inheritance."
         },
         {
-          "path": "runtime_config.sessions[].turn_timeout_ms",
-          "reason": "Intentionally omitted to prove profile and service wake-timeout precedence."
-        },
-        {
           "path": "service_defaults.storage",
           "reason": "The target fixture authors storage directly; service-default storage fallback is covered by the core-config service_storage_defaults_are_applied_when_graph_omits_storage test."
         }

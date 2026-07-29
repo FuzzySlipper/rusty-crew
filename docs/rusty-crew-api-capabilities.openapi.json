@@ -236,25 +236,6 @@
         "x-rusty-crew-command-name": "reload_config"
       }
     },
-    "/v1/admin/control/config/wake-timeout": {
-      "post": {
-        "operationId": "adminControlConfigWakeTimeoutPatch",
-        "summary": "Patch only the service wake-timeout policy while preserving unrelated runtime config sections.",
-        "tags": ["config", "service"],
-        "security": [{ "AdminBearer": [] }],
-        "responses": {
-          "default": {
-            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
-          }
-        },
-        "x-rusty-crew-capability-id": "admin.control.config.wake_timeout.patch",
-        "x-rusty-crew-auth": "admin",
-        "x-rusty-crew-mutation": "control",
-        "x-rusty-crew-stability": "stable",
-        "x-rusty-crew-contract-detail": "capability",
-        "x-rusty-crew-command-name": "patch_wake_timeout"
-      }
-    },
     "/v1/admin/control/curator/archives/list": {
       "post": {
         "operationId": "adminControlCuratorArchivesList",
@@ -5609,7 +5590,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 225,
+    "capability_count": 224,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

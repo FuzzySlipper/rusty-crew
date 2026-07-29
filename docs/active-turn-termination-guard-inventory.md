@@ -22,9 +22,8 @@ The target lifecycle rule is simple:
 - only explicit operator/user cancellation or a genuinely terminal provider
   outcome ends an otherwise healthy logical turn.
 
-The current implementation does not yet satisfy that rule. Tasks 6364 through
-6373 own the migration. This document is the code-backed baseline and known
-limitations list, not permission to preserve the old hard stops.
+Tasks 6364 through 6373 migrated the implementation to this rule. This document
+now records both the retired guards and the operation bounds that remain.
 
 ## Disposition Vocabulary
 
@@ -43,38 +42,35 @@ The live and debug admin diagnostics were read from
 
 | Surface | Live `9347` | Debug `9348` |
 | --- | --- | --- |
-| Whole-wake policy | `wakeTimeout.mode=disabled` | `wakeTimeout.mode=disabled` |
-| Session `turnTimeoutMs` | no loaded session override | no loaded session override |
+| Whole-turn lifetime ceiling | absent | absent |
+| Finite turn-lifetime diagnostics | absent | absent |
 | Provider request deadline | every loaded module reports `disabled` | every loaded module reports `disabled` |
 | Chat Completions work quantum | `64` | `64` |
 | Responses work quantum | `64` | `64` |
 | Active buffered runs | one progressing Chat Completions run | none |
 
 The live buffered run had exceeded fifteen minutes while this audit was being
-written. It reported `wake_timeout_ms=0`, recent transitions, 2,948 raw stream
+written. It reported recent transitions, 2,948 raw stream
 items, 429 retained items, 2,519 coalesced deltas, and zero dropped items. That
-is direct evidence that disabled wall-clock limits and stream coalescing permit
-healthy long work today. It does not remove the latent hard stops below.
+is direct evidence that continuation and stream coalescing permit healthy long
+work.
 
-The deployed services and `ops/systemd/service.env.example` distinguish the
-durable Chat Completions scheduling quantum from the remaining emergency
-Responses ceiling:
+The deployed services and `ops/systemd/service.env.example` expose scheduling
+quanta and no-progress thresholds, not logical-turn ceilings:
 
 - `RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=64`
 - `RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS=64`
 - `RUSTY_CREW_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD=3`
 - `RUSTY_CREW_OPENAI_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD=3`
 
-Crossing the Chat Completions quantum persists and resumes the same logical
-turn; it is no longer a terminal guard. Task 6367 owns the equivalent Responses
-change.
+Crossing either quantum persists and resumes the same logical turn.
 
 ## Whole Logical Turn And Continuation Guards
 
 | Guard | Current owner and surface | Default / maximum | Progress signal | Current terminal behavior | Persistence and restart | Intended disposition |
 | --- | --- | --- | --- | --- | --- | --- |
-| Service wake timeout | TypeScript `service-wake-dispatch.ts`, `wake-timeout.ts`, and `buffered-brain-host.ts`; session/profile `turnTimeoutMs`, profile `runtime.maxTurnDurationMs`, or service wake policy | disabled when absent; config validator caps configured turn timeout at 24 hours | elapsed wall time only | aborts observation/provider hook and records `wake_timeout` | no logical-turn continuation checkpoint | Remove as a healthy-turn terminal. Preserve explicit cancel; use yield/attention for real no-progress. Tasks 6365 and 6372. |
-| Buffered coordinator wake timeout | Rust `brain-runtime::BufferedBrainTurnCoordinator::timeout_if_due_at` | optional milliseconds from the same effective wake policy | elapsed wall time only | transitions run to `TimedOut`, clears pending tool state, reason `wake_timeout` | active registry is process memory | Delete duplicated terminal authority when durable continuation lands. Tasks 6365 and 6372. |
+| Retired service whole-turn deadline | Removed in task 6372 from dispatch, profile/session config, admin APIs, diagnostics, and chat terminals | none | n/a | none | legacy fields fail validation instead of being ignored | Complete. Explicit cancellation and progress-aware attention are the only whole-turn stop controls. |
+| Retired buffered coordinator deadline | Removed in task 6372 from Rust coordinator state, bridge contracts, and diagnostics | none | n/a | no timed-out coordinator phase exists | n/a | Complete. Rust scheduling quanta yield durable continuation instead. |
 | Chat Completions tool rounds | Rust `chat-completions`; TS `chat-completions-continuation-policy.ts` supplies config | 64-round scheduling quantum; no turn maximum | completed tool rounds | atomically checkpoints and yields after the quantum; the next epoch resumes the same logical turn | messages, reasoning, tool history, counters, images, and diagnostics are held in the Rust-owned durable continuation payload | Landed in task 6366. The quantum is scheduling policy only and cannot fail healthy progress. |
 | Responses continuation rounds | Rust `openai-responses`; TS `responses-continuation-policy.ts` supplies config | 64-round scheduling quantum; no turn maximum | completed continuation rounds | atomically checkpoints and yields after the quantum; the next epoch resumes the same logical turn | replay projection, committed output, response id, usage, provider state, repeated-call map, and metrics are held in the Rust-owned durable continuation payload | Landed in task 6367. The quantum is scheduling policy only and cannot fail healthy progress. |
 | Chat repeated identical tool calls | Rust `chat-completions` shared no-progress policy | 3 equivalent failed repetitions after the baseline by default; configurable | intent, result, durable state, assistant progress, and success/failure class | successful repetitions continue; confirmed equivalent failure durably pauses as `attention_required` | no-progress state and full brain continuation are checkpointed | Landed in task 6368. Explicit retry/cancel resolution is Rust-owned. |
@@ -224,8 +220,8 @@ The accepted contract is `adr/0026-durable-logical-turn-continuation.md`.
 | 6368 | shared progress-aware no-progress policy and buffer-pressure semantics |
 | 6369 | diagnostics, chat/activity projection, and operator controls |
 | 6371 | deterministic, restart, and live long-turn certification |
-| 6372 | delete legacy timeout/ceiling paths and configuration surfaces |
-| 6373 | temporary deployed 512-ceiling mitigation; remove after 6372 |
+| 6372 | removed legacy timeout/ceiling paths and configuration surfaces |
+| 6373 | temporary deployed 512-ceiling mitigation, removed by 6372 |
 
 ## Source Map
 

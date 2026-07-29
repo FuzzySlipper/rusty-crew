@@ -163,7 +163,7 @@
     "smoke:external-cassettes": "npm run smoke:successor-gateway-cassettes -w @rusty-crew/adapter-den && npm run smoke:chat-api-cassettes -w @rusty-crew/brain-island",
     "smoke:channel-readback-tool": "npm run smoke:channel-readback-tool -w @rusty-crew/brain-island",
     "smoke:channel-wake-policy": "npm run smoke:channel-wake-policy -w @rusty-crew/brain-island",
-    "smoke:wake-timeout": "npm run smoke:wake-timeout -w @rusty-crew/brain-island",
+    "smoke:turn-lifetime-clean-break": "npm run smoke:turn-lifetime-clean-break -w @rusty-crew/brain-island",
     "smoke:session-defaults": "npm run smoke:session-defaults -w @rusty-crew/brain-island",
     "smoke:session-history-window": "npm run smoke:session-history-window -w @rusty-crew/brain-island",
     "smoke:post-turn-maintenance": "npm run smoke:post-turn-maintenance -w @rusty-crew/brain-island",

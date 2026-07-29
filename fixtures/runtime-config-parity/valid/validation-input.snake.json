@@ -23,8 +23,7 @@
         "history_window": {
           "max_messages": 12
         },
-        "max_history_messages": 24,
-        "turn_timeout_ms": 30000
+        "max_history_messages": 24
       }
     ],
     "scheduled_jobs": [
@@ -108,13 +107,11 @@
           "max_duration_ms": 60000,
           "max_delegation_depth": 4
         },
-        "max_turn_duration_ms": 30000,
         "max_tokens_per_turn": 4096
       },
       "session_defaults": {
         "owner_id": "parity-owner",
-        "max_history_messages": 128,
-        "turn_timeout_ms": 30000
+        "max_history_messages": 128
       },
       "mcp_config": {
         "binding_id": "parity-runner-mcp",

@@ -1249,7 +1249,6 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
       {
         model: Type.String(),
         providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
-        wakeTimeoutMs: Type.Optional(Type.Number()),
         temperatureMilli: Type.Optional(Type.Number()),
         reasoningEffort: Type.Optional(Type.String()),
         wireDialect: Type.Optional(

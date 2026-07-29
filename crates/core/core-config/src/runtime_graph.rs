@@ -37,21 +37,7 @@ pub struct RuntimeGraphHostFacts {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphServiceDefaults {
-    pub wake_timeout: Option<RuntimeGraphWakeTimeoutSource>,
     pub storage: Option<RuntimeGraphStorageSource>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeGraphWakeTimeoutMode {
-    Disabled,
-    Default,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RuntimeGraphWakeTimeoutSource {
-    pub mode: RuntimeGraphWakeTimeoutMode,
-    pub default_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -87,7 +73,6 @@ pub struct RuntimeGraphSessionSource {
     pub owner_id: Option<String>,
     pub history_window: Option<SessionHistoryWindow>,
     pub max_history_messages: Option<u32>,
-    pub turn_timeout_ms: Option<u32>,
     pub local_tool_profile_id: Option<String>,
 }
 
@@ -178,7 +163,6 @@ pub struct RuntimeGraphEffectiveConfig {
     pub profiles_dir: String,
     pub skills_dir: Option<String>,
     pub storage: RuntimeGraphStoragePlan,
-    pub wake_timeout: RuntimeGraphWakeTimeoutPlan,
     pub brains: Vec<BrainConfigDraft>,
     pub sessions: Vec<RuntimeGraphSessionPlan>,
     pub scheduled_jobs: Vec<RuntimeGraphScheduledJobPlan>,
@@ -196,22 +180,9 @@ pub struct RuntimeGraphSessionPlan {
     pub owner_id: Option<String>,
     pub history_window: Option<SessionHistoryWindow>,
     pub max_history_messages: Option<u32>,
-    pub turn_timeout_ms: Option<u32>,
-    pub effective_wake_timeout_ms: Option<u32>,
-    pub wake_timeout_source: RuntimeGraphWakeTimeoutSourceKind,
     pub local_tool_profile_id: Option<String>,
     pub context_policy_profile_id: Option<ProfileId>,
     pub session_memory_prompt_profile_id: Option<ProfileId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeGraphWakeTimeoutSourceKind {
-    Disabled,
-    Session,
-    ProfileRuntime,
-    ProfileSessionDefault,
-    ServiceDefault,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -261,12 +232,6 @@ pub struct RuntimeGraphPostgresStoragePlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RuntimeGraphWakeTimeoutPlan {
-    pub mode: RuntimeGraphWakeTimeoutMode,
-    pub default_ms: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeGraphDerivedRecord {
     pub kind: RuntimeGraphDerivedKind,
     pub id: String,
@@ -307,9 +272,8 @@ pub fn plan_runtime_graph(input: &RuntimeGraphPlanInput) -> RuntimeGraphPlan {
         .map(|profile| (ProfileId::new(profile.profile_id.clone()), profile))
         .collect();
     let storage = plan_storage(input, &mut diagnostics);
-    let wake_timeout = plan_wake_timeout(input, &mut diagnostics);
     let brains = plan_brains(input, &mut defaults_applied, &mut diagnostics);
-    let sessions = plan_sessions(input, &profiles_by_id, &wake_timeout, &mut defaults_applied);
+    let sessions = plan_sessions(input, &profiles_by_id, &mut defaults_applied);
     let (scheduled_jobs, mut derived_jobs) = plan_scheduled_jobs(input, &profiles_by_id, &sessions);
     let (mcp_bindings, mut derived_mcp) = plan_mcp_bindings(input, &profiles_by_id, &sessions);
     let mut channel_bindings = input.runtime_config.channel_bindings.clone();
@@ -330,7 +294,6 @@ pub fn plan_runtime_graph(input: &RuntimeGraphPlanInput) -> RuntimeGraphPlan {
                 owner_id: session.owner_id.clone(),
                 history_window: session.history_window.clone(),
                 max_history_messages: session.max_history_messages,
-                turn_timeout_ms: session.turn_timeout_ms,
             })
             .collect(),
         scheduled_jobs: scheduled_jobs
@@ -369,7 +332,6 @@ pub fn plan_runtime_graph(input: &RuntimeGraphPlanInput) -> RuntimeGraphPlan {
             profiles_dir: input.runtime_config.profiles_dir.clone(),
             skills_dir: input.runtime_config.skills_dir.clone(),
             storage,
-            wake_timeout,
             brains,
             sessions,
             scheduled_jobs,
@@ -439,7 +401,6 @@ fn plan_brains(
 fn plan_sessions(
     input: &RuntimeGraphPlanInput,
     profiles: &HashMap<ProfileId, &RuntimeGraphProfileSource>,
-    service_wake_timeout: &RuntimeGraphWakeTimeoutPlan,
     defaults: &mut Vec<RuntimeGraphDefaultRecord>,
 ) -> Vec<RuntimeGraphSessionPlan> {
     let mut sessions: Vec<_> = input
@@ -503,35 +464,6 @@ fn plan_sessions(
             let max_history_messages = session
                 .max_history_messages
                 .or_else(|| profile_defaults.and_then(|defaults| defaults.max_history_messages));
-            let turn_timeout_ms = session
-                .turn_timeout_ms
-                .or_else(|| profile_defaults.and_then(|defaults| defaults.turn_timeout_ms));
-            let (effective_wake_timeout_ms, wake_timeout_source) =
-                if let Some(timeout) = session.turn_timeout_ms {
-                    (Some(timeout), RuntimeGraphWakeTimeoutSourceKind::Session)
-                } else if let Some(timeout) = profile
-                    .and_then(|profile| profile.runtime.as_ref())
-                    .and_then(|runtime| runtime.max_turn_duration_ms)
-                {
-                    (
-                        Some(timeout),
-                        RuntimeGraphWakeTimeoutSourceKind::ProfileRuntime,
-                    )
-                } else if let Some(timeout) =
-                    profile_defaults.and_then(|defaults| defaults.turn_timeout_ms)
-                {
-                    (
-                        Some(timeout),
-                        RuntimeGraphWakeTimeoutSourceKind::ProfileSessionDefault,
-                    )
-                } else if service_wake_timeout.mode == RuntimeGraphWakeTimeoutMode::Default {
-                    (
-                        service_wake_timeout.default_ms,
-                        RuntimeGraphWakeTimeoutSourceKind::ServiceDefault,
-                    )
-                } else {
-                    (None, RuntimeGraphWakeTimeoutSourceKind::Disabled)
-                };
             RuntimeGraphSessionPlan {
                 session_id: SessionId::new(session.session_id.clone()),
                 agent_id: AgentId::new(session.agent_id.clone()),
@@ -541,9 +473,6 @@ fn plan_sessions(
                 owner_id,
                 history_window: session.history_window.clone(),
                 max_history_messages,
-                turn_timeout_ms,
-                effective_wake_timeout_ms,
-                wake_timeout_source,
                 local_tool_profile_id: session
                     .local_tool_profile_id
                     .clone()
@@ -730,32 +659,6 @@ fn plan_mcp_bindings(
     }
     bindings.sort_by(|left, right| left.binding_id.cmp(&right.binding_id));
     (bindings, derived)
-}
-
-fn plan_wake_timeout(
-    input: &RuntimeGraphPlanInput,
-    diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
-) -> RuntimeGraphWakeTimeoutPlan {
-    let source =
-        input
-            .service_defaults
-            .wake_timeout
-            .clone()
-            .unwrap_or(RuntimeGraphWakeTimeoutSource {
-                mode: RuntimeGraphWakeTimeoutMode::Disabled,
-                default_ms: None,
-            });
-    if source.mode == RuntimeGraphWakeTimeoutMode::Default && source.default_ms.is_none() {
-        diagnostics.push(RuntimeConfigDiagnostic::error(
-            "wake_timeout_default_required",
-            "serviceDefaults.wakeTimeout.defaultMs",
-            "defaultMs is required when wake timeout mode is default",
-        ));
-    }
-    RuntimeGraphWakeTimeoutPlan {
-        mode: source.mode,
-        default_ms: source.default_ms,
-    }
 }
 
 fn plan_storage(
@@ -960,10 +863,9 @@ mod tests {
     }
 
     #[test]
-    fn explicit_session_values_override_profile_and_service_defaults() {
+    fn explicit_session_values_override_profile_defaults() {
         let mut input = source_fixture("complete-source.camel.json");
         let session = &mut input.runtime_config.sessions[0];
-        session.turn_timeout_ms = Some(9_000);
         session.local_tool_profile_id = Some("session-tools".to_string());
         session.resource_limits = Some(ResourceLimits {
             workdir: Some("/explicit".to_string()),
@@ -972,11 +874,6 @@ mod tests {
         });
         let plan = plan_runtime_graph(&input);
         let session = &plan.runtime_config.sessions[0];
-        assert_eq!(session.effective_wake_timeout_ms, Some(9_000));
-        assert_eq!(
-            session.wake_timeout_source,
-            RuntimeGraphWakeTimeoutSourceKind::Session
-        );
         assert_eq!(
             session.local_tool_profile_id.as_deref(),
             Some("session-tools")

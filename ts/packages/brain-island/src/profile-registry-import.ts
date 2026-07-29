@@ -582,7 +582,7 @@ const PROFILE_SCHEMA = schema(
       "maxTokens",
     ]),
     brain: schema(["module", "strategy"]),
-    runtime: schema(["maxTurns", "maxTokensPerTurn", "maxTurnDurationMs"], {
+    runtime: schema(["maxTurns", "maxTokensPerTurn"], {
       defaultResourceLimits: schema([
         "workdir",
         "maxDurationMs",
@@ -593,7 +593,6 @@ const PROFILE_SCHEMA = schema(
       "maxIterations",
       "maxTokensPerTurn",
       "maxDurationMs",
-      "maxTurnDurationMs",
     ]),
     toolPolicy: schema([
       "mode",
@@ -644,7 +643,7 @@ const PROFILE_SCHEMA = schema(
       "review",
     ]),
     roleplayMechanic: schema(["autoMonitor", "auto_monitor"]),
-    sessionDefaults: schema(["ownerId", "maxHistoryMessages", "turnTimeoutMs"]),
+    sessionDefaults: schema(["ownerId", "maxHistoryMessages"]),
     channelDefaults: schema(["wakePolicy"]),
   },
 );

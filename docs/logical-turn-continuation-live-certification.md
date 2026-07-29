@@ -67,6 +67,34 @@ operation idempotent.
 The smoke temporarily set both work quanta to `1`, then restored the debug
 service defaults to `64`. The production service on port 9347 was not touched.
 
+## Finite-ceiling removal proof
+
+Task 6372 restarted and inspected both installed services after deleting the
+legacy whole-turn timeout authority and configuration surfaces:
+
+| Instance | Storage | Loaded brain modules | Finite lifetime fields | Retired admin route |
+| --- | --- | ---: | --- | --- |
+| live `9347` | PostgreSQL | 11 | none | `404 unknown_admin_control_route` |
+| debug `9348` | SQLite | 35 | none | `404 unknown_admin_control_route` |
+
+The diagnostics scan checked every scalar path for the removed service,
+session, profile, and Rust coordinator timeout names. The installed
+`/home/system/rusty-crew/config` and
+`/home/system/rusty-crew-debug/config` trees likewise contain none of the
+retired fields or continuation-limit environment variables. The live service
+retains three historical abnormal-activity records with the old Chat
+Completions limit reason; those immutable observations are not active policy,
+configuration, or a reported effective ceiling.
+
+Every loaded module reports a disabled provider-request deadline and a
+64-round scheduling quantum. A provider may still opt into a bounded request
+deadline, but that deadline governs one external operation. The quantum yields
+and resumes the same logical turn; neither value is a whole-turn lifetime.
+
+Fresh-install and strict-validation coverage lives in
+`smoke:turn-lifetime-clean-break`. It proves that retired service, session, and
+profile fields are rejected rather than silently ignored.
+
 ## Gates
 
 The task implementation passed:

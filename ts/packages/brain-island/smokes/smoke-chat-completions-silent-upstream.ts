@@ -30,7 +30,6 @@ try {
       config: {
         model: "silent-upstream",
         providerRequestTimeoutMs: 200,
-        wakeTimeoutMs: 2_000,
         maxOutputTokens: 16,
       },
       client: {
@@ -65,7 +64,6 @@ try {
       terminal: terminal.terminal,
       error: terminal.error,
       providerTimeoutMs: 200,
-      hostWakeTimeoutMs: 2_000,
     }),
   );
 } finally {

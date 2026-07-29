@@ -17,7 +17,6 @@ import type {
 } from "./index.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
 import type { BrainHostContext } from "./brain-host-context.js";
-import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import {
@@ -247,7 +246,6 @@ export async function createOpenAiResponsesBrainHost(
           workQuantumContinuationRounds:
             responsesWorkQuantumContinuationRounds(),
           noProgressAttentionThreshold: responsesNoProgressAttentionThreshold(),
-          wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
         },
         client: responsesClientConfig,
       };

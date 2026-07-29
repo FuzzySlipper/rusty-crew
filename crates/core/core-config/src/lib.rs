@@ -22,7 +22,6 @@ mod runtime_graph;
 pub use runtime_graph::*;
 
 const MAX_HISTORY_MESSAGES: u32 = 10_000;
-const MAX_TURN_TIMEOUT_MS: u32 = 24 * 60 * 60 * 1_000;
 pub const DEFAULT_POSTGRES_SCHEMA: &str = "rusty_crew";
 const ID_PATTERN_DESCRIPTION: &str =
     "must start with a letter or digit and contain only letters, digits, '.', '_', ':' or '-'";
@@ -578,7 +577,6 @@ pub struct SessionConfigDraft {
     pub owner_id: Option<String>,
     pub history_window: Option<SessionHistoryWindow>,
     pub max_history_messages: Option<u32>,
-    pub turn_timeout_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -664,7 +662,6 @@ pub struct ProfileBrainMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProfileRuntimeOptions {
     pub default_resource_limits: Option<ResourceLimits>,
-    pub max_turn_duration_ms: Option<u32>,
     pub max_tokens_per_turn: Option<u32>,
 }
 
@@ -672,7 +669,6 @@ pub struct ProfileRuntimeOptions {
 pub struct ProfileSessionDefaults {
     pub owner_id: Option<String>,
     pub max_history_messages: Option<u32>,
-    pub turn_timeout_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1141,9 +1137,6 @@ fn apply_profile_session_defaults(
     if session.max_history_messages.is_none() {
         session.max_history_messages = defaults.max_history_messages;
     }
-    if session.turn_timeout_ms.is_none() {
-        session.turn_timeout_ms = defaults.turn_timeout_ms;
-    }
 }
 
 fn derive_background_review_job(
@@ -1534,7 +1527,6 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         owner_id: None,
         history_window: None,
         max_history_messages: None,
-        turn_timeout_ms: None,
     };
     let profile_mcp_config = input
         .request
@@ -2788,13 +2780,6 @@ impl<'a> RuntimeConfigValidator<'a> {
                     &format!("profiles[{index}].runtime.defaultResourceLimits"),
                     runtime.default_resource_limits.as_ref(),
                 );
-                validate_optional_max(
-                    self,
-                    "invalid_turn_duration",
-                    &format!("profiles[{index}].runtime.maxTurnDurationMs"),
-                    runtime.max_turn_duration_ms,
-                    MAX_TURN_TIMEOUT_MS,
-                );
             }
             if let Some(defaults) = &profile.session_defaults {
                 validate_optional_max(
@@ -2803,13 +2788,6 @@ impl<'a> RuntimeConfigValidator<'a> {
                     &format!("profiles[{index}].sessionDefaults.maxHistoryMessages"),
                     defaults.max_history_messages,
                     MAX_HISTORY_MESSAGES,
-                );
-                validate_optional_max(
-                    self,
-                    "invalid_turn_timeout",
-                    &format!("profiles[{index}].sessionDefaults.turnTimeoutMs"),
-                    defaults.turn_timeout_ms,
-                    MAX_TURN_TIMEOUT_MS,
                 );
             }
             if let Some(review) = &profile.background_review {
@@ -2953,13 +2931,6 @@ impl<'a> RuntimeConfigValidator<'a> {
                 &format!("sessions[{index}].maxHistoryMessages"),
                 session.max_history_messages,
                 MAX_HISTORY_MESSAGES,
-            );
-            validate_optional_max(
-                self,
-                "invalid_turn_timeout",
-                &format!("sessions[{index}].turnTimeoutMs"),
-                session.turn_timeout_ms,
-                MAX_TURN_TIMEOUT_MS,
             );
         }
     }
@@ -4187,7 +4158,6 @@ mod tests {
                 owner_id: None,
                 history_window: None,
                 max_history_messages: None,
-                turn_timeout_ms: None,
             }],
             scheduled_jobs: Vec::new(),
             channel_bindings: Vec::new(),
@@ -4234,7 +4204,6 @@ mod tests {
         let expanded_session = &plan.runtime_config.sessions[0];
         assert_eq!(expanded_session.owner_id.as_deref(), Some("owner"));
         assert_eq!(expanded_session.max_history_messages, Some(500));
-        assert_eq!(expanded_session.turn_timeout_ms, Some(30_000));
 
         draft.scheduled_jobs = plan.derived_scheduled_jobs.clone();
         draft.mcp_bindings = plan.derived_mcp_bindings.clone();
@@ -4454,7 +4423,6 @@ mod tests {
                 owner_id: None,
                 history_window: None,
                 max_history_messages: None,
-                turn_timeout_ms: None,
             }
         );
         assert_eq!(plan.profile_mcp_config, None);
@@ -4794,7 +4762,6 @@ mod tests {
                     max_messages: Some(200),
                 }),
                 max_history_messages: None,
-                turn_timeout_ms: Some(30_000),
             }],
             scheduled_jobs: vec![
                 ScheduledJobConfigDraft {
@@ -4857,13 +4824,11 @@ mod tests {
             }),
             runtime: Some(ProfileRuntimeOptions {
                 default_resource_limits: None,
-                max_turn_duration_ms: Some(60_000),
                 max_tokens_per_turn: Some(8_000),
             }),
             session_defaults: Some(ProfileSessionDefaults {
                 owner_id: Some("owner".to_string()),
                 max_history_messages: Some(500),
-                turn_timeout_ms: Some(30_000),
             }),
             mcp_config: Some(ProfileMcpConfig {
                 binding_id: Some(format!("{profile_id}-mcp")),

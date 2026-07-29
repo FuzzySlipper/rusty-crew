@@ -32,7 +32,6 @@ export type AdminControlCommandName =
   | "reload_config"
   | "plan_runtime_config_update"
   | "apply_runtime_config_update"
-  | "patch_wake_timeout"
   | "reload_mcp"
   | "run_maintenance"
   | "scheduler_tick"
@@ -161,9 +160,6 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   applyRuntimeConfigUpdate?(
-    command: AdminControlCommand,
-  ): Promise<AdminControlOutcome> | AdminControlOutcome;
-  patchWakeTimeout?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   reloadMcp?(
@@ -560,24 +556,6 @@ function parseControlCommand(
         },
       };
     }
-  }
-
-  if (
-    parts.length === 5 &&
-    parts[0] === "v1" &&
-    parts[1] === "admin" &&
-    parts[2] === "control" &&
-    parts[3] === "config" &&
-    parts[4] === "wake-timeout"
-  ) {
-    return {
-      ok: true,
-      command: {
-        ...commandBase,
-        name: "patch_wake_timeout",
-        target: {},
-      },
-    };
   }
 
   if (
@@ -1116,8 +1094,6 @@ function executorForCommand(
       return executor.planRuntimeConfigUpdate;
     case "apply_runtime_config_update":
       return executor.applyRuntimeConfigUpdate;
-    case "patch_wake_timeout":
-      return executor.patchWakeTimeout;
     case "reload_mcp":
       return executor.reloadMcp;
     case "run_maintenance":

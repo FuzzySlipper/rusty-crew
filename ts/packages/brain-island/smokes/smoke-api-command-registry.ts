@@ -209,15 +209,15 @@ assertUnique(
   ),
   "admin control route",
 );
-assert.ok(
+assert.equal(
   ADMIN_CONTROL_CAPABILITIES.some(
     (capability) =>
-      capability.id === "admin.control.config.wake_timeout.patch" &&
-      capability.command_name === "patch_wake_timeout" &&
-      capability.method === "POST" &&
-      capability.path_template === "/v1/admin/control/config/wake-timeout",
+      capability.id.includes("wake_timeout") ||
+      capability.command_name.includes("wake_timeout") ||
+      capability.path_template.includes("wake-timeout"),
   ),
-  "wake-timeout patch capability must advertise the safe config write path",
+  false,
+  "retired whole-wake timeout controls must not remain discoverable",
 );
 const newSessionCapability = ADMIN_CONTROL_CAPABILITIES.find(
   (capability) => capability.id === "admin.control.sessions.new",

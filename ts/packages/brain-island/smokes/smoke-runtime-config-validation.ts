@@ -42,13 +42,11 @@ const profile: ProfileConfig = {
       maxDurationMs: 60_000,
       maxDelegationDepth: 4,
     },
-    maxTurnDurationMs: 30_000,
     maxTokensPerTurn: 2048,
   },
   sessionDefaults: {
     ownerId: "smoke",
     maxHistoryMessages: 128,
-    turnTimeoutMs: 30_000,
   },
   mcpConfig: {
     bindingId: "runtime-validator-mcp",
@@ -100,7 +98,6 @@ const runtimeConfig: RustyCrewRuntimeConfig = {
       },
       ownerId: "smoke",
       maxHistoryMessages: 128,
-      turnTimeoutMs: 30_000,
     },
   ],
   scheduledJobs: [

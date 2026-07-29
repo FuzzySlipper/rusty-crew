@@ -8,8 +8,7 @@
   },
   "runtime": {
     "maxTurns": 1,
-    "maxTokensPerTurn": 8192,
-    "maxTurnDurationMs": 90000
+    "maxTokensPerTurn": 8192
   },
   "toolPolicy": {
     "requestedToolsets": [

@@ -565,8 +565,8 @@ does not accept TypeScript-authored lifecycle phase changes or arbitrary
 checkpoint JSON.
 
 No compatibility aliases preserve terminal continuation-limit reason codes.
-When implementation and certification finish, their code, config variables,
-diagnostics fields, tests, and docs are deleted in task 6372.
+Task 6372 deleted their code, config variables, diagnostics fields, tests, and
+operator-facing docs after implementation and certification completed.
 
 ## Implementation Sequence
 
@@ -618,13 +618,13 @@ diagnostics fields, tests, and docs are deleted in task 6372.
      profile values without interruption;
    - browser-visible yield/resume/attention evidence.
 
-7. **Task 6372: Clean removal**
+7. **Task 6372: Clean removal (completed)**
    - delete wake timeout and finite continuation-limit authority;
    - delete emergency 512 environment/config surfaces and old reason codes;
    - update old verification docs and reject reintroduction in CI.
 
-Task 6373 is only the deployed emergency mitigation while this sequence lands.
-It is not a compatibility requirement.
+Task 6373 was the deployed emergency mitigation while this sequence landed; it
+was removed rather than preserved as compatibility behavior.
 
 ## Rejected Alternatives
 

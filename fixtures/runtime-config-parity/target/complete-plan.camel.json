@@ -21,10 +21,6 @@
         "statementTimeoutMs": 30000
       }
     },
-    "wakeTimeout": {
-      "mode": "default",
-      "defaultMs": 120000
-    },
     "brains": [
       {
         "implementationId": "parity-runner-brain",
@@ -44,9 +40,6 @@
         },
         "ownerId": "parity-owner",
         "maxHistoryMessages": 128,
-        "turnTimeoutMs": 45000,
-        "effectiveWakeTimeoutMs": 30000,
-        "wakeTimeoutSource": "profile_runtime",
         "localToolProfileId": "full-agent",
         "contextPolicyProfileId": "parity-runner",
         "sessionMemoryPromptProfileId": "parity-runner"

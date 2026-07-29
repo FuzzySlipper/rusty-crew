@@ -8540,14 +8540,6 @@ export const bridgeWireSchemaArtifact = {
             },
             "session_id": {
               "type": "string"
-            },
-            "turn_timeout_ms": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
             }
           },
           "required": [
@@ -10118,14 +10110,6 @@ export const bridgeWireSchemaArtifact = {
                   },
                   "session_id": {
                     "type": "string"
-                  },
-                  "turn_timeout_ms": {
-                    "format": "uint32",
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
                   }
                 },
                 "required": [
@@ -10536,14 +10520,6 @@ export const bridgeWireSchemaArtifact = {
                       "null"
                     ]
                   },
-                  "effective_wake_timeout_ms": {
-                    "format": "uint32",
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
                   "history_window": {
                     "properties": {
                       "max_messages": {
@@ -10626,24 +10602,6 @@ export const bridgeWireSchemaArtifact = {
                       "string",
                       "null"
                     ]
-                  },
-                  "turn_timeout_ms": {
-                    "format": "uint32",
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "wake_timeout_source": {
-                    "enum": [
-                      "disabled",
-                      "session",
-                      "profile_runtime",
-                      "profile_session_default",
-                      "service_default"
-                    ],
-                    "type": "string"
                   }
                 },
                 "required": [
@@ -10651,8 +10609,7 @@ export const bridgeWireSchemaArtifact = {
                   "agent_id",
                   "profile_id",
                   "kind",
-                  "resource_limits",
-                  "wake_timeout_source"
+                  "resource_limits"
                 ],
                 "type": "object"
               },
@@ -10750,35 +10707,11 @@ export const bridgeWireSchemaArtifact = {
                 "postgres"
               ],
               "type": "object"
-            },
-            "wake_timeout": {
-              "properties": {
-                "default_ms": {
-                  "format": "uint32",
-                  "minimum": 0,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
-                "mode": {
-                  "enum": [
-                    "disabled",
-                    "default"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "mode"
-              ],
-              "type": "object"
             }
           },
           "required": [
             "profiles_dir",
             "storage",
-            "wake_timeout",
             "brains",
             "sessions",
             "scheduled_jobs",

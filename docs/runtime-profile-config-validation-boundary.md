@@ -186,13 +186,11 @@ interface ProfileRuntimeMetadata {
   brain?: { module?: string; strategy?: string };
   runtime?: {
     defaultResourceLimits?: ResourceLimits;
-    maxTurnDurationMs?: number;
     maxTokensPerTurn?: number;
   };
   sessionDefaults?: {
     ownerId?: string;
     maxHistoryMessages?: number;
-    turnTimeoutMs?: number;
   };
   mcpConfig?: {
     bindingId?: string;

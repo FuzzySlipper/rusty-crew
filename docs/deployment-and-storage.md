@@ -216,7 +216,6 @@ policy and configured sessions may also be declared here.
 ```json
 {
   "profilesDir": "/home/system/rusty-crew/config/profiles",
-  "wakeTimeout": { "mode": "disabled" },
   "brains": [],
   "sessions": []
 }

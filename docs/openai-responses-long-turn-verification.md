@@ -8,16 +8,15 @@ operator-control boundary.
 
 Provider request deadlines remain disabled by default. When explicitly set,
 `RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS` applies to each HTTP
-request independently of the continuation work quantum and wake-duration
-policy.
+request independently of the continuation work quantum. It never measures
+total logical-turn lifetime.
 
 Terminal provenance uses distinct reason codes:
 
 - `provider_request_timeout`: configured provider HTTP request deadline;
-- `wake_timeout`: session/service wake-duration deadline;
 - `provider_response_failed` or `provider_response_incomplete`: provider
   terminal rejection;
-- `provider_request_cancelled`: explicit or wake-policy cancellation.
+- `provider_request_cancelled`: explicit cancellation.
 
 The admin diagnostics response reports the effective
 `workQuantumContinuationRounds`, provider request timeout mode, and retained

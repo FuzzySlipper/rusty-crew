@@ -121,7 +121,6 @@ pub struct BufferedBrainTurnDiagnostic {
     pub pending_tool_request_count: usize,
     pub submitted_tool_output_count: usize,
     pub age_ms: u64,
-    pub wake_timeout_ms: u64,
     pub terminal: bool,
     pub cancelled: bool,
     pub has_error: bool,

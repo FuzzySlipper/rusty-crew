@@ -51,7 +51,6 @@ runtimeConfig:
   maxIterations: 100
   maxTokensPerTurn: 8192
   maxDurationMs: 900000
-  maxTurnDurationMs: 180000
 toolPolicy:
   mode: allow_all
 memoryConfig:
@@ -61,7 +60,6 @@ memoryConfig:
 sessionDefaults:
   ownerId: "owner:den-k8plus:rusty-crew-runner"
   maxHistoryMessages: 200
-  turnTimeoutMs: 1800000
 channelDefaults:
   wakePolicy: subscription
 backgroundReview:
@@ -123,7 +121,6 @@ backgroundReview:
         kind: "full",
         ownerId: "owner:den-k8plus:rusty-crew-runner",
         maxHistoryMessages: 200,
-        turnTimeoutMs: 1800000,
       },
     ],
     scheduledJobs: [

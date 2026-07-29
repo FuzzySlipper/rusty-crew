@@ -430,14 +430,6 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     ["config"],
   ),
   controlCapability(
-    "admin.control.config.wake_timeout.patch",
-    "POST",
-    "/v1/admin/control/config/wake-timeout",
-    "Patch only the service wake-timeout policy while preserving unrelated runtime config sections.",
-    "patch_wake_timeout",
-    ["config", "service"],
-  ),
-  controlCapability(
     "admin.control.mcp.reload",
     "POST",
     "/v1/admin/control/mcp/{session_id}/reload",

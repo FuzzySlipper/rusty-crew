@@ -5,12 +5,7 @@
     "default_workdir": "__FIXTURE_ROOT__/work",
     "postgres_database_url_env_present": true
   },
-  "service_defaults": {
-    "wake_timeout": {
-      "mode": "default",
-      "default_ms": 120000
-    }
-  },
+  "service_defaults": {},
   "runtime_config": {
     "profiles_dir": "__FIXTURE_ROOT__/profiles",
     "skills_dir": "__FIXTURE_ROOT__/skills",
@@ -75,14 +70,12 @@
           "max_duration_ms": 60000,
           "max_delegation_depth": 4
         },
-        "max_turn_duration_ms": 30000,
         "max_tokens_per_turn": 4096
       },
       "local_tool_profile_id": "full-agent",
       "session_defaults": {
         "owner_id": "parity-owner",
-        "max_history_messages": 128,
-        "turn_timeout_ms": 45000
+        "max_history_messages": 128
       },
       "session_memory_prompt": {
         "enabled": true,

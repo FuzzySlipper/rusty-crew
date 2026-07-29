@@ -53,8 +53,6 @@ struct JsOpenAiResponsesBrainConfig {
     #[serde(default)]
     work_quantum_continuation_rounds: Option<usize>,
     #[serde(default)]
-    wake_timeout_ms: Option<u64>,
-    #[serde(default)]
     no_progress_attention_threshold: Option<u32>,
 }
 
@@ -246,7 +244,6 @@ pub(crate) fn start_openai_responses_brain_json(
         "openai-responses",
         wake_id.clone(),
         SessionId::new(input.session_id),
-        input.config.wake_timeout_ms,
         BufferedBrainTurnLimits::default(),
     )
     .map_err(brain_turn_error_to_napi)?;
@@ -276,9 +273,6 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
 ) -> napi::Result<String> {
     let max_items = max_items.unwrap_or(64).max(1) as usize;
     let terminal = buffered_runs.with_run_mut(&wake_id, |run| {
-        if run.coordinator.timeout_if_due() {
-            run.payload.provider_cancellation.cancel();
-        }
         let drain = run.coordinator.drain_stream(max_items);
         let stream_retention_metrics = run.coordinator.stream_retention_metrics();
         let tool_requests = run.coordinator.drain_host_tool_requests(128);
@@ -565,19 +559,6 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                             "OpenAI Responses buffered wake {} ended before tool output {}: {}",
                             self.wake_id, call.call_id, summary
                         ),
-                        is_error: true,
-                    });
-                }
-                if run.coordinator.timeout_if_due() {
-                    run.payload.provider_cancellation.cancel();
-                    return Some(NeutralToolOutput {
-                        output: run
-                            .coordinator
-                            .terminal()
-                            .map(|terminal| terminal.summary.clone())
-                            .unwrap_or_else(|| {
-                                "OpenAI Responses buffered wake timed out".to_string()
-                            }),
                         is_error: true,
                     });
                 }

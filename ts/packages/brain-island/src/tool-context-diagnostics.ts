@@ -908,9 +908,6 @@ function profileConfigIssues(
           profile.runtime.maxTokensPerTurn,
         )}`
       : undefined,
-    profile.runtime?.maxTurnDurationMs
-      ? `runtimeConfig.maxTurnDurationMs enforces a host-side wake timeout at ${profile.runtime.maxTurnDurationMs}ms`
-      : undefined,
   ].filter((note): note is string => Boolean(note));
   for (const note of declarativeNotes) {
     issues.push({

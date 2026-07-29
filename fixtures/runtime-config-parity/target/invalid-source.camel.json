@@ -4,11 +4,7 @@
     "engineDataDir": "__FIXTURE_ROOT__/engine",
     "postgresDatabaseUrlEnvPresent": false
   },
-  "serviceDefaults": {
-    "wakeTimeout": {
-      "mode": "default"
-    }
-  },
+  "serviceDefaults": {},
   "runtimeConfig": {
     "profilesDir": "__FIXTURE_ROOT__/profiles",
     "storage": {
@@ -67,7 +63,6 @@
     }
   ],
   "expectedDiagnosticCodes": [
-    "wake_timeout_default_required",
     "postgres_database_url_env_invalid",
     "postgres_database_url_env_missing",
     "postgres_schema_invalid",

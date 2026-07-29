@@ -52,11 +52,9 @@ export const coreConfigFacadeArtifact = {
       "profiles[].runtime.default_resource_limits.max_duration_ms",
       "profiles[].runtime.default_resource_limits.workdir",
       "profiles[].runtime.max_tokens_per_turn",
-      "profiles[].runtime.max_turn_duration_ms",
       "profiles[].session_defaults",
       "profiles[].session_defaults.max_history_messages",
       "profiles[].session_defaults.owner_id",
-      "profiles[].session_defaults.turn_timeout_ms",
       "request",
       "request.agent_id",
       "request.brain",
@@ -145,7 +143,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].resource_limits.max_duration_ms",
       "runtime_config.sessions[].resource_limits.workdir",
       "runtime_config.sessions[].session_id",
-      "runtime_config.sessions[].turn_timeout_ms",
       "runtime_config.skills_dir"
     ],
     "RuntimeConfigValidationInput": [
@@ -191,11 +188,9 @@ export const coreConfigFacadeArtifact = {
       "profiles[].runtime.default_resource_limits.max_duration_ms",
       "profiles[].runtime.default_resource_limits.workdir",
       "profiles[].runtime.max_tokens_per_turn",
-      "profiles[].runtime.max_turn_duration_ms",
       "profiles[].session_defaults",
       "profiles[].session_defaults.max_history_messages",
       "profiles[].session_defaults.owner_id",
-      "profiles[].session_defaults.turn_timeout_ms",
       "runtime_config",
       "runtime_config.brains",
       "runtime_config.brains[].implementation_id",
@@ -249,7 +244,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].resource_limits.max_duration_ms",
       "runtime_config.sessions[].resource_limits.workdir",
       "runtime_config.sessions[].session_id",
-      "runtime_config.sessions[].turn_timeout_ms",
       "runtime_config.skills_dir"
     ],
     "RuntimeGraphPlan": [
@@ -306,7 +300,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions",
       "runtime_config.sessions[].agent_id",
       "runtime_config.sessions[].context_policy_profile_id",
-      "runtime_config.sessions[].effective_wake_timeout_ms",
       "runtime_config.sessions[].history_window",
       "runtime_config.sessions[].kind",
       "runtime_config.sessions[].local_tool_profile_id",
@@ -319,8 +312,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].resource_limits.workdir",
       "runtime_config.sessions[].session_id",
       "runtime_config.sessions[].session_memory_prompt_profile_id",
-      "runtime_config.sessions[].turn_timeout_ms",
-      "runtime_config.sessions[].wake_timeout_source",
       "runtime_config.skills_dir",
       "runtime_config.storage",
       "runtime_config.storage.backend",
@@ -336,9 +327,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.storage.sqlite.effective_path",
       "runtime_config.storage.sqlite.path",
       "runtime_config.storage.sqlite.wal",
-      "runtime_config.wake_timeout",
-      "runtime_config.wake_timeout.default_ms",
-      "runtime_config.wake_timeout.mode",
       "source_revision"
     ],
     "RuntimeGraphPlanInput": [
@@ -388,11 +376,9 @@ export const coreConfigFacadeArtifact = {
       "profiles[].runtime.default_resource_limits.max_duration_ms",
       "profiles[].runtime.default_resource_limits.workdir",
       "profiles[].runtime.max_tokens_per_turn",
-      "profiles[].runtime.max_turn_duration_ms",
       "profiles[].session_defaults",
       "profiles[].session_defaults.max_history_messages",
       "profiles[].session_defaults.owner_id",
-      "profiles[].session_defaults.turn_timeout_ms",
       "profiles[].session_memory_prompt",
       "profiles[].session_memory_prompt.enabled",
       "profiles[].session_memory_prompt.include_ancestors",
@@ -438,7 +424,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].profile_id",
       "runtime_config.sessions[].resource_limits",
       "runtime_config.sessions[].session_id",
-      "runtime_config.sessions[].turn_timeout_ms",
       "runtime_config.skills_dir",
       "runtime_config.storage",
       "runtime_config.storage.backend",
@@ -453,10 +438,7 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.storage.sqlite.path",
       "runtime_config.storage.sqlite.wal",
       "service_defaults",
-      "service_defaults.storage",
-      "service_defaults.wake_timeout",
-      "service_defaults.wake_timeout.default_ms",
-      "service_defaults.wake_timeout.mode"
+      "service_defaults.storage"
     ]
   },
   "enum_value_inventory": {
@@ -484,17 +466,6 @@ export const coreConfigFacadeArtifact = {
       "active",
       "proof_admin_only",
       "blocked_unimplemented"
-    ],
-    "RuntimeGraphWakeTimeoutMode": [
-      "disabled",
-      "default"
-    ],
-    "RuntimeGraphWakeTimeoutSourceKind": [
-      "disabled",
-      "session",
-      "profile_runtime",
-      "profile_session_default",
-      "service_default"
     ]
   }
 } as const;

@@ -716,7 +716,6 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
         "chat-completions",
         "shutdown-buffered-wake",
         SessionId::new("shutdown-buffered-session"),
-        Some(10_000),
         rusty_crew_brain_runtime::BufferedBrainTurnLimits::default(),
     )
     .unwrap();
@@ -770,7 +769,6 @@ fn chat_completions_reasoning_compacts_past_stream_item_limit_without_losing_bou
         "chat-completions",
         context.wake_id.clone(),
         context.session_id.clone(),
-        None,
         rusty_crew_brain_runtime::BufferedBrainTurnLimits {
             max_stream_items: 16,
             max_stream_delta_bytes: 8 * 1_024 * 1_024,
@@ -1234,7 +1232,6 @@ fn native_brain_host_result_bridges_keep_repeated_tool_failures_recoverable() {
             module_id,
             wake_id,
             SessionId::new(session_id),
-            None,
             rusty_crew_brain_runtime::BufferedBrainTurnLimits::default(),
         )
         .expect("coordinator");

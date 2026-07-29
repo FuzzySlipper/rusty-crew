@@ -165,12 +165,6 @@ export interface RustyCrewConfiguredSession extends Omit<
 export interface EffectiveSessionDefaults {
   ownerId?: string;
   maxHistoryMessages?: number;
-  turnTimeoutMs?: number;
-}
-
-export interface RustyCrewWakeTimeoutConfig {
-  mode: "disabled" | "default";
-  defaultMs?: number;
 }
 
 export type RustyCrewScheduledJobShape = NativeScheduledJobConfigDraft["shape"];
@@ -188,7 +182,6 @@ export interface ServiceRuntimeEnvelope {
   // adapters, and service observation, not the Rust-owned runtime graph draft.
   storage?: RustyCrewStorageConfig;
   denObservation?: RustyCrewDenObservationConfig;
-  wakeTimeout?: RustyCrewWakeTimeoutConfig;
   mcpServers?: RustyCrewMcpServerConfig[];
   imageGeneration?: ImageGenerationConfig;
 }
@@ -275,7 +268,6 @@ export interface RuntimeConfigValidationPreflightReport {
       ownerId: boolean;
       resourceLimits: boolean;
       maxHistoryMessages: boolean;
-      turnTimeoutMs: boolean;
     }>;
   };
 }
@@ -428,7 +420,6 @@ interface RuntimeGraphAuthoredSource {
   profilesDir: string;
   runtimeConfig: Record<string, unknown>;
   denObservation: RustyCrewDenObservationConfig;
-  wakeTimeout: RustyCrewWakeTimeoutConfig;
   mcpServers: RustyCrewMcpServerConfig[];
   imageGeneration: ImageGenerationConfig;
 }
@@ -440,6 +431,7 @@ function runtimeGraphAuthoredSource(
   if (!isRecord(parsed)) {
     throw new Error("service runtime config root must be an object");
   }
+  rejectRetiredTurnLifetimeFields(parsed);
   const profilesDir = pathValue(
     parsed.profilesDir,
     join(serviceConfig.paths.configDir, "profiles"),
@@ -460,13 +452,29 @@ function runtimeGraphAuthoredSource(
     profilesDir,
     runtimeConfig,
     denObservation: runtimeDenObservationConfig(parsed.denObservation),
-    wakeTimeout: runtimeWakeTimeoutConfig(parsed.wakeTimeout),
     mcpServers: optionalArrayValue(
       parsed.mcpServers,
       serviceConfig.mcp.servers,
     ).map((item, index) => configuredMcpServer(item, index)),
     imageGeneration: imageGenerationConfigFromUnknown(parsed.imageGeneration),
   };
+}
+
+function rejectRetiredTurnLifetimeFields(
+  parsed: Record<string, unknown>,
+): void {
+  if (Object.hasOwn(parsed, "wakeTimeout")) {
+    throw new Error(
+      "wakeTimeout is retired; logical turns continue until completion, operator attention, or explicit cancellation",
+    );
+  }
+  for (const [index, session] of arrayValue(parsed.sessions).entries()) {
+    if (isRecord(session) && Object.hasOwn(session, "turnTimeoutMs")) {
+      throw new Error(
+        `sessions[${index}].turnTimeoutMs is retired; session turns have no finite lifetime`,
+      );
+    }
+  }
 }
 
 function runtimeGraphPlanningFacts(
@@ -492,7 +500,6 @@ function runtimeGraphPlanningFacts(
         serviceConfig.environmentVariablePresent(databaseUrlEnv),
     },
     serviceDefaults: {
-      wakeTimeout: source.wakeTimeout,
       storage: {
         backend: storage.backend,
         sqlite: {
@@ -534,7 +541,6 @@ function emptyNativeRuntimeGraph(
   return {
     profilesDir: source.profilesDir,
     storage,
-    wakeTimeout: source.wakeTimeout,
     brains: [],
     sessions: [],
     scheduledJobs: [],
@@ -630,13 +636,11 @@ function sessionDefaultSummaries(
       ownerId: false,
       resourceLimits: false,
       maxHistoryMessages: false,
-      turnTimeoutMs: false,
     };
     const field = match[2]!;
     summary.ownerId ||= field === "ownerId";
     summary.resourceLimits ||= field.startsWith("resourceLimits");
     summary.maxHistoryMessages ||= field === "maxHistoryMessages";
-    summary.turnTimeoutMs ||= field === "turnTimeoutMs";
     summaries.set(sessionId, summary);
   }
   return [...summaries.values()];
@@ -691,13 +695,6 @@ function runtimeConfigFromGraphPlan(
     ...(effective.skillsDir == null ? {} : { skillsDir: effective.skillsDir }),
     storage: effective.storage,
     denObservation: source.denObservation,
-    wakeTimeout:
-      effective.wakeTimeout.mode === "default"
-        ? {
-            mode: "default",
-            defaultMs: effective.wakeTimeout.defaultMs,
-          }
-        : { mode: "disabled" },
     mcpServers: source.mcpServers,
     imageGeneration: source.imageGeneration,
     brains: effective.brains.map((brain) => ({
@@ -718,7 +715,6 @@ function runtimeConfigFromGraphPlan(
         historyWindow: session.historyWindow,
         maxHistoryMessages:
           session.maxHistoryMessages ?? session.historyWindow?.maxMessages,
-        turnTimeoutMs: session.effectiveWakeTimeoutMs,
         sessionMemoryPrompt:
           profile?.memoryConfig?.sessionMemoryPrompt ??
           (isRecord(authored.sessionMemoryPrompt)
@@ -786,7 +782,6 @@ function runtimeGraphSourceFromEffective(
     skillsDir: runtimeConfig.skillsDir,
     storage: runtimeConfig.storage,
     denObservation: runtimeConfig.denObservation,
-    wakeTimeout: runtimeConfig.wakeTimeout,
     mcpServers: runtimeConfig.mcpServers,
     imageGeneration: runtimeConfig.imageGeneration,
     brains: runtimeConfig.brains,
@@ -1307,32 +1302,14 @@ function resourceLimitsWithDefaultWorkdir(
 }
 
 export function effectiveSessionDefaults(
-  session: Pick<
-    RustyCrewConfiguredSession,
-    "ownerId" | "maxHistoryMessages" | "turnTimeoutMs"
-  >,
+  session: Pick<RustyCrewConfiguredSession, "ownerId" | "maxHistoryMessages">,
   profile: Pick<ProfileConfig, "sessionDefaults">,
 ): EffectiveSessionDefaults {
   return definedDefaults({
     ownerId: session.ownerId ?? profile.sessionDefaults?.ownerId,
     maxHistoryMessages:
       session.maxHistoryMessages ?? profile.sessionDefaults?.maxHistoryMessages,
-    turnTimeoutMs:
-      session.turnTimeoutMs ?? profile.sessionDefaults?.turnTimeoutMs,
   });
-}
-
-export function effectiveWakeTimeoutMs(input: {
-  session?: Pick<RustyCrewConfiguredSession, "turnTimeoutMs">;
-  profile: Pick<ProfileConfig, "runtime" | "sessionDefaults">;
-  service?: RustyCrewWakeTimeoutConfig;
-}): number | undefined {
-  return (
-    input.session?.turnTimeoutMs ??
-    input.profile.runtime?.maxTurnDurationMs ??
-    input.profile.sessionDefaults?.turnTimeoutMs ??
-    (input.service?.mode === "default" ? input.service.defaultMs : undefined)
-  );
 }
 
 function definedDefaults(
@@ -1911,35 +1888,6 @@ function denObservationEventFilter(
           ),
     profileId: optionalString(input.profileId),
     agentId: optionalString(input.agentId),
-  };
-}
-
-export function runtimeWakeTimeoutConfig(
-  input: unknown,
-): RustyCrewWakeTimeoutConfig {
-  if (input === undefined || input === null) {
-    return { mode: "disabled" };
-  }
-  if (!isRecord(input)) {
-    throw new Error("wakeTimeout config must be an object");
-  }
-  const mode = optionalString(input.mode) ?? "disabled";
-  if (mode === "disabled") {
-    return { mode: "disabled" };
-  }
-  if (mode !== "default") {
-    throw new Error("wakeTimeout.mode must be disabled or default");
-  }
-  const defaultMs = optionalPositiveInteger(
-    input.defaultMs,
-    "wakeTimeout.defaultMs",
-  );
-  if (defaultMs === undefined) {
-    throw new Error("wakeTimeout.defaultMs is required when mode is default");
-  }
-  return {
-    mode: "default",
-    defaultMs,
   };
 }
 

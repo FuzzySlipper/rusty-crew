@@ -2768,7 +2768,6 @@ function writeEmptyRuntimeConfig(root: string): void {
     JSON.stringify(
       {
         profilesDir,
-        wakeTimeout: { mode: "disabled" },
         brains: [],
         sessions: [],
       },

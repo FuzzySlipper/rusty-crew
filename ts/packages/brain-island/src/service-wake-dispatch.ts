@@ -16,21 +16,15 @@ import { BufferedBrainWakeError } from "./buffered-brain-host.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ChatEvent } from "./rusty-view-chat-api.js";
 import {
-  effectiveTurnTimeoutMs,
-  WakeDispatchTimeoutError,
-  withWakeTimeout,
-} from "./wake-timeout.js";
-import {
   buildProfileRoleAssembly,
   type BuildProfileRoleAssemblyOptions,
 } from "./profile-role-assembly.js";
 import type { loadProfileContext } from "./profile-loading.js";
 import { effectiveToolSelectionForResourceLimits } from "./tool-profile-selection.js";
-import {
-  effectiveWakeTimeoutMs,
-  type RustyCrewConfiguredSession,
-  type RustyCrewRuntimeConfig,
-  type ServiceBrainWakeResultObservation,
+import type {
+  RustyCrewConfiguredSession,
+  RustyCrewRuntimeConfig,
+  ServiceBrainWakeResultObservation,
 } from "./service-runtime-config.js";
 
 export interface ServiceWakeDispatchReport {
@@ -86,7 +80,6 @@ export interface ServiceWakeDispatchContext {
   inFlightWakes: Set<SessionId>;
   deferredWakeSessions: Set<SessionId>;
   toolCallDebugStore: ToolCallDebugStore;
-  wakeTimeout: RustyCrewRuntimeConfig["wakeTimeout"];
   brainForProfile(profileId: ProfileId): BrainImplementationHandle | undefined;
   configuredSessionForRuntimeSession(
     session: Pick<SessionState, "sessionId" | "profileId">,
@@ -284,44 +277,25 @@ export async function dispatchWake(
       ),
     };
     const role = buildProfileRoleAssembly(effectiveProfileContext, roleInput);
-    const turnTimeoutMs = effectiveTurnTimeoutMs(
-      effectiveWakeTimeoutMs({
-        session: configured,
-        profile: profileContext.profile,
-        service: context.wakeTimeout,
-      }),
-    );
-    const wakeTimeoutController = new AbortController();
-    const observed = await withWakeTimeout(
-      observeWakeEvents(
-        context,
-        sessionId,
-        async () => {
-          const request = await context.bridge.buildBrainWakeRequestForSession({
-            brain,
-            sessionId,
-            systemPrompt: role.systemPrompt,
-            roleAssemblyJson: new TextEncoder().encode(
-              JSON.stringify(role.roleAssembly),
-            ),
-            wakeId,
-          });
-          return context.bridge.wakeBrain(request, {
-            signal: wakeTimeoutController.signal,
-          });
-        },
-        appendChatEvents
-          ? (events) =>
-              appendCoreEventsToChatLog(context, session, wakeId, events)
-          : undefined,
-        wakeTimeoutController.signal,
-      ),
-      {
-        wakeId,
-        sessionId,
-        timeoutMs: turnTimeoutMs,
-        onTimeout: () => wakeTimeoutController.abort(),
+    const observed = await observeWakeEvents(
+      context,
+      sessionId,
+      async () => {
+        const request = await context.bridge.buildBrainWakeRequestForSession({
+          brain,
+          sessionId,
+          systemPrompt: role.systemPrompt,
+          roleAssemblyJson: new TextEncoder().encode(
+            JSON.stringify(role.roleAssembly),
+          ),
+          wakeId,
+        });
+        return context.bridge.wakeBrain(request);
       },
+      appendChatEvents
+        ? (events) =>
+            appendCoreEventsToChatLog(context, session, wakeId, events)
+        : undefined,
     );
     await context.publishWakeToolActivity({
       session,
@@ -389,42 +363,6 @@ export async function dispatchWake(
     dispatchFinish = runtimeDispatchFinish(report);
     return report;
   } catch (error) {
-    if (error instanceof WakeDispatchTimeoutError) {
-      const report: ServiceWakeDispatchReport = {
-        sessionId,
-        wakeId: error.wakeId,
-        status: "failed",
-        summary: await buildChatWakeFailureSummary(
-          context,
-          activeWake?.session,
-          error.wakeId,
-          `wake ${error.wakeId} timed out after ${error.timeoutMs}ms`,
-        ),
-        reasonCode: "wake_timeout",
-      };
-      if (appendChatEvents && activeWake !== undefined) {
-        await ensureChatWakeTerminalEventsFromChatLog(
-          context,
-          activeWake.session,
-          error.wakeId,
-          {
-            status: "failed",
-            summary: report.summary,
-            reasonCode: report.reasonCode,
-            source: "wake_timeout",
-            allowWithoutAssistantTurn: true,
-          },
-        );
-      }
-      context.recordEvent({
-        source: "service-host",
-        eventType: "brain_wake_timeout",
-        severity: "error",
-        summary: `${report.summary} (${source}).`,
-      });
-      dispatchFinish = runtimeDispatchFinish(report);
-      return report;
-    }
     if (error instanceof BufferedBrainWakeError) {
       const report: ServiceWakeDispatchReport = {
         sessionId,
@@ -894,7 +832,6 @@ async function observeWakeEvents<T>(
   sessionId: SessionId,
   callback: () => Promise<T>,
   onEvents?: (events: readonly CoreEvent[]) => void | Promise<void>,
-  signal?: AbortSignal,
 ): Promise<{ accepted: T; events: CoreEvent[] }> {
   const subscription = await context.bridge.subscribeEvents({
     eventKinds: [
@@ -916,20 +853,11 @@ async function observeWakeEvents<T>(
       });
 
     while (!callbackSettled) {
-      if (signal?.aborted) {
-        throw new Error(`wake event observation aborted for ${sessionId}`);
-      }
       await delay(25);
-      if (signal?.aborted) {
-        throw new Error(`wake event observation aborted for ${sessionId}`);
-      }
       const chunk = await drainSubscriptionEventsUntilIdle(
         context.bridge,
         subscription,
       );
-      if (signal?.aborted) {
-        throw new Error(`wake event observation aborted for ${sessionId}`);
-      }
       if (chunk.length > 0) {
         events.push(...chunk);
         await onEvents?.(chunk);

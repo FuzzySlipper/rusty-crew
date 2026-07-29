@@ -46,9 +46,7 @@ try {
           module: "openai-responses",
           strategy: "replay",
         },
-        runtime: {
-          maxTurnDurationMs: 60_000,
-        },
+        runtime: {},
       },
       skills: [],
       toolSelection: {

@@ -15,7 +15,6 @@ export function profileRuntimeMetadata(
     runtime: profile.runtime
       ? {
           defaultResourceLimits: profile.runtime.defaultResourceLimits,
-          maxTurnDurationMs: profile.runtime.maxTurnDurationMs,
           maxTokensPerTurn: profile.runtime.maxTokensPerTurn,
         }
       : undefined,

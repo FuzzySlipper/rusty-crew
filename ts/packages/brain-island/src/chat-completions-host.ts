@@ -23,7 +23,6 @@ import {
 import { createRoleplayNarratorFsmBridge } from "./roleplay-narrator-fsm.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 import type { BrainHostContext } from "./brain-host-context.js";
-import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
@@ -198,7 +197,6 @@ function createRustChatCompletionsBrainHostExecutor(
           ...(requestTimeoutMs === undefined
             ? {}
             : { providerRequestTimeoutMs: requestTimeoutMs }),
-          wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
           temperatureMilli:
             context.profile.profile.modelConfig.temperatureMilli,
           reasoningEffort:

@@ -33,7 +33,6 @@ export function runtimeConfigValidationInput(
         ownerId: session.ownerId,
         historyWindow: session.historyWindow,
         maxHistoryMessages: session.maxHistoryMessages,
-        turnTimeoutMs: session.turnTimeoutMs,
       })),
       scheduledJobs: runtimeConfig.scheduledJobs.map((job) => ({
         id: job.id,

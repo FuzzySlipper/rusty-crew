@@ -906,7 +906,6 @@ pub struct ChatCompletionsToolOutput {
     pub output: String,
     pub is_error: bool,
     pub cancelled: bool,
-    pub timed_out: bool,
 }
 
 impl ChatCompletionsToolOutput {
@@ -915,7 +914,6 @@ impl ChatCompletionsToolOutput {
             output: output.into(),
             is_error: false,
             cancelled: false,
-            timed_out: false,
         }
     }
 
@@ -924,7 +922,6 @@ impl ChatCompletionsToolOutput {
             output: output.into(),
             is_error: true,
             cancelled: false,
-            timed_out: false,
         }
     }
 
@@ -933,16 +930,6 @@ impl ChatCompletionsToolOutput {
             output: output.into(),
             is_error: true,
             cancelled: true,
-            timed_out: false,
-        }
-    }
-
-    pub fn timed_out(output: impl Into<String>) -> Self {
-        Self {
-            output: output.into(),
-            is_error: true,
-            cancelled: false,
-            timed_out: true,
         }
     }
 }
@@ -1517,15 +1504,14 @@ where
                     ),
                     &mut sink,
                 );
-                if output.cancelled || output.timed_out {
-                    let kind = if output.timed_out {
-                        CoreErrorKind::TimeoutExpired
-                    } else {
-                        CoreErrorKind::BrainUnavailable
-                    };
+                if output.cancelled {
                     push_stream_item(
                         &mut stream,
-                        wake_failed_item(&input.context, kind, output.output),
+                        wake_failed_item(
+                            &input.context,
+                            CoreErrorKind::BrainUnavailable,
+                            output.output,
+                        ),
                         &mut sink,
                     );
                     return ChatCompletionsBrainLoopOutput {
@@ -5694,31 +5680,27 @@ mod tests {
     }
 
     #[test]
-    fn minimal_loop_fails_visibly_on_tool_cancellation_or_timeout() {
-        for tool_output in [
-            ChatCompletionsToolOutput::cancelled("cancelled by operator"),
-            ChatCompletionsToolOutput::timed_out("tool timed out"),
-        ] {
-            let context = context();
-            let mut brain = loop_with(
-                vec![Ok(vec![
-                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
-                    ChatCompletionsEvent::Finished {
-                        finish_reason: Some("tool_calls".to_string()),
-                    },
-                ])],
-                vec![tool_output.clone()],
-            );
+    fn minimal_loop_fails_visibly_on_tool_cancellation() {
+        let tool_output = ChatCompletionsToolOutput::cancelled("cancelled by operator");
+        let context = context();
+        let mut brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("tool_calls".to_string()),
+                },
+            ])],
+            vec![tool_output.clone()],
+        );
 
-            let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("go")]);
-            assert!(!output.completed);
-            assert_eq!(terminal_kind(&output.stream), "wake_failed");
-            assert!(matches!(
-                output.stream.last(),
-                Some(BrainWakeStreamItem::WakeFailed { failure })
-                    if failure.message == tool_output.output
-            ));
-        }
+        let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("go")]);
+        assert!(!output.completed);
+        assert_eq!(terminal_kind(&output.stream), "wake_failed");
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.message == tool_output.output
+        ));
     }
 
     #[test]

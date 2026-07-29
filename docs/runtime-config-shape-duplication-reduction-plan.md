@@ -133,7 +133,7 @@ Task 4667 split the brain-island runtime config type into two explicit pieces:
   `profilesDir`, `skillsDir`, `brains`, `sessions`, `scheduledJobs`,
   `channelBindings`, and `mcpBindings`.
 - `ServiceRuntimeEnvelope` is the TS/service-host loader envelope:
-  `storage`, `denObservation`, `wakeTimeout`, and `mcpServers`.
+  `storage`, `denObservation`, and `mcpServers`.
 
 `RustyCrewRuntimeConfig` remains the composed type that existing callers use,
 but new runtime-affecting graph fields should land in the graph draft and be

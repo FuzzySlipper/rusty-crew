@@ -18,8 +18,7 @@ use rusty_crew_core_config::{
     RuntimeConfigDiagnosticSeverity, RuntimeConfigDraft, RuntimeConfigPlan,
     RuntimeConfigValidationInput, RuntimeConfigValidationResult, RuntimeGraphDefaultSource,
     RuntimeGraphDerivedKind, RuntimeGraphPlanInput, RuntimeGraphPostgresBootMode,
-    RuntimeGraphStorageBackend, RuntimeGraphStorageImplementationStatus,
-    RuntimeGraphWakeTimeoutMode, RuntimeGraphWakeTimeoutSourceKind, ScheduledJobConfigDraft,
+    RuntimeGraphStorageBackend, RuntimeGraphStorageImplementationStatus, ScheduledJobConfigDraft,
     ScheduledJobShape, SessionConfigDraft,
 };
 use rusty_crew_core_persistence as persistence;
@@ -1430,23 +1429,6 @@ fn core_config_facade_artifact() -> Result<CoreConfigFacadeArtifact> {
         ])?,
     );
     enum_value_inventory.insert(
-        "RuntimeGraphWakeTimeoutMode".to_owned(),
-        serialized_enum_values(&[
-            RuntimeGraphWakeTimeoutMode::Disabled,
-            RuntimeGraphWakeTimeoutMode::Default,
-        ])?,
-    );
-    enum_value_inventory.insert(
-        "RuntimeGraphWakeTimeoutSourceKind".to_owned(),
-        serialized_enum_values(&[
-            RuntimeGraphWakeTimeoutSourceKind::Disabled,
-            RuntimeGraphWakeTimeoutSourceKind::Session,
-            RuntimeGraphWakeTimeoutSourceKind::ProfileRuntime,
-            RuntimeGraphWakeTimeoutSourceKind::ProfileSessionDefault,
-            RuntimeGraphWakeTimeoutSourceKind::ServiceDefault,
-        ])?,
-    );
-    enum_value_inventory.insert(
         "RuntimeGraphDerivedKind".to_owned(),
         serialized_enum_values(&[
             RuntimeGraphDerivedKind::ScheduledJob,
@@ -2545,7 +2527,6 @@ fn sample_session_config_draft() -> SessionConfigDraft {
             max_messages: Some(128),
         }),
         max_history_messages: Some(256),
-        turn_timeout_ms: Some(60_000),
     }
 }
 
@@ -2649,13 +2630,11 @@ fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
         }),
         runtime: Some(ProfileRuntimeOptions {
             default_resource_limits: Some(sample_resource_limits()),
-            max_turn_duration_ms: Some(120_000),
             max_tokens_per_turn: Some(4096),
         }),
         session_defaults: Some(ProfileSessionDefaults {
             owner_id: Some("field-owner".to_owned()),
             max_history_messages: Some(512),
-            turn_timeout_ms: Some(60_000),
         }),
         mcp_config: Some(ProfileMcpConfig {
             binding_id: Some("field-mcp-binding".to_owned()),
@@ -3646,7 +3625,6 @@ fn sample_buffered_brain_run_diagnostics_value() -> Value {
                 "pending_tool_request_count": 1,
                 "submitted_tool_output_count": 0,
                 "age_ms": 250,
-                "wake_timeout_ms": 300000,
                 "terminal": false,
                 "cancelled": false,
                 "has_error": false,

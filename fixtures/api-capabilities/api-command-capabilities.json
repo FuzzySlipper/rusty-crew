@@ -2462,18 +2462,6 @@
         "command_name": "apply_runtime_config_update"
       },
       {
-        "id": "admin.control.config.wake_timeout.patch",
-        "method": "POST",
-        "path_template": "/v1/admin/control/config/wake-timeout",
-        "description": "Patch only the service wake-timeout policy while preserving unrelated runtime config sections.",
-        "auth": "admin",
-        "mutation": "control",
-        "stability": "stable",
-        "tags": ["config", "service"],
-        "public": true,
-        "command_name": "patch_wake_timeout"
-      },
-      {
         "id": "admin.control.mcp.reload",
         "method": "POST",
         "path_template": "/v1/admin/control/mcp/{session_id}/reload",
@@ -4138,13 +4126,6 @@
         "capability_id": "admin.control.config.draft.apply",
         "method": "POST",
         "path_template": "/v1/admin/control/config/draft/apply",
-        "route_id": "admin.control",
-        "auth_phase": "after_auth"
-      },
-      {
-        "capability_id": "admin.control.config.wake_timeout.patch",
-        "method": "POST",
-        "path_template": "/v1/admin/control/config/wake-timeout",
         "route_id": "admin.control",
         "auth_phase": "after_auth"
       },

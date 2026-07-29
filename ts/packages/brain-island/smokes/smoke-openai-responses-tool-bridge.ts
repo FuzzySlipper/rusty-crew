@@ -51,7 +51,6 @@ import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
     ) => {
       assert.equal(input.moduleId, "openai-responses");
       capturedInstructions = input.providerInput.config.instructions;
-      capturedWakeTimeoutMs = input.providerInput.config.wakeTimeoutMs;
       return native.startBrainRun(input);
     },
     drainBrainRun: native.drainBrainRun.bind(native),
@@ -66,7 +65,6 @@ import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
     now: () => "2026-07-04T00:00:00.000Z",
   });
   let capturedInstructions: string | undefined;
-  let capturedWakeTimeoutMs: number | undefined;
 
   const brain = await openAiResponsesBrainModule.createBrain({
     bridge,
@@ -82,9 +80,6 @@ import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
           module: "openai-responses",
           strategy: "replay",
         },
-        runtime: {
-          maxTurnDurationMs: 45_000,
-        },
       },
       skills: [],
       toolSelection: {
@@ -92,14 +87,7 @@ import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
         toolProfile,
       },
     } as unknown as LoadedProfileContext,
-    runtimeConfig: {
-      sessions: [
-        {
-          sessionId: "responses-tool-bridge-session",
-          turnTimeoutMs: 12_000,
-        },
-      ],
-    } as never,
+    runtimeConfig: { sessions: [] } as never,
     toolResolver: () => [sentinelTool],
     providerStateScope: {
       profileFingerprint: "profile-smoke",
@@ -113,7 +101,6 @@ import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
   assert.match(capturedInstructions ?? "", /System instruction marker/);
   assert.match(capturedInstructions ?? "", /Role inventory marker/);
   assert.match(capturedInstructions ?? "", /den_get_document/);
-  assert.equal(capturedWakeTimeoutMs, 12_000);
   assert.match(providerStateText, /SENTINEL_REAL_TOOL_OUTPUT/);
   assert.doesNotMatch(providerStateText, /completed by Rust Responses bridge/);
   assert.doesNotMatch(providerStateText, /deterministic field scaffold/);
@@ -385,7 +372,7 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
   assert.equal(
     completedDebugRecords.every(
       (record) =>
-        record?.status === "completed" &&
+        record?.status === "failed" &&
         JSON.stringify(record.final_result?.value).includes(
           "memory_client_unavailable",
         ),
@@ -395,7 +382,7 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
   return {
     submittedOutputs: submittedOutputs.length,
     providerStatusReported,
-    debugRecordsCompleted: completedDebugRecords.length,
+    failedDebugRecords: completedDebugRecords.length,
   };
 }
 

@@ -135,7 +135,6 @@ interface RuntimeConfigValidationPreflightReport {
       ownerId: boolean;
       resourceLimits: boolean;
       maxHistoryMessages: boolean;
-      turnTimeoutMs: boolean;
     }>;
   };
 }

@@ -307,7 +307,6 @@ export interface OpenAiResponsesBrainRunInput {
     providerRequestTimeoutMs?: number;
     workQuantumContinuationRounds?: number;
     noProgressAttentionThreshold?: number;
-    wakeTimeoutMs?: number;
   };
   client?:
     | { mode: "fake" }
@@ -344,7 +343,6 @@ export interface ChatCompletionsBrainRunInput {
   config: {
     model: string;
     providerRequestTimeoutMs?: number;
-    wakeTimeoutMs?: number;
     temperatureMilli?: number;
     reasoningEffort?: string;
     wireDialect?: "standard" | "kimi" | "glm" | "qwen" | "deepseek";
@@ -950,7 +948,6 @@ export interface NativeBufferedBrainRunDiagnostic {
   pending_tool_request_count: number;
   submitted_tool_output_count: number;
   age_ms: number;
-  wake_timeout_ms: number;
   terminal: boolean;
   cancelled: boolean;
   has_error: boolean;
@@ -1219,10 +1216,6 @@ export interface NativeRuntimeGraphPlanInput {
     postgresDatabaseUrlEnvPresent: boolean;
   };
   serviceDefaults: {
-    wakeTimeout?: {
-      mode: "disabled" | "default";
-      defaultMs?: number;
-    };
     storage?: {
       backend: "sqlite" | "postgres";
       sqlite?: {
@@ -1269,18 +1262,10 @@ export interface NativeRuntimeGraphPlan {
         statementTimeoutMs: number;
       };
     };
-    wakeTimeout: { mode: "disabled" | "default"; defaultMs?: number };
     brains: NativeBrainConfigDraft[];
     sessions: Array<
       NativeSessionConfigDraft & {
         resourceLimits: ResourceLimits;
-        effectiveWakeTimeoutMs?: number;
-        wakeTimeoutSource:
-          | "disabled"
-          | "session"
-          | "profile_runtime"
-          | "profile_session_default"
-          | "service_default";
         localToolProfileId?: string;
         contextPolicyProfileId?: string;
         sessionMemoryPromptProfileId?: string;
@@ -1331,7 +1316,6 @@ export interface NativeSessionConfigDraft {
   ownerId?: string;
   historyWindow?: SessionState["historyWindow"];
   maxHistoryMessages?: number;
-  turnTimeoutMs?: number;
 }
 
 export interface NativeScheduledJobConfigDraft {
@@ -1383,13 +1367,11 @@ export interface NativeProfileRuntimeMetadata {
   };
   runtime?: {
     defaultResourceLimits?: ResourceLimits;
-    maxTurnDurationMs?: number;
     maxTokensPerTurn?: number;
   };
   sessionDefaults?: {
     ownerId?: string;
     maxHistoryMessages?: number;
-    turnTimeoutMs?: number;
   };
   mcpConfig?: {
     bindingId?: string;

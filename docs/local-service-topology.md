@@ -57,10 +57,10 @@ baseUrl: http://127.0.0.1:18082/v1
 
 Production Chat Completions hosts always use the live Rust provider path.
 Provider requests have no automatic deadline by default; user cancellation owns
-turn lifetime. An operator may configure an emergency request ceiling:
+turn lifetime. An operator may configure a per-request deadline:
 
 ```text
-# Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
+# Optional per-request deadline; this does not bound logical-turn lifetime.
 # RUSTY_CREW_CHAT_COMPLETIONS_PROVIDER_REQUEST_TIMEOUT_MS=30000
 ```
 

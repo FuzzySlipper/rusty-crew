@@ -79,7 +79,6 @@ const profileContext = {
     runtime: {
       maxTurns: 4,
       maxTokensPerTurn: 8192,
-      maxTurnDurationMs: 180_000,
       defaultResourceLimits: {
         workdir: "/home/dev/rusty-crew",
         maxDurationMs: 30_000,
@@ -92,7 +91,6 @@ const profileContext = {
     sessionDefaults: {
       ownerId: "owner:diagnostics",
       maxHistoryMessages: 200,
-      turnTimeoutMs: 1_800_000,
     },
     channelDefaults: {
       wakePolicy: "subscription",

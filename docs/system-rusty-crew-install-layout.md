@@ -126,7 +126,7 @@ RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
 
 # Optional when direct OpenAI OAuth Responses profiles are active.
 # Direct OAuth uses provider credential envelopes, not ALLOW_NO_KEY.
-# Optional emergency ceiling; omitted by default so user cancellation owns turn lifetime.
+# Optional per-request deadline; this does not bound logical-turn lifetime.
 # RUSTY_CREW_OPENAI_RESPONSES_PROVIDER_REQUEST_TIMEOUT_MS=300000
 ```
 
@@ -171,9 +171,6 @@ Minimum shape:
       "maxConnections": 10,
       "statementTimeoutMs": 30000
     }
-  },
-  "wakeTimeout": {
-    "mode": "disabled"
   },
   "brains": [],
   "sessions": [],

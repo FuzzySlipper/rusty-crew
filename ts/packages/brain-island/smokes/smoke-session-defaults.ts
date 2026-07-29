@@ -10,7 +10,6 @@ import { inspectDirectDebugSession } from "../src/direct-debug-service.js";
 import { buildRuntimeDiagnosticsProjection } from "../src/runtime-diagnostics.js";
 import {
   effectiveSessionDefaults,
-  effectiveWakeTimeoutMs,
   sessionWithProfileDefaults,
   type RustyCrewConfiguredSession,
 } from "../src/service-runtime-config.js";
@@ -22,7 +21,6 @@ const profile = {
     modelName: "deterministic",
   },
   runtime: {
-    maxTurnDurationMs: 180_000,
     defaultResourceLimits: {
       workdir: "/home/dev/rusty-crew",
       maxDurationMs: 30_000,
@@ -31,7 +29,6 @@ const profile = {
   sessionDefaults: {
     ownerId: "owner:profile",
     maxHistoryMessages: 200,
-    turnTimeoutMs: 1_800_000,
   },
 };
 const profileContext = {
@@ -74,7 +71,6 @@ const inherited = sessionWithProfileDefaults(
 );
 assert.equal(inherited.ownerId, "owner:profile");
 assert.equal(inherited.maxHistoryMessages, 200);
-assert.equal(inherited.turnTimeoutMs, 1_800_000);
 assert.equal(inherited.resourceLimits?.workdir, "/home/dev/rusty-crew");
 assert.equal(inherited.toolProfile?.tools[0]?.name, "read_file");
 
@@ -113,15 +109,11 @@ const explicit = {
   kind: "full" as const,
   ownerId: "owner:service",
   maxHistoryMessages: 25,
-  turnTimeoutMs: 45_000,
 } satisfies RustyCrewConfiguredSession;
 assert.deepEqual(effectiveSessionDefaults(explicit, profile), {
   ownerId: "owner:service",
   maxHistoryMessages: 25,
-  turnTimeoutMs: 45_000,
 });
-assert.equal(effectiveWakeTimeoutMs({ session: explicit, profile }), 45_000);
-assert.equal(effectiveWakeTimeoutMs({ profile }), 180_000);
 
 const diagnostics = buildRuntimeDiagnosticsProjection({
   now: "2026-06-22T00:00:00.000Z",
@@ -129,21 +121,21 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
   sessionDefaults: new Map([
     [
       "explicit-session" as SessionId,
-      {
-        ...effectiveSessionDefaults(explicit, profile),
-        wakeTimeoutMs: effectiveWakeTimeoutMs({
-          session: explicit,
-          profile,
-        }),
-      },
+      effectiveSessionDefaults(explicit, profile),
     ],
   ]),
 });
 const sessionDiagnostics = diagnostics.runtime.sessions[0];
 assert.equal(sessionDiagnostics?.effectiveDefaults?.ownerId, "owner:service");
 assert.equal(sessionDiagnostics?.effectiveDefaults?.maxHistoryMessages, 25);
-assert.equal(sessionDiagnostics?.effectiveDefaults?.turnTimeoutMs, 45_000);
-assert.equal(sessionDiagnostics?.effectiveDefaults?.wakeTimeoutMs, 45_000);
+assert.equal(
+  "turnTimeoutMs" in (sessionDiagnostics?.effectiveDefaults ?? {}),
+  false,
+);
+assert.equal(
+  "wakeTimeoutMs" in (sessionDiagnostics?.effectiveDefaults ?? {}),
+  false,
+);
 
 const debug = inspectDirectDebugSession(
   { sessionId: "explicit-session" },
@@ -162,14 +154,17 @@ const debug = inspectDirectDebugSession(
 assert.equal(debug.ok, true);
 if (!debug.ok) throw new Error("expected debug inspection to succeed");
 assert.equal(debug.data.session.effectiveDefaults?.ownerId, "owner:service");
-assert.equal(debug.data.session.effectiveDefaults?.wakeTimeoutMs, 45_000);
+assert.equal(
+  "wakeTimeoutMs" in (debug.data.session.effectiveDefaults ?? {}),
+  false,
+);
 
 console.log(
   JSON.stringify(
     {
       inherited: inherited.ownerId,
       explicit: debug.data.session.effectiveDefaults,
-      wakeTimeoutWithoutExplicit: effectiveWakeTimeoutMs({ profile }),
+      finiteTurnLifetimeReported: false,
     },
     null,
     2,

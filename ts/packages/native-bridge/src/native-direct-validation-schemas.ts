@@ -237,7 +237,6 @@ const rawBufferedBrainRunDiagnosticSchema = Type.Object(
     pending_tool_request_count: Type.Number({ minimum: 0 }),
     submitted_tool_output_count: Type.Number({ minimum: 0 }),
     age_ms: Type.Number({ minimum: 0 }),
-    wake_timeout_ms: Type.Number({ minimum: 0 }),
     terminal: Type.Boolean(),
     cancelled: Type.Boolean(),
     has_error: Type.Boolean(),

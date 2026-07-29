@@ -125,8 +125,8 @@ export async function runBufferedBrainHost(options: {
   );
   let cancelRequested = false;
   const cancelBufferedWake = async (
-    reasonCode = "wake_timeout",
-    summary = `wake ${started.wakeId} was cancelled by service wake timeout policy`,
+    reasonCode = "host_cancelled",
+    summary = `wake ${started.wakeId} was cancelled by an explicit host signal`,
   ) => {
     if (cancelRequested) return;
     cancelRequested = true;

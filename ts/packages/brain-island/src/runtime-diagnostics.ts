@@ -303,7 +303,6 @@ export interface RuntimeBufferedBrainRunDiagnostic {
   pending_tool_request_count: number;
   submitted_tool_output_count: number;
   age_ms: number;
-  wake_timeout_ms: number;
   terminal: boolean;
   cancelled: boolean;
   has_error: boolean;
@@ -320,8 +319,6 @@ export interface RuntimeBufferedBrainRunDiagnostics {
 export interface RuntimeSessionEffectiveDefaults {
   ownerId?: string;
   maxHistoryMessages?: number;
-  turnTimeoutMs?: number;
-  wakeTimeoutMs?: number;
 }
 
 export interface RuntimeDelegationDiagnostics {

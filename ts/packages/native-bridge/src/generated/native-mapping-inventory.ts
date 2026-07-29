@@ -144,8 +144,7 @@ export const nativeMappingInventory = {
           "stream_retention_metrics",
           "submitted_tool_output_count",
           "terminal",
-          "wake_id",
-          "wake_timeout_ms"
+          "wake_id"
         ],
         "NativeBufferedBrainRunDiagnostics": [
           "active_run_count",
@@ -2122,8 +2121,7 @@ export const nativeMappingInventory = {
           "owner_id",
           "profile_id",
           "resource_limits",
-          "session_id",
-          "turn_timeout_ms"
+          "session_id"
         ]
       },
       "namedTypeScriptInterfaces": [

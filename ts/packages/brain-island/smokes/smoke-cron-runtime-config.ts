@@ -39,7 +39,6 @@ try {
         sessionDefaults: {
           ownerId: "cron-owner",
           maxHistoryMessages: 42,
-          turnTimeoutMs: 30000,
         },
         mcpConfig: {
           bindingId: "cron-agent-mcp",
@@ -159,7 +158,6 @@ try {
   assert.equal(runtimeConfig.mcpBindings[0]?.toolProfileKey, "cron-profile");
   assert.equal(runtimeConfig.sessions[0]?.ownerId, "cron-owner");
   assert.equal(runtimeConfig.sessions[0]?.maxHistoryMessages, 42);
-  assert.equal(runtimeConfig.sessions[0]?.turnTimeoutMs, 30000);
   assert.equal(
     runtimeConfig.sessions[0]?.resourceLimits?.workdir,
     join(root, "work", "cron-profile"),

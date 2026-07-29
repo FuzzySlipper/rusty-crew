@@ -27,10 +27,8 @@ import {
 import type { RustyCrewMcpServerConfig } from "./service-config.js";
 import { mcpServerWriteFromBody } from "./service-mcp-server-registry-routes.js";
 import {
-  runtimeWakeTimeoutConfig,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
-  type RustyCrewWakeTimeoutConfig,
 } from "./service-runtime-config.js";
 
 export interface ServiceProfileAdminMutationContext {
@@ -319,48 +317,6 @@ export async function applyServiceRuntimeConfigDraft(
     summaryPrefix: "Runtime config draft applied",
   });
   return { ...plan, applyResult };
-}
-
-export async function patchServiceWakeTimeout(
-  context: ServiceProfileAdminMutationContext,
-  command: AdminControlCommand,
-): Promise<{
-  ok: true;
-  wakeTimeout: RustyCrewWakeTimeoutConfig;
-  previousWakeTimeout?: RustyCrewWakeTimeoutConfig;
-  preservedSections: Record<string, number | undefined>;
-  safeWritePath: {
-    capabilityId: string;
-    method: "POST";
-    path: "/v1/admin/control/config/wake-timeout";
-    body: "{ wakeTimeout: { mode: 'disabled' } } | { wakeTimeout: { mode: 'default', defaultMs: number } }";
-  };
-  applyResult: RustyCrewRuntimeConfigApplyResult;
-}> {
-  const wakeTimeout = wakeTimeoutFromPatchCommand(command);
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(context);
-  const preservedSections = runtimeConfigSectionCounts(runtimeConfigFile.value);
-  const previousWakeTimeout = context.runtimeConfig.wakeTimeout;
-  runtimeConfigFile.value.wakeTimeout = wakeTimeout;
-  await writeJsonFileAtomic(context.serviceConfigFile, runtimeConfigFile.value);
-  const applyResult = await context.applyRuntimeConfigFromDisk({
-    createMissingSessions: false,
-    eventType: "wake_timeout_config_patched",
-    summaryPrefix: "Wake timeout config patched",
-  });
-  return {
-    ok: true,
-    wakeTimeout,
-    previousWakeTimeout,
-    preservedSections,
-    safeWritePath: {
-      capabilityId: "admin.control.config.wake_timeout.patch",
-      method: "POST",
-      path: "/v1/admin/control/config/wake-timeout",
-      body: "{ wakeTimeout: { mode: 'disabled' } } | { wakeTimeout: { mode: 'default', defaultMs: number } }",
-    },
-    applyResult,
-  };
 }
 
 export async function decommissionServiceProfile(
@@ -977,20 +933,6 @@ async function planRuntimeConfigValue(
   };
 }
 
-function wakeTimeoutFromPatchCommand(
-  command: AdminControlCommand,
-): RustyCrewWakeTimeoutConfig {
-  const input = Object.hasOwn(command.body, "wakeTimeout")
-    ? command.body.wakeTimeout
-    : command.body;
-  if (!isRecord(input) || !Object.hasOwn(input, "mode")) {
-    throw new Error(
-      "wakeTimeout patch requires wakeTimeout.mode or top-level mode",
-    );
-  }
-  return runtimeWakeTimeoutConfig(input);
-}
-
 function runtimeConfigSectionCounts(
   value: Record<string, unknown>,
 ): Record<string, number | undefined> {
@@ -1232,15 +1174,13 @@ function runtimeConfigDraftFromCommand(
   if (draft === undefined) {
     throw new Error("runtimeConfig object is required");
   }
+  rejectRetiredTurnLifetimeDraft(draft);
   return {
     profilesDir:
       optionalString(draft.profilesDir) ?? context.runtimeConfig.profilesDir,
     ...(optionalString(draft.skillsDir) === undefined
       ? {}
       : { skillsDir: optionalString(draft.skillsDir) }),
-    wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
-      ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
-      : context.runtimeConfig.wakeTimeout,
     brains: arrayValue(draft.brains).map((brain, index) =>
       runtimeConfigBrainDraft(brain, index),
     ),
@@ -1269,6 +1209,7 @@ function runtimeConfigDraftFromFileValue(
   context: ServiceProfileAdminMutationContext,
   draft: Record<string, unknown>,
 ): RustyCrewRuntimeConfig {
+  rejectRetiredTurnLifetimeDraft(draft);
   return {
     profilesDir:
       optionalString(draft.profilesDir) ?? context.runtimeConfig.profilesDir,
@@ -1277,9 +1218,6 @@ function runtimeConfigDraftFromFileValue(
       : { skillsDir: optionalString(draft.skillsDir) }),
     storage: context.runtimeConfig.storage,
     denObservation: context.runtimeConfig.denObservation,
-    wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
-      ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
-      : context.runtimeConfig.wakeTimeout,
     imageGeneration: Object.hasOwn(draft, "imageGeneration")
       ? (draft.imageGeneration as RustyCrewRuntimeConfig["imageGeneration"])
       : context.runtimeConfig.imageGeneration,
@@ -1302,6 +1240,21 @@ function runtimeConfigDraftFromFileValue(
       draft.mcpBindings,
     ) as RustyCrewRuntimeConfig["mcpBindings"],
   };
+}
+
+function rejectRetiredTurnLifetimeDraft(draft: Record<string, unknown>): void {
+  if (Object.hasOwn(draft, "wakeTimeout")) {
+    throw new Error(
+      "runtimeConfig.wakeTimeout is retired; logical turns have no finite lifetime",
+    );
+  }
+  for (const [index, session] of arrayValue(draft.sessions).entries()) {
+    if (isRecord(session) && Object.hasOwn(session, "turnTimeoutMs")) {
+      throw new Error(
+        `runtimeConfig.sessions[${index}].turnTimeoutMs is retired`,
+      );
+    }
+  }
 }
 
 function runtimeConfigMcpServerDraft(value: unknown): RustyCrewMcpServerConfig {

@@ -26,7 +26,6 @@ pub enum BufferedBrainTurnPhase {
     Completed,
     Failed,
     Cancelled,
-    TimedOut,
 }
 
 impl BufferedBrainTurnPhase {
@@ -38,7 +37,6 @@ impl BufferedBrainTurnPhase {
                 | Self::Completed
                 | Self::Failed
                 | Self::Cancelled
-                | Self::TimedOut
         )
     }
 }
@@ -254,7 +252,6 @@ pub struct BufferedBrainTurnCoordinator {
     session_id: SessionId,
     phase: BufferedBrainTurnPhase,
     limits: BufferedBrainTurnLimits,
-    wake_timeout_ms: Option<u64>,
     created_at: OffsetDateTime,
     started_at: Option<OffsetDateTime>,
     last_transition_at: OffsetDateTime,
@@ -283,14 +280,12 @@ impl BufferedBrainTurnCoordinator {
         module_id: impl Into<String>,
         wake_id: impl Into<String>,
         session_id: SessionId,
-        wake_timeout_ms: Option<u64>,
         limits: BufferedBrainTurnLimits,
     ) -> Result<Self, BufferedBrainTurnError> {
         Self::new_at(
             module_id,
             wake_id,
             session_id,
-            wake_timeout_ms,
             limits,
             OffsetDateTime::now_utc(),
         )
@@ -300,7 +295,6 @@ impl BufferedBrainTurnCoordinator {
         module_id: impl Into<String>,
         wake_id: impl Into<String>,
         session_id: SessionId,
-        wake_timeout_ms: Option<u64>,
         limits: BufferedBrainTurnLimits,
         now: OffsetDateTime,
     ) -> Result<Self, BufferedBrainTurnError> {
@@ -310,7 +304,6 @@ impl BufferedBrainTurnCoordinator {
             session_id,
             phase: BufferedBrainTurnPhase::Created,
             limits: limits.validate()?,
-            wake_timeout_ms,
             created_at: now,
             started_at: None,
             last_transition_at: now,
@@ -367,10 +360,6 @@ impl BufferedBrainTurnCoordinator {
         self.terminal.as_ref()
     }
 
-    pub fn wake_timeout_ms(&self) -> Option<u64> {
-        self.wake_timeout_ms
-    }
-
     pub fn is_cancelled(&self) -> bool {
         self.phase == BufferedBrainTurnPhase::Cancelled
     }
@@ -378,9 +367,7 @@ impl BufferedBrainTurnCoordinator {
     pub fn has_error(&self) -> bool {
         matches!(
             self.phase,
-            BufferedBrainTurnPhase::Failed
-                | BufferedBrainTurnPhase::Cancelled
-                | BufferedBrainTurnPhase::TimedOut
+            BufferedBrainTurnPhase::Failed | BufferedBrainTurnPhase::Cancelled
         )
     }
 
@@ -752,9 +739,7 @@ impl BufferedBrainTurnCoordinator {
     ) -> Result<(), BufferedBrainTurnError> {
         if matches!(
             self.phase,
-            BufferedBrainTurnPhase::Created
-                | BufferedBrainTurnPhase::Cancelled
-                | BufferedBrainTurnPhase::TimedOut
+            BufferedBrainTurnPhase::Created | BufferedBrainTurnPhase::Cancelled
         ) {
             return Err(self.invalid_transition("set provider state output"));
         }
@@ -865,31 +850,6 @@ impl BufferedBrainTurnCoordinator {
             now,
         );
         Ok(())
-    }
-
-    pub fn timeout_if_due(&mut self) -> bool {
-        self.timeout_if_due_at(OffsetDateTime::now_utc())
-    }
-
-    pub fn timeout_if_due_at(&mut self, now: OffsetDateTime) -> bool {
-        let Some(wake_timeout_ms) = self.wake_timeout_ms else {
-            return false;
-        };
-        let Some(started_at) = self.started_at else {
-            return false;
-        };
-        if self.phase.is_terminal()
-            || (now - started_at).whole_milliseconds().max(0) as u64 <= wake_timeout_ms
-        {
-            return false;
-        }
-        self.transition_terminal(
-            BufferedBrainTurnPhase::TimedOut,
-            "wake_timeout".to_string(),
-            format!("brain turn exceeded {wake_timeout_ms}ms timeout"),
-            now,
-        );
-        true
     }
 
     pub fn drain_stream(&mut self, max_items: usize) -> BufferedBrainTurnDrain {
@@ -1081,7 +1041,6 @@ impl<Payload> BufferedBrainTurnRegistry<Payload> {
                     pending_tool_request_count: coordinator.pending_tool_request_count(),
                     submitted_tool_output_count: coordinator.submitted_tool_output_count(),
                     age_ms: elapsed_ms(coordinator.created_at(), now),
-                    wake_timeout_ms: coordinator.wake_timeout_ms().unwrap_or(0),
                     terminal: coordinator.phase().is_terminal(),
                     cancelled: coordinator.is_cancelled(),
                     has_error: coordinator.has_error(),
@@ -1146,7 +1105,6 @@ fn buffered_brain_turn_phase_name(phase: BufferedBrainTurnPhase) -> &'static str
         BufferedBrainTurnPhase::Completed => "completed",
         BufferedBrainTurnPhase::Failed => "failed",
         BufferedBrainTurnPhase::Cancelled => "cancelled",
-        BufferedBrainTurnPhase::TimedOut => "timed_out",
     }
 }
 
@@ -1166,7 +1124,6 @@ mod tests {
     use rusty_crew_core_protocol::{
         BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainWakeFailure, CoreErrorKind,
     };
-    use time::Duration;
 
     fn session_id(value: &str) -> SessionId {
         SessionId(value.to_string())
@@ -1177,7 +1134,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            Some(1_000),
             BufferedBrainTurnLimits::default(),
             OffsetDateTime::UNIX_EPOCH,
         )
@@ -1560,7 +1516,7 @@ mod tests {
     }
 
     #[test]
-    fn first_terminal_transition_wins_cancellation_and_timeout_races() {
+    fn first_terminal_transition_wins_after_completion_or_cancellation() {
         let mut completed = coordinator();
         completed.start().expect("start");
         completed
@@ -1582,48 +1538,7 @@ mod tests {
         cancelled
             .cancel_at("user_cancelled", "stopped", OffsetDateTime::UNIX_EPOCH)
             .expect("cancel");
-        assert!(!cancelled
-            .timeout_if_due_at(OffsetDateTime::UNIX_EPOCH + Duration::milliseconds(1_001)));
         assert_eq!(cancelled.phase(), BufferedBrainTurnPhase::Cancelled);
-
-        let mut timed_out = coordinator();
-        timed_out
-            .start_at(OffsetDateTime::UNIX_EPOCH)
-            .expect("start");
-        assert!(
-            timed_out.timeout_if_due_at(OffsetDateTime::UNIX_EPOCH + Duration::milliseconds(1_001))
-        );
-        assert!(matches!(
-            timed_out.cancel("late_cancel", "too late"),
-            Err(BufferedBrainTurnError::InvalidTransition {
-                phase: BufferedBrainTurnPhase::TimedOut,
-                ..
-            })
-        ));
-        assert_eq!(timed_out.phase(), BufferedBrainTurnPhase::TimedOut);
-    }
-
-    #[test]
-    fn timeout_uses_injected_clock_and_can_be_disabled() {
-        let mut turn = coordinator();
-        turn.start_at(OffsetDateTime::UNIX_EPOCH).expect("start");
-        assert!(!turn.timeout_if_due_at(OffsetDateTime::UNIX_EPOCH + Duration::seconds(1)));
-        assert!(turn.timeout_if_due_at(OffsetDateTime::UNIX_EPOCH + Duration::milliseconds(1_001)));
-        assert_eq!(turn.phase(), BufferedBrainTurnPhase::TimedOut);
-
-        let mut unbounded = BufferedBrainTurnCoordinator::new_at(
-            "chat-completions",
-            "wake-2",
-            session_id("session-1"),
-            None,
-            BufferedBrainTurnLimits::default(),
-            OffsetDateTime::UNIX_EPOCH,
-        )
-        .expect("coordinator");
-        unbounded
-            .start_at(OffsetDateTime::UNIX_EPOCH)
-            .expect("start");
-        assert!(!unbounded.timeout_if_due_at(OffsetDateTime::UNIX_EPOCH + Duration::days(10)));
     }
 
     #[test]
@@ -1639,7 +1554,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             limits,
         )
         .expect("coordinator");
@@ -1664,7 +1578,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             limits,
         )
         .expect("coordinator");
@@ -1702,7 +1615,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             limits,
         )
         .expect("coordinator");
@@ -1722,7 +1634,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             BufferedBrainTurnLimits {
                 max_stream_items: 16,
                 max_stream_delta_bytes: 8 * 1_024,
@@ -1805,7 +1716,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             BufferedBrainTurnLimits {
                 max_stream_items: 1,
                 ..BufferedBrainTurnLimits::default()
@@ -1825,7 +1735,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             BufferedBrainTurnLimits {
                 max_stream_items: 1,
                 ..BufferedBrainTurnLimits::default()
@@ -1882,7 +1791,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             BufferedBrainTurnLimits {
                 max_stream_delta_bytes: 4,
                 ..BufferedBrainTurnLimits::default()
@@ -1971,7 +1879,6 @@ mod tests {
             "chat-completions",
             "wake-1",
             session_id("session-1"),
-            None,
             BufferedBrainTurnLimits {
                 max_stream_items: 0,
                 ..BufferedBrainTurnLimits::default()

@@ -75,29 +75,13 @@ Successful reasoning/tool wake:
 - tool events included successful scene-state reads/writes
 - final output was clean narrative with no tool/protocol artifacts
 
-## Timeout And Cancellation
+## Historical Timeout Evidence
 
-The existing live debug timeout harness ran against `tester-session`:
-
-```bash
-RUSTY_CREW_TIMEOUT_LIVE_PROFILE_ID=tester \
-RUSTY_CREW_TIMEOUT_LIVE_SESSION_ID=tester-session \
-npm run smoke:wake-timeout-live-debug-service -w @rusty-crew/brain-island
-```
-
-Results:
-
-- disabled timeout: completed normally in 1188 ms;
-- 25 ms service cap: failed visibly with `reason_code=wake_timeout` and summary
-  `timed out after 25ms`;
-- 60000 ms session override: completed normally in 1185 ms;
-- the harness restored the original disabled service wake-timeout policy.
-
-A separate live provider-idle probe temporarily set the debug pi-agent stream
-idle budget to 25 ms. Wake
-`service-tester-session-1783650748587-2` was rejected with a browser-visible
-summary containing `provider stream idle timeout`. The debug environment was
-restored to 300000 ms and the service restarted healthy.
+This certification originally included whole-wake and provider-idle timeout
+probes. Those behaviors were later retired: logical turns now use durable
+yield/continuation and explicit cancellation rather than elapsed-time hard
+stops. See `docs/logical-turn-continuation-live-certification.md` for the
+current live contract.
 
 ## SSE And Rusty View
 
