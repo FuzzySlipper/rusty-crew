@@ -60,8 +60,12 @@ Operator setup references:
    Den-owned planning/product data plus observability; and tool availability is
    profile-based rather than gated by a `WorkerPolicy` allow/deny model.
 
-1. **`adr/` (both repo-root `adr/0001-*` and `docs/adr/0002`–`0023`)** — the
+1. **`adr/` (both repo-root `adr/0001-*` and `docs/adr/0002`–`0026`)** — the
    decision trail. Notable recent decisions:
+   - `0026-durable-logical-turn-continuation.md` — stable logical-turn identity,
+     immutable Rust-owned checkpoints, fair execution epochs, restart
+     hydration, effect deduplication, attention states, and explicit
+     cancellation replace healthy-work hard stops.
    - `0023-rust-brain-catalog-and-host-capabilities.md` — Rust owns the
      production built-in catalog, both provider loops, and run policy;
      TypeScript supplies narrow tool, client, and projection host adapters.

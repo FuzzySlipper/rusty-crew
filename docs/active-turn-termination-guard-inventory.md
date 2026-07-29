@@ -158,6 +158,8 @@ This is the main prerequisite for replacing ceilings with continuation:
 Task 6364 owns the contract design. Task 6365 owns Rust persistence,
 coordination, claim, and restart hydration.
 
+The accepted contract is `adr/0026-durable-logical-turn-continuation.md`.
+
 ## Known Limitations Until The Campaign Lands
 
 - Raising continuation ceilings to 512 only postpones failure; it does not make
