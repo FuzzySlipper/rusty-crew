@@ -2436,6 +2436,21 @@
         "required": ["wake_id", "session_id", "actions"],
         "type": "object"
       },
+      "BrainContinuationPayload": {
+        "properties": {
+          "moduleId": { "type": "string" },
+          "payload": true,
+          "payloadFingerprint": { "type": "string" },
+          "payloadVersion": { "type": "string" }
+        },
+        "required": [
+          "moduleId",
+          "payloadVersion",
+          "payloadFingerprint",
+          "payload"
+        ],
+        "type": "object"
+      },
       "BrainEvent": {
         "oneOf": [
           {
@@ -2788,6 +2803,18 @@
         },
         "required": ["latest_only"],
         "type": "object"
+      },
+      "ContinuationYieldReason": {
+        "enum": [
+          "initial_admission",
+          "work_quantum_reached",
+          "scheduler_fairness",
+          "provider_retry",
+          "buffer_pressure",
+          "restart_recovery",
+          "operator_requested"
+        ],
+        "type": "string"
       },
       "CoreError": {
         "properties": {
@@ -4015,6 +4042,597 @@
       "FanOutGroupStatus": {
         "enum": ["in_progress", "completed", "partial_failure", "failed_fast"],
         "type": "string"
+      },
+      "LogicalTurnAdmission": {
+        "properties": {
+          "initialCheckpoint": {
+            "$ref": "#/components/schemas/LogicalTurnCheckpoint"
+          },
+          "lifecycleEvent": {
+            "$ref": "#/components/schemas/LogicalTurnLifecycleEvent"
+          },
+          "record": { "$ref": "#/components/schemas/LogicalTurnRecord" }
+        },
+        "required": ["record", "initialCheckpoint", "lifecycleEvent"],
+        "type": "object"
+      },
+      "LogicalTurnAttention": {
+        "properties": {
+          "evidenceRefs": {
+            "default": [],
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/LogicalTurnAttentionReason"
+          },
+          "reasonCode": { "type": "string" },
+          "requiredAt": { "type": "string" },
+          "resolutionActions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LogicalTurnResolutionAction"
+            },
+            "type": "array"
+          },
+          "retryUnchangedSafe": { "type": "boolean" },
+          "summary": { "type": "string" }
+        },
+        "required": [
+          "reason",
+          "reasonCode",
+          "summary",
+          "retryUnchangedSafe",
+          "requiredAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnAttentionReason": {
+        "enum": [
+          "no_progress",
+          "tool_outcome_unknown",
+          "provider_configuration_required",
+          "provider_credential_required",
+          "provider_protocol_failure",
+          "checkpoint_version_unsupported",
+          "rebind_incompatible",
+          "storage_repair_required",
+          "invariant_repair_required"
+        ],
+        "type": "string"
+      },
+      "LogicalTurnBindingSnapshot": {
+        "properties": {
+          "brainModuleId": { "type": "string" },
+          "brainStrategyId": { "type": "string" },
+          "credentialId": { "type": ["string", "null"] },
+          "credentialRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "profileId": { "type": "string" },
+          "profileRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "promptFingerprint": { "type": "string" },
+          "providerAlias": { "type": "string" },
+          "providerFingerprint": { "type": "string" },
+          "providerRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "toolRegistryRevision": { "type": "string" },
+          "toolSelectionFingerprint": { "type": "string" }
+        },
+        "required": [
+          "profileId",
+          "profileRevision",
+          "promptFingerprint",
+          "toolSelectionFingerprint",
+          "toolRegistryRevision",
+          "brainModuleId",
+          "brainStrategyId",
+          "providerAlias",
+          "providerRevision",
+          "providerFingerprint"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnCancelRequest": {
+        "properties": {
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idempotencyKey": { "type": "string" },
+          "logicalTurnId": { "type": "string" },
+          "now": { "type": "string" },
+          "reasonCode": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "required": [
+          "logicalTurnId",
+          "expectedRevision",
+          "idempotencyKey",
+          "reasonCode",
+          "summary",
+          "now"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnCancellationReceipt": {
+        "properties": {
+          "alreadyTerminal": { "type": "boolean" },
+          "record": { "$ref": "#/components/schemas/LogicalTurnRecord" },
+          "replayed": { "type": "boolean" }
+        },
+        "required": ["record", "replayed", "alreadyTerminal"],
+        "type": "object"
+      },
+      "LogicalTurnCheckpoint": {
+        "properties": {
+          "bindingGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "completedEpochId": { "type": ["string", "null"] },
+          "continuationId": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "frozenInput": {
+            "$ref": "#/components/schemas/LogicalTurnFrozenInput"
+          },
+          "logicalTurnId": { "type": "string" },
+          "moduleState": {
+            "$ref": "#/components/schemas/BrainContinuationPayload"
+          },
+          "operationCursor": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parentContinuationId": { "type": ["string", "null"] },
+          "progress": { "$ref": "#/components/schemas/LogicalTurnProgress" },
+          "projectionCursor": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sequence": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "yieldReason": {
+            "$ref": "#/components/schemas/ContinuationYieldReason"
+          }
+        },
+        "required": [
+          "continuationId",
+          "logicalTurnId",
+          "sequence",
+          "bindingGeneration",
+          "frozenInput",
+          "moduleState",
+          "operationCursor",
+          "projectionCursor",
+          "progress",
+          "yieldReason",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnClaimRequest": {
+        "properties": {
+          "claimExpiresAt": { "type": "string" },
+          "claimHolder": { "type": "string" },
+          "continuationId": { "type": "string" },
+          "executionEpochId": { "type": "string" },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "logicalTurnId": { "type": "string" },
+          "now": { "type": "string" }
+        },
+        "required": [
+          "logicalTurnId",
+          "expectedRevision",
+          "continuationId",
+          "executionEpochId",
+          "claimHolder",
+          "claimExpiresAt",
+          "now"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnContinuationClaim": {
+        "properties": {
+          "checkpoint": {
+            "$ref": "#/components/schemas/LogicalTurnCheckpoint"
+          },
+          "claimGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "record": { "$ref": "#/components/schemas/LogicalTurnRecord" },
+          "replayed": { "type": "boolean" }
+        },
+        "required": ["record", "checkpoint", "claimGeneration", "replayed"],
+        "type": "object"
+      },
+      "LogicalTurnFrozenInput": {
+        "properties": {
+          "attachmentRefs": {
+            "default": [],
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "bodyStateFingerprint": { "type": "string" },
+          "bodyStateRef": { "type": "string" },
+          "roleAssemblyFingerprint": { "type": "string" },
+          "roleAssemblyRef": { "type": "string" },
+          "systemPromptFingerprint": { "type": "string" },
+          "systemPromptRef": { "type": "string" },
+          "transcriptCursor": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bodyStateRef",
+          "bodyStateFingerprint",
+          "systemPromptRef",
+          "systemPromptFingerprint",
+          "roleAssemblyRef",
+          "roleAssemblyFingerprint",
+          "transcriptCursor"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnHydrationReport": {
+        "properties": {
+          "alreadyRunnable": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "attentionRequired": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hydratedAt": { "type": "string" },
+          "inspected": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "madeRunnable": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "terminalSkipped": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "inspected",
+          "madeRunnable",
+          "attentionRequired",
+          "alreadyRunnable",
+          "terminalSkipped",
+          "hydratedAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnLifecycleEvent": {
+        "properties": {
+          "continuationId": { "type": "string" },
+          "executionEpochId": { "type": ["string", "null"] },
+          "kind": {
+            "$ref": "#/components/schemas/LogicalTurnLifecycleEventKind"
+          },
+          "logicalTurnId": { "type": "string" },
+          "logicalTurnRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "occurredAt": { "type": "string" },
+          "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
+          "progress": { "$ref": "#/components/schemas/LogicalTurnProgress" },
+          "projectionId": { "type": "string" },
+          "reasonCode": { "type": "string" },
+          "sessionId": { "type": "string" },
+          "summary": { "type": "string" },
+          "wakeId": { "type": "string" }
+        },
+        "required": [
+          "projectionId",
+          "logicalTurnId",
+          "sessionId",
+          "wakeId",
+          "continuationId",
+          "kind",
+          "phase",
+          "progress",
+          "reasonCode",
+          "summary",
+          "occurredAt",
+          "logicalTurnRevision"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnLifecycleEventKind": {
+        "enum": [
+          "admitted",
+          "continuation_claimed",
+          "continuation_progress",
+          "continuation_checkpointed",
+          "continuation_yielded",
+          "continuation_resumed",
+          "attention_required",
+          "rebind_requested",
+          "rebound",
+          "cancel_requested",
+          "completed",
+          "cancelled",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "LogicalTurnOperationKind": {
+        "enum": ["provider_request", "host_tool_execution"],
+        "type": "string"
+      },
+      "LogicalTurnOperationPhase": {
+        "enum": [
+          "planned",
+          "leased",
+          "completed",
+          "outcome_unknown",
+          "superseded",
+          "completed_after_cancel"
+        ],
+        "type": "string"
+      },
+      "LogicalTurnOperationRecord": {
+        "properties": {
+          "continuationId": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "executionEpochId": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/LogicalTurnOperationKind" },
+          "leaseExpiresAt": { "type": ["string", "null"] },
+          "leaseGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "leaseHolder": { "type": ["string", "null"] },
+          "logicalTurnId": { "type": "string" },
+          "operationId": { "type": "string" },
+          "phase": { "$ref": "#/components/schemas/LogicalTurnOperationPhase" },
+          "reasonCode": { "type": ["string", "null"] },
+          "requestFingerprint": { "type": "string" },
+          "resultRef": { "type": ["string", "null"] },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "operationId",
+          "logicalTurnId",
+          "continuationId",
+          "executionEpochId",
+          "kind",
+          "phase",
+          "requestFingerprint",
+          "idempotencyKey",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnPhase": {
+        "enum": [
+          "admitted",
+          "runnable",
+          "running",
+          "yielded",
+          "attention_required",
+          "cancel_requested",
+          "completed",
+          "cancelled",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "LogicalTurnProgress": {
+        "properties": {
+          "acceptedActionCount": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "assistantContentBytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "committedProjectionCursor": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "committedProviderOperations": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "committedToolOperations": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "consecutiveNoProgressSamples": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delegatedCompletionCount": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "lastLivenessAt": { "type": "string" },
+          "lastSemanticProgressAt": { "type": "string" },
+          "semanticRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stateFingerprint": { "type": "string" }
+        },
+        "required": [
+          "semanticRevision",
+          "committedProviderOperations",
+          "committedToolOperations",
+          "committedProjectionCursor",
+          "assistantContentBytes",
+          "acceptedActionCount",
+          "delegatedCompletionCount",
+          "stateFingerprint",
+          "lastLivenessAt",
+          "lastSemanticProgressAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnRecord": {
+        "properties": {
+          "activeEpochId": { "type": ["string", "null"] },
+          "admittedAt": { "type": "string" },
+          "attention": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/LogicalTurnAttention" },
+              { "type": "null" }
+            ]
+          },
+          "binding": {
+            "$ref": "#/components/schemas/LogicalTurnBindingSnapshot"
+          },
+          "bindingGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cancellationGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "claimExpiresAt": { "type": ["string", "null"] },
+          "claimGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "claimHolder": { "type": ["string", "null"] },
+          "continuationSequence": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "currentContinuationId": { "type": "string" },
+          "logicalTurnId": { "type": "string" },
+          "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "sessionId": { "type": "string" },
+          "sourceWakeId": { "type": "string" },
+          "terminalAt": { "type": ["string", "null"] },
+          "updatedAt": { "type": "string" }
+        },
+        "required": [
+          "logicalTurnId",
+          "sessionId",
+          "sourceWakeId",
+          "phase",
+          "binding",
+          "currentContinuationId",
+          "continuationSequence",
+          "bindingGeneration",
+          "cancellationGeneration",
+          "revision",
+          "admittedAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "LogicalTurnResolutionAction": {
+        "enum": [
+          "retry_unchanged",
+          "retry_provider_operation",
+          "confirm_tool_completed",
+          "confirm_tool_not_completed",
+          "rebind",
+          "cancel"
+        ],
+        "type": "string"
+      },
+      "LogicalTurnYieldReceipt": {
+        "properties": {
+          "checkpoint": {
+            "$ref": "#/components/schemas/LogicalTurnCheckpoint"
+          },
+          "record": { "$ref": "#/components/schemas/LogicalTurnRecord" },
+          "replayed": { "type": "boolean" }
+        },
+        "required": ["record", "checkpoint", "replayed"],
+        "type": "object"
+      },
+      "LogicalTurnYieldRequest": {
+        "properties": {
+          "checkpoint": {
+            "$ref": "#/components/schemas/LogicalTurnCheckpoint"
+          },
+          "expectedCancellationGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expectedClaimGeneration": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expectedEpochId": { "type": "string" },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "lifecycleEvent": {
+            "$ref": "#/components/schemas/LogicalTurnLifecycleEvent"
+          },
+          "logicalTurnId": { "type": "string" },
+          "now": { "type": "string" }
+        },
+        "required": [
+          "logicalTurnId",
+          "expectedRevision",
+          "expectedEpochId",
+          "expectedClaimGeneration",
+          "expectedCancellationGeneration",
+          "checkpoint",
+          "lifecycleEvent",
+          "now"
+        ],
+        "type": "object"
       },
       "MemoryConflictPolicy": {
         "enum": [
