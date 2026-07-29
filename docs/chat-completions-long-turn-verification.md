@@ -1,5 +1,10 @@
 # Chat Completions long-turn verification
 
+> Known limitation: the finite continuation guard documented below is an
+> emergency compatibility posture, not the target lifecycle. The code-backed
+> removal plan is in `active-turn-termination-guard-inventory.md` and task
+> 6362. Healthy progress must ultimately yield and durably continue.
+
 Rusty Crew's native Chat Completions loop permits up to 64 tool continuation
 rounds by default. Operators can set a different bounded service-wide value
 with `RUSTY_CREW_CHAT_COMPLETIONS_MAX_TOOL_ROUNDS` (1 through 512). The

@@ -46,6 +46,9 @@ Operator setup references:
 - `local-service-topology.md` — concise live-versus-debug service map.
 - `runtime-activity-census.md` — Rust-owned active-work ledger, topology,
   reconciliation findings, restart semantics, and diagnostics privacy rules.
+- `active-turn-termination-guard-inventory.md` — code-backed inventory of
+  every known active-turn hard stop, the live/debug effective posture, and the
+  migration from finite ceilings to durable continuation.
 - `review-agent-inbox-and-prompt-guidance.md` — copy-ready reviewer and
   requester prompts plus the durable serial inbox contract.
 

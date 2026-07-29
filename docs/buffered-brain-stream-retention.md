@@ -1,5 +1,10 @@
 # Buffered Brain Stream Retention
 
+> Known limitation: queue and byte overflow can still fail a healthy logical
+> turn. `active-turn-termination-guard-inventory.md` records the current limits
+> and the task 6362 plan to replace terminal overflow with flow control,
+> checkpointing, and durable continuation.
+
 Rust's buffered brain coordinator owns stream retention for both the
 `chat-completions` and `openai-responses` brain modules. Provider transports may
 emit a large number of fine-grained text and reasoning deltas, but transport
