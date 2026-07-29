@@ -159,6 +159,22 @@ impl NativeBridgeBinding {
                     )
                 })?)
             }
+            BrainWakeSettlementKind::AttentionRequired => {
+                LogicalTurnEpochResult::AttentionRequired {
+                    module_state: input.continuation_state.ok_or_else(|| {
+                        napi::Error::new(
+                            napi::Status::InvalidArg,
+                            "attention-required brain wake requires continuation state",
+                        )
+                    })?,
+                    attention: input.attention.ok_or_else(|| {
+                        napi::Error::new(
+                            napi::Status::InvalidArg,
+                            "attention-required brain wake requires attention details",
+                        )
+                    })?,
+                }
+            }
             BrainWakeSettlementKind::Failed => LogicalTurnEpochResult::Failed {
                 reason_code: input
                     .reason_code

@@ -2,7 +2,9 @@ use crate::{
     BufferedBrainStreamRetentionMetrics, BufferedNeutralCancellation,
     BufferedNeutralPendingToolRequest,
 };
-use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem};
+use rusty_crew_core_protocol::{
+    BrainWakeAttention, BrainWakeProviderStateOutput, BrainWakeStreamItem,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -22,6 +24,8 @@ pub struct BufferedBrainRunDrain {
     pub tool_requests: Vec<BufferedNeutralPendingToolRequest>,
     pub stream_retention_metrics: BufferedBrainStreamRetentionMetrics,
     pub terminal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<BrainWakeAttention>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<BrainWakeProviderStateOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

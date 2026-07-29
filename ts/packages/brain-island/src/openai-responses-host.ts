@@ -20,7 +20,10 @@ import type { BrainHostContext } from "./brain-host-context.js";
 import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
-import { responsesWorkQuantumContinuationRounds } from "./responses-continuation-policy.js";
+import {
+  responsesNoProgressAttentionThreshold,
+  responsesWorkQuantumContinuationRounds,
+} from "./responses-continuation-policy.js";
 
 export type OpenAiResponsesClientConfig = NonNullable<
   OpenAiResponsesBrainRunInput["client"]
@@ -179,8 +182,9 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   brainStreamItemCounts?: Record<string, number>;
   streamRetentionMetrics?: import("@rusty-crew/native-bridge").NativeBufferedBrainStreamRetentionMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
-  outcome: "completed" | "yielded";
+  outcome: "completed" | "yielded" | "attention_required";
   continuationState?: import("@rusty-crew/contracts").BrainContinuationPayload;
+  attention?: import("@rusty-crew/contracts").BrainWakeAttention;
 }> {
   const bridge = context.bridge;
   if (bridge === undefined) {
@@ -242,6 +246,7 @@ export async function createOpenAiResponsesBrainHost(
             : { providerRequestTimeoutMs: requestTimeoutMs }),
           workQuantumContinuationRounds:
             responsesWorkQuantumContinuationRounds(),
+          noProgressAttentionThreshold: responsesNoProgressAttentionThreshold(),
           wakeTimeoutMs: brainWakeTimeoutMs(context, wake),
         },
         client: responsesClientConfig,

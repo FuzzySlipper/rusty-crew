@@ -11,12 +11,12 @@ use rusty_crew_chat_completions_brain::{
     ChatCompletionsFinalMessage, ChatCompletionsInputImage, ChatCompletionsNeutralToolExecutor,
     ChatCompletionsToolOutput, FakeChatCompletionsClient, LiveChatCompletionsClient,
     NeutralBrainTool as ChatCompletionsNeutralBrainTool, PendingChatFunctionCall,
-    ProviderCancellation, DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
+    ProviderCancellation, DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
     DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
 };
 use rusty_crew_core_protocol::{
-    BrainWakeProviderStateInput, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
-    ChatCompletionsWireDialect,
+    BrainWakeAttention, BrainWakeProviderStateInput, ChatCompletionsReasoningHistory,
+    ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -76,9 +76,7 @@ struct JsChatCompletionsBrainConfig {
     #[serde(default)]
     work_quantum_tool_rounds: Option<usize>,
     #[serde(default)]
-    repeated_tool_call_limit: Option<usize>,
-    #[serde(default)]
-    max_malformed_tool_call_recoveries: Option<usize>,
+    no_progress_attention_threshold: Option<u32>,
     #[serde(default)]
     final_message_fallback_text: Option<String>,
 }
@@ -139,6 +137,7 @@ pub(crate) struct ChatCompletionsBufferedRunPayload {
     provider_finished: bool,
     provider_cancellation: ProviderCancellation,
     continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
+    attention: Option<BrainWakeAttention>,
 }
 
 pub(crate) type ChatCompletionsBufferedRunRegistry =
@@ -227,6 +226,7 @@ pub(crate) fn drain_chat_completions_brain_stream_json(
                 "tool_requests": tool_requests,
                 "stream_retention_metrics": stream_retention_metrics,
                 "terminal": terminal,
+                "attention": terminal.then(|| run.payload.attention.clone()).flatten(),
                 "terminal_reason_code": terminal_reason_code,
                 "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
                 "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
@@ -338,22 +338,34 @@ fn run_chat_completions_brain_buffered(
 ) {
     let sink_wake_id = wake_id.clone();
     let sink_buffered_runs = Arc::clone(&buffered_runs);
-    let mut sink = move |item: BrainWakeStreamItem| {
-        if let Err(error) = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
+    let mut sink = move |item: BrainWakeStreamItem| loop {
+        let attempt = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
             if run.coordinator.phase().is_terminal() {
-                return;
+                return Ok(false);
             }
-            if let Err(error) = run.coordinator.enqueue_provider_stream_item(item) {
+            run.coordinator
+                .enqueue_provider_stream_item(item.clone())
+                .map(|_| true)
+        });
+        match attempt {
+            Ok(Ok(true)) | Ok(Ok(false)) => break,
+            Ok(Err(BufferedBrainTurnError::BufferLimitExceeded { .. })) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(Err(error)) => {
                 eprintln!(
                     "chat-completions wake {} could not enqueue a live stream item: {}",
                     sink_wake_id, error
                 );
+                break;
             }
-        }) {
-            eprintln!(
-                "chat-completions wake {} could not access its buffered run while streaming: {}",
-                sink_wake_id, error
-            );
+            Err(error) => {
+                eprintln!(
+                        "chat-completions wake {} could not access its buffered run while streaming: {}",
+                        sink_wake_id, error
+                    );
+                break;
+            }
         }
     };
     let result = run_chat_completions_brain_with_buffered_tools(
@@ -376,6 +388,14 @@ fn run_chat_completions_brain_buffered(
                         let _ = run.coordinator.set_provider_state_output(provider_state);
                     }
                     run.payload.continuation_state = output.continuation_state;
+                    if let Some(attention) = output.attention {
+                        let reason_code = attention.reason_code.clone();
+                        let summary = attention.summary.clone();
+                        run.payload.attention = Some(attention);
+                        if !run.coordinator.phase().is_terminal() {
+                            let _ = run.coordinator.require_attention(reason_code, summary);
+                        }
+                    }
                     if output.yielded && !run.coordinator.phase().is_terminal() {
                         let _ = run.coordinator.yield_turn();
                     }
@@ -425,11 +445,10 @@ fn run_chat_completions_brain_with_buffered_tools(
             .config
             .work_quantum_tool_rounds
             .unwrap_or(DEFAULT_WORK_QUANTUM_TOOL_ROUNDS),
-        repeated_tool_call_limit: input.config.repeated_tool_call_limit.unwrap_or(3),
-        max_malformed_tool_call_recoveries: input
+        no_progress_attention_threshold: input
             .config
-            .max_malformed_tool_call_recoveries
-            .unwrap_or(DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES),
+            .no_progress_attention_threshold
+            .unwrap_or(DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD),
     };
     let descriptors = input
         .tools
@@ -635,6 +654,15 @@ fn fake_chat_completions_client(tool_name: Option<&str>) -> FakeChatCompletionsC
             ]),
         ]);
     }
+    if tool_name == "no_progress_failure_tool" {
+        return FakeChatCompletionsClient::new((1..=4).map(|round| {
+            fake_chat_completions_tool_call_script(
+                tool_name,
+                &format!("fake-chat-no-progress-{round}"),
+                "{}",
+            )
+        }));
+    }
     if tool_name == "long_continuation_tool" {
         let mut scripts = (1..=12)
             .map(|round| {
@@ -705,15 +733,21 @@ impl ChatCompletionsNeutralToolExecutor for BufferedChatCompletionsToolExecutor 
             name: call.name.clone(),
             arguments_json: call.arguments_json.clone(),
         };
-        {
+        loop {
             let queued = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
-                run.coordinator.queue_tool_request(request)
+                run.coordinator.queue_tool_request(request.clone())
             });
-            if !matches!(queued, Ok(Ok(()))) {
-                return ChatCompletionsToolOutput::error(format!(
-                    "chat-completions buffered wake {} disappeared before tool request {}",
-                    self.wake_id, call_id
-                ));
+            match queued {
+                Ok(Ok(())) => break,
+                Ok(Err(BufferedBrainTurnError::BufferLimitExceeded { .. })) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                _ => {
+                    return ChatCompletionsToolOutput::error(format!(
+                        "chat-completions buffered wake {} ended before tool request {}",
+                        self.wake_id, call_id
+                    ));
+                }
             }
         }
 

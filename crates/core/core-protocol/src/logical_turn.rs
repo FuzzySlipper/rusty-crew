@@ -354,6 +354,47 @@ pub struct LogicalTurnYieldReceipt {
     pub replayed: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnAttentionRequest {
+    pub logical_turn_id: LogicalTurnId,
+    pub expected_revision: u64,
+    pub expected_epoch_id: ExecutionEpochId,
+    pub expected_claim_generation: u64,
+    pub expected_cancellation_generation: u64,
+    pub checkpoint: LogicalTurnCheckpoint,
+    pub attention: LogicalTurnAttention,
+    pub lifecycle_event: LogicalTurnLifecycleEvent,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnAttentionReceipt {
+    pub record: LogicalTurnRecord,
+    pub checkpoint: LogicalTurnCheckpoint,
+    pub replayed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnAttentionResolutionRequest {
+    pub logical_turn_id: LogicalTurnId,
+    pub expected_revision: u64,
+    pub action: LogicalTurnResolutionAction,
+    pub lifecycle_event: LogicalTurnLifecycleEvent,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogicalTurnAttentionResolutionReceipt {
+    pub record: LogicalTurnRecord,
+    pub checkpoint: LogicalTurnCheckpoint,
+    pub action: LogicalTurnResolutionAction,
+    pub replayed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LogicalTurnCancelRequest {

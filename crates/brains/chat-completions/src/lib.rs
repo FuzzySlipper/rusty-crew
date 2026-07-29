@@ -9,10 +9,12 @@ use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_protocol::{
     BrainActionBatch, BrainContinuationPayload, BrainEvent, BrainEventEnvelope,
-    BrainProviderStatusLevel, BrainWakeFailure, BrainWakeProviderStateInput,
-    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, BrainWakeStreamItem,
-    ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
-    CoreErrorKind, ModelProviderRecord, SessionId,
+    BrainNoProgressPolicy, BrainNoProgressState, BrainProgressDisposition,
+    BrainProgressResultClass, BrainProgressSample, BrainProviderStatusLevel, BrainWakeAttention,
+    BrainWakeFailure, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
+    BrainWakeProviderStateUpdate, BrainWakeStreamItem, ChatCompletionsReasoningHistory,
+    ChatCompletionsThinkingMode, ChatCompletionsWireDialect, CoreErrorKind,
+    LogicalTurnAttentionReason, LogicalTurnResolutionAction, ModelProviderRecord, SessionId,
 };
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -29,8 +31,8 @@ use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "chat-completions";
 pub const DEFAULT_WORK_QUANTUM_TOOL_ROUNDS: usize = 64;
-pub const CONTINUATION_PAYLOAD_VERSION: &str = "chat-completions-continuation-v1";
-pub const DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES: usize = 1;
+pub const CONTINUATION_PAYLOAD_VERSION: &str = "chat-completions-continuation-v2";
+pub const DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD: u32 = 3;
 pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
 pub const OUTPUT_LIMIT_EXCEEDED_REASON_CODE: &str = "chat_completions_output_limit_exceeded";
 pub const MALFORMED_PROVIDER_STREAM_REASON_CODE: &str =
@@ -952,16 +954,14 @@ pub trait ChatCompletionsNeutralToolExecutor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatCompletionsBrainLoopConfig {
     pub work_quantum_tool_rounds: usize,
-    pub repeated_tool_call_limit: usize,
-    pub max_malformed_tool_call_recoveries: usize,
+    pub no_progress_attention_threshold: u32,
 }
 
 impl Default for ChatCompletionsBrainLoopConfig {
     fn default() -> Self {
         Self {
             work_quantum_tool_rounds: DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
-            repeated_tool_call_limit: 3,
-            max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
+            no_progress_attention_threshold: DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
         }
     }
 }
@@ -981,6 +981,7 @@ pub struct ChatCompletionsBrainLoopOutput {
     pub stream: Vec<BrainWakeStreamItem>,
     pub completed: bool,
     pub yielded: bool,
+    pub attention: Option<BrainWakeAttention>,
     pub provider_request_count: usize,
     pub tool_round_count: usize,
     pub provider_event_counts: BTreeMap<String, usize>,
@@ -1095,6 +1096,7 @@ where
                         stream,
                         completed: false,
                         yielded: false,
+                        attention: None,
                         provider_request_count: 0,
                         tool_round_count: 0,
                         provider_event_counts: BTreeMap::new(),
@@ -1133,6 +1135,7 @@ where
                         stream,
                         completed: false,
                         yielded: false,
+                        attention: None,
                         provider_request_count: 0,
                         tool_round_count: 0,
                         provider_event_counts: BTreeMap::new(),
@@ -1151,24 +1154,43 @@ where
             .as_ref()
             .map(|state| state.durable_messages.clone())
             .unwrap_or(fresh_messages);
-        let mut repeated_calls: HashMap<(String, String), usize> = restored
+        let mut no_progress_state = restored
             .as_ref()
-            .map(|state| {
-                state
-                    .repeated_calls
-                    .iter()
-                    .map(|call| ((call.name.clone(), call.arguments_json.clone()), call.count))
-                    .collect()
-            })
+            .map(|state| state.no_progress_state.clone())
             .unwrap_or_default();
+        let no_progress_policy =
+            match BrainNoProgressPolicy::new(self.config.no_progress_attention_threshold) {
+                Ok(policy) => policy,
+                Err(message) => {
+                    push_stream_item(
+                        &mut stream,
+                        wake_failed_item_with_reason(
+                            &input.context,
+                            CoreErrorKind::InvalidInput,
+                            "chat_completions_no_progress_policy_invalid",
+                            message,
+                        ),
+                        &mut sink,
+                    );
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        attention: None,
+                        provider_request_count: 0,
+                        tool_round_count: 0,
+                        provider_event_counts: BTreeMap::new(),
+                        provider_request_debug_samples: Vec::new(),
+                        provider_state: None,
+                        continuation_state: None,
+                    };
+                }
+            };
         let mut provider_request_count = restored
             .as_ref()
             .map_or(0, |state| state.provider_request_count);
         let mut tool_round_count = restored.as_ref().map_or(0, |state| state.tool_round_count);
         let mut epoch_tool_round_count = 0;
-        let mut malformed_tool_call_recovery_count = restored
-            .as_ref()
-            .map_or(0, |state| state.malformed_tool_call_recovery_count);
         let mut provider_event_counts = restored
             .as_ref()
             .map(|state| state.provider_event_counts.clone())
@@ -1250,6 +1272,7 @@ where
                     stream,
                     completed: false,
                     yielded: false,
+                    attention: None,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
@@ -1260,93 +1283,136 @@ where
             }
 
             if !malformed_tool_calls.is_empty() {
-                let reason_code = if finish_reason.as_deref() == Some("length") {
+                let trigger_reason_code = if finish_reason.as_deref() == Some("length") {
                     OUTPUT_LIMIT_EXCEEDED_REASON_CODE
                 } else {
                     MALFORMED_PROVIDER_STREAM_REASON_CODE
                 };
-                if malformed_tool_call_recovery_count
-                    < self.config.max_malformed_tool_call_recoveries
-                {
-                    malformed_tool_call_recovery_count += 1;
-                    // Some OpenAI-compatible providers reject assistant history
-                    // entries that contain reasoning_content without visible
-                    // content or executable tool calls. The reasoning deltas
-                    // remain observable, but only replay a provider-valid
-                    // partial assistant message during recovery.
-                    if !assistant_text.is_empty() {
-                        messages.push(assistant_partial_message(
+                let malformed_summary =
+                    malformed_tool_call_summary(finish_reason.as_deref(), &malformed_tool_calls);
+                let disposition = no_progress_policy.observe(
+                    &mut no_progress_state,
+                    BrainProgressSample {
+                        intent_fingerprint: progress_fingerprint(&[
+                            "malformed_tool_call",
+                            finish_reason.as_deref().unwrap_or("unknown"),
+                        ]),
+                        result_fingerprint: progress_fingerprint(&[&malformed_summary]),
+                        state_fingerprint: progress_json_fingerprint(&durable_messages),
+                        assistant_progress_fingerprint: progress_fingerprint(&[
                             &assistant_text,
                             &assistant_reasoning,
-                        ));
-                    }
-                    messages.push(ChatCompletionMessage::user(
-                        malformed_tool_call_recovery_feedback(
-                            finish_reason.as_deref(),
-                            &malformed_tool_calls,
-                            malformed_tool_call_recovery_count,
-                            self.config.max_malformed_tool_call_recoveries,
-                        ),
+                        ]),
+                        result_class: BrainProgressResultClass::MalformedProviderOutput,
+                    },
+                );
+                // Some OpenAI-compatible providers reject assistant history
+                // entries that contain reasoning_content without visible
+                // content or executable tool calls. The reasoning deltas
+                // remain observable, but only replay a provider-valid partial
+                // assistant message during recovery.
+                if !assistant_text.is_empty() {
+                    messages.push(assistant_partial_message(
+                        &assistant_text,
+                        &assistant_reasoning,
                     ));
+                }
+                if let BrainProgressDisposition::AttentionRequired {
+                    consecutive_samples,
+                } = disposition
+                {
+                    let reason_code = "chat_completions_malformed_tool_call_no_progress";
+                    let summary = format!(
+                        "provider repeatedly emitted the same malformed tool call without recoverable progress ({consecutive_samples} equivalent repetitions)"
+                    );
+                    messages.push(ChatCompletionMessage::user(format!(
+                        "[Rusty Crew operator attention] {summary}. Stop retrying this call until the provider configuration or prompt is adjusted."
+                    )));
                     push_stream_item(
                         &mut stream,
-                        malformed_tool_call_recovery_status(
+                        no_progress_attention_status(
                             &input.context,
                             reason_code,
-                            malformed_tool_call_recovery_count,
-                            self.config.max_malformed_tool_call_recoveries,
-                            &malformed_tool_calls,
+                            &summary,
+                            consecutive_samples,
                         ),
                         &mut sink,
                     );
-                    continue;
+                    let continuation_state = match chat_completions_continuation_output(
+                        messages,
+                        durable_messages,
+                        input_images,
+                        no_progress_state,
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts.clone(),
+                        provider_request_debug_samples.clone(),
+                    ) {
+                        Ok(state) => state,
+                        Err(message) => {
+                            push_stream_item(
+                                &mut stream,
+                                wake_failed_item_with_reason(
+                                    &input.context,
+                                    CoreErrorKind::InternalError,
+                                    "chat_completions_continuation_checkpoint_failed",
+                                    message,
+                                ),
+                                &mut sink,
+                            );
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: false,
+                                attention: None,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state: None,
+                            };
+                        }
+                    };
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        attention: Some(no_progress_attention(
+                            reason_code,
+                            summary,
+                            consecutive_samples,
+                        )),
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
+                        continuation_state: Some(continuation_state),
+                    };
                 }
-                let message = if reason_code == OUTPUT_LIMIT_EXCEEDED_REASON_CODE {
-                    format!(
-                        "chat-completions provider reached finish_reason length with malformed tool arguments and exhausted {} recovery attempt(s)",
-                        self.config.max_malformed_tool_call_recoveries
-                    )
-                } else {
-                    format!(
-                        "{}; exhausted {} recovery attempt(s)",
-                        malformed_tool_call_summary(
-                            finish_reason.as_deref(),
-                            &malformed_tool_calls,
-                        ),
-                        self.config.max_malformed_tool_call_recoveries
-                    )
-                };
+                let recovery_number = no_progress_state
+                    .consecutive_no_progress_samples
+                    .saturating_add(1);
+                messages.push(ChatCompletionMessage::user(
+                    malformed_tool_call_recovery_feedback(
+                        finish_reason.as_deref(),
+                        &malformed_tool_calls,
+                        recovery_number,
+                    ),
+                ));
                 push_stream_item(
                     &mut stream,
-                    wake_failed_item_with_reason(
+                    malformed_tool_call_recovery_status(
                         &input.context,
-                        CoreErrorKind::BrainUnavailable,
-                        reason_code,
-                        message,
+                        trigger_reason_code,
+                        recovery_number,
+                        no_progress_policy.attention_threshold(),
+                        &malformed_tool_calls,
                     ),
                     &mut sink,
                 );
-                let provider_state = if tool_round_count > 0 {
-                    chat_completions_provider_state_output(
-                        &input.context,
-                        &self.request_builder.config,
-                        input.provider_state.as_ref(),
-                        durable_messages,
-                    )
-                } else {
-                    None
-                };
-                return ChatCompletionsBrainLoopOutput {
-                    stream,
-                    completed: false,
-                    yielded: false,
-                    provider_request_count,
-                    tool_round_count,
-                    provider_event_counts,
-                    provider_request_debug_samples,
-                    provider_state,
-                    continuation_state: None,
-                };
+                continue;
             }
 
             if finish_reason.as_deref() == Some("length") && !tool_calls_are_actionable(&tool_calls)
@@ -1365,6 +1431,7 @@ where
                     stream,
                     completed: false,
                     yielded: false,
+                    attention: None,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
@@ -1408,6 +1475,7 @@ where
                     stream,
                     completed: true,
                     yielded: false,
+                    attention: None,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
@@ -1425,35 +1493,6 @@ where
             messages.push(assistant_tool_message.clone());
             durable_messages.push(assistant_tool_message);
             for call in tool_calls {
-                let repeated_key = (call.name.clone(), call.arguments_json.clone());
-                let count = repeated_calls.entry(repeated_key).or_insert(0);
-                *count += 1;
-                if *count > self.config.repeated_tool_call_limit {
-                    push_stream_item(
-                        &mut stream,
-                        wake_failed_item(
-                            &input.context,
-                            CoreErrorKind::BrainUnavailable,
-                            format!(
-                                "chat-completions repeated tool call {} with unchanged arguments more than {} times",
-                                call.name, self.config.repeated_tool_call_limit
-                            ),
-                        ),
-                        &mut sink,
-                    );
-                    return ChatCompletionsBrainLoopOutput {
-                        stream,
-                        completed: false,
-                        yielded: false,
-                        provider_request_count,
-                        tool_round_count,
-                        provider_event_counts,
-                        provider_request_debug_samples,
-                        provider_state: None,
-                        continuation_state: None,
-                    };
-                }
-
                 push_stream_item(
                     &mut stream,
                     brain_event_item(
@@ -1465,7 +1504,7 @@ where
                     ),
                     &mut sink,
                 );
-                let output = self.tools.execute(&call);
+                let mut output = self.tools.execute(&call);
                 push_stream_item(
                     &mut stream,
                     brain_event_item(
@@ -1493,6 +1532,7 @@ where
                         stream,
                         completed: false,
                         yielded: false,
+                        attention: None,
                         provider_request_count,
                         tool_round_count,
                         provider_event_counts,
@@ -1500,6 +1540,48 @@ where
                         provider_state: None,
                         continuation_state: None,
                     };
+                }
+                let disposition = no_progress_policy.observe(
+                    &mut no_progress_state,
+                    BrainProgressSample {
+                        intent_fingerprint: progress_fingerprint(&[
+                            "tool_call",
+                            &call.name,
+                            &call.arguments_json,
+                        ]),
+                        result_fingerprint: progress_fingerprint(&[
+                            if output.is_error { "error" } else { "success" },
+                            &output.output,
+                        ]),
+                        state_fingerprint: String::new(),
+                        assistant_progress_fingerprint: progress_fingerprint(&[
+                            &assistant_text,
+                            &assistant_reasoning,
+                        ]),
+                        result_class: if output.is_error {
+                            BrainProgressResultClass::Failed
+                        } else {
+                            BrainProgressResultClass::Succeeded
+                        },
+                    },
+                );
+                if let BrainProgressDisposition::Correction {
+                    consecutive_samples,
+                } = disposition
+                {
+                    output.output.push_str(&format!(
+                        "\n\n[Rusty Crew no-progress guidance] This tool returned the same failure for the same arguments again ({consecutive_samples} equivalent repetition(s)). Change the arguments, choose another tool, or report the dependency as unavailable instead of repeating it unchanged."
+                    ));
+                    push_stream_item(
+                        &mut stream,
+                        no_progress_correction_status(
+                            &input.context,
+                            &call.name,
+                            consecutive_samples,
+                            no_progress_policy.attention_threshold(),
+                        ),
+                        &mut sink,
+                    );
                 }
                 let tool_message = ChatCompletionMessage::tool(
                     call.id
@@ -1509,16 +1591,87 @@ where
                 );
                 messages.push(tool_message.clone());
                 durable_messages.push(tool_message);
+                if let BrainProgressDisposition::AttentionRequired {
+                    consecutive_samples,
+                } = disposition
+                {
+                    let reason_code = "chat_completions_tool_no_progress";
+                    let summary = format!(
+                        "tool {} returned an equivalent failure for unchanged arguments {consecutive_samples} consecutive times",
+                        call.name
+                    );
+                    push_stream_item(
+                        &mut stream,
+                        no_progress_attention_status(
+                            &input.context,
+                            reason_code,
+                            &summary,
+                            consecutive_samples,
+                        ),
+                        &mut sink,
+                    );
+                    let continuation_state = match chat_completions_continuation_output(
+                        messages,
+                        durable_messages,
+                        input_images,
+                        no_progress_state,
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts.clone(),
+                        provider_request_debug_samples.clone(),
+                    ) {
+                        Ok(state) => state,
+                        Err(message) => {
+                            push_stream_item(
+                                &mut stream,
+                                wake_failed_item_with_reason(
+                                    &input.context,
+                                    CoreErrorKind::InternalError,
+                                    "chat_completions_continuation_checkpoint_failed",
+                                    message,
+                                ),
+                                &mut sink,
+                            );
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: false,
+                                attention: None,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state: None,
+                            };
+                        }
+                    };
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        attention: Some(no_progress_attention(
+                            reason_code,
+                            summary,
+                            consecutive_samples,
+                        )),
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
+                        continuation_state: Some(continuation_state),
+                    };
+                }
             }
             if epoch_tool_round_count >= self.config.work_quantum_tool_rounds {
                 let continuation_state = match chat_completions_continuation_output(
                     messages,
                     durable_messages,
                     input_images,
-                    repeated_calls,
+                    no_progress_state,
                     provider_request_count,
                     tool_round_count,
-                    malformed_tool_call_recovery_count,
                     provider_event_counts.clone(),
                     provider_request_debug_samples.clone(),
                 ) {
@@ -1538,6 +1691,7 @@ where
                             stream,
                             completed: false,
                             yielded: false,
+                            attention: None,
                             provider_request_count,
                             tool_round_count,
                             provider_event_counts,
@@ -1551,6 +1705,7 @@ where
                     stream,
                     completed: false,
                     yielded: true,
+                    attention: None,
                     provider_request_count,
                     tool_round_count,
                     provider_event_counts,
@@ -2063,8 +2218,7 @@ fn assistant_partial_message(content: &str, reasoning_content: &str) -> ChatComp
 fn malformed_tool_call_recovery_feedback(
     finish_reason: Option<&str>,
     calls: &[MalformedChatFunctionCall],
-    attempt: usize,
-    max_attempts: usize,
+    attempt: u32,
 ) -> String {
     let diagnostics = calls
         .iter()
@@ -2084,15 +2238,15 @@ fn malformed_tool_call_recovery_feedback(
         ""
     };
     format!(
-        "[Rusty Crew tool-call recovery {attempt}/{max_attempts}] The previous assistant response did not produce executable tool arguments: {diagnostics}. No tool from that response was executed. Retry the intended tool call with one complete JSON object, or continue without the tool if it is unnecessary. Do not repeat text already emitted.{output_limit_guidance}"
+        "[Rusty Crew tool-call recovery {attempt}] The previous assistant response did not produce executable tool arguments: {diagnostics}. No tool from that response was executed. Retry the intended tool call with one complete JSON object, or continue without the tool if it is unnecessary. Do not repeat text already emitted.{output_limit_guidance}"
     )
 }
 
 fn malformed_tool_call_recovery_status(
     context: &BrainEventContext,
     trigger_reason_code: &str,
-    attempt: usize,
-    max_attempts: usize,
+    attempt: u32,
+    attention_threshold: u32,
     calls: &[MalformedChatFunctionCall],
 ) -> BrainWakeStreamItem {
     brain_event_item(
@@ -2100,14 +2254,14 @@ fn malformed_tool_call_recovery_status(
         BrainEvent::ProviderStatus {
             level: BrainProviderStatusLevel::Degraded,
             message: format!(
-                "Retrying provider after malformed tool call (attempt {attempt} of {max_attempts}); no malformed call was executed."
+                "Retrying provider after malformed tool call (recovery {attempt}); no malformed call was executed."
             ),
             metadata_json: Some(
                 json!({
                     "kind": "malformed_tool_call_recovery",
                     "trigger_reason_code": trigger_reason_code,
                     "attempt": attempt,
-                    "max_attempts": max_attempts,
+                    "attention_threshold": attention_threshold,
                     "malformed_call_count": calls.len(),
                     "tool_names": calls
                         .iter()
@@ -2118,6 +2272,89 @@ fn malformed_tool_call_recovery_status(
             ),
         },
     )
+}
+
+fn no_progress_correction_status(
+    context: &BrainEventContext,
+    tool_name: &str,
+    consecutive_samples: u32,
+    attention_threshold: u32,
+) -> BrainWakeStreamItem {
+    brain_event_item(
+        context,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Degraded,
+            message: format!(
+                "Tool {tool_name} repeated an equivalent failed result; corrective guidance was returned to the model."
+            ),
+            metadata_json: Some(
+                json!({
+                    "kind": "tool_no_progress_correction",
+                    "tool_name": tool_name,
+                    "consecutive_samples": consecutive_samples,
+                    "attention_threshold": attention_threshold,
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn no_progress_attention_status(
+    context: &BrainEventContext,
+    reason_code: &str,
+    summary: &str,
+    consecutive_samples: u32,
+) -> BrainWakeStreamItem {
+    brain_event_item(
+        context,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Degraded,
+            message: summary.to_string(),
+            metadata_json: Some(
+                json!({
+                    "kind": "logical_turn_attention_required",
+                    "reason_code": reason_code,
+                    "consecutive_no_progress_samples": consecutive_samples,
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn no_progress_attention(
+    reason_code: impl Into<String>,
+    summary: impl Into<String>,
+    consecutive_no_progress_samples: u32,
+) -> BrainWakeAttention {
+    BrainWakeAttention {
+        reason: LogicalTurnAttentionReason::NoProgress,
+        reason_code: reason_code.into(),
+        summary: summary.into(),
+        evidence_refs: Vec::new(),
+        resolution_actions: vec![
+            LogicalTurnResolutionAction::RetryProviderOperation,
+            LogicalTurnResolutionAction::Cancel,
+        ],
+        retry_unchanged_safe: false,
+        consecutive_no_progress_samples,
+    }
+}
+
+fn progress_fingerprint(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.len().to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn progress_json_fingerprint(value: &impl Serialize) -> String {
+    serde_json::to_vec(value)
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+        .unwrap_or_else(|_| progress_fingerprint(&["serialization_failed"]))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2135,19 +2372,11 @@ struct ChatCompletionsContinuationStateV1 {
     messages: Vec<ChatCompletionMessage>,
     durable_messages: Vec<ChatCompletionMessage>,
     input_images: Vec<ChatCompletionsInputImage>,
-    repeated_calls: Vec<RepeatedToolCallState>,
+    no_progress_state: BrainNoProgressState,
     provider_request_count: usize,
     tool_round_count: usize,
-    malformed_tool_call_recovery_count: usize,
     provider_event_counts: BTreeMap<String, usize>,
     provider_request_debug_samples: Vec<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct RepeatedToolCallState {
-    name: String,
-    arguments_json: String,
-    count: usize,
 }
 
 fn chat_completions_continuation_state(
@@ -2176,36 +2405,21 @@ fn chat_completions_continuation_output(
     messages: Vec<ChatCompletionMessage>,
     durable_messages: Vec<ChatCompletionMessage>,
     input_images: Vec<ChatCompletionsInputImage>,
-    repeated_calls: HashMap<(String, String), usize>,
+    no_progress_state: BrainNoProgressState,
     provider_request_count: usize,
     tool_round_count: usize,
-    malformed_tool_call_recovery_count: usize,
     provider_event_counts: BTreeMap<String, usize>,
     provider_request_debug_samples: Vec<Value>,
 ) -> Result<BrainContinuationPayload, String> {
-    let mut repeated_calls = repeated_calls
-        .into_iter()
-        .map(|((name, arguments_json), count)| RepeatedToolCallState {
-            name,
-            arguments_json,
-            count,
-        })
-        .collect::<Vec<_>>();
-    repeated_calls.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then_with(|| left.arguments_json.cmp(&right.arguments_json))
-    });
     let payload = serde_json::to_value(ChatCompletionsContinuationStateV1 {
         kind: MODULE_ID.to_string(),
         payload_version: CONTINUATION_PAYLOAD_VERSION.to_string(),
         messages,
         durable_messages,
         input_images,
-        repeated_calls,
+        no_progress_state,
         provider_request_count,
         tool_round_count,
-        malformed_tool_call_recovery_count,
         provider_event_counts,
         provider_request_debug_samples,
     })
@@ -4646,7 +4860,7 @@ mod tests {
     }
 
     #[test]
-    fn minimal_loop_exhausts_recovery_for_repeated_missing_name_at_length() {
+    fn minimal_loop_requires_attention_for_repeated_missing_name_at_length() {
         let provider_stream = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"partial answer\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n",
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
@@ -4656,6 +4870,8 @@ mod tests {
             vec![
                 Ok(parse(provider_stream).expect("parse first incomplete tool stream")),
                 Ok(parse(provider_stream).expect("parse repeated incomplete tool stream")),
+                Ok(parse(provider_stream).expect("parse stalled incomplete tool stream")),
+                Ok(parse(provider_stream).expect("parse attention incomplete tool stream")),
             ],
             Vec::new(),
         );
@@ -4664,7 +4880,7 @@ mod tests {
             brain.wake_with_messages(context(), vec![ChatCompletionMessage::user("look it up")]);
 
         assert!(!output.completed);
-        assert_eq!(output.provider_request_count, 2);
+        assert_eq!(output.provider_request_count, 4);
         assert_eq!(output.tool_round_count, 0);
         assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
             text: "partial answer".to_string(),
@@ -4682,12 +4898,18 @@ mod tests {
             event,
             BrainEvent::ToolCallStarted { .. } | BrainEvent::ToolCallFinished { .. }
         )));
-        assert!(matches!(
-            output.stream.last(),
-            Some(BrainWakeStreamItem::WakeFailed { failure })
-                if failure.reason_code.as_deref() == Some(OUTPUT_LIMIT_EXCEEDED_REASON_CODE)
-                    && failure.message.contains("exhausted 1 recovery attempt")
-        ));
+        assert!(output
+            .stream
+            .iter()
+            .all(|item| !matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+        assert_eq!(
+            output
+                .attention
+                .as_ref()
+                .map(|attention| attention.reason_code.as_str()),
+            Some("chat_completions_malformed_tool_call_no_progress")
+        );
+        assert!(output.continuation_state.is_some());
     }
 
     #[test]
@@ -4848,10 +5070,7 @@ mod tests {
         }));
     }
 
-    fn assert_completed_round_survives_exhausted_recovery(
-        finish_reason: &str,
-        expected_reason_code: &str,
-    ) {
+    fn assert_completed_round_survives_attention_pause(finish_reason: &str) {
         let malformed_round = || {
             vec![
                 ChatCompletionsEvent::ContentDelta("partial malformed output".to_string()),
@@ -4887,6 +5106,8 @@ mod tests {
                 ]),
                 Ok(malformed_round()),
                 Ok(malformed_round()),
+                Ok(malformed_round()),
+                Ok(malformed_round()),
             ],
             vec![ChatCompletionsToolOutput::ok("side effect committed")],
         );
@@ -4897,7 +5118,7 @@ mod tests {
         );
 
         assert!(!output.completed);
-        assert_eq!(output.provider_request_count, 3);
+        assert_eq!(output.provider_request_count, 5);
         assert_eq!(output.tool_round_count, 1);
         assert_eq!(
             events(&output.stream)
@@ -4907,28 +5128,35 @@ mod tests {
             1,
             "malformed calls must never execute",
         );
-        assert!(matches!(
-            output.stream.last(),
-            Some(BrainWakeStreamItem::WakeFailed { failure })
-                if failure.reason_code.as_deref() == Some(expected_reason_code)
-        ));
-        let Some(BrainWakeProviderStateOutput::Replace { state }) = output.provider_state else {
-            panic!("completed tool round must remain durable after recovery exhaustion");
-        };
-        let persisted: ChatCompletionsProviderStateV1 =
-            serde_json::from_value(state.payload).expect("persisted completed tool round");
-        assert!(persisted.messages.iter().any(|message| {
+        assert!(output
+            .stream
+            .iter()
+            .all(|item| !matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+        assert_eq!(
+            output
+                .attention
+                .as_ref()
+                .map(|attention| attention.reason_code.as_str()),
+            Some("chat_completions_malformed_tool_call_no_progress")
+        );
+        let continuation = output
+            .continuation_state
+            .as_ref()
+            .expect("attention pause must retain continuation");
+        let persisted =
+            chat_completions_continuation_state(continuation).expect("persisted continuation");
+        assert!(persisted.durable_messages.iter().any(|message| {
             message.role == ChatMessageRole::Assistant
                 && message.tool_calls.iter().any(|call| {
                     call.function.name == "lookup"
                         && call.function.arguments == r#"{"query":"commit side effect"}"#
                 })
         }));
-        assert!(persisted.messages.iter().any(|message| {
+        assert!(persisted.durable_messages.iter().any(|message| {
             message.role == ChatMessageRole::Tool
                 && message.content.as_deref() == Some("side effect committed")
         }));
-        assert!(persisted.messages.iter().all(|message| {
+        assert!(persisted.durable_messages.iter().all(|message| {
             let content = message.content.as_deref().unwrap_or_default();
             content != "partial malformed output"
                 && !content.contains("Rusty Crew tool-call recovery")
@@ -4937,19 +5165,13 @@ mod tests {
     }
 
     #[test]
-    fn minimal_loop_preserves_completed_round_when_length_recovery_exhausts() {
-        assert_completed_round_survives_exhausted_recovery(
-            "length",
-            OUTPUT_LIMIT_EXCEEDED_REASON_CODE,
-        );
+    fn minimal_loop_preserves_completed_round_when_length_recovery_needs_attention() {
+        assert_completed_round_survives_attention_pause("length");
     }
 
     #[test]
-    fn minimal_loop_preserves_completed_round_when_malformed_recovery_exhausts() {
-        assert_completed_round_survives_exhausted_recovery(
-            "stop",
-            MALFORMED_PROVIDER_STREAM_REASON_CODE,
-        );
+    fn minimal_loop_preserves_completed_round_when_malformed_recovery_needs_attention() {
+        assert_completed_round_survives_attention_pause("stop");
     }
 
     #[test]
@@ -5168,8 +5390,7 @@ mod tests {
         let mut brain =
             loop_with(scripts, outputs).with_loop_config(ChatCompletionsBrainLoopConfig {
                 work_quantum_tool_rounds: DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
-                repeated_tool_call_limit: 3,
-                max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
+                no_progress_attention_threshold: DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
             });
 
         let output = brain.wake_with_messages(
@@ -5216,8 +5437,7 @@ mod tests {
         )
         .with_loop_config(ChatCompletionsBrainLoopConfig {
             work_quantum_tool_rounds: 1,
-            repeated_tool_call_limit: 3,
-            max_malformed_tool_call_recoveries: DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES,
+            no_progress_attention_threshold: DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
         });
 
         let first = brain.wake(ChatCompletionsBrainLoopInput {
@@ -5316,7 +5536,7 @@ mod tests {
     }
 
     #[test]
-    fn minimal_loop_rejects_repeated_identical_tool_calls() {
+    fn minimal_loop_allows_repeated_identical_successful_tool_calls() {
         let context = context();
         let repeated = Ok(vec![
             ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
@@ -5330,6 +5550,12 @@ mod tests {
                 repeated.clone(),
                 repeated.clone(),
                 repeated,
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("all repeated work completed".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
             ],
             vec![
                 ChatCompletionsToolOutput::ok("one"),
@@ -5341,13 +5567,51 @@ mod tests {
 
         let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("loop")]);
 
+        assert!(output.completed);
+        assert_eq!(output.tool_round_count, 4);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "all repeated work completed".to_string(),
+        }));
+    }
+
+    #[test]
+    fn minimal_loop_pauses_after_confirmed_repeated_failed_tool_calls() {
+        let repeated = || {
+            Ok(vec![
+                ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("tool_calls".to_string()),
+                },
+            ])
+        };
+        let mut brain = loop_with(
+            vec![repeated(), repeated(), repeated(), repeated()],
+            vec![
+                ChatCompletionsToolOutput::error("dependency unavailable"),
+                ChatCompletionsToolOutput::error("dependency unavailable"),
+                ChatCompletionsToolOutput::error("dependency unavailable"),
+                ChatCompletionsToolOutput::error("dependency unavailable"),
+            ],
+        );
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user(
+                "retry the unavailable dependency",
+            )],
+        );
+
         assert!(!output.completed);
-        assert_eq!(terminal_kind(&output.stream), "wake_failed");
-        assert!(matches!(
-            output.stream.last(),
-            Some(BrainWakeStreamItem::WakeFailed { failure })
-                if failure.message.contains("repeated tool call lookup")
-        ));
+        assert_eq!(output.tool_round_count, 4);
+        assert!(output
+            .stream
+            .iter()
+            .all(|item| !matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+        let attention = output.attention.expect("operator attention");
+        assert_eq!(attention.reason_code, "chat_completions_tool_no_progress");
+        assert_eq!(attention.consecutive_no_progress_samples, 3);
+        assert!(output.continuation_state.is_some());
     }
 
     #[test]

@@ -6,6 +6,7 @@ import type {
   BrainEventEnvelope,
   BrainImplementationHandle,
   BrainImplementationRegistration,
+  BrainWakeAttention,
   BrainWakeProviderStateInput,
   BrainWakeProviderStateOutput,
   BrainWakeStreamItem,
@@ -46,8 +47,9 @@ export interface BrainWakeResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
-  outcome?: "completed" | "yielded";
+  outcome?: "completed" | "yielded" | "attention_required";
   continuationState?: BrainContinuationPayload;
+  attention?: BrainWakeAttention;
   stream?: BrainWakeStreamItem[];
   transportMetrics?:
     | OpenAiResponsesTransportMetrics

@@ -107,6 +107,9 @@ export async function executeNativeBrainWake(
           ...(result.continuationState === undefined
             ? {}
             : { continuation_state: result.continuationState }),
+          ...(result.attention === undefined
+            ? {}
+            : { attention: result.attention }),
         }),
       ),
     ) as { outcome: BrainWakeAccepted["outcome"] };

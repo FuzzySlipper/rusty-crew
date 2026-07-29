@@ -3,7 +3,7 @@ use crate::repos::logical_turns::{
     continuation_yield_reason_as_str, lifecycle_for_record, logical_turn_lifecycle_kind_as_str,
     logical_turn_operation_kind_as_str, logical_turn_operation_phase_as_str,
     logical_turn_phase_as_str, require_revision, require_running_fence, validate_admission,
-    validate_lifecycle_identity, validate_yield,
+    validate_attention, validate_attention_resolution, validate_lifecycle_identity, validate_yield,
 };
 use crate::{
     LogicalTurnAdmissionWrite, LogicalTurnCompletionRequest, LogicalTurnContentWrite,
@@ -11,7 +11,9 @@ use crate::{
 };
 use postgres::GenericClient;
 use rusty_crew_core_protocol::{
-    ContinuationId, ContinuationYieldReason, LogicalTurnAdmission, LogicalTurnCancelRequest,
+    ContinuationId, ContinuationYieldReason, LogicalTurnAdmission, LogicalTurnAttentionReceipt,
+    LogicalTurnAttentionRequest, LogicalTurnAttentionResolutionReceipt,
+    LogicalTurnAttentionResolutionRequest, LogicalTurnCancelRequest,
     LogicalTurnCancellationReceipt, LogicalTurnCheckpoint, LogicalTurnClaimRequest,
     LogicalTurnContinuationClaim, LogicalTurnHydrationReport, LogicalTurnId,
     LogicalTurnLifecycleEvent, LogicalTurnLifecycleEventKind, LogicalTurnOperationRecord,
@@ -340,6 +342,115 @@ impl PostgresBackendStore {
         Ok(LogicalTurnYieldReceipt {
             record,
             checkpoint: request.checkpoint.clone(),
+            replayed: false,
+        })
+    }
+
+    pub fn require_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionRequest,
+    ) -> CoreResult<LogicalTurnAttentionReceipt> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("begin PostgreSQL logical turn attention", error))?;
+        let mut record = load_turn_pg_for_update(&mut tx, &schema, &request.logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        if let Some(existing) =
+            load_checkpoint_pg(&mut tx, &schema, &request.checkpoint.continuation_id)?
+        {
+            if existing == request.checkpoint
+                && record.current_continuation_id == existing.continuation_id
+                && record.phase == LogicalTurnPhase::AttentionRequired
+                && record.attention.as_ref() == Some(&request.attention)
+            {
+                return Ok(LogicalTurnAttentionReceipt {
+                    record,
+                    checkpoint: existing,
+                    replayed: true,
+                });
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "logical turn attention continuation id already has different content",
+            ));
+        }
+        require_running_fence(
+            &record,
+            request.expected_revision,
+            &request.expected_epoch_id,
+            request.expected_claim_generation,
+            request.expected_cancellation_generation,
+        )?;
+        validate_attention(&record, request)?;
+        let expected_revision = record.revision;
+        record.phase = LogicalTurnPhase::AttentionRequired;
+        record.current_continuation_id = request.checkpoint.continuation_id.clone();
+        record.continuation_sequence = request.checkpoint.sequence;
+        record.active_epoch_id = None;
+        record.claim_holder = None;
+        record.claim_expires_at = None;
+        record.attention = Some(request.attention.clone());
+        record.updated_at = request.now.clone();
+        record.revision += 1;
+        update_turn_pg(&mut tx, &schema, &record, expected_revision)?;
+        insert_checkpoint_pg(&mut tx, &schema, &request.checkpoint)?;
+        insert_outbox_pg(&mut tx, &schema, &request.lifecycle_event)?;
+        delete_ticket_pg(&mut tx, &schema, &record.logical_turn_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL logical turn attention", error))?;
+        Ok(LogicalTurnAttentionReceipt {
+            record,
+            checkpoint: request.checkpoint.clone(),
+            replayed: false,
+        })
+    }
+
+    pub fn resolve_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionResolutionRequest,
+    ) -> CoreResult<LogicalTurnAttentionResolutionReceipt> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("begin PostgreSQL logical turn attention resolution", error)
+        })?;
+        let mut record = load_turn_pg_for_update(&mut tx, &schema, &request.logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        validate_attention_resolution(&record, request)?;
+        let checkpoint = load_checkpoint_pg(&mut tx, &schema, &record.current_continuation_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "attention-required logical turn has no current checkpoint",
+                )
+            })?;
+        let expected_revision = record.revision;
+        record.phase = LogicalTurnPhase::Runnable;
+        record.attention = None;
+        record.updated_at = request.now.clone();
+        record.revision += 1;
+        update_turn_pg(&mut tx, &schema, &record, expected_revision)?;
+        insert_outbox_pg(&mut tx, &schema, &request.lifecycle_event)?;
+        upsert_ticket_pg(
+            &mut tx,
+            &schema,
+            &LogicalTurnContinuationTicket {
+                logical_turn_id: record.logical_turn_id.clone(),
+                continuation_id: record.current_continuation_id.clone(),
+                session_id: record.session_id.clone(),
+                reason: ContinuationYieldReason::OperatorRequested,
+                created_at: request.now.clone(),
+            },
+        )?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL logical turn attention resolution", error)
+        })?;
+        Ok(LogicalTurnAttentionResolutionReceipt {
+            record,
+            checkpoint,
+            action: request.action,
             replayed: false,
         })
     }

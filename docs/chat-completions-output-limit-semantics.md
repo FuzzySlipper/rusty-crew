@@ -42,10 +42,10 @@ success signals. Rust owns their interpretation in the native
   `malformed_tool_call_recovery`, the attempt count, the triggering reason code,
   and affected tool names. Partial text, reasoning, and malformed-fragment
   diagnostics remain visible in the event stream.
-- Repeated malformed output exhausts the bounded recovery and fails under the
-  original stable reason family: `chat_completions_output_limit_exceeded` for a
-  `length` finish or `chat_completions_malformed_provider_stream` otherwise.
-  The terminal failure states that recovery was exhausted.
+- Repeated equivalent malformed output receives model-visible correction. If
+  intent, result, durable state, and assistant progress remain unchanged for
+  the configured no-progress threshold, Rust checkpoints the same logical turn
+  as `attention_required` instead of failing it.
 
 The output-limit failure preserves all text, reasoning, and completed tool
 events emitted before the terminal provider event. It also emits an info-level
@@ -55,10 +55,10 @@ event instead of a successful empty or partial completion.
 
 Rusty Crew does not increase a provider's output-token setting. Provider
 configuration remains the operator's authority, and an incomplete provider
-result remains visible. The bounded malformed-call recovery is not a generic
-hidden continuation: it runs only when a tool fragment is present but unsafe to
-execute, records an explicit degraded status, and cannot exceed
-`DEFAULT_MAX_MALFORMED_TOOL_CALL_RECOVERIES` without deliberate configuration.
+result remains visible. Malformed-call recovery runs only when a tool fragment
+is present but unsafe to execute. It records correction and attention status,
+preserves completed work in the continuation checkpoint, and never turns a
+healthy repeated operation into a count-based failure.
 
 ## Verification
 

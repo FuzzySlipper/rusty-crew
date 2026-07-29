@@ -27,7 +27,10 @@ import { brainWakeTimeoutMs } from "./brain-host-timeout.js";
 import { providerRequestDebugEvent } from "./provider-debug-projection.js";
 import { providerRequestTimeoutMs } from "./provider-request-timeout.js";
 import { runBufferedBrainHost } from "./buffered-brain-host.js";
-import { chatCompletionsWorkQuantumToolRounds } from "./chat-completions-continuation-policy.js";
+import {
+  chatCompletionsNoProgressAttentionThreshold,
+  chatCompletionsWorkQuantumToolRounds,
+} from "./chat-completions-continuation-policy.js";
 import type { RoleplayNarratorProviderPhase } from "./roleplay-narrator-fsm.js";
 import type { NarratorImageContextResolution } from "./narrator-image-context.js";
 
@@ -221,6 +224,8 @@ function createRustChatCompletionsBrainHostExecutor(
             context.profile.profile.modelConfig.maxOutputTokens ??
             context.maxTokens,
           workQuantumToolRounds: chatCompletionsWorkQuantumToolRounds(),
+          noProgressAttentionThreshold:
+            chatCompletionsNoProgressAttentionThreshold(),
         },
         client,
       };
@@ -437,8 +442,9 @@ async function runRustChatCompletionsBrainWithIncrementalDrain(
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
-  outcome: "completed" | "yielded";
+  outcome: "completed" | "yielded" | "attention_required";
   continuationState?: BrainContinuationPayload;
+  attention?: import("@rusty-crew/contracts").BrainWakeAttention;
   transportMetrics?: ChatCompletionsTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;

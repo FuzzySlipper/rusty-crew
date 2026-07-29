@@ -886,7 +886,22 @@ pub struct BrainWakeAccepted {
 pub enum BrainWakeSettlementKind {
     Completed,
     Yielded,
+    AttentionRequired,
     Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BrainWakeAttention {
+    pub reason: crate::LogicalTurnAttentionReason,
+    pub reason_code: String,
+    pub summary: String,
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
+    #[serde(default)]
+    pub resolution_actions: Vec<crate::LogicalTurnResolutionAction>,
+    pub retry_unchanged_safe: bool,
+    pub consecutive_no_progress_samples: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -895,6 +910,8 @@ pub struct BrainWakeSettlementRequest {
     pub outcome: BrainWakeSettlementKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation_state: Option<crate::BrainContinuationPayload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<BrainWakeAttention>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

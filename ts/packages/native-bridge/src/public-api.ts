@@ -14,6 +14,7 @@ import type {
   BrainWakeProviderStateOutput,
   BrainWakeProviderStateInput,
   BrainWakeAccepted,
+  BrainWakeAttention,
   BrainWakeFailure,
   BrainWakeRequest,
   BrainWakeStreamItem,
@@ -157,8 +158,9 @@ export interface BrainWakeExecutionResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
-  outcome?: "completed" | "yielded";
+  outcome?: "completed" | "yielded" | "attention_required";
   continuationState?: BrainContinuationPayload;
+  attention?: BrainWakeAttention;
   stream?: BrainWakeStreamItem[];
   transportMetrics?:
     | OpenAiResponsesTransportMetrics
@@ -194,6 +196,7 @@ export interface NativeBufferedBrainRunDrain {
   streamRetentionMetrics: NativeBufferedBrainStreamRetentionMetrics;
   terminal: boolean;
   yielded?: boolean;
+  attention?: BrainWakeAttention;
   continuationState?: BrainContinuationPayload;
   terminalReasonCode?: string;
   providerState?: BrainWakeProviderStateOutput;
@@ -298,6 +301,7 @@ export interface OpenAiResponsesBrainRunInput {
     maxOutputTokens?: number;
     providerRequestTimeoutMs?: number;
     workQuantumContinuationRounds?: number;
+    noProgressAttentionThreshold?: number;
     wakeTimeoutMs?: number;
   };
   client?:
@@ -349,7 +353,7 @@ export interface ChatCompletionsBrainRunInput {
     providerStateStrategyId?: string;
     maxOutputTokens?: number;
     workQuantumToolRounds?: number;
-    repeatedToolCallLimit?: number;
+    noProgressAttentionThreshold?: number;
     finalMessageFallbackText?: string;
   };
   client?:

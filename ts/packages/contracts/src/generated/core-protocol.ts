@@ -469,6 +469,16 @@ export type BrainWakeAccepted = {
   wakeId: string;
 };
 
+export type BrainWakeAttention = {
+  consecutiveNoProgressSamples: number;
+  evidenceRefs?: Array<string>;
+  reason: LogicalTurnAttentionReason;
+  reasonCode: string;
+  resolutionActions?: Array<LogicalTurnResolutionAction>;
+  retryUnchangedSafe: boolean;
+  summary: string;
+};
+
 export type BrainWakeFailure = {
   kind: CoreErrorKind;
   message: string;
@@ -518,6 +528,17 @@ export type BrainWakeRequest = {
   roleAssembly: RuntimeBufferHandle;
   sessionId: SessionId;
   systemPrompt: RuntimeBufferHandle;
+  wakeId: string;
+};
+
+export type BrainWakeSettlementKind = "completed" | "yielded" | "attention_required" | "failed";
+
+export type BrainWakeSettlementRequest = {
+  attention?: BrainWakeAttention | null;
+  continuationState?: BrainContinuationPayload | null;
+  outcome: BrainWakeSettlementKind;
+  reasonCode?: string | null;
+  summary?: string | null;
   wakeId: string;
 };
 
@@ -1110,6 +1131,21 @@ export type LogicalTurnAttention = {
 };
 
 export type LogicalTurnAttentionReason = "no_progress" | "tool_outcome_unknown" | "provider_configuration_required" | "provider_credential_required" | "provider_protocol_failure" | "checkpoint_version_unsupported" | "rebind_incompatible" | "storage_repair_required" | "invariant_repair_required";
+
+export type LogicalTurnAttentionResolutionReceipt = {
+  action: LogicalTurnResolutionAction;
+  checkpoint: LogicalTurnCheckpoint;
+  record: LogicalTurnRecord;
+  replayed: boolean;
+};
+
+export type LogicalTurnAttentionResolutionRequest = {
+  action: LogicalTurnResolutionAction;
+  expectedRevision: number;
+  lifecycleEvent: LogicalTurnLifecycleEvent;
+  logicalTurnId: string;
+  now: string;
+};
 
 export type LogicalTurnBindingSnapshot = {
   brainModuleId: string;

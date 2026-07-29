@@ -163,9 +163,8 @@ impl BufferedBrainToolFailurePolicy {
     ) -> BufferedBrainToolPolicyDecision {
         let failure = self.failure_from_result(tool_name, result);
         let recovery_guidance = self.record_failure(failure.as_ref());
-        let (output, truncation) = bound_tool_output_with_guidance(
+        let (output, truncation) = bound_tool_output(
             &result.output_text,
-            recovery_guidance.as_ref(),
             self.config.max_output_chars,
             max_output_bytes,
         );
@@ -335,56 +334,6 @@ fn bound_tool_output(
     (kept, Some(truncation))
 }
 
-fn bound_tool_output_with_guidance(
-    input: &str,
-    guidance: Option<&BufferedBrainToolRecoveryGuidance>,
-    max_chars: usize,
-    max_bytes: usize,
-) -> (String, Option<BufferedBrainToolOutputTruncation>) {
-    let Some(guidance) = guidance else {
-        return bound_tool_output(input, max_chars, max_bytes);
-    };
-    let suffix = format!("\n\n[Rusty Crew recovery guidance]\n{}", guidance.guidance);
-    let suffix_chars = suffix.chars().count();
-    if input.chars().count() + suffix_chars <= max_chars && input.len() + suffix.len() <= max_bytes
-    {
-        return (format!("{input}{suffix}"), None);
-    }
-    let marker = "\n[tool output truncated]";
-    let reserved_chars = suffix_chars + marker.chars().count();
-    let reserved_bytes = suffix.len() + marker.len();
-    if reserved_chars >= max_chars || reserved_bytes >= max_bytes {
-        let (output, _) = bound_tool_output(&suffix, max_chars, max_bytes);
-        return (
-            output.clone(),
-            Some(BufferedBrainToolOutputTruncation {
-                original_chars: input.chars().count(),
-                original_bytes: input.len(),
-                output_chars: output.chars().count(),
-                output_bytes: output.len(),
-            }),
-        );
-    }
-    let body_max_chars = max_chars - reserved_chars;
-    let body_max_bytes = max_bytes - reserved_bytes;
-    let mut output = String::new();
-    for (output_chars, character) in input.chars().enumerate() {
-        if output_chars >= body_max_chars || output.len() + character.len_utf8() > body_max_bytes {
-            break;
-        }
-        output.push(character);
-    }
-    output.push_str(marker);
-    output.push_str(&suffix);
-    let truncation = BufferedBrainToolOutputTruncation {
-        original_chars: input.chars().count(),
-        original_bytes: input.len(),
-        output_chars: output.chars().count(),
-        output_bytes: output.len(),
-    };
-    (output, Some(truncation))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,10 +384,7 @@ mod tests {
             .guidance
             .contains("den_get_document: tool_unavailable"));
         assert!(second.provider_output.is_error);
-        assert!(second
-            .provider_output
-            .output
-            .contains("Do not repeat an unchanged call"));
+        assert_eq!(second.provider_output.output, "not available");
     }
 
     #[test]
@@ -529,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_failure_guidance_survives_output_truncation() {
+    fn repeated_failure_guidance_does_not_mutate_provider_output() {
         let mut policy =
             BufferedBrainToolFailurePolicy::new(BufferedBrainToolFailurePolicyConfig {
                 max_output_chars: 1_024,
@@ -543,14 +489,15 @@ mod tests {
         policy.record_result("patch", &failure, 4_096);
         let second = policy.record_result("patch", &failure, 4_096);
         assert!(second.truncation.is_some());
-        assert!(second.provider_output.output.chars().count() <= 1_024);
         assert!(second
             .provider_output
             .output
-            .contains("[Rusty Crew recovery guidance]"));
+            .starts_with(&"x".repeat(1_024)));
+        assert!(!second.provider_output.output.contains("recovery guidance"));
         assert!(second
-            .provider_output
-            .output
+            .recovery_guidance
+            .expect("recovery guidance metadata")
+            .guidance
             .contains("Do not repeat an unchanged call"));
     }
 }

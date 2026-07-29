@@ -598,6 +598,14 @@ diagnostics fields, tests, and docs are deleted in task 6372.
    - convert buffer pressure to drain/checkpoint/yield;
    - preserve ordinary tool failures as model-visible data.
 
+   Implemented: both production brains use the shared Rust progress sample and
+   classify intent, result, durable state, assistant progress, and result class.
+   Repeated successful calls remain valid work. Equivalent failed or malformed
+   operations receive correction before the same logical turn is checkpointed
+   in `attention_required`. Buffered stream, request, and result pressure now
+   drains and retries rather than terminating the wake. Operator attention is
+   restart durable and explicit cancellation remains available while paused.
+
 5. **Task 6369: Operations and projection**
    - add admin/chat/activity diagnostics, attention resolution, explicit
      cancellation, and safe rebind controls;

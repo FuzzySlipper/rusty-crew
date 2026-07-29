@@ -108,14 +108,17 @@ RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS=1000
 RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
 RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=64
 RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS=64
+RUSTY_CREW_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD=3
+RUSTY_CREW_OPENAI_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD=3
 ```
 
-The Chat Completions value is a scheduling quantum: after that many tool rounds,
-Rust persists the logical-turn checkpoint and resumes it in another execution
-epoch. It cannot terminate healthy progress. The Responses value remains a
-temporary compatibility ceiling until its durable continuation path lands.
-Provider-request and session turn timeouts may be left unset when explicit user
-cancellation is the desired lifecycle policy.
+The work-quantum values are scheduling policy: Rust persists the logical-turn
+checkpoint and resumes it in another execution epoch. They cannot terminate
+healthy progress. The no-progress values count equivalent failed or malformed
+results after a baseline; successful repeated calls always count as progress.
+Once confirmed stalled, the turn is checkpointed in `attention_required`
+rather than failed. Provider-request and session turn timeouts may be left unset
+when explicit user cancellation is the desired lifecycle policy.
 
 `0.0.0.0` is appropriate for the current trusted-LAN deployment. Use an
 appropriate interface and bearer auth for other environments. Explicit

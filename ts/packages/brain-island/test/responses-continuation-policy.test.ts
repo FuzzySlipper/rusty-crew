@@ -14,18 +14,49 @@ import type {
 import type { BrainHostContext } from "../src/brain-host-context.js";
 import { createOpenAiResponsesBrainHost } from "../src/openai-responses-host.js";
 import {
+  DEFAULT_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD,
   DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
+  responsesContinuationDiagnostics,
+  responsesNoProgressAttentionThreshold,
   responsesWorkQuantumContinuationRounds,
 } from "../src/responses-continuation-policy.js";
 import type { BrainWakeInput } from "../src/index.js";
 
 const variable = "RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS";
+const noProgressVariable =
+  "RUSTY_CREW_OPENAI_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD";
 
 test("Responses continuation policy uses the durable default", () => {
   assert.equal(
     responsesWorkQuantumContinuationRounds({}),
     DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
   );
+  assert.deepEqual(responsesContinuationDiagnostics("openai-responses"), {
+    workQuantumContinuationRounds:
+      DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
+    noProgressAttentionThreshold:
+      DEFAULT_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD,
+  });
+});
+
+test("Responses no-progress policy is explicit and configurable", () => {
+  assert.equal(
+    responsesNoProgressAttentionThreshold({}),
+    DEFAULT_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD,
+  );
+  assert.equal(
+    responsesNoProgressAttentionThreshold({ [noProgressVariable]: " 8 " }),
+    8,
+  );
+  for (const value of ["0", "1", "1.5", "many"]) {
+    assert.throws(
+      () =>
+        responsesNoProgressAttentionThreshold({
+          [noProgressVariable]: value,
+        }),
+      new RegExp(noProgressVariable),
+    );
+  }
 });
 
 test("Responses continuation policy accepts an explicit work quantum", () => {
@@ -96,6 +127,10 @@ test("Responses host forwards strategy quantum and continuation to Rust", async 
     DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
   );
   assert.equal(captured?.config.strategyId, "previous-response-chain");
+  assert.equal(
+    captured?.config.noProgressAttentionThreshold,
+    DEFAULT_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD,
+  );
   assert.deepEqual(captured?.continuationState, continuationState);
   assert.equal(result.outcome, "yielded");
   assert.deepEqual(result.continuationState, continuationState);

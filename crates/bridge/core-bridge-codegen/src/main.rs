@@ -2869,6 +2869,7 @@ fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
                         max_stream_delta_bytes: 8 * 1_024 * 1_024,
                     },
                     terminal: true,
+                    attention: None,
                     provider_state: None,
                     transport_metrics: Some(json!({
                         "effectiveTransport": "responses",

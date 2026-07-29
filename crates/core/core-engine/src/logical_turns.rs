@@ -16,6 +16,10 @@ pub struct LogicalTurnWakePreparation {
 pub enum LogicalTurnEpochResult {
     Completed,
     Yielded(BrainContinuationPayload),
+    AttentionRequired {
+        module_state: BrainContinuationPayload,
+        attention: BrainWakeAttention,
+    },
     Failed {
         reason_code: String,
         summary: String,
@@ -240,6 +244,95 @@ impl CoreEngine {
                     phase: receipt.record.phase,
                 })
             }
+            LogicalTurnEpochResult::AttentionRequired {
+                module_state,
+                attention,
+            } => {
+                if module_state.module_id != claim.record.binding.brain_module_id {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        "logical turn attention module does not match the bound brain module",
+                    ));
+                }
+                let payload_fingerprint = json_fingerprint(&module_state.payload)?;
+                if payload_fingerprint != module_state.payload_fingerprint {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "logical turn attention continuation payload fingerprint mismatch",
+                    ));
+                }
+                let sequence = claim.record.continuation_sequence + 1;
+                let continuation_id = ContinuationId::new(format!(
+                    "continuation:{}",
+                    sha256_hex(
+                        format!(
+                            "{}|{}|{}|{}|attention",
+                            claim.record.logical_turn_id.0,
+                            claim.record.current_continuation_id.0,
+                            sequence,
+                            module_state.payload_fingerprint
+                        )
+                        .as_bytes()
+                    )
+                ));
+                let mut progress = claim.checkpoint.progress.clone();
+                progress.state_fingerprint = module_state.payload_fingerprint.clone();
+                progress.last_liveness_at = now.clone();
+                progress.consecutive_no_progress_samples =
+                    attention.consecutive_no_progress_samples;
+                let checkpoint = LogicalTurnCheckpoint {
+                    continuation_id: continuation_id.clone(),
+                    logical_turn_id: claim.record.logical_turn_id.clone(),
+                    sequence,
+                    parent_continuation_id: Some(claim.record.current_continuation_id.clone()),
+                    completed_epoch_id: Some(epoch_id.clone()),
+                    binding_generation: claim.record.binding_generation,
+                    frozen_input: claim.checkpoint.frozen_input.clone(),
+                    module_state,
+                    operation_cursor: claim.checkpoint.operation_cursor,
+                    projection_cursor: claim.checkpoint.projection_cursor.saturating_add(1),
+                    progress: progress.clone(),
+                    yield_reason: ContinuationYieldReason::OperatorRequested,
+                    created_at: now.clone(),
+                };
+                let durable_attention = LogicalTurnAttention {
+                    reason: attention.reason,
+                    reason_code: attention.reason_code.clone(),
+                    summary: attention.summary.clone(),
+                    evidence_refs: attention.evidence_refs,
+                    resolution_actions: attention.resolution_actions,
+                    retry_unchanged_safe: attention.retry_unchanged_safe,
+                    required_at: now.clone(),
+                };
+                let receipt =
+                    self.require_logical_turn_attention(&LogicalTurnAttentionRequest {
+                        logical_turn_id: claim.record.logical_turn_id.clone(),
+                        expected_revision: claim.record.revision,
+                        expected_epoch_id: epoch_id.clone(),
+                        expected_claim_generation: claim.claim_generation,
+                        expected_cancellation_generation: claim.record.cancellation_generation,
+                        checkpoint,
+                        attention: durable_attention,
+                        lifecycle_event: lifecycle_event(
+                            &claim.record,
+                            LifecycleEventInput {
+                                continuation_id,
+                                execution_epoch_id: Some(epoch_id),
+                                kind: LogicalTurnLifecycleEventKind::AttentionRequired,
+                                phase: LogicalTurnPhase::AttentionRequired,
+                                progress,
+                                reason_code: &attention.reason_code,
+                                summary: &attention.summary,
+                                occurred_at: now.clone(),
+                            },
+                        ),
+                        now,
+                    })?;
+                Ok(LogicalTurnEpochSettlement {
+                    outcome: BrainWakeOutcome::Continuing,
+                    phase: receipt.record.phase,
+                })
+            }
             LogicalTurnEpochResult::Completed => self.finish_logical_turn_epoch(
                 claim,
                 epoch_id,
@@ -281,6 +374,13 @@ impl CoreEngine {
         self.store.get_logical_turn(logical_turn_id)
     }
 
+    pub fn get_logical_turn_checkpoint(
+        &self,
+        continuation_id: &ContinuationId,
+    ) -> CoreResult<Option<LogicalTurnCheckpoint>> {
+        self.store.get_logical_turn_checkpoint(continuation_id)
+    }
+
     pub fn claim_logical_turn(
         &self,
         request: &LogicalTurnClaimRequest,
@@ -295,6 +395,29 @@ impl CoreEngine {
         request: &LogicalTurnYieldRequest,
     ) -> CoreResult<LogicalTurnYieldReceipt> {
         let receipt = self.store.yield_logical_turn(request)?;
+        self.flush_logical_turn_outbox()?;
+        if !receipt.replayed {
+            self.bus.publish(CoreEvent::BrainWakeRequested {
+                session_id: receipt.record.session_id.clone(),
+            })?;
+        }
+        Ok(receipt)
+    }
+
+    pub fn require_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionRequest,
+    ) -> CoreResult<LogicalTurnAttentionReceipt> {
+        let receipt = self.store.require_logical_turn_attention(request)?;
+        self.flush_logical_turn_outbox()?;
+        Ok(receipt)
+    }
+
+    pub fn resolve_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionResolutionRequest,
+    ) -> CoreResult<LogicalTurnAttentionResolutionReceipt> {
+        let receipt = self.store.resolve_logical_turn_attention(request)?;
         self.flush_logical_turn_outbox()?;
         if !receipt.replayed {
             self.bus.publish(CoreEvent::BrainWakeRequested {

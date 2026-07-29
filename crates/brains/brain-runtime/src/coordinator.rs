@@ -22,6 +22,7 @@ pub enum BufferedBrainTurnPhase {
     Running,
     AwaitingHostTools,
     Yielded,
+    AttentionRequired,
     Completed,
     Failed,
     Cancelled,
@@ -32,7 +33,12 @@ impl BufferedBrainTurnPhase {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Yielded | Self::Completed | Self::Failed | Self::Cancelled | Self::TimedOut
+            Self::Yielded
+                | Self::AttentionRequired
+                | Self::Completed
+                | Self::Failed
+                | Self::Cancelled
+                | Self::TimedOut
         )
     }
 }
@@ -451,6 +457,7 @@ impl BufferedBrainTurnCoordinator {
     ) -> Result<u64, BufferedBrainTurnError> {
         match self.enqueue_stream_item(item) {
             Ok(sequence) => Ok(sequence),
+            Err(error @ BufferedBrainTurnError::BufferLimitExceeded { .. }) => Err(error),
             Err(error) => {
                 if !self.phase.is_terminal() {
                     let _ = self.fail(
@@ -470,42 +477,31 @@ impl BufferedBrainTurnCoordinator {
     ) -> Result<u64, BufferedBrainTurnError> {
         self.require_phase(BufferedBrainTurnPhase::Running, "enqueue stream item")?;
         self.validate_stream_identity(&item)?;
-        self.raw_stream_item_count = self.raw_stream_item_count.saturating_add(1);
         let delta_bytes = stream_delta_bytes(&item);
-        if delta_bytes.is_some() {
-            self.raw_delta_item_count = self.raw_delta_item_count.saturating_add(1);
-        }
         if let Some(delta_bytes) = delta_bytes {
-            let Some(next_retained_delta_bytes) =
-                self.retained_delta_bytes.checked_add(delta_bytes)
+            let Some(next_queued_delta_bytes) = self.queued_delta_bytes.checked_add(delta_bytes)
             else {
-                self.dropped_stream_item_count = self.dropped_stream_item_count.saturating_add(1);
-                self.fail_limit(
-                    "stream_delta_bytes",
-                    self.limits.max_stream_delta_bytes,
-                    now,
-                );
                 return Err(BufferedBrainTurnError::BufferLimitExceeded {
                     buffer: "stream_delta_bytes",
                     limit: self.limits.max_stream_delta_bytes,
                 });
             };
-            if next_retained_delta_bytes > self.limits.max_stream_delta_bytes {
-                self.dropped_stream_item_count = self.dropped_stream_item_count.saturating_add(1);
-                self.fail_limit(
-                    "stream_delta_bytes",
-                    self.limits.max_stream_delta_bytes,
-                    now,
-                );
+            // An atomic provider delta can itself exceed the retention target. Admit one
+            // only after the host has drained the queue; otherwise signal backpressure.
+            if next_queued_delta_bytes > self.limits.max_stream_delta_bytes
+                && !self.stream_items.is_empty()
+            {
                 return Err(BufferedBrainTurnError::BufferLimitExceeded {
                     buffer: "stream_delta_bytes",
                     limit: self.limits.max_stream_delta_bytes,
                 });
             }
             if let Some(sequence) = coalesce_adjacent_delta(&mut self.stream_items, &item) {
+                self.raw_stream_item_count = self.raw_stream_item_count.saturating_add(1);
+                self.raw_delta_item_count = self.raw_delta_item_count.saturating_add(1);
                 self.coalesced_delta_item_count = self.coalesced_delta_item_count.saturating_add(1);
-                self.retained_delta_bytes = next_retained_delta_bytes;
-                self.queued_delta_bytes = self.queued_delta_bytes.saturating_add(delta_bytes);
+                self.retained_delta_bytes = self.retained_delta_bytes.saturating_add(delta_bytes);
+                self.queued_delta_bytes = next_queued_delta_bytes;
                 self.record_transition_at(now);
                 return Ok(sequence);
             }
@@ -513,8 +509,6 @@ impl BufferedBrainTurnCoordinator {
 
         let terminal_item = item.is_terminal();
         if !terminal_item && self.stream_items.len() >= self.limits.max_stream_items {
-            self.dropped_stream_item_count = self.dropped_stream_item_count.saturating_add(1);
-            self.fail_limit("stream_items", self.limits.max_stream_items, now);
             return Err(BufferedBrainTurnError::BufferLimitExceeded {
                 buffer: "stream_items",
                 limit: self.limits.max_stream_items,
@@ -543,8 +537,10 @@ impl BufferedBrainTurnCoordinator {
         };
         self.stream_items
             .push_back(SequencedBrainWakeStreamItem { sequence, item });
+        self.raw_stream_item_count = self.raw_stream_item_count.saturating_add(1);
         self.retained_stream_item_count = self.retained_stream_item_count.saturating_add(1);
         if let Some(delta_bytes) = delta_bytes {
+            self.raw_delta_item_count = self.raw_delta_item_count.saturating_add(1);
             self.retained_delta_bytes = self.retained_delta_bytes.saturating_add(delta_bytes);
             self.queued_delta_bytes = self.queued_delta_bytes.saturating_add(delta_bytes);
         }
@@ -588,11 +584,6 @@ impl BufferedBrainTurnCoordinator {
             });
         }
         if self.pending_tool_requests.len() >= self.limits.max_pending_tool_requests {
-            self.fail_limit(
-                "pending_tool_requests",
-                self.limits.max_pending_tool_requests,
-                now,
-            );
             return Err(BufferedBrainTurnError::BufferLimitExceeded {
                 buffer: "pending_tool_requests",
                 limit: self.limits.max_pending_tool_requests,
@@ -718,8 +709,7 @@ impl BufferedBrainTurnCoordinator {
                 limit_bytes: self.limits.max_tool_output_bytes,
             });
         }
-        if self.accepted_tool_outputs.len() >= self.limits.max_tool_results {
-            self.fail_limit("tool_results", self.limits.max_tool_results, now);
+        if self.submitted_tool_outputs.len() >= self.limits.max_tool_results {
             return Err(BufferedBrainTurnError::BufferLimitExceeded {
                 buffer: "tool_results",
                 limit: self.limits.max_tool_results,
@@ -789,6 +779,34 @@ impl BufferedBrainTurnCoordinator {
         Ok(())
     }
 
+    pub fn require_attention(
+        &mut self,
+        reason_code: impl Into<String>,
+        summary: impl Into<String>,
+    ) -> Result<(), BufferedBrainTurnError> {
+        self.require_attention_at(reason_code, summary, OffsetDateTime::now_utc())
+    }
+
+    pub fn require_attention_at(
+        &mut self,
+        reason_code: impl Into<String>,
+        summary: impl Into<String>,
+        now: OffsetDateTime,
+    ) -> Result<(), BufferedBrainTurnError> {
+        self.require_phase(
+            BufferedBrainTurnPhase::Running,
+            "require operator attention",
+        )?;
+        self.phase = BufferedBrainTurnPhase::AttentionRequired;
+        self.terminal = Some(BufferedBrainTurnTerminal {
+            reason_code: reason_code.into(),
+            summary: summary.into(),
+            occurred_at: format_rfc3339(now),
+        });
+        self.record_transition_at(now);
+        Ok(())
+    }
+
     pub fn fail(
         &mut self,
         reason_code: impl Into<String>,
@@ -828,6 +846,15 @@ impl BufferedBrainTurnCoordinator {
         now: OffsetDateTime,
     ) -> Result<(), BufferedBrainTurnError> {
         if self.phase == BufferedBrainTurnPhase::Cancelled {
+            return Ok(());
+        }
+        if self.phase == BufferedBrainTurnPhase::AttentionRequired {
+            self.transition_terminal(
+                BufferedBrainTurnPhase::Cancelled,
+                reason_code.into(),
+                summary.into(),
+                now,
+            );
             return Ok(());
         }
         self.require_active("cancel")?;
@@ -944,15 +971,6 @@ impl BufferedBrainTurnCoordinator {
             phase: self.phase,
             operation,
         }
-    }
-
-    fn fail_limit(&mut self, buffer: &'static str, limit: usize, now: OffsetDateTime) {
-        self.transition_terminal(
-            BufferedBrainTurnPhase::Failed,
-            format!("{buffer}_limit_exceeded"),
-            format!("{buffer} exceeded configured limit {limit}"),
-            now,
-        );
     }
 
     fn transition_terminal(
@@ -1124,6 +1142,7 @@ fn buffered_brain_turn_phase_name(phase: BufferedBrainTurnPhase) -> &'static str
         BufferedBrainTurnPhase::Running => "running",
         BufferedBrainTurnPhase::AwaitingHostTools => "awaiting_host_tools",
         BufferedBrainTurnPhase::Yielded => "yielded",
+        BufferedBrainTurnPhase::AttentionRequired => "attention_required",
         BufferedBrainTurnPhase::Completed => "completed",
         BufferedBrainTurnPhase::Failed => "failed",
         BufferedBrainTurnPhase::Cancelled => "cancelled",
@@ -1451,11 +1470,10 @@ mod tests {
             .guidance
             .contains("Tool failure count this turn: 2."));
         assert!(guidance.guidance.contains("read_file: tool_unavailable"));
-        assert!(second
-            .decision
-            .provider_output
-            .output
-            .contains("Correct the arguments"));
+        assert_eq!(
+            second.decision.provider_output.output,
+            "Tool den_get_document is unavailable"
+        );
         assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
         assert!(turn.terminal().is_none());
 
@@ -1515,6 +1533,25 @@ mod tests {
         assert_eq!(turn.phase(), BufferedBrainTurnPhase::Cancelled);
         assert_eq!(turn.pending_tool_request_count(), 0);
         assert_eq!(turn.submitted_tool_output_count(), 0);
+        assert_eq!(
+            turn.terminal()
+                .map(|terminal| terminal.reason_code.as_str()),
+            Some("user_cancelled")
+        );
+    }
+
+    #[test]
+    fn operator_attention_can_always_be_cancelled_explicitly() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        turn.require_attention("tool_no_progress", "operator decision required")
+            .expect("attention");
+
+        turn.cancel("user_cancelled", "stopped while paused")
+            .expect("cancel attention");
+
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Cancelled);
+        assert_eq!(turn.pending_tool_request_count(), 0);
         assert_eq!(
             turn.terminal()
                 .map(|terminal| terminal.reason_code.as_str()),
@@ -1590,7 +1627,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_pending_tool_and_output_limits_fail_or_reject() {
+    fn stream_pending_tool_and_output_limits_apply_recoverable_backpressure() {
         let limits = BufferedBrainTurnLimits {
             max_stream_items: 1,
             max_stream_delta_bytes: 1_024,
@@ -1617,7 +1654,11 @@ mod tests {
                 ..
             })
         ));
-        assert_eq!(stream_turn.phase(), BufferedBrainTurnPhase::Failed);
+        assert_eq!(stream_turn.phase(), BufferedBrainTurnPhase::Running);
+        assert_eq!(stream_turn.drain_stream(1).items.len(), 1);
+        stream_turn
+            .enqueue_stream_item(event_item("wake-1", "session-1"))
+            .expect("retry after drain");
 
         let mut tool_turn = BufferedBrainTurnCoordinator::new(
             "chat-completions",
@@ -1638,6 +1679,24 @@ mod tests {
                 ..
             })
         ));
+        assert_eq!(tool_turn.phase(), BufferedBrainTurnPhase::AwaitingHostTools);
+        tool_turn
+            .submit_tool_output("call-1", tool_output("one"))
+            .expect("first result");
+        tool_turn
+            .queue_tool_request(tool_request("call-2"))
+            .expect("request after host result");
+        assert!(matches!(
+            tool_turn.submit_tool_output("call-2", tool_output("two")),
+            Err(BufferedBrainTurnError::BufferLimitExceeded {
+                buffer: "tool_results",
+                ..
+            })
+        ));
+        assert!(tool_turn.take_submitted_tool_output("call-1").is_some());
+        tool_turn
+            .submit_tool_output("call-2", tool_output("two"))
+            .expect("result retry after provider consumption");
 
         let mut output_turn = BufferedBrainTurnCoordinator::new(
             "chat-completions",
@@ -1818,7 +1877,7 @@ mod tests {
     }
 
     #[test]
-    fn delta_byte_exhaustion_is_bounded_and_has_stable_provenance() {
+    fn delta_byte_pressure_drains_and_retries_without_terminating() {
         let mut turn = BufferedBrainTurnCoordinator::new(
             "chat-completions",
             "wake-1",
@@ -1845,25 +1904,26 @@ mod tests {
             })
         );
 
-        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Failed);
-        assert_eq!(
-            turn.terminal()
-                .map(|terminal| terminal.reason_code.as_str()),
-            Some("stream_delta_bytes_limit_exceeded")
-        );
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
+        assert!(turn.terminal().is_none());
         let metrics = turn.stream_retention_metrics();
-        assert_eq!(metrics.raw_stream_item_count, 2);
-        assert_eq!(metrics.raw_delta_item_count, 2);
+        assert_eq!(metrics.raw_stream_item_count, 1);
+        assert_eq!(metrics.raw_delta_item_count, 1);
         assert_eq!(metrics.retained_stream_item_count, 1);
         assert_eq!(metrics.coalesced_delta_item_count, 0);
-        assert_eq!(metrics.dropped_stream_item_count, 1);
+        assert_eq!(metrics.dropped_stream_item_count, 0);
         assert_eq!(metrics.retained_delta_bytes, 3);
         assert_eq!(metrics.queued_delta_bytes, 3);
 
         let first = turn.drain_stream(8);
-        assert!(first.terminal);
+        assert!(!first.terminal);
         assert_eq!(first.items.len(), 1);
-        assert!(turn.drain_stream(8).terminal);
+        turn.enqueue_stream_item(brain_event_item(BrainEvent::TextDelta {
+            text: "de".to_string(),
+        }))
+        .expect("retry after drain");
+        assert_eq!(turn.stream_retention_metrics().retained_delta_bytes, 5);
+        assert_eq!(turn.stream_retention_metrics().queued_delta_bytes, 2);
     }
 
     #[test]

@@ -127,10 +127,14 @@ RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS=1000
 RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS=250
 RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS=64
 RUSTY_CREW_OPENAI_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS=64
+RUSTY_CREW_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD=3
+RUSTY_CREW_OPENAI_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD=3
 ```
 
-Both values control how often a healthy turn durably yields; neither caps the
-logical turn or substitutes for explicit cancellation.
+The work-quantum values control how often a healthy turn durably yields. The
+no-progress values control when equivalent failed or malformed work pauses for
+operator attention. None caps successful work or substitutes for explicit
+cancellation.
 
 For trusted development on this machine/LAN, tokenless admin can be enabled
 explicitly:

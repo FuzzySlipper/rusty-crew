@@ -2584,6 +2584,41 @@
         "required": ["wake_id", "accepted", "outcome"],
         "type": "object"
       },
+      "BrainWakeAttention": {
+        "properties": {
+          "consecutiveNoProgressSamples": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "evidenceRefs": {
+            "default": [],
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/LogicalTurnAttentionReason"
+          },
+          "reasonCode": { "type": "string" },
+          "resolutionActions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LogicalTurnResolutionAction"
+            },
+            "type": "array"
+          },
+          "retryUnchangedSafe": { "type": "boolean" },
+          "summary": { "type": "string" }
+        },
+        "required": [
+          "reason",
+          "reasonCode",
+          "summary",
+          "retryUnchangedSafe",
+          "consecutiveNoProgressSamples"
+        ],
+        "type": "object"
+      },
       "BrainWakeFailure": {
         "properties": {
           "kind": { "$ref": "#/components/schemas/CoreErrorKind" },
@@ -2717,6 +2752,32 @@
           "role_assembly",
           "wake_id"
         ],
+        "type": "object"
+      },
+      "BrainWakeSettlementKind": {
+        "enum": ["completed", "yielded", "attention_required", "failed"],
+        "type": "string"
+      },
+      "BrainWakeSettlementRequest": {
+        "properties": {
+          "attention": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/BrainWakeAttention" },
+              { "type": "null" }
+            ]
+          },
+          "continuation_state": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/BrainContinuationPayload" },
+              { "type": "null" }
+            ]
+          },
+          "outcome": { "$ref": "#/components/schemas/BrainWakeSettlementKind" },
+          "reason_code": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "wake_id": { "type": "string" }
+        },
+        "required": ["wake_id", "outcome"],
         "type": "object"
       },
       "BrainWakeStreamItem": {
@@ -4125,6 +4186,45 @@
           "invariant_repair_required"
         ],
         "type": "string"
+      },
+      "LogicalTurnAttentionResolutionReceipt": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/LogicalTurnResolutionAction"
+          },
+          "checkpoint": {
+            "$ref": "#/components/schemas/LogicalTurnCheckpoint"
+          },
+          "record": { "$ref": "#/components/schemas/LogicalTurnRecord" },
+          "replayed": { "type": "boolean" }
+        },
+        "required": ["record", "checkpoint", "action", "replayed"],
+        "type": "object"
+      },
+      "LogicalTurnAttentionResolutionRequest": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/LogicalTurnResolutionAction"
+          },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "lifecycleEvent": {
+            "$ref": "#/components/schemas/LogicalTurnLifecycleEvent"
+          },
+          "logicalTurnId": { "type": "string" },
+          "now": { "type": "string" }
+        },
+        "required": [
+          "logicalTurnId",
+          "expectedRevision",
+          "action",
+          "lifecycleEvent",
+          "now"
+        ],
+        "type": "object"
       },
       "LogicalTurnBindingSnapshot": {
         "properties": {

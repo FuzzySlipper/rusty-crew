@@ -1,5 +1,6 @@
 use super::*;
 use rusty_crew_core_persistence::{LogicalTurnAdmissionWrite, LogicalTurnContentWrite};
+use rusty_crew_core_protocol::{LogicalTurnAttentionReason, LogicalTurnResolutionAction};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -167,6 +168,129 @@ fn prepared_responses_turn_restores_opaque_checkpoint_after_restart() {
         resumed.role_assembly_json,
         br#"{"instructions":"responses role"}"#
     );
+    restarted
+        .settle_logical_turn_epoch(&resumed.claim, LogicalTurnEpochResult::Completed)
+        .unwrap();
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
+fn operator_attention_survives_restart_and_explicit_retry_resumes_same_turn() {
+    let data_dir = unique_data_dir("logical-turn-attention-restart");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "attention-session",
+            "attention-agent",
+            "prepared-logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let registration = chat_completions_registration();
+    let first = engine
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "attention-source-wake",
+            "attention system prompt".into(),
+            br#"{"messages":["attention role"]}"#.to_vec(),
+        )
+        .unwrap();
+    let payload = json!({"messages": ["failed call"], "no_progress": 3});
+    let continuation = BrainContinuationPayload {
+        module_id: "chat-completions".into(),
+        payload_version: "chat-completions-continuation-v2".into(),
+        payload_fingerprint: json_sha256(&payload),
+        payload,
+    };
+    let settlement = engine
+        .settle_logical_turn_epoch(
+            &first.claim,
+            LogicalTurnEpochResult::AttentionRequired {
+                module_state: continuation.clone(),
+                attention: BrainWakeAttention {
+                    reason: LogicalTurnAttentionReason::NoProgress,
+                    reason_code: "chat_completions_tool_no_progress".into(),
+                    summary: "tool returned the same failure repeatedly".into(),
+                    evidence_refs: vec!["tool:lookup".into()],
+                    resolution_actions: vec![
+                        LogicalTurnResolutionAction::RetryProviderOperation,
+                        LogicalTurnResolutionAction::Cancel,
+                    ],
+                    retry_unchanged_safe: false,
+                    consecutive_no_progress_samples: 3,
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(settlement.phase, LogicalTurnPhase::AttentionRequired);
+    assert!(engine
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    let logical_turn_id = first.claim.record.logical_turn_id.clone();
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let attention_record = restarted
+        .get_logical_turn(&logical_turn_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(attention_record.phase, LogicalTurnPhase::AttentionRequired);
+    assert!(attention_record.attention.is_some());
+    assert!(restarted
+        .logical_turn_continuation_tickets()
+        .unwrap()
+        .is_empty());
+    let checkpoint = restarted
+        .get_logical_turn_checkpoint(&attention_record.current_continuation_id)
+        .unwrap()
+        .unwrap();
+    let resolved = restarted
+        .resolve_logical_turn_attention(&LogicalTurnAttentionResolutionRequest {
+            logical_turn_id: logical_turn_id.clone(),
+            expected_revision: attention_record.revision,
+            action: LogicalTurnResolutionAction::RetryProviderOperation,
+            lifecycle_event: LogicalTurnLifecycleEvent {
+                projection_id: TurnProjectionId::new(format!(
+                    "projection:{}:{}:attention-resolved",
+                    logical_turn_id.0,
+                    attention_record.revision + 1
+                )),
+                logical_turn_id: logical_turn_id.clone(),
+                session_id: attention_record.session_id.clone(),
+                wake_id: attention_record.source_wake_id.clone(),
+                continuation_id: attention_record.current_continuation_id.clone(),
+                execution_epoch_id: None,
+                kind: LogicalTurnLifecycleEventKind::ContinuationResumed,
+                phase: LogicalTurnPhase::Runnable,
+                progress: checkpoint.progress.clone(),
+                reason_code: "operator_retry_provider_operation".into(),
+                summary: "operator resolved attention and requested a provider retry".into(),
+                occurred_at: NOW.into(),
+                logical_turn_revision: attention_record.revision + 1,
+            },
+            now: NOW.into(),
+        })
+        .unwrap();
+    assert_eq!(resolved.record.phase, LogicalTurnPhase::Runnable);
+    assert!(resolved.record.attention.is_none());
+    assert_eq!(
+        restarted.logical_turn_continuation_tickets().unwrap().len(),
+        1
+    );
+
+    let resumed = restarted
+        .prepare_logical_turn_wake(
+            &registration,
+            &session.session_id,
+            "replacement-wake",
+            "replacement system prompt".into(),
+            br#"{"messages":["replacement role"]}"#.to_vec(),
+        )
+        .unwrap();
+    assert_eq!(resumed.claim.record.logical_turn_id, logical_turn_id);
+    assert_eq!(resumed.continuation_state, Some(continuation));
     restarted
         .settle_logical_turn_epoch(&resumed.claim, LogicalTurnEpochResult::Completed)
         .unwrap();

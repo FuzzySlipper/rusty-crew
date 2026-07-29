@@ -17,11 +17,13 @@ use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
     AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainContinuationPayload, BrainEvent,
-    BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure, BrainWakeProviderStateInput,
-    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, BrainWakeRequest,
-    BrainWakeStreamItem, CompletionPacket, CompletionStatus, CoreError, CoreErrorKind, CoreEvent,
-    CoreResult, ExternalEventPayload, ProviderStateAbsenceReason, ProviderStateMode,
-    ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
+    BrainEventEnvelope, BrainNoProgressPolicy, BrainNoProgressState, BrainProgressDisposition,
+    BrainProgressResultClass, BrainProgressSample, BrainProviderStatusLevel, BrainWakeAttention,
+    BrainWakeFailure, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
+    BrainWakeProviderStateUpdate, BrainWakeRequest, BrainWakeStreamItem, CompletionPacket,
+    CompletionStatus, CoreError, CoreErrorKind, CoreEvent, CoreResult, ExternalEventPayload,
+    LogicalTurnAttentionReason, LogicalTurnResolutionAction, ProviderStateAbsenceReason,
+    ProviderStateMode, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
 };
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -39,9 +41,9 @@ pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
 pub const PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID: &str = "previous-response-chain";
 pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v1";
-pub const MAX_REPEATED_FUNCTION_CALLS: usize = 3;
+pub const DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD: u32 = 3;
 pub const DEFAULT_WORK_QUANTUM_CONTINUATION_ROUNDS: usize = 64;
-pub const CONTINUATION_PAYLOAD_VERSION: &str = "openai-responses-continuation-v1";
+pub const CONTINUATION_PAYLOAD_VERSION: &str = "openai-responses-continuation-v2";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesBrainConfig {
@@ -58,6 +60,7 @@ pub struct ResponsesBrainConfig {
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
     pub work_quantum_continuation_rounds: usize,
+    pub no_progress_attention_threshold: u32,
 }
 
 impl ResponsesBrainConfig {
@@ -76,6 +79,7 @@ impl ResponsesBrainConfig {
             max_output_tokens: None,
             provider_request_timeout_ms: None,
             work_quantum_continuation_rounds: DEFAULT_WORK_QUANTUM_CONTINUATION_ROUNDS,
+            no_progress_attention_threshold: DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
         }
     }
 
@@ -950,14 +954,6 @@ pub enum ResponsesStreamError {
     ResponseIncomplete(String),
     #[error("function call output call_id mismatch: expected {expected}, got {actual}")]
     FunctionCallOutputMismatch { expected: String, actual: String },
-    #[error(
-        "provider repeated function call {name} with unchanged arguments more than {limit} times"
-    )]
-    RepeatedFunctionCall {
-        name: String,
-        arguments_json: String,
-        limit: usize,
-    },
     #[error("Responses continuation state is invalid: {0}")]
     ContinuationStateInvalid(String),
     #[error("Responses continuation checkpoint failed: {0}")]
@@ -975,7 +971,6 @@ impl ResponsesStreamError {
             Self::ResponseIncomplete(_) => "provider_response_incomplete",
             Self::ContinuationStateInvalid(_) => "responses_continuation_state_invalid",
             Self::ContinuationCheckpointFailed(_) => "responses_continuation_checkpoint_failed",
-            Self::RepeatedFunctionCall { .. } => "responses_repeated_function_call",
             Self::ClosedBeforeComplete => "provider_stream_closed_before_complete",
             Self::MissingField(_) | Self::UnknownEvent(_) => "provider_protocol_error",
             Self::FunctionCallOutputMismatch { .. } => "responses_function_call_output_mismatch",
@@ -989,7 +984,6 @@ impl ResponsesStreamError {
             Self::ResponseFailed(_) | Self::ResponseIncomplete(_) => "provider_response",
             Self::ContinuationStateInvalid(_)
             | Self::ContinuationCheckpointFailed(_)
-            | Self::RepeatedFunctionCall { .. }
             | Self::FunctionCallOutputMismatch { .. } => "responses_loop",
             Self::ClosedBeforeComplete | Self::MissingField(_) | Self::UnknownEvent(_) => {
                 "provider_protocol"
@@ -1021,7 +1015,7 @@ struct ResponsesContinuationStateV1 {
     committed_output_items: Vec<ResponsesOutputItem>,
     last_response_id: Option<String>,
     last_usage: Option<ResponsesTokenUsage>,
-    repeated_function_calls: Vec<ResponsesRepeatedFunctionCall>,
+    no_progress_state: BrainNoProgressState,
     provider_state: Option<BrainWakeProviderStateInput>,
     provider_state_absence: Option<ProviderStateAbsenceReason>,
     metrics: ResponsesContinuationMetrics,
@@ -1062,14 +1056,6 @@ enum ResponsesContinuationInputItem {
     ReplayHint {
         raw_json: Value,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ResponsesRepeatedFunctionCall {
-    name: String,
-    arguments_json: String,
-    count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1830,6 +1816,12 @@ pub struct ResponsesReplayBrain<C, T> {
     request_builder: ResponsesRequestBuilder,
 }
 
+enum ResponsesProviderDisposition {
+    Complete,
+    Continue,
+    AttentionRequired(BrainWakeAttention),
+}
+
 type BrainWakeItemSink<'a> = Option<&'a mut dyn FnMut(BrainWakeStreamItem)>;
 
 fn push_stream_item(
@@ -1996,16 +1988,18 @@ where
             .as_ref()
             .map(|state| ResponsesReplayProjection::from(state.base_history.clone()))
             .unwrap_or(history);
-        let mut repeated_function_calls: HashMap<(String, String), usize> = restored
+        let mut no_progress_state = restored
             .as_ref()
-            .map(|state| {
-                state
-                    .repeated_function_calls
-                    .iter()
-                    .map(|call| ((call.name.clone(), call.arguments_json.clone()), call.count))
-                    .collect()
-            })
+            .map(|state| state.no_progress_state.clone())
             .unwrap_or_default();
+        let no_progress_policy =
+            BrainNoProgressPolicy::new(self.request_builder.config.no_progress_attention_threshold)
+                .map_err(|message| {
+                    CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        format!("invalid Responses no-progress policy: {message}"),
+                    )
+                })?;
         let mut epoch_continuation_round_count = 0usize;
 
         loop {
@@ -2069,7 +2063,7 @@ where
                         metrics.observe_request(&replay_request);
                         let request_started_at = Instant::now();
                         let mut observed_deltas = Vec::new();
-                        let completed_without_pending = match self.client.stream_observed(
+                        let disposition = match self.client.stream_observed(
                             replay_request,
                             &mut |provider_event| {
                                 if let Some(item) =
@@ -2094,7 +2088,8 @@ where
                                     &mut committed_output_items,
                                     &mut last_response_id,
                                     &mut last_usage,
-                                    &mut repeated_function_calls,
+                                    no_progress_policy,
+                                    &mut no_progress_state,
                                 )
                             }
                             Err(error) => {
@@ -2107,7 +2102,7 @@ where
                                 ))
                             }
                         };
-                        let completed_without_pending = match completed_without_pending {
+                        let disposition = match disposition {
                             Ok(done) => done,
                             Err(error) => {
                                 return Ok(failed_result(
@@ -2119,8 +2114,7 @@ where
                                 ))
                             }
                         };
-                        if continuation_items.is_empty() {
-                            debug_assert!(completed_without_pending);
+                        if matches!(&disposition, ResponsesProviderDisposition::Complete) {
                             return Ok(finish_responses_wake(
                                 &request,
                                 &self.request_builder.config,
@@ -2134,6 +2128,26 @@ where
                                     request_fingerprint: replay_fingerprint,
                                 },
                                 metrics.finish(),
+                            ));
+                        }
+                        if let ResponsesProviderDisposition::AttentionRequired(attention) =
+                            disposition
+                        {
+                            return Ok(attention_responses_wake(
+                                &request,
+                                &self.request_builder.config,
+                                items,
+                                &mut sink,
+                                &base_history,
+                                continuation_items,
+                                committed_output_items,
+                                last_response_id,
+                                last_usage,
+                                no_progress_state,
+                                provider_state,
+                                provider_state_absence,
+                                metrics,
+                                attention,
                             ));
                         }
                         metrics.observe_continuation_round();
@@ -2151,7 +2165,7 @@ where
                                 committed_output_items,
                                 last_response_id,
                                 last_usage,
-                                repeated_function_calls,
+                                no_progress_state,
                                 provider_state,
                                 provider_state_absence,
                                 metrics,
@@ -2168,7 +2182,7 @@ where
                     ));
                 }
             };
-            let completed_without_pending = self.process_provider_events(
+            let disposition = self.process_provider_events(
                 &request,
                 &mut items,
                 events,
@@ -2178,9 +2192,10 @@ where
                 &mut committed_output_items,
                 &mut last_response_id,
                 &mut last_usage,
-                &mut repeated_function_calls,
+                no_progress_policy,
+                &mut no_progress_state,
             );
-            let completed_without_pending = match completed_without_pending {
+            let disposition = match disposition {
                 Ok(done) => done,
                 Err(error) => {
                     return Ok(failed_result(
@@ -2192,7 +2207,7 @@ where
                     ))
                 }
             };
-            if completed_without_pending {
+            if matches!(&disposition, ResponsesProviderDisposition::Complete) {
                 return Ok(finish_responses_wake(
                     &request,
                     &self.request_builder.config,
@@ -2206,6 +2221,24 @@ where
                         request_fingerprint: planned_fingerprint,
                     },
                     metrics.finish(),
+                ));
+            }
+            if let ResponsesProviderDisposition::AttentionRequired(attention) = disposition {
+                return Ok(attention_responses_wake(
+                    &request,
+                    &self.request_builder.config,
+                    items,
+                    &mut sink,
+                    &base_history,
+                    continuation_items,
+                    committed_output_items,
+                    last_response_id,
+                    last_usage,
+                    no_progress_state,
+                    provider_state,
+                    provider_state_absence,
+                    metrics,
+                    attention,
                 ));
             }
             metrics.observe_continuation_round();
@@ -2223,7 +2256,7 @@ where
                     committed_output_items,
                     last_response_id,
                     last_usage,
-                    repeated_function_calls,
+                    no_progress_state,
                     provider_state,
                     provider_state_absence,
                     metrics,
@@ -2244,14 +2277,18 @@ where
         committed_output_items: &mut Vec<ResponsesOutputItem>,
         last_response_id: &mut Option<String>,
         last_usage: &mut Option<ResponsesTokenUsage>,
-        repeated_function_calls: &mut HashMap<(String, String), usize>,
-    ) -> Result<bool, ResponsesStreamError> {
+        no_progress_policy: BrainNoProgressPolicy,
+        no_progress_state: &mut BrainNoProgressState,
+    ) -> Result<ResponsesProviderDisposition, ResponsesStreamError> {
         let mut completed = false;
         let mut pending_calls = Vec::new();
         let mut observed_delta_index = 0;
+        let mut assistant_progress = Sha256::new();
         for provider_event in events {
             match provider_event {
                 ResponsesEvent::TextDelta(text) => {
+                    assistant_progress.update(b"text");
+                    assistant_progress.update(text.as_bytes());
                     let item = event(request, BrainEvent::TextDelta { text });
                     if observed_delta_index < eagerly_streamed_delta_count {
                         items.push(item);
@@ -2261,6 +2298,8 @@ where
                     observed_delta_index += 1;
                 }
                 ResponsesEvent::ReasoningDelta(delta) => {
+                    assistant_progress.update(b"reasoning");
+                    assistant_progress.update(delta.as_bytes());
                     let item = event(
                         request,
                         BrainEvent::ReasoningDelta {
@@ -2317,19 +2356,11 @@ where
             return Err(ResponsesStreamError::ClosedBeforeComplete);
         }
         if pending_calls.is_empty() {
-            return Ok(true);
+            return Ok(ResponsesProviderDisposition::Complete);
         }
+        let assistant_progress_fingerprint = format!("{:x}", assistant_progress.finalize());
+        let mut attention = None;
         for call in pending_calls {
-            let repeat_key = (call.name.clone(), call.arguments_json.clone());
-            let repeat_count = repeated_function_calls.entry(repeat_key).or_insert(0);
-            *repeat_count += 1;
-            if *repeat_count > MAX_REPEATED_FUNCTION_CALLS {
-                return Err(ResponsesStreamError::RepeatedFunctionCall {
-                    name: call.name,
-                    arguments_json: call.arguments_json,
-                    limit: MAX_REPEATED_FUNCTION_CALLS,
-                });
-            }
             push_stream_item(
                 items,
                 event(
@@ -2341,7 +2372,7 @@ where
                 ),
                 sink,
             );
-            let output = self.tools.execute(&call);
+            let mut output = self.tools.execute(&call);
             push_stream_item(
                 items,
                 event(
@@ -2354,6 +2385,45 @@ where
                 ),
                 sink,
             );
+            let disposition = no_progress_policy.observe(
+                no_progress_state,
+                BrainProgressSample {
+                    intent_fingerprint: progress_fingerprint(&[
+                        "function_call",
+                        &call.name,
+                        &call.arguments_json,
+                    ]),
+                    result_fingerprint: progress_fingerprint(&[
+                        if output.is_error { "error" } else { "success" },
+                        &output.output,
+                    ]),
+                    state_fingerprint: String::new(),
+                    assistant_progress_fingerprint: assistant_progress_fingerprint.clone(),
+                    result_class: if output.is_error {
+                        BrainProgressResultClass::Failed
+                    } else {
+                        BrainProgressResultClass::Succeeded
+                    },
+                },
+            );
+            if let BrainProgressDisposition::Correction {
+                consecutive_samples,
+            } = disposition
+            {
+                output.output.push_str(&format!(
+                    "\n\n[Rusty Crew no-progress guidance] This function returned the same failure for unchanged arguments again ({consecutive_samples} equivalent repetition(s)). Change the arguments, choose another tool, or report the dependency as unavailable instead of repeating it unchanged."
+                ));
+                push_stream_item(
+                    items,
+                    responses_no_progress_correction_event(
+                        request,
+                        &call.name,
+                        consecutive_samples,
+                        no_progress_policy.attention_threshold(),
+                    ),
+                    sink,
+                );
+            }
             continuation_items.push(ResponsesInputItem::FunctionCall {
                 id: call.provider_item_id.clone(),
                 call_id: call.call_id.clone(),
@@ -2370,8 +2440,36 @@ where
                 output: output.output,
                 is_error: output.is_error,
             });
+            if let BrainProgressDisposition::AttentionRequired {
+                consecutive_samples,
+            } = disposition
+            {
+                let reason_code = "responses_tool_no_progress";
+                let summary = format!(
+                    "function {} returned an equivalent failure for unchanged arguments {consecutive_samples} consecutive times",
+                    call.name
+                );
+                push_stream_item(
+                    items,
+                    responses_no_progress_attention_event(
+                        request,
+                        reason_code,
+                        &summary,
+                        consecutive_samples,
+                    ),
+                    sink,
+                );
+                attention = Some(responses_no_progress_attention(
+                    reason_code,
+                    summary,
+                    consecutive_samples,
+                ));
+            }
         }
-        Ok(false)
+        Ok(match attention {
+            Some(attention) => ResponsesProviderDisposition::AttentionRequired(attention),
+            None => ResponsesProviderDisposition::Continue,
+        })
     }
 }
 
@@ -2393,6 +2491,7 @@ pub struct ResponsesBrainWakeResult {
     pub provider_state: Option<BrainWakeProviderStateOutput>,
     pub transport_metrics: ResponsesTransportMetrics,
     pub yielded: bool,
+    pub attention: Option<BrainWakeAttention>,
     pub continuation_state: Option<BrainContinuationPayload>,
 }
 
@@ -2441,6 +2540,7 @@ fn finish_responses_wake(
         provider_state: Some(provider_state),
         transport_metrics,
         yielded: false,
+        attention: None,
         continuation_state: None,
     }
 }
@@ -2456,7 +2556,7 @@ fn yield_responses_wake(
     committed_output_items: Vec<ResponsesOutputItem>,
     last_response_id: Option<String>,
     last_usage: Option<ResponsesTokenUsage>,
-    repeated_function_calls: HashMap<(String, String), usize>,
+    no_progress_state: BrainNoProgressState,
     provider_state: Option<BrainWakeProviderStateInput>,
     provider_state_absence: Option<ProviderStateAbsenceReason>,
     metrics: ResponsesTransportMetricsBuilder,
@@ -2471,16 +2571,7 @@ fn yield_responses_wake(
         committed_output_items,
         last_response_id,
         last_usage,
-        repeated_function_calls: repeated_function_calls
-            .into_iter()
-            .map(
-                |((name, arguments_json), count)| ResponsesRepeatedFunctionCall {
-                    name,
-                    arguments_json,
-                    count,
-                },
-            )
-            .collect(),
+        no_progress_state,
         provider_state,
         provider_state_absence,
         metrics: metrics.checkpoint(),
@@ -2496,6 +2587,55 @@ fn yield_responses_wake(
         provider_state: None,
         transport_metrics: metrics.finish(),
         yielded: true,
+        attention: None,
+        continuation_state: Some(continuation_state),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attention_responses_wake(
+    request: &BrainWakeRequest,
+    config: &ResponsesBrainConfig,
+    items: Vec<BrainWakeStreamItem>,
+    sink: &mut BrainWakeItemSink<'_>,
+    base_history: &ResponsesReplayProjection,
+    continuation_items: Vec<ResponsesInputItem>,
+    committed_output_items: Vec<ResponsesOutputItem>,
+    last_response_id: Option<String>,
+    last_usage: Option<ResponsesTokenUsage>,
+    no_progress_state: BrainNoProgressState,
+    provider_state: Option<BrainWakeProviderStateInput>,
+    provider_state_absence: Option<ProviderStateAbsenceReason>,
+    metrics: ResponsesTransportMetricsBuilder,
+    attention: BrainWakeAttention,
+) -> ResponsesBrainWakeResult {
+    let continuation_state = ResponsesContinuationStateV1 {
+        strategy: config.strategy,
+        base_history: ResponsesContinuationProjection::from(base_history),
+        continuation_items: continuation_items
+            .iter()
+            .map(ResponsesContinuationInputItem::from)
+            .collect(),
+        committed_output_items,
+        last_response_id,
+        last_usage,
+        no_progress_state,
+        provider_state,
+        provider_state_absence,
+        metrics: metrics.checkpoint(),
+    };
+    let continuation_state = match responses_continuation_output(continuation_state) {
+        Ok(state) => state,
+        Err(error) => {
+            return failed_result(request, items, error, metrics.finish(), sink);
+        }
+    };
+    ResponsesBrainWakeResult {
+        stream: BrainWakeStream::from_items(items),
+        provider_state: None,
+        transport_metrics: metrics.finish(),
+        yielded: false,
+        attention: Some(attention),
         continuation_state: Some(continuation_state),
     }
 }
@@ -2683,8 +2823,86 @@ fn failed_result(
         provider_state: None,
         transport_metrics,
         yielded: false,
+        attention: None,
         continuation_state: None,
     }
+}
+
+fn responses_no_progress_correction_event(
+    request: &BrainWakeRequest,
+    tool_name: &str,
+    consecutive_samples: u32,
+    attention_threshold: u32,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Degraded,
+            message: format!(
+                "Function {tool_name} repeated an equivalent failed result; corrective guidance was returned to the model."
+            ),
+            metadata_json: Some(
+                json!({
+                    "kind": "tool_no_progress_correction",
+                    "tool_name": tool_name,
+                    "consecutive_samples": consecutive_samples,
+                    "attention_threshold": attention_threshold,
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn responses_no_progress_attention_event(
+    request: &BrainWakeRequest,
+    reason_code: &str,
+    summary: &str,
+    consecutive_samples: u32,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Degraded,
+            message: summary.to_string(),
+            metadata_json: Some(
+                json!({
+                    "kind": "logical_turn_attention_required",
+                    "reason_code": reason_code,
+                    "consecutive_no_progress_samples": consecutive_samples,
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn responses_no_progress_attention(
+    reason_code: impl Into<String>,
+    summary: impl Into<String>,
+    consecutive_no_progress_samples: u32,
+) -> BrainWakeAttention {
+    BrainWakeAttention {
+        reason: LogicalTurnAttentionReason::NoProgress,
+        reason_code: reason_code.into(),
+        summary: summary.into(),
+        evidence_refs: Vec::new(),
+        resolution_actions: vec![
+            LogicalTurnResolutionAction::RetryProviderOperation,
+            LogicalTurnResolutionAction::Cancel,
+        ],
+        retry_unchanged_safe: false,
+        consecutive_no_progress_samples,
+    }
+}
+
+fn progress_fingerprint(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.len().to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 fn event(request: &BrainWakeRequest, event: BrainEvent) -> BrainWakeStreamItem {
@@ -3638,7 +3856,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_identical_function_calls_fail_before_provider_request_timeout() {
+    fn repeated_identical_successful_function_calls_continue() {
         let repeated_call = || {
             Ok(vec![
                 ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
@@ -3658,7 +3876,15 @@ mod tests {
             repeated_call(),
             repeated_call(),
             repeated_call(),
+            Ok(vec![
+                ResponsesEvent::TextDelta("repeated work completed".to_string()),
+                ResponsesEvent::Completed {
+                    response_id: "resp-final".to_string(),
+                    usage: None,
+                },
+            ]),
         ])
+        .expect_function_output("call-repeat")
         .expect_function_output("call-repeat")
         .expect_function_output("call-repeat")
         .expect_function_output("call-repeat");
@@ -3674,20 +3900,65 @@ mod tests {
         );
         let result = brain.wake(wake_request(None, None)).unwrap();
         let items = result.stream.drain_until_terminal().unwrap();
-        let failures = items
-            .iter()
-            .filter_map(|item| match item {
-                BrainWakeStreamItem::WakeFailed { failure } => Some(failure.message.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(
-            failures
-                .iter()
-                .any(|message| message.contains("repeated function call lookup")),
-            "expected repeated-call failure, got {failures:?}",
+        assert!(items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if event.event == BrainEvent::TextDelta { text: "repeated work completed".to_string() }
+        )));
+        assert!(result.attention.is_none());
+        assert!(result.provider_state.is_some());
+    }
+
+    #[test]
+    fn repeated_identical_failed_function_calls_require_attention() {
+        let repeated_call = |call_id: &str, response_id: &str| {
+            Ok(vec![
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: None,
+                    call_id: call_id.to_string(),
+                    name: "lookup".to_string(),
+                    arguments: r#"{"query":"same"}"#.to_string(),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: response_id.to_string(),
+                    usage: None,
+                },
+            ])
+        };
+        let client = FakeResponsesClient::new(vec![
+            repeated_call("call-repeat", "resp-1"),
+            repeated_call("call-repeat", "resp-2"),
+            repeated_call("call-repeat", "resp-3"),
+            repeated_call("call-repeat", "resp-4"),
+        ])
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat");
+        let mut brain = brain_with(
+            client,
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "dependency unavailable".to_string(),
+                    is_error: true,
+                },
+            )]),
         );
-        assert!(result.provider_state.is_none());
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_closed().unwrap();
+
+        assert!(
+            items
+                .iter()
+                .all(|item| !matches!(item, BrainWakeStreamItem::WakeFailed { .. })),
+            "attention path emitted failure items: {items:?}"
+        );
+        let attention = result.attention.expect("operator attention");
+        assert_eq!(attention.reason_code, "responses_tool_no_progress");
+        assert_eq!(attention.consecutive_no_progress_samples, 3);
+        assert!(result.continuation_state.is_some());
     }
 
     #[test]

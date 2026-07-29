@@ -1,6 +1,7 @@
 import type {
   BrainAction,
   BrainContinuationPayload,
+  BrainWakeAttention,
   BrainWakeProviderStateOutput,
   BrainWakeFailure,
   BrainWakeStreamItem,
@@ -190,6 +191,7 @@ export function toOpenAiResponsesBrainRunResult(
       : undefined,
     outcome: raw.yielded ? "yielded" : "completed",
     continuationState: raw.continuation_state ?? undefined,
+    attention: raw.attention ?? undefined,
     transportMetrics: raw.transport_metrics,
     credentialSecretUpdate: raw.credential_secret_update
       ? {
@@ -233,6 +235,7 @@ export function toRawOpenAiResponsesBrainRunResult(
       : undefined,
     yielded: result.outcome === "yielded",
     continuation_state: result.continuationState,
+    attention: result.attention,
     transport_metrics: result.transportMetrics,
     credential_secret_update: result.credentialSecretUpdate
       ? {
@@ -412,6 +415,7 @@ export function toBufferedBrainRunDrainResult(
     ),
     terminal: raw.terminal,
     ...(raw.yielded === undefined ? {} : { yielded: raw.yielded }),
+    ...(raw.attention == null ? {} : { attention: raw.attention }),
     ...(raw.continuation_state == null
       ? {}
       : { continuationState: raw.continuation_state }),
@@ -476,6 +480,7 @@ export function toRawBufferedBrainRunDrainResult(
     ),
     terminal: result.terminal,
     ...(result.yielded === undefined ? {} : { yielded: result.yielded }),
+    ...(result.attention === undefined ? {} : { attention: result.attention }),
     ...(result.continuationState === undefined
       ? {}
       : { continuation_state: result.continuationState }),
@@ -518,6 +523,7 @@ export interface RawOpenAiResponsesBrainRunResult {
   provider_state?: RawBrainWakeProviderStateOutput | null;
   yielded?: boolean;
   continuation_state?: BrainContinuationPayload | null;
+  attention?: BrainWakeAttention | null;
   transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
 }
@@ -569,6 +575,7 @@ export interface RawOpenAiResponsesBufferedDrainResult {
   terminal: boolean;
   yielded?: boolean;
   continuation_state?: BrainContinuationPayload | null;
+  attention?: BrainWakeAttention | null;
   provider_state?: RawBrainWakeProviderStateOutput;
   transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
@@ -588,6 +595,7 @@ export interface RawChatCompletionsBufferedDrainResult {
   terminal: boolean;
   yielded?: boolean;
   continuation_state?: BrainContinuationPayload | null;
+  attention?: BrainWakeAttention | null;
   provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?: RawChatCompletionsTransportMetrics;
   error?: string | null;
@@ -609,6 +617,7 @@ export interface RawBufferedBrainRunDrainResult {
   terminal: boolean;
   yielded?: boolean;
   continuation_state?: BrainContinuationPayload | null;
+  attention?: BrainWakeAttention | null;
   terminal_reason_code?: string | null;
   provider_state?: RawBrainWakeProviderStateOutput | null;
   transport_metrics?:

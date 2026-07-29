@@ -303,6 +303,28 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn require_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionRequest,
+    ) -> CoreResult<LogicalTurnAttentionReceipt> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.require_logical_turn_attention(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.require_logical_turn_attention(request),
+        }
+    }
+
+    pub fn resolve_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionResolutionRequest,
+    ) -> CoreResult<LogicalTurnAttentionResolutionReceipt> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.resolve_logical_turn_attention(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.resolve_logical_turn_attention(request),
+        }
+    }
+
     pub fn complete_logical_turn(
         &self,
         request: &LogicalTurnCompletionRequest,

@@ -230,6 +230,7 @@ export interface RuntimeBrainModuleDiagnostics {
     providerRequestTimeoutMs?: number;
     workQuantumToolRounds?: number;
     workQuantumContinuationRounds?: number;
+    noProgressAttentionThreshold?: number;
     modelId: string;
     status?: string;
     baseUrl?: string;

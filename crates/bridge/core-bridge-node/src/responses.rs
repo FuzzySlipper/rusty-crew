@@ -5,6 +5,7 @@ use rusty_crew_brain_runtime::{
     BufferedBrainTurnPhase, BufferedBrainTurnRegistry, BufferedBrainTurnRun,
     BufferedNeutralPendingToolRequest, BufferedNeutralToolOutputPoll,
 };
+use rusty_crew_core_protocol::BrainWakeAttention;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -53,6 +54,8 @@ struct JsOpenAiResponsesBrainConfig {
     work_quantum_continuation_rounds: Option<usize>,
     #[serde(default)]
     wake_timeout_ms: Option<u64>,
+    #[serde(default)]
+    no_progress_attention_threshold: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -103,6 +106,7 @@ struct OpenAiResponsesBrainRunOutput {
     continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
     transport_metrics: ResponsesTransportMetrics,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
+    attention: Option<BrainWakeAttention>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -142,6 +146,7 @@ pub(crate) struct OpenAiResponsesBufferedRunPayload {
     transport_metrics: Option<ResponsesTransportMetrics>,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
     continuation_state: Option<rusty_crew_core_protocol::BrainContinuationPayload>,
+    attention: Option<BrainWakeAttention>,
     provider_finished: bool,
     provider_cancellation: ResponsesProviderCancellation,
 }
@@ -293,6 +298,7 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
             "tool_requests": tool_requests,
             "stream_retention_metrics": stream_retention_metrics,
             "terminal": terminal,
+            "attention": terminal.then(|| run.payload.attention.clone()).flatten(),
             "terminal_reason_code": terminal_reason_code,
             "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
             "yielded": terminal && run.coordinator.phase() == BufferedBrainTurnPhase::Yielded,
@@ -405,22 +411,34 @@ fn run_openai_responses_brain_buffered(
 ) {
     let sink_wake_id = wake_id.clone();
     let sink_buffered_runs = Arc::clone(&buffered_runs);
-    let mut sink = move |item: BrainWakeStreamItem| {
-        if let Err(error) = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
+    let mut sink = move |item: BrainWakeStreamItem| loop {
+        let attempt = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
             if run.coordinator.phase().is_terminal() {
-                return;
+                return Ok(false);
             }
-            if let Err(error) = run.coordinator.enqueue_provider_stream_item(item) {
+            run.coordinator
+                .enqueue_provider_stream_item(item.clone())
+                .map(|_| true)
+        });
+        match attempt {
+            Ok(Ok(true)) | Ok(Ok(false)) => break,
+            Ok(Err(BufferedBrainTurnError::BufferLimitExceeded { .. })) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(Err(error)) => {
                 eprintln!(
                     "openai-responses wake {} could not enqueue a live stream item: {}",
                     sink_wake_id, error
                 );
+                break;
             }
-        }) {
-            eprintln!(
-                "openai-responses wake {} could not access its buffered run while streaming: {}",
-                sink_wake_id, error
-            );
+            Err(error) => {
+                eprintln!(
+                        "openai-responses wake {} could not access its buffered run while streaming: {}",
+                        sink_wake_id, error
+                    );
+                break;
+            }
         }
     };
     let result = run_openai_responses_brain_with_buffered_tools(
@@ -441,6 +459,14 @@ fn run_openai_responses_brain_buffered(
                     run.payload.continuation_state = output.continuation_state;
                     run.payload.transport_metrics = Some(output.transport_metrics);
                     run.payload.credential_secret_update = output.credential_secret_update;
+                    if let Some(attention) = output.attention {
+                        let reason_code = attention.reason_code.clone();
+                        let summary = attention.summary.clone();
+                        run.payload.attention = Some(attention);
+                        if !run.coordinator.phase().is_terminal() {
+                            let _ = run.coordinator.require_attention(reason_code, summary);
+                        }
+                    }
                     if output.yielded && !run.coordinator.phase().is_terminal() {
                         let _ = run.coordinator.yield_turn();
                     }
@@ -488,18 +514,24 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
             name: call.name.clone(),
             arguments_json: call.arguments_json.clone(),
         };
-        {
+        loop {
             let queued = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
-                run.coordinator.queue_tool_request(request)
+                run.coordinator.queue_tool_request(request.clone())
             });
-            if !matches!(queued, Ok(Ok(()))) {
-                return NeutralToolOutput {
-                    output: format!(
-                        "OpenAI Responses buffered wake {} disappeared before tool request {}",
-                        self.wake_id, call.call_id
-                    ),
-                    is_error: true,
-                };
+            match queued {
+                Ok(Ok(())) => break,
+                Ok(Err(BufferedBrainTurnError::BufferLimitExceeded { .. })) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                _ => {
+                    return NeutralToolOutput {
+                        output: format!(
+                            "OpenAI Responses buffered wake {} ended before tool request {}",
+                            self.wake_id, call.call_id
+                        ),
+                        is_error: true,
+                    };
+                }
             }
         }
 
@@ -577,6 +609,7 @@ pub(crate) fn run_openai_responses_brain_json_blocking(input_json: String) -> na
         "provider_state": output.provider_state,
         "yielded": output.yielded,
         "continuation_state": output.continuation_state,
+        "attention": output.attention,
         "transport_metrics": output.transport_metrics,
         "credential_secret_update": output.credential_secret_update,
     });
@@ -754,6 +787,9 @@ where
     });
     config.max_output_tokens = input.config.max_output_tokens;
     config.provider_request_timeout_ms = input.config.provider_request_timeout_ms;
+    if let Some(no_progress_attention_threshold) = input.config.no_progress_attention_threshold {
+        config.no_progress_attention_threshold = no_progress_attention_threshold;
+    }
     if let Some(work_quantum_continuation_rounds) = input.config.work_quantum_continuation_rounds {
         if work_quantum_continuation_rounds == 0 {
             return Err(napi::Error::new(
@@ -881,7 +917,7 @@ where
         }
     }
     .map_err(to_napi_error)?;
-    let stream = if result.yielded {
+    let stream = if result.yielded || result.attention.is_some() {
         result.stream.drain_until_closed().map_err(to_napi_error)?
     } else {
         result
@@ -896,6 +932,7 @@ where
         continuation_state: result.continuation_state,
         transport_metrics: result.transport_metrics,
         credential_secret_update,
+        attention: result.attention,
     })
 }
 

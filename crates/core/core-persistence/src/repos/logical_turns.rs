@@ -304,6 +304,114 @@ impl CoordinationStore {
         })
     }
 
+    pub fn require_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionRequest,
+    ) -> CoreResult<LogicalTurnAttentionReceipt> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("begin logical turn attention", error))?;
+        let mut record = load_turn(&tx, &request.logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        if let Some(existing) = load_checkpoint(&tx, &request.checkpoint.continuation_id)? {
+            if existing == request.checkpoint
+                && record.current_continuation_id == existing.continuation_id
+                && record.phase == LogicalTurnPhase::AttentionRequired
+                && record.attention.as_ref() == Some(&request.attention)
+            {
+                return Ok(LogicalTurnAttentionReceipt {
+                    record,
+                    checkpoint: existing,
+                    replayed: true,
+                });
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "logical turn attention continuation id already has different content",
+            ));
+        }
+        require_running_fence(
+            &record,
+            request.expected_revision,
+            &request.expected_epoch_id,
+            request.expected_claim_generation,
+            request.expected_cancellation_generation,
+        )?;
+        validate_attention(&record, request)?;
+        let expected_revision = record.revision;
+        record.phase = LogicalTurnPhase::AttentionRequired;
+        record.current_continuation_id = request.checkpoint.continuation_id.clone();
+        record.continuation_sequence = request.checkpoint.sequence;
+        record.active_epoch_id = None;
+        record.claim_holder = None;
+        record.claim_expires_at = None;
+        record.attention = Some(request.attention.clone());
+        record.updated_at = request.now.clone();
+        record.revision += 1;
+        update_turn(&tx, &record, expected_revision)?;
+        insert_checkpoint(&tx, &request.checkpoint)?;
+        insert_outbox(&tx, &request.lifecycle_event)?;
+        tx.execute(
+            "DELETE FROM logical_brain_turn_tickets WHERE logical_turn_id = ?1",
+            params![record.logical_turn_id.0],
+        )
+        .map_err(|error| persistence_error("delete logical turn attention ticket", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit logical turn attention", error))?;
+        Ok(LogicalTurnAttentionReceipt {
+            record,
+            checkpoint: request.checkpoint.clone(),
+            replayed: false,
+        })
+    }
+
+    pub fn resolve_logical_turn_attention(
+        &self,
+        request: &LogicalTurnAttentionResolutionRequest,
+    ) -> CoreResult<LogicalTurnAttentionResolutionReceipt> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("begin logical turn attention resolution", error))?;
+        let mut record = load_turn(&tx, &request.logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        validate_attention_resolution(&record, request)?;
+        let checkpoint =
+            load_checkpoint(&tx, &record.current_continuation_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "attention-required logical turn has no current checkpoint",
+                )
+            })?;
+        let expected_revision = record.revision;
+        record.phase = LogicalTurnPhase::Runnable;
+        record.attention = None;
+        record.updated_at = request.now.clone();
+        record.revision += 1;
+        update_turn(&tx, &record, expected_revision)?;
+        insert_outbox(&tx, &request.lifecycle_event)?;
+        upsert_ticket(
+            &tx,
+            &LogicalTurnContinuationTicket {
+                logical_turn_id: record.logical_turn_id.clone(),
+                continuation_id: record.current_continuation_id.clone(),
+                session_id: record.session_id.clone(),
+                reason: ContinuationYieldReason::OperatorRequested,
+                created_at: request.now.clone(),
+            },
+        )?;
+        tx.commit().map_err(|error| {
+            persistence_error("commit logical turn attention resolution", error)
+        })?;
+        Ok(LogicalTurnAttentionResolutionReceipt {
+            record,
+            checkpoint,
+            action: request.action,
+            replayed: false,
+        })
+    }
+
     pub fn complete_logical_turn(
         &self,
         request: &LogicalTurnCompletionRequest,
@@ -774,6 +882,66 @@ pub(crate) fn validate_yield(
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "logical turn yield contract is internally inconsistent",
+        ));
+    }
+    validate_lifecycle_identity(record, &request.lifecycle_event)
+}
+
+pub(crate) fn validate_attention(
+    record: &LogicalTurnRecord,
+    request: &LogicalTurnAttentionRequest,
+) -> CoreResult<()> {
+    let checkpoint = &request.checkpoint;
+    if checkpoint.logical_turn_id != record.logical_turn_id
+        || checkpoint.parent_continuation_id.as_ref() != Some(&record.current_continuation_id)
+        || checkpoint.completed_epoch_id.as_ref() != Some(&request.expected_epoch_id)
+        || checkpoint.sequence != record.continuation_sequence + 1
+        || checkpoint.binding_generation != record.binding_generation
+        || request.lifecycle_event.kind != LogicalTurnLifecycleEventKind::AttentionRequired
+        || request.lifecycle_event.phase != LogicalTurnPhase::AttentionRequired
+        || request.lifecycle_event.continuation_id != checkpoint.continuation_id
+        || request.lifecycle_event.execution_epoch_id.as_ref() != Some(&request.expected_epoch_id)
+        || request.lifecycle_event.logical_turn_revision != record.revision + 1
+        || request.attention.reason_code != request.lifecycle_event.reason_code
+        || request.attention.summary != request.lifecycle_event.summary
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "logical turn attention contract is internally inconsistent",
+        ));
+    }
+    validate_lifecycle_identity(record, &request.lifecycle_event)
+}
+
+pub(crate) fn validate_attention_resolution(
+    record: &LogicalTurnRecord,
+    request: &LogicalTurnAttentionResolutionRequest,
+) -> CoreResult<()> {
+    require_revision(record, request.expected_revision)?;
+    let attention = record.attention.as_ref().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "logical turn does not require operator attention",
+        )
+    })?;
+    if record.phase != LogicalTurnPhase::AttentionRequired
+        || !attention.resolution_actions.contains(&request.action)
+        || !matches!(
+            request.action,
+            rusty_crew_core_protocol::LogicalTurnResolutionAction::RetryUnchanged
+                | rusty_crew_core_protocol::LogicalTurnResolutionAction::RetryProviderOperation
+        )
+        || (request.action == rusty_crew_core_protocol::LogicalTurnResolutionAction::RetryUnchanged
+            && !attention.retry_unchanged_safe)
+        || request.lifecycle_event.kind != LogicalTurnLifecycleEventKind::ContinuationResumed
+        || request.lifecycle_event.phase != LogicalTurnPhase::Runnable
+        || request.lifecycle_event.continuation_id != record.current_continuation_id
+        || request.lifecycle_event.execution_epoch_id.is_some()
+        || request.lifecycle_event.logical_turn_revision != record.revision + 1
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "logical turn attention resolution is not valid for the current state",
         ));
     }
     validate_lifecycle_identity(record, &request.lifecycle_event)

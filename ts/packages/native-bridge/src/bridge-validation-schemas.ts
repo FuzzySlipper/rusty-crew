@@ -1171,6 +1171,9 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
         workQuantumContinuationRounds: Type.Optional(
           Type.Number({ minimum: 1 }),
         ),
+        noProgressAttentionThreshold: Type.Optional(
+          Type.Integer({ minimum: 2 }),
+        ),
       },
       { additionalProperties: true },
     ),
@@ -1277,7 +1280,9 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
         providerStateStrategyId: Type.Optional(Type.String()),
         maxOutputTokens: Type.Optional(Type.Number()),
         workQuantumToolRounds: Type.Optional(Type.Integer({ minimum: 1 })),
-        repeatedToolCallLimit: Type.Optional(Type.Number()),
+        noProgressAttentionThreshold: Type.Optional(
+          Type.Integer({ minimum: 2 }),
+        ),
         finalMessageFallbackText: Type.Optional(Type.String()),
       },
       { additionalProperties: true },
@@ -1555,6 +1560,40 @@ export const rawChatCompletionsBufferedDrainResultSchema = Type.Object(
   { additionalProperties: true },
 );
 
+const brainWakeAttentionSchema = Type.Object(
+  {
+    reason: Type.Union([
+      Type.Literal("no_progress"),
+      Type.Literal("tool_outcome_unknown"),
+      Type.Literal("provider_configuration_required"),
+      Type.Literal("provider_credential_required"),
+      Type.Literal("provider_protocol_failure"),
+      Type.Literal("checkpoint_version_unsupported"),
+      Type.Literal("rebind_incompatible"),
+      Type.Literal("storage_repair_required"),
+      Type.Literal("invariant_repair_required"),
+    ]),
+    reasonCode: Type.String(),
+    summary: Type.String(),
+    evidenceRefs: Type.Optional(Type.Array(Type.String())),
+    resolutionActions: Type.Optional(
+      Type.Array(
+        Type.Union([
+          Type.Literal("retry_unchanged"),
+          Type.Literal("retry_provider_operation"),
+          Type.Literal("confirm_tool_completed"),
+          Type.Literal("confirm_tool_not_completed"),
+          Type.Literal("rebind"),
+          Type.Literal("cancel"),
+        ]),
+      ),
+    ),
+    retryUnchangedSafe: Type.Boolean(),
+    consecutiveNoProgressSamples: Type.Number({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
 export const rawBufferedBrainRunDrainSchema = Type.Object(
   {
     module_id: Type.Union([
@@ -1594,6 +1633,9 @@ export const rawBufferedBrainRunDrainSchema = Type.Object(
     terminal: Type.Boolean(),
     yielded: Type.Optional(Type.Boolean()),
     continuation_state: Type.Optional(Type.Unknown()),
+    attention: Type.Optional(
+      Type.Union([brainWakeAttentionSchema, Type.Null()]),
+    ),
     terminal_reason_code: Type.Optional(
       Type.Union([Type.String(), Type.Null()]),
     ),

@@ -15,13 +15,17 @@ import type {
 import type { BrainHostContext } from "../src/brain-host-context.js";
 import {
   chatCompletionsContinuationDiagnostics,
+  chatCompletionsNoProgressAttentionThreshold,
   chatCompletionsWorkQuantumToolRounds,
+  DEFAULT_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD,
   DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
 } from "../src/chat-completions-continuation-policy.js";
 import { createChatCompletionsBrainHost } from "../src/chat-completions-host.js";
 import type { BrainWakeInput } from "../src/index.js";
 
 const variable = "RUSTY_CREW_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS";
+const noProgressVariable =
+  "RUSTY_CREW_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD";
 
 test("Chat Completions continuation policy uses the scheduling default", () => {
   assert.equal(
@@ -30,11 +34,35 @@ test("Chat Completions continuation policy uses the scheduling default", () => {
   );
   assert.deepEqual(chatCompletionsContinuationDiagnostics("chat-completions"), {
     workQuantumToolRounds: DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
+    noProgressAttentionThreshold:
+      DEFAULT_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD,
   });
   assert.deepEqual(
     chatCompletionsContinuationDiagnostics("openai-responses"),
     {},
   );
+});
+
+test("Chat Completions no-progress policy is explicit and configurable", () => {
+  assert.equal(
+    chatCompletionsNoProgressAttentionThreshold({}),
+    DEFAULT_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD,
+  );
+  assert.equal(
+    chatCompletionsNoProgressAttentionThreshold({
+      [noProgressVariable]: " 9 ",
+    }),
+    9,
+  );
+  for (const value of ["0", "1", "1.5", "many"]) {
+    assert.throws(
+      () =>
+        chatCompletionsNoProgressAttentionThreshold({
+          [noProgressVariable]: value,
+        }),
+      new RegExp(noProgressVariable),
+    );
+  }
 });
 
 test("Chat Completions continuation policy accepts a large scheduling quantum", () => {
@@ -93,6 +121,10 @@ test("Chat Completions host sends the work quantum to the native boundary", asyn
   assert.equal(
     capturedConfig?.workQuantumToolRounds,
     DEFAULT_CHAT_COMPLETIONS_WORK_QUANTUM_TOOL_ROUNDS,
+  );
+  assert.equal(
+    capturedConfig?.noProgressAttentionThreshold,
+    DEFAULT_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD,
   );
 });
 

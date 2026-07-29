@@ -967,6 +967,95 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
 }
 
 #[test]
+fn chat_completions_buffered_bridge_pauses_repeated_failed_work_for_attention() {
+    let bridge = NativeBridge::new();
+    let registry = bridge.chat_completions_buffered_runs();
+    let wake_id = "buffered-chat-no-progress";
+    crate::chat_completions::start_chat_completions_brain_json(
+        Arc::clone(&registry),
+        serde_json::json!({
+            "wakeId": wake_id,
+            "sessionId": "buffered-chat-no-progress-session",
+            "messages": [{ "role": "user", "content": "attempt the operation" }],
+            "tools": [{
+                "name": "no_progress_failure_tool",
+                "description": "Always returns the same failed result",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }
+            }],
+            "config": {
+                "model": "fake-chat-model",
+                "noProgressAttentionThreshold": 3
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut submitted_call_ids = Vec::new();
+    let terminal = (0..400)
+        .find_map(|_| {
+            let drain: serde_json::Value = serde_json::from_str(
+                &crate::chat_completions::drain_chat_completions_brain_stream_json(
+                    &registry,
+                    wake_id.to_string(),
+                    Some(64),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            for request in drain["tool_requests"].as_array().unwrap() {
+                let call_id = request["call_id"].as_str().unwrap().to_string();
+                submitted_call_ids.push(call_id.clone());
+                crate::chat_completions::submit_chat_completions_tool_output_json(
+                    &registry,
+                    serde_json::json!({
+                        "wakeId": wake_id,
+                        "callId": call_id,
+                        "output": "dependency remains unavailable",
+                        "status": "failed",
+                        "reasonCode": "dependency_unavailable",
+                        "retryable": true
+                    })
+                    .to_string(),
+                )
+                .unwrap();
+            }
+            if drain["terminal"] == true {
+                Some(drain)
+            } else {
+                thread::sleep(std::time::Duration::from_millis(5));
+                None
+            }
+        })
+        .expect("repeated failed work should pause for operator attention");
+
+    assert_eq!(submitted_call_ids.len(), 4);
+    assert_eq!(terminal["error"], serde_json::Value::Null);
+    assert_eq!(terminal["yielded"], false);
+    assert_eq!(
+        terminal["terminal_reason_code"],
+        "chat_completions_tool_no_progress"
+    );
+    assert_eq!(
+        terminal["attention"]["reasonCode"],
+        "chat_completions_tool_no_progress"
+    );
+    assert!(terminal["attention"]["resolutionActions"]
+        .as_array()
+        .is_some_and(|actions| !actions.is_empty()));
+    assert!(terminal["continuation_state"].is_object());
+    assert!(!terminal["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| { item["type"] == "actions" || item["type"] == "wake_failed" }));
+}
+
+#[test]
 fn openai_responses_buffered_bridge_yields_and_resumes_without_repeating_tools() {
     let mut bridge = NativeBridge::new();
     bridge
