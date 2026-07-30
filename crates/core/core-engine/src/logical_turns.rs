@@ -546,6 +546,27 @@ impl CoreEngine {
         self.store.insert_logical_turn_operation(operation)
     }
 
+    pub fn lease_logical_turn_operation(
+        &self,
+        request: &LogicalTurnOperationLeaseRequest,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        self.store.lease_logical_turn_operation(request)
+    }
+
+    pub fn complete_logical_turn_operation(
+        &self,
+        request: &LogicalTurnOperationCompletionRequest,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        self.store.complete_logical_turn_operation(request)
+    }
+
+    pub fn list_logical_turn_operations(
+        &self,
+        logical_turn_id: &LogicalTurnId,
+    ) -> CoreResult<Vec<LogicalTurnOperationRecord>> {
+        self.store.list_logical_turn_operations(logical_turn_id)
+    }
+
     pub fn update_logical_turn_operation(
         &self,
         operation: &LogicalTurnOperationRecord,

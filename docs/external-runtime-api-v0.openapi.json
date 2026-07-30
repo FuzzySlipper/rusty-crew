@@ -4670,6 +4670,7 @@
           "phase": { "$ref": "#/components/schemas/LogicalTurnOperationPhase" },
           "reasonCode": { "type": ["string", "null"] },
           "requestFingerprint": { "type": "string" },
+          "resultPayload": true,
           "resultRef": { "type": ["string", "null"] },
           "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
           "updatedAt": { "type": "string" }

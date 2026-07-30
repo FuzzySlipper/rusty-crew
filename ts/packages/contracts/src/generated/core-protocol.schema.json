@@ -5416,6 +5416,7 @@
         "requestFingerprint": {
           "type": "string"
         },
+        "resultPayload": true,
         "resultRef": {
           "type": [
             "string",

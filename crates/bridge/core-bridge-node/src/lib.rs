@@ -54,15 +54,16 @@ use rusty_crew_core_persistence::{
     CuratorGovernanceWrite, CuratorGovernanceWriteResult, CuratorMutationQuery,
     CuratorMutationRecord, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
     DeleteChatMessageVariantRequest, EnsureActiveChatConversationBranchRequest,
-    EnsureActiveChatConversationBranchResult, ExactPage, LoreRecallQuery, LoreRecallResult,
-    LoreRecallTraceQuery, LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord,
-    MessageSlotWrite, MessageVariantQuery, MessageVariantRecord, MessageVariantWrite,
-    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
-    QueuedMessageRecord, RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest,
-    ReorderChatMessageVariantsRequest, RoleplayCharacterQuery, RoleplayCharacterRecord,
-    RoleplayCharacterWrite, RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayImportQuery,
-    RoleplayImportRecord, RoleplayImportWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    EnsureActiveChatConversationBranchResult, ExactPage, LogicalTurnOperationCompletionRequest,
+    LogicalTurnOperationLeaseRequest, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery, QueuedMessageRecord,
+    RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest,
+    RoleplayCharacterQuery, RoleplayCharacterRecord, RoleplayCharacterWrite,
+    RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayImportQuery, RoleplayImportRecord,
+    RoleplayImportWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
     RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
     RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
     RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
@@ -102,17 +103,19 @@ use rusty_crew_core_protocol::{
     AgentMessageInboxQuery, AgentMessageReplyCommand, AgentRoundCommand, AgentRoundId,
     AgentRoundStartReceipt, AgentRouteDelete, AgentRouteKey, AgentRouteRecord,
     AgentRouteResolution, AgentRouteWrite, AttachmentId, BackgroundMemoryAutoMutationPlanInput,
-    BodyState, BrainWakeProviderStateInput, BrainWakeStreamItem, CaptureMemoryProposalPlanInput,
-    ContextCompactionArtifact, ContextCompactionArtifactQuery, CrewAgentSessionCreationRequest,
-    CuratorGovernancePlanInput, CuratorLifecyclePlanInput, DataBankScopeId, ExternalAgentBinding,
-    ExternalAgentBindingMetadataWrite, ExternalAgentBindingRestoreRequest,
-    ExternalAgentSessionCreationId, ExternalAgentSessionCreationRequest, ExternalBindingId,
-    ExternalControlId, ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
+    BodyState, BrainOperationId, BrainWakeProviderStateInput, BrainWakeStreamItem,
+    CaptureMemoryProposalPlanInput, ContextCompactionArtifact, ContextCompactionArtifactQuery,
+    CrewAgentSessionCreationRequest, CuratorGovernancePlanInput, CuratorLifecyclePlanInput,
+    DataBankScopeId, ExternalAgentBinding, ExternalAgentBindingMetadataWrite,
+    ExternalAgentBindingRestoreRequest, ExternalAgentSessionCreationId,
+    ExternalAgentSessionCreationRequest, ExternalBindingId, ExternalControlId,
+    ExternalControlRequest, ExternalControlStatus, ExternalControllerContext,
     ExternalControllerLease, ExternalInteractionRecord, ExternalRuntimeCertificationInvalidation,
     ExternalRuntimeCertificationRequest, ExternalRuntimeEventInput,
     ExternalRuntimeHandshakeObservation, ExternalRuntimeId, ExternalRuntimeRegistration,
     ExternalRuntimeStateObservation, ExternalTurnPhase, ExternalTurnRequestId,
     ExternalTurnTerminalError, GitHubGateSuspendRequest, GitHubGateTerminalEvent,
+    LogicalTurnOperationKind, LogicalTurnOperationPhase, LogicalTurnOperationRecord,
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
     MessageVariantId, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
@@ -202,6 +205,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub(crate) use sessions::*;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 pub(crate) use storage_admin::*;
 use time::format_description::well_known::Rfc3339;
@@ -226,6 +230,9 @@ struct ActiveLogicalWake {
     brain: BrainImplementationHandle,
     session_id: SessionId,
     claim: rusty_crew_core_protocol::LogicalTurnContinuationClaim,
+    next_host_tool_operation: Arc<AtomicU64>,
+    host_tool_operations: Arc<Mutex<HashMap<String, BrainOperationId>>>,
+    provider_operation_id: Arc<Mutex<Option<BrainOperationId>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]

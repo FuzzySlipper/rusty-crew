@@ -1310,6 +1310,7 @@ export type LogicalTurnOperationRecord = {
   phase: LogicalTurnOperationPhase;
   reasonCode?: string | null;
   requestFingerprint: string;
+  resultPayload?: unknown;
   resultRef?: string | null;
   revision: number;
   updatedAt: string;

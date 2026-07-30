@@ -29,4 +29,5 @@ rusty-crew-chat-completions-brain = { path = "../../brains/chat-completions" }
 rusty-crew-roleplay-core = { path = "../../roleplay/roleplay-core" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 time.workspace = true

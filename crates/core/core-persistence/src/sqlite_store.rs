@@ -369,6 +369,28 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn lease_logical_turn_operation(
+        &self,
+        request: &LogicalTurnOperationLeaseRequest,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.lease_logical_turn_operation(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.lease_logical_turn_operation(request),
+        }
+    }
+
+    pub fn complete_logical_turn_operation(
+        &self,
+        request: &LogicalTurnOperationCompletionRequest,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.complete_logical_turn_operation(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.complete_logical_turn_operation(request),
+        }
+    }
+
     pub fn update_logical_turn_operation(
         &self,
         operation: &LogicalTurnOperationRecord,

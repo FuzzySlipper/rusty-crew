@@ -76,6 +76,23 @@ pub struct LogicalTurnContentWrite {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LogicalTurnOperationLeaseRequest {
+    pub operation: LogicalTurnOperationRecord,
+    pub expected_turn_revision: u64,
+    pub expected_claim_generation: u64,
+    pub expected_cancellation_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalTurnOperationCompletionRequest {
+    pub operation: LogicalTurnOperationRecord,
+    pub expected_operation_revision: u64,
+    pub expected_turn_revision: u64,
+    pub expected_claim_generation: u64,
+    pub expected_cancellation_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicalTurnAdmissionWrite {
     pub admission: LogicalTurnAdmission,
     pub frozen_content: Vec<LogicalTurnContentWrite>,

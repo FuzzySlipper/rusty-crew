@@ -645,6 +645,117 @@ impl CoordinationStore {
         Ok(operation.clone())
     }
 
+    pub fn lease_logical_turn_operation(
+        &self,
+        request: &LogicalTurnOperationLeaseRequest,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("begin logical turn operation lease", error))?;
+        let turn = load_turn(&tx, &request.operation.logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        require_running_fence(
+            &turn,
+            request.expected_turn_revision,
+            &request.operation.execution_epoch_id,
+            request.expected_claim_generation,
+            request.expected_cancellation_generation,
+        )?;
+        if request.operation.phase != LogicalTurnOperationPhase::Leased
+            || request.operation.revision != 1
+            || request.operation.result_ref.is_some()
+            || request.operation.result_payload.is_some()
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "logical turn operation lease must start at leased revision 1 without a result",
+            ));
+        }
+        if let Some(existing) = load_operation(&tx, &request.operation.operation_id)? {
+            if existing == request.operation {
+                return Ok(existing);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                "logical turn operation id already exists with different content",
+            ));
+        }
+        insert_operation(&tx, &request.operation)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit logical turn operation lease", error))?;
+        Ok(request.operation.clone())
+    }
+
+    pub fn complete_logical_turn_operation(
+        &self,
+        request: &LogicalTurnOperationCompletionRequest,
+    ) -> CoreResult<LogicalTurnOperationRecord> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("begin logical turn operation completion", error))?;
+        let turn = load_turn(&tx, &request.operation.logical_turn_id)?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "logical turn not found"))?;
+        let mut completed = request.operation.clone();
+        let active_fence_matches = require_running_fence(
+            &turn,
+            request.expected_turn_revision,
+            &completed.execution_epoch_id,
+            request.expected_claim_generation,
+            request.expected_cancellation_generation,
+        )
+        .is_ok();
+        if active_fence_matches {
+            if completed.phase != LogicalTurnOperationPhase::Completed {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "active logical turn operation completion must use completed phase",
+                ));
+            }
+        } else if turn.cancellation_generation != request.expected_cancellation_generation
+            || matches!(
+                turn.phase,
+                LogicalTurnPhase::CancelRequested | LogicalTurnPhase::Cancelled
+            )
+        {
+            completed.phase = LogicalTurnOperationPhase::CompletedAfterCancel;
+        } else {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "logical turn operation completion no longer matches the active execution fence",
+            ));
+        }
+        if completed.revision != request.expected_operation_revision + 1
+            || completed.result_ref.is_none()
+            || completed.result_payload.is_none()
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "logical turn operation completion requires the next revision and durable result",
+            ));
+        }
+        let existing = load_operation(&tx, &completed.operation_id)?.ok_or_else(|| {
+            CoreError::new(CoreErrorKind::NotFound, "logical turn operation not found")
+        })?;
+        if existing.revision != request.expected_operation_revision
+            || existing.logical_turn_id != completed.logical_turn_id
+            || existing.continuation_id != completed.continuation_id
+            || existing.execution_epoch_id != completed.execution_epoch_id
+            || existing.request_fingerprint != completed.request_fingerprint
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "logical turn operation changed before completion",
+            ));
+        }
+        update_operation(&tx, &completed, request.expected_operation_revision)?;
+        tx.commit().map_err(|error| {
+            persistence_error("commit logical turn operation completion", error)
+        })?;
+        Ok(completed)
+    }
+
     pub fn update_logical_turn_operation(
         &self,
         operation: &LogicalTurnOperationRecord,
@@ -1108,6 +1219,79 @@ fn insert_content_blob(
         ],
     )
     .map_err(|error| persistence_error("insert logical turn content", error))?;
+    Ok(())
+}
+
+fn load_operation(
+    conn: &rusqlite::Connection,
+    operation_id: &rusty_crew_core_protocol::BrainOperationId,
+) -> CoreResult<Option<LogicalTurnOperationRecord>> {
+    conn.query_row(
+        "SELECT record_json FROM logical_brain_turn_operations WHERE operation_id = ?1",
+        params![operation_id.0],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|error| persistence_error("load logical turn operation", error))?
+    .map(|raw| decode(&raw, "logical turn operation"))
+    .transpose()
+}
+
+fn insert_operation(
+    conn: &rusqlite::Connection,
+    operation: &LogicalTurnOperationRecord,
+) -> CoreResult<()> {
+    conn.execute(
+        "INSERT INTO logical_brain_turn_operations (
+            operation_id, logical_turn_id, continuation_id, execution_epoch_id,
+            kind, phase, idempotency_key, lease_expires_at, revision, updated_at, record_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            operation.operation_id.0,
+            operation.logical_turn_id.0,
+            operation.continuation_id.0,
+            operation.execution_epoch_id.0,
+            logical_turn_operation_kind_as_str(operation.kind),
+            logical_turn_operation_phase_as_str(operation.phase),
+            operation.idempotency_key,
+            operation.lease_expires_at,
+            operation.revision as i64,
+            operation.updated_at,
+            to_json_text(operation)?,
+        ],
+    )
+    .map_err(|error| persistence_error("insert logical turn operation", error))?;
+    Ok(())
+}
+
+fn update_operation(
+    conn: &rusqlite::Connection,
+    operation: &LogicalTurnOperationRecord,
+    expected_revision: u64,
+) -> CoreResult<()> {
+    let changed = conn
+        .execute(
+            "UPDATE logical_brain_turn_operations
+             SET phase = ?1, lease_expires_at = ?2, revision = ?3,
+                 updated_at = ?4, record_json = ?5
+             WHERE operation_id = ?6 AND revision = ?7",
+            params![
+                logical_turn_operation_phase_as_str(operation.phase),
+                operation.lease_expires_at,
+                operation.revision as i64,
+                operation.updated_at,
+                to_json_text(operation)?,
+                operation.operation_id.0,
+                expected_revision as i64,
+            ],
+        )
+        .map_err(|error| persistence_error("update logical turn operation", error))?;
+    if changed != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "logical turn operation revision mismatch or missing",
+        ));
+    }
     Ok(())
 }
 

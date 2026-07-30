@@ -1,10 +1,129 @@
 use super::*;
-use rusty_crew_core_persistence::{LogicalTurnAdmissionWrite, LogicalTurnContentWrite};
-use rusty_crew_core_protocol::{LogicalTurnAttentionReason, LogicalTurnResolutionAction};
+use rusty_crew_core_persistence::{
+    LogicalTurnAdmissionWrite, LogicalTurnContentWrite, LogicalTurnOperationCompletionRequest,
+    LogicalTurnOperationLeaseRequest,
+};
+use rusty_crew_core_protocol::{
+    BrainOperationId, LogicalTurnAttentionReason, LogicalTurnOperationKind,
+    LogicalTurnOperationPhase, LogicalTurnOperationRecord, LogicalTurnResolutionAction,
+};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const NOW: &str = "2026-06-19T00:00:00Z";
+
+#[test]
+fn production_operation_receipts_are_durable_and_cancellation_fenced() {
+    let data_dir = unique_data_dir("logical-turn-operation-receipts");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "operation-session",
+            "operation-agent",
+            "prepared-logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let prepared = engine
+        .prepare_logical_turn_wake(
+            &chat_completions_registration(),
+            &session.session_id,
+            "operation-wake",
+            "system prompt".into(),
+            br#"{"messages":[]}"#.to_vec(),
+        )
+        .unwrap();
+    let claim_generation = prepared.claim.record.claim_generation.unwrap();
+    let epoch_id = prepared.claim.record.active_epoch_id.clone().unwrap();
+    let leased = LogicalTurnOperationRecord {
+        operation_id: BrainOperationId::new("operation:test:1"),
+        logical_turn_id: prepared.claim.record.logical_turn_id.clone(),
+        continuation_id: prepared.claim.record.current_continuation_id.clone(),
+        execution_epoch_id: epoch_id,
+        kind: LogicalTurnOperationKind::HostToolExecution,
+        phase: LogicalTurnOperationPhase::Leased,
+        request_fingerprint: "request-fingerprint".into(),
+        idempotency_key: "operation:test:1".into(),
+        lease_holder: prepared.claim.record.claim_holder.clone(),
+        lease_generation: Some(claim_generation),
+        lease_expires_at: prepared.claim.record.claim_expires_at.clone(),
+        result_ref: None,
+        result_payload: None,
+        reason_code: None,
+        revision: 1,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+    };
+    engine
+        .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+            operation: leased.clone(),
+            expected_turn_revision: prepared.claim.record.revision,
+            expected_claim_generation: claim_generation,
+            expected_cancellation_generation: prepared.claim.record.cancellation_generation,
+        })
+        .unwrap();
+    let mut completed = leased.clone();
+    completed.phase = LogicalTurnOperationPhase::Completed;
+    completed.result_ref = Some("sha256:result".into());
+    completed.result_payload = Some(json!({"status":"succeeded","output":"ok"}));
+    completed.revision = 2;
+    let completed = engine
+        .complete_logical_turn_operation(&LogicalTurnOperationCompletionRequest {
+            operation: completed,
+            expected_operation_revision: 1,
+            expected_turn_revision: prepared.claim.record.revision,
+            expected_claim_generation: claim_generation,
+            expected_cancellation_generation: prepared.claim.record.cancellation_generation,
+        })
+        .unwrap();
+    assert_eq!(completed.phase, LogicalTurnOperationPhase::Completed);
+    let mut cancelled_lease = leased.clone();
+    cancelled_lease.operation_id = BrainOperationId::new("operation:test:2");
+    cancelled_lease.idempotency_key = "operation:test:2".into();
+    engine
+        .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+            operation: cancelled_lease.clone(),
+            expected_turn_revision: prepared.claim.record.revision,
+            expected_claim_generation: claim_generation,
+            expected_cancellation_generation: prepared.claim.record.cancellation_generation,
+        })
+        .unwrap();
+    engine
+        .cancel_logical_turn(&LogicalTurnCancelRequest {
+            logical_turn_id: prepared.claim.record.logical_turn_id.clone(),
+            expected_revision: prepared.claim.record.revision,
+            idempotency_key: "cancel-operation-turn".into(),
+            reason_code: "operator_cancelled".into(),
+            summary: "operator cancelled while a tool result was returning".into(),
+            now: NOW.into(),
+        })
+        .unwrap();
+    cancelled_lease.phase = LogicalTurnOperationPhase::Completed;
+    cancelled_lease.result_ref = Some("sha256:cancelled-result".into());
+    cancelled_lease.result_payload = Some(json!({"status":"succeeded","output":"late"}));
+    cancelled_lease.revision = 2;
+    let cancelled_completion = engine
+        .complete_logical_turn_operation(&LogicalTurnOperationCompletionRequest {
+            operation: cancelled_lease,
+            expected_operation_revision: 1,
+            expected_turn_revision: prepared.claim.record.revision,
+            expected_claim_generation: claim_generation,
+            expected_cancellation_generation: prepared.claim.record.cancellation_generation,
+        })
+        .unwrap();
+    assert_eq!(
+        cancelled_completion.phase,
+        LogicalTurnOperationPhase::CompletedAfterCancel
+    );
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let operations = restarted
+        .list_logical_turn_operations(&prepared.claim.record.logical_turn_id)
+        .unwrap();
+    assert_eq!(operations, vec![completed, cancelled_completion]);
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
 
 #[test]
 fn logical_turn_diagnostics_preserve_progress_across_restart_and_cancel_yielded_turns() {
@@ -645,6 +764,54 @@ fn sqlite_logical_turn_survives_over_512_yields_restart_and_cancel() {
                 now: NOW.into(),
             })
             .unwrap();
+        if sequence == 1 {
+            let claim_generation = claim.record.claim_generation.unwrap();
+            let leased = LogicalTurnOperationRecord {
+                operation_id: BrainOperationId::new("operation:sqlite:1"),
+                logical_turn_id: claim.record.logical_turn_id.clone(),
+                continuation_id: claim.record.current_continuation_id.clone(),
+                execution_epoch_id: claim.record.active_epoch_id.clone().unwrap(),
+                kind: LogicalTurnOperationKind::HostToolExecution,
+                phase: LogicalTurnOperationPhase::Leased,
+                request_fingerprint: "sqlite-request".into(),
+                idempotency_key: "operation:sqlite:1".into(),
+                lease_holder: claim.record.claim_holder.clone(),
+                lease_generation: Some(claim_generation),
+                lease_expires_at: claim.record.claim_expires_at.clone(),
+                result_ref: None,
+                result_payload: None,
+                reason_code: None,
+                revision: 1,
+                created_at: NOW.into(),
+                updated_at: NOW.into(),
+            };
+            engine
+                .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+                    operation: leased.clone(),
+                    expected_turn_revision: claim.record.revision,
+                    expected_claim_generation: claim_generation,
+                    expected_cancellation_generation: claim.record.cancellation_generation,
+                })
+                .unwrap();
+            let mut completed = leased;
+            completed.phase = LogicalTurnOperationPhase::Completed;
+            completed.result_ref = Some("sha256:sqlite-result".into());
+            completed.result_payload = Some(json!({"output":"sqlite-ok"}));
+            completed.revision = 2;
+            assert_eq!(
+                engine
+                    .complete_logical_turn_operation(&LogicalTurnOperationCompletionRequest {
+                        operation: completed,
+                        expected_operation_revision: 1,
+                        expected_turn_revision: claim.record.revision,
+                        expected_claim_generation: claim_generation,
+                        expected_cancellation_generation: claim.record.cancellation_generation,
+                    },)
+                    .unwrap()
+                    .phase,
+                LogicalTurnOperationPhase::Completed
+            );
+        }
         let request = yield_request_at(&claim, sequence);
         let yielded = engine.yield_logical_turn(&request).unwrap();
         assert_eq!(yielded.record.continuation_sequence, sequence);
@@ -763,6 +930,54 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
                 now: NOW.into(),
             })
             .unwrap();
+        if sequence == 1 {
+            let claim_generation = claim.record.claim_generation.unwrap();
+            let leased = LogicalTurnOperationRecord {
+                operation_id: BrainOperationId::new("operation:postgres:1"),
+                logical_turn_id: claim.record.logical_turn_id.clone(),
+                continuation_id: claim.record.current_continuation_id.clone(),
+                execution_epoch_id: claim.record.active_epoch_id.clone().unwrap(),
+                kind: LogicalTurnOperationKind::HostToolExecution,
+                phase: LogicalTurnOperationPhase::Leased,
+                request_fingerprint: "postgres-request".into(),
+                idempotency_key: "operation:postgres:1".into(),
+                lease_holder: claim.record.claim_holder.clone(),
+                lease_generation: Some(claim_generation),
+                lease_expires_at: claim.record.claim_expires_at.clone(),
+                result_ref: None,
+                result_payload: None,
+                reason_code: None,
+                revision: 1,
+                created_at: NOW.into(),
+                updated_at: NOW.into(),
+            };
+            engine
+                .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+                    operation: leased.clone(),
+                    expected_turn_revision: claim.record.revision,
+                    expected_claim_generation: claim_generation,
+                    expected_cancellation_generation: claim.record.cancellation_generation,
+                })
+                .unwrap();
+            let mut completed = leased;
+            completed.phase = LogicalTurnOperationPhase::Completed;
+            completed.result_ref = Some("sha256:postgres-result".into());
+            completed.result_payload = Some(json!({"output":"postgres-ok"}));
+            completed.revision = 2;
+            assert_eq!(
+                engine
+                    .complete_logical_turn_operation(&LogicalTurnOperationCompletionRequest {
+                        operation: completed,
+                        expected_operation_revision: 1,
+                        expected_turn_revision: claim.record.revision,
+                        expected_claim_generation: claim_generation,
+                        expected_cancellation_generation: claim.record.cancellation_generation,
+                    },)
+                    .unwrap()
+                    .phase,
+                LogicalTurnOperationPhase::Completed
+            );
+        }
         let request = yield_request_at(&claim, sequence);
         let yielded = engine.yield_logical_turn(&request).unwrap();
         assert_eq!(yielded.record.continuation_sequence, sequence);
@@ -787,6 +1002,13 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
         .unwrap();
     assert_eq!(turn.continuation_sequence, 513);
     assert_eq!(turn.phase, LogicalTurnPhase::Yielded);
+    assert_eq!(
+        engine
+            .list_logical_turn_operations(&LogicalTurnId::new("turn-1"))
+            .unwrap()
+            .len(),
+        1
+    );
     engine
         .cancel_logical_turn(&LogicalTurnCancelRequest {
             logical_turn_id: turn.logical_turn_id,

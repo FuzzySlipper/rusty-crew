@@ -49,6 +49,8 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let identity = parse_brain_run_identity(&input_json)?;
+        lease_provider_operation(&bridge, &identity.wake_id, &input_json)
+            .map_err(core_error_to_napi)?;
         begin_native_brain_activities(&bridge, &module_id, &identity);
         let result = match module_id.as_str() {
             CHAT_COMPLETIONS_MODULE_ID => start_chat_completions_brain_json(
@@ -64,6 +66,14 @@ impl NativeBridgeBinding {
         let result = match result {
             Ok(result) => result,
             Err(error) => {
+                let _ = complete_provider_operation(
+                    &bridge,
+                    &identity.wake_id,
+                    serde_json::json!({
+                        "status": "failed_to_start",
+                        "message": error.to_string(),
+                    }),
+                );
                 finish_native_brain_activity_tree(
                     &bridge,
                     &identity.wake_id,
@@ -98,7 +108,8 @@ impl NativeBridgeBinding {
             ),
             _ => return Err(unsupported_brain_module(&module_id)),
         }?;
-        observe_native_brain_drain(&bridge, &module_id, &wake_id, &result);
+        let result = prepare_native_brain_drain(&bridge, &module_id, &wake_id, result)
+            .map_err(core_error_to_napi)?;
         attach_brain_module_id(&module_id, result)
     }
 
@@ -110,6 +121,27 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let activity_identity = parse_tool_result_identity(&input_json);
+        let deliver_to_provider =
+            complete_host_tool_operation(&bridge, &input_json).map_err(core_error_to_napi)?;
+        if !deliver_to_provider {
+            let value =
+                serde_json::from_str::<serde_json::Value>(&input_json).map_err(|error| {
+                    napi::Error::new(
+                        napi::Status::InvalidArg,
+                        format!("invalid host tool result JSON: {error}"),
+                    )
+                })?;
+            return attach_brain_module_id(
+                &module_id,
+                serde_json::json!({
+                    "ok": true,
+                    "wake_id": value.get("wakeId").and_then(|value| value.as_str()),
+                    "call_id": value.get("callId").and_then(|value| value.as_str()),
+                    "receipt": "completed_after_cancel",
+                })
+                .to_string(),
+            );
+        }
         let result = match module_id.as_str() {
             CHAT_COMPLETIONS_MODULE_ID => submit_chat_completions_tool_output_json(
                 &bridge.chat_completions_buffered_runs(),
@@ -284,19 +316,29 @@ fn begin_native_brain_activities(
     }
 }
 
-fn observe_native_brain_drain(
+fn prepare_native_brain_drain(
     bridge: &NativeBridge,
     module_id: &str,
     wake_id: &str,
-    output_json: &str,
-) {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(output_json) else {
-        return;
-    };
+    output_json: String,
+) -> CoreResult<String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(&output_json).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("invalid native brain drain JSON: {error}"),
+        )
+    })?;
     if let Some(tool_requests) = value
-        .get("tool_requests")
-        .and_then(|value| value.as_array())
+        .get_mut("tool_requests")
+        .and_then(|value| value.as_array_mut())
     {
+        let mut dispatchable = Vec::with_capacity(tool_requests.len());
+        for request in std::mem::take(tool_requests) {
+            if prepare_host_tool_operation(bridge, module_id, wake_id, &request)? {
+                dispatchable.push(request);
+            }
+        }
+        *tool_requests = dispatchable;
         let session = bridge
             .buffered_brain_run_diagnostics()
             .ok()
@@ -306,7 +348,7 @@ fn observe_native_brain_drain(
                     .into_iter()
                     .find(|run| run.wake_id == wake_id)
             });
-        for request in tool_requests {
+        for request in tool_requests.iter() {
             let Some(call_id) = request.get("call_id").and_then(|value| value.as_str()) else {
                 continue;
             };
@@ -378,8 +420,392 @@ fn observe_native_brain_drain(
             .get("terminal_reason_code")
             .and_then(|value| value.as_str())
             .or(default_reason);
+        complete_provider_operation(
+            bridge,
+            wake_id,
+            serde_json::json!({
+                "status": if cancelled { "cancelled" } else if failed { "failed" } else { "completed" },
+                "reasonCode": reason_code,
+                "summary": summary,
+            }),
+        )?;
         finish_native_brain_activity_tree(bridge, wake_id, status, reason_code, summary);
     }
+    serde_json::to_string(&value).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InternalError,
+            format!("serialize native brain drain JSON: {error}"),
+        )
+    })
+}
+
+fn lease_provider_operation(
+    bridge: &NativeBridge,
+    wake_id: &str,
+    input_json: &str,
+) -> CoreResult<()> {
+    let Some(active) = bridge.active_logical_wakes.get(wake_id).cloned() else {
+        return Ok(());
+    };
+    let epoch_id = active.claim.record.active_epoch_id.clone().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "active logical wake has no execution epoch",
+        )
+    })?;
+    let operation_id = BrainOperationId::new(format!(
+        "operation:{}:{}:provider:{}",
+        active.claim.record.logical_turn_id.0,
+        active.claim.record.current_continuation_id.0,
+        sha256_text(&epoch_id.0)
+    ));
+    let now = now_iso();
+    let operation = LogicalTurnOperationRecord {
+        operation_id: operation_id.clone(),
+        logical_turn_id: active.claim.record.logical_turn_id.clone(),
+        continuation_id: active.claim.record.current_continuation_id.clone(),
+        execution_epoch_id: epoch_id,
+        kind: LogicalTurnOperationKind::ProviderRequest,
+        phase: LogicalTurnOperationPhase::Leased,
+        request_fingerprint: sha256_text(input_json),
+        idempotency_key: operation_id.0.clone(),
+        lease_holder: active.claim.record.claim_holder.clone(),
+        lease_generation: active.claim.record.claim_generation,
+        lease_expires_at: active.claim.record.claim_expires_at.clone(),
+        result_ref: None,
+        result_payload: None,
+        reason_code: None,
+        revision: 1,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    bridge
+        .engine()?
+        .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+            operation,
+            expected_turn_revision: active.claim.record.revision,
+            expected_claim_generation: required_claim_generation(&active)?,
+            expected_cancellation_generation: active.claim.record.cancellation_generation,
+        })?;
+    *active.provider_operation_id.lock().map_err(|_| {
+        CoreError::new(
+            CoreErrorKind::InternalError,
+            "provider operation map is poisoned",
+        )
+    })? = Some(operation_id);
+    Ok(())
+}
+
+fn prepare_host_tool_operation(
+    bridge: &NativeBridge,
+    module_id: &str,
+    wake_id: &str,
+    request: &serde_json::Value,
+) -> CoreResult<bool> {
+    let Some(active) = bridge.active_logical_wakes.get(wake_id).cloned() else {
+        return Ok(true);
+    };
+    let call_id = required_json_string(request, "call_id")?;
+    let name = required_json_string(request, "name")?;
+    let arguments_json = required_json_string(request, "arguments_json")?;
+    let sequence = active
+        .next_host_tool_operation
+        .fetch_add(1, Ordering::SeqCst);
+    let operation_id = BrainOperationId::new(format!(
+        "operation:{}:{}:host-tool:{sequence}",
+        active.claim.record.logical_turn_id.0, active.claim.record.current_continuation_id.0,
+    ));
+    let request_fingerprint = sha256_text(
+        &serde_json::json!({"name": name, "argumentsJson": arguments_json}).to_string(),
+    );
+    let existing = bridge
+        .engine()?
+        .list_logical_turn_operations(&active.claim.record.logical_turn_id)?
+        .into_iter()
+        .find(|operation| operation.operation_id == operation_id);
+    if let Some(existing) = existing {
+        if existing.request_fingerprint != request_fingerprint {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!("logical turn replay diverged at host tool operation {sequence}"),
+            ));
+        }
+        active
+            .host_tool_operations
+            .lock()
+            .map_err(|_| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "host tool operation map is poisoned",
+                )
+            })?
+            .insert(call_id.clone(), operation_id);
+        if existing.phase == LogicalTurnOperationPhase::Completed {
+            let mut payload = existing.result_payload.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "completed host tool operation has no durable result payload",
+                )
+            })?;
+            let payload_object = payload.as_object_mut().ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "durable host tool result payload is not an object",
+                )
+            })?;
+            payload_object.insert("wakeId".into(), serde_json::Value::String(wake_id.into()));
+            payload_object.insert("callId".into(), serde_json::Value::String(call_id));
+            let replay_json = payload.to_string();
+            match module_id {
+                CHAT_COMPLETIONS_MODULE_ID => submit_chat_completions_tool_output_json(
+                    &bridge.chat_completions_buffered_runs,
+                    replay_json,
+                ),
+                OPENAI_RESPONSES_MODULE_ID => submit_openai_responses_tool_output_json(
+                    &bridge.openai_responses_buffered_runs,
+                    replay_json,
+                ),
+                _ => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "unsupported brain module",
+                    ))
+                }
+            }
+            .map_err(|error| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    format!("replay durable host tool result: {error}"),
+                )
+            })?;
+            return Ok(false);
+        }
+        if existing.phase == LogicalTurnOperationPhase::CompletedAfterCancel {
+            return Ok(false);
+        }
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "host tool operation already exists without a replayable completed result",
+        ));
+    }
+
+    let epoch_id = active.claim.record.active_epoch_id.clone().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "active logical wake has no execution epoch",
+        )
+    })?;
+    let now = now_iso();
+    let operation = LogicalTurnOperationRecord {
+        operation_id: operation_id.clone(),
+        logical_turn_id: active.claim.record.logical_turn_id.clone(),
+        continuation_id: active.claim.record.current_continuation_id.clone(),
+        execution_epoch_id: epoch_id,
+        kind: LogicalTurnOperationKind::HostToolExecution,
+        phase: LogicalTurnOperationPhase::Leased,
+        request_fingerprint,
+        idempotency_key: operation_id.0.clone(),
+        lease_holder: active.claim.record.claim_holder.clone(),
+        lease_generation: active.claim.record.claim_generation,
+        lease_expires_at: active.claim.record.claim_expires_at.clone(),
+        result_ref: None,
+        result_payload: None,
+        reason_code: None,
+        revision: 1,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    bridge
+        .engine()?
+        .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+            operation,
+            expected_turn_revision: active.claim.record.revision,
+            expected_claim_generation: required_claim_generation(&active)?,
+            expected_cancellation_generation: active.claim.record.cancellation_generation,
+        })?;
+    active
+        .host_tool_operations
+        .lock()
+        .map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "host tool operation map is poisoned",
+            )
+        })?
+        .insert(call_id, operation_id);
+    Ok(true)
+}
+
+fn complete_host_tool_operation(bridge: &NativeBridge, input_json: &str) -> CoreResult<bool> {
+    let payload = serde_json::from_str::<serde_json::Value>(input_json).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("invalid host tool result JSON: {error}"),
+        )
+    })?;
+    let wake_id = required_json_string(&payload, "wakeId")?;
+    let call_id = required_json_string(&payload, "callId")?;
+    let Some(active) = bridge.active_logical_wakes.get(&wake_id).cloned() else {
+        return Ok(true);
+    };
+    let Some(operation_id) = active
+        .host_tool_operations
+        .lock()
+        .map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "host tool operation map is poisoned",
+            )
+        })?
+        .get(&call_id)
+        .cloned()
+    else {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "host tool result has no durable operation lease",
+        ));
+    };
+    let operation = bridge
+        .engine()?
+        .list_logical_turn_operations(&active.claim.record.logical_turn_id)?
+        .into_iter()
+        .find(|operation| operation.operation_id == operation_id)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                "durable host tool operation not found",
+            )
+        })?;
+    if matches!(
+        operation.phase,
+        LogicalTurnOperationPhase::Completed | LogicalTurnOperationPhase::CompletedAfterCancel
+    ) {
+        if operation.result_payload.as_ref() != Some(&payload) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "host tool operation already completed with a different result",
+            ));
+        }
+        return Ok(operation.phase == LogicalTurnOperationPhase::Completed);
+    }
+    if operation.phase != LogicalTurnOperationPhase::Leased {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "host tool operation is not leased",
+        ));
+    }
+    let mut completed = operation.clone();
+    completed.phase = LogicalTurnOperationPhase::Completed;
+    completed.result_ref = Some(format!("sha256:{}", sha256_text(input_json)));
+    completed.result_payload = Some(payload);
+    completed.reason_code = completed
+        .result_payload
+        .as_ref()
+        .and_then(|value| value.get("reasonCode"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    completed.revision += 1;
+    completed.updated_at = now_iso();
+    let completed = bridge.engine()?.complete_logical_turn_operation(
+        &LogicalTurnOperationCompletionRequest {
+            operation: completed,
+            expected_operation_revision: operation.revision,
+            expected_turn_revision: active.claim.record.revision,
+            expected_claim_generation: required_claim_generation(&active)?,
+            expected_cancellation_generation: active.claim.record.cancellation_generation,
+        },
+    )?;
+    Ok(completed.phase == LogicalTurnOperationPhase::Completed)
+}
+
+fn complete_provider_operation(
+    bridge: &NativeBridge,
+    wake_id: &str,
+    payload: serde_json::Value,
+) -> CoreResult<()> {
+    let Some(active) = bridge.active_logical_wakes.get(wake_id).cloned() else {
+        return Ok(());
+    };
+    let Some(operation_id) = active
+        .provider_operation_id
+        .lock()
+        .map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "provider operation map is poisoned",
+            )
+        })?
+        .clone()
+    else {
+        return Ok(());
+    };
+    let operation = bridge
+        .engine()?
+        .list_logical_turn_operations(&active.claim.record.logical_turn_id)?
+        .into_iter()
+        .find(|operation| operation.operation_id == operation_id)
+        .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "provider operation not found"))?;
+    if operation.phase != LogicalTurnOperationPhase::Leased {
+        return Ok(());
+    }
+    let mut completed = operation.clone();
+    completed.phase = LogicalTurnOperationPhase::Completed;
+    completed.result_ref = Some(format!("sha256:{}", sha256_text(&payload.to_string())));
+    completed.result_payload = Some(payload);
+    completed.revision += 1;
+    completed.updated_at = now_iso();
+    bridge
+        .engine()?
+        .complete_logical_turn_operation(&LogicalTurnOperationCompletionRequest {
+            operation: completed,
+            expected_operation_revision: operation.revision,
+            expected_turn_revision: active.claim.record.revision,
+            expected_claim_generation: required_claim_generation(&active)?,
+            expected_cancellation_generation: active.claim.record.cancellation_generation,
+        })?;
+    Ok(())
+}
+
+fn required_claim_generation(active: &ActiveLogicalWake) -> CoreResult<u64> {
+    active.claim.record.claim_generation.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "active logical wake has no claim generation",
+        )
+    })
+}
+
+fn required_json_string(value: &serde_json::Value, name: &str) -> CoreResult<String> {
+    value
+        .get(name)
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("brain operation payload requires {name}"),
+            )
+        })
+}
+
+fn now_iso() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .expect("UTC timestamps format as RFC3339")
+}
+
+fn sha256_text(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+fn core_error_to_napi(error: CoreError) -> napi::Error {
+    let status = if error.kind == CoreErrorKind::InvalidInput {
+        napi::Status::InvalidArg
+    } else {
+        napi::Status::GenericFailure
+    };
+    napi::Error::new(status, error.to_string())
 }
 
 fn parse_tool_result_identity(input_json: &str) -> Option<(String, String, bool)> {
@@ -434,6 +860,223 @@ fn finish_native_brain_activity_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_host_tool_dispatch_persists_lease_and_result_before_consumption() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "rusty-crew-operation-ledger-{}",
+            OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+        let mut bridge = NativeBridge::new();
+        let brain = bridge
+            .register_brain_implementation(BrainImplementationRegistration {
+                implementation_id: rusty_crew_core_bridge_api::BrainImplementationId::new(
+                    "operation-brain",
+                ),
+                profile_id: ProfileId::new("operation-profile"),
+                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+                model_config: rusty_crew_core_bridge_api::BrainModelConfig {
+                    provider: "fake".into(),
+                    model_name: "fake".into(),
+                    temperature_milli: None,
+                    max_output_tokens: None,
+                },
+                strategy: Some(rusty_crew_core_bridge_api::BrainStrategyMetadata::unused(
+                    CHAT_COMPLETIONS_MODULE_ID,
+                    "default",
+                )),
+                provider_state_scope: None,
+            })
+            .expect("register brain");
+        bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: data_dir.to_string_lossy().into_owned(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::System,
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1_000,
+                storage: None,
+            })
+            .expect("initialize engine");
+        bridge
+            .create_session(rusty_crew_core_bridge_api::SessionConfig {
+                session_id: SessionId::new("operation-session"),
+                agent_id: rusty_crew_core_bridge_api::AgentId::new("operation-agent"),
+                profile_id: ProfileId::new("operation-profile"),
+                kind: rusty_crew_core_bridge_api::SessionKind::Full,
+                delegation: None,
+                resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: None,
+                },
+                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+                history_window: None,
+            })
+            .expect("create session");
+        bridge
+            .build_brain_wake_request_for_session(
+                brain,
+                SessionId::new("operation-session"),
+                "system".into(),
+                br#"{"messages":[]}"#.to_vec(),
+                "operation-wake".into(),
+            )
+            .expect("prepare logical wake");
+
+        let request = serde_json::json!({
+            "call_id": "call-1",
+            "provider_item_id": null,
+            "name": "read_file",
+            "arguments_json": "{\"path\":\"README.md\"}"
+        });
+        let output = prepare_native_brain_drain(
+            &bridge,
+            CHAT_COMPLETIONS_MODULE_ID,
+            "operation-wake",
+            serde_json::json!({
+                "tool_requests": [request],
+                "terminal": false
+            })
+            .to_string(),
+        )
+        .expect("prepare host dispatch");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output).unwrap()["tool_requests"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let active = bridge.active_logical_wakes.get("operation-wake").unwrap();
+        let logical_turn_id = active.claim.record.logical_turn_id.clone();
+        let leased = bridge
+            .engine()
+            .unwrap()
+            .list_logical_turn_operations(&logical_turn_id)
+            .unwrap();
+        assert_eq!(leased.len(), 1);
+        assert_eq!(leased[0].phase, LogicalTurnOperationPhase::Leased);
+
+        assert!(complete_host_tool_operation(
+            &bridge,
+            &serde_json::json!({
+                "wakeId": "operation-wake",
+                "callId": "call-1",
+                "output": "contents",
+                "status": "succeeded",
+                "retryable": false
+            })
+            .to_string()
+        )
+        .expect("persist host result"));
+        let completed = bridge
+            .engine()
+            .unwrap()
+            .list_logical_turn_operations(&logical_turn_id)
+            .unwrap();
+        assert_eq!(completed[0].phase, LogicalTurnOperationPhase::Completed);
+        assert!(completed[0].result_payload.is_some());
+
+        drop(bridge);
+        let mut restarted = NativeBridge::new();
+        let restarted_brain = restarted
+            .register_brain_implementation(BrainImplementationRegistration {
+                implementation_id: rusty_crew_core_bridge_api::BrainImplementationId::new(
+                    "operation-brain",
+                ),
+                profile_id: ProfileId::new("operation-profile"),
+                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+                model_config: rusty_crew_core_bridge_api::BrainModelConfig {
+                    provider: "fake".into(),
+                    model_name: "fake".into(),
+                    temperature_milli: None,
+                    max_output_tokens: None,
+                },
+                strategy: Some(rusty_crew_core_bridge_api::BrainStrategyMetadata::unused(
+                    CHAT_COMPLETIONS_MODULE_ID,
+                    "default",
+                )),
+                provider_state_scope: None,
+            })
+            .expect("register restarted brain");
+        restarted
+            .initialize_engine(EngineConfig {
+                engine_data_dir: data_dir.to_string_lossy().into_owned(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::System,
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1_000,
+                storage: None,
+            })
+            .expect("restart engine");
+        restarted
+            .build_brain_wake_request_for_session(
+                restarted_brain,
+                SessionId::new("operation-session"),
+                "replacement system".into(),
+                br#"{"messages":["replacement"]}"#.to_vec(),
+                "operation-wake-restarted".into(),
+            )
+            .expect("resume logical wake");
+        let mut coordinator = rusty_crew_brain_runtime::BufferedBrainTurnCoordinator::new(
+            CHAT_COMPLETIONS_MODULE_ID,
+            "operation-wake-restarted",
+            SessionId::new("operation-session"),
+            rusty_crew_brain_runtime::BufferedBrainTurnLimits::default(),
+        )
+        .expect("coordinator");
+        coordinator.start().unwrap();
+        coordinator
+            .queue_tool_request(
+                rusty_crew_brain_runtime::BufferedNeutralPendingToolRequest {
+                    call_id: "call-replayed".into(),
+                    provider_item_id: None,
+                    name: "read_file".into(),
+                    arguments_json: "{\"path\":\"README.md\"}".into(),
+                },
+            )
+            .unwrap();
+        restarted
+            .chat_completions_buffered_runs
+            .insert(rusty_crew_brain_runtime::BufferedBrainTurnRun::new(
+                coordinator,
+                crate::chat_completions::ChatCompletionsBufferedRunPayload::default(),
+            ))
+            .unwrap();
+        let replayed = prepare_native_brain_drain(
+            &restarted,
+            CHAT_COMPLETIONS_MODULE_ID,
+            "operation-wake-restarted",
+            serde_json::json!({
+                "tool_requests": [{
+                    "call_id": "call-replayed",
+                    "provider_item_id": null,
+                    "name": "read_file",
+                    "arguments_json": "{\"path\":\"README.md\"}"
+                }],
+                "terminal": false
+            })
+            .to_string(),
+        )
+        .expect("replay durable result");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&replayed).unwrap()["tool_requests"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        restarted
+            .chat_completions_buffered_runs
+            .with_run_mut("operation-wake-restarted", |run| {
+                assert!(matches!(
+                    run.coordinator
+                        .poll_submitted_tool_output("call-replayed"),
+                    rusty_crew_brain_runtime::BufferedNeutralToolOutputPoll::Ready(output)
+                        if output.output == "contents"
+                ));
+            })
+            .unwrap();
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
 
     #[test]
     fn unsupported_modules_fail_closed() {

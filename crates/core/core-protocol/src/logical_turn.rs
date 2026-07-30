@@ -261,6 +261,8 @@ pub struct LogicalTurnOperationRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_payload: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<String>,
     pub revision: u64,
     pub created_at: IsoTimestamp,
