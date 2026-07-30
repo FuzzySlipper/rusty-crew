@@ -278,7 +278,9 @@ export async function executePreparedBrainHostToolRequest(
   }
 }
 
-function brainToolStateFingerprint(result: BrainToolResult): string | undefined {
+function brainToolStateFingerprint(
+  result: BrainToolResult,
+): string | undefined {
   const details = result.details;
   if (!isRecord(details)) return undefined;
   for (const key of [

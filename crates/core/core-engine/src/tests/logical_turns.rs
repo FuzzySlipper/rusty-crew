@@ -656,7 +656,7 @@ fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
         .create_session(session_config(
             "logical-session",
             "logical-agent",
-            "prepared-logical-profile",
+            "logical-profile",
             SessionKind::Full,
         ))
         .unwrap();
