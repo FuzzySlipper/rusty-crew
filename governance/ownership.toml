@@ -20,6 +20,7 @@ may_not_depend_on = ["rusty-crew-core-bridge-node"]
 name = "rust-brain-module"
 path_prefixes = ["crates/brains/"]
 allowed_internal_dependencies = [
+  "rusty-crew-brain-runtime",
   "rusty-crew-core-protocol",
   "rusty-crew-core-bridge-api",
 ]

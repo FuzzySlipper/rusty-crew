@@ -245,6 +245,14 @@ export interface RuntimeBrainModuleDiagnostics {
       kind?: string;
     };
   };
+  contextCompaction?: {
+    enabled: boolean;
+    autoCompactionEnabled: boolean;
+    strategyId: string;
+    compactAtPercent: number;
+    targetPercentAfterCompaction: number;
+    contextWindowTokens?: number;
+  };
   providerStateMode?: string;
   providerStateRebuild?: BrainModuleProviderStateRebuildPolicy;
   providerState?: RuntimeProviderStateDiagnostics;

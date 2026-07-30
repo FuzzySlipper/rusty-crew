@@ -14,6 +14,10 @@ pub use openai_oauth::{
 };
 
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
+use rusty_crew_brain_runtime::{
+    decide_context_compaction, is_context_limit_provider_error, BrainContextCompactionArtifact,
+    BrainContextCompactionDecision, BrainContextCompactionPolicy,
+};
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
     AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainContinuationPayload, BrainEvent,
@@ -61,6 +65,7 @@ pub struct ResponsesBrainConfig {
     pub provider_request_timeout_ms: Option<u64>,
     pub work_quantum_continuation_rounds: usize,
     pub no_progress_attention_threshold: u32,
+    pub context_compaction: Option<BrainContextCompactionPolicy>,
 }
 
 impl ResponsesBrainConfig {
@@ -80,6 +85,7 @@ impl ResponsesBrainConfig {
             provider_request_timeout_ms: None,
             work_quantum_continuation_rounds: DEFAULT_WORK_QUANTUM_CONTINUATION_ROUNDS,
             no_progress_attention_threshold: DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD,
+            context_compaction: None,
         }
     }
 
@@ -443,7 +449,7 @@ struct ResponsesPlannedRequest {
     fallback_reason: Option<PreviousResponseChainFallbackReason>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ResponsesReplayProjection {
     pub input_items: Vec<ResponsesInputItem>,
     pub replay_hints: Vec<ResponsesInputItem>,
@@ -1032,6 +1038,16 @@ struct ResponsesOutputContinuationState {
     accumulated_text: String,
     accumulated_reasoning: String,
     provider_guidance: Option<String>,
+    compaction_guidance: Option<String>,
+    #[serde(default)]
+    context_compaction: ResponsesContextCompactionState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponsesContextCompactionState {
+    last_compacted_item_count: usize,
+    artifacts: Vec<BrainContextCompactionArtifact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1990,11 +2006,11 @@ where
         if restored.is_none() {
             push_stream_item(&mut items, event(&request, BrainEvent::Started), &mut sink);
         }
-        let provider_state = restored
+        let mut provider_state = restored
             .as_ref()
             .and_then(|state| state.provider_state.clone())
             .or_else(|| request.provider_state.clone());
-        let provider_state_absence = restored
+        let mut provider_state_absence = restored
             .as_ref()
             .and_then(|state| state.provider_state_absence.clone())
             .or_else(|| request.provider_state_absence.clone());
@@ -2067,6 +2083,168 @@ where
         let mut epoch_continuation_round_count = 0usize;
 
         loop {
+            macro_rules! pause_on_provider_context_limit {
+                ($error:expr) => {
+                    if self.request_builder.config.context_compaction.is_some()
+                        && is_context_limit_provider_error(&$error.to_string())
+                    {
+                        let summary = format!(
+                            "The provider rejected the Responses projection before mid-turn context compaction could complete: {}",
+                            $error
+                        );
+                        push_stream_item(
+                            &mut items,
+                            responses_context_compaction_failure_event(&request, &summary),
+                            &mut sink,
+                        );
+                        return Ok(attention_responses_wake(
+                            &request,
+                            &self.request_builder.config,
+                            items,
+                            &mut sink,
+                            &base_history,
+                            continuation_items,
+                            committed_output_items,
+                            last_response_id,
+                            last_usage,
+                            no_progress_state,
+                            output_continuation,
+                            provider_state,
+                            provider_state_absence,
+                            metrics,
+                            responses_context_compaction_attention(summary),
+                        ));
+                    }
+                };
+            }
+            if continuation_items.len()
+                > output_continuation
+                    .context_compaction
+                    .last_compacted_item_count
+            {
+                let serialized_bytes = serde_json::to_vec(&(
+                    &base_history,
+                    &continuation_items,
+                    &output_continuation.compaction_guidance,
+                ))
+                .map(|value| value.len())
+                .unwrap_or(usize::MAX);
+                let provider_input_tokens = last_usage.as_ref().map(|usage| usage.input_tokens);
+                match decide_context_compaction(
+                    self.request_builder.config.context_compaction.as_ref(),
+                    provider_input_tokens,
+                    serialized_bytes,
+                ) {
+                    Ok(BrainContextCompactionDecision::Compact(usage)) => {
+                        push_stream_item(
+                            &mut items,
+                            responses_context_compaction_event(
+                                &request,
+                                "context_compaction_started",
+                                BrainProviderStatusLevel::Info,
+                                "Mid-turn Responses context compaction started at a safe provider boundary.",
+                                &usage,
+                                None,
+                            ),
+                            &mut sink,
+                        );
+                        let sequence =
+                            output_continuation.context_compaction.artifacts.len() as u64 + 1;
+                        match compact_responses_items(
+                            &mut continuation_items,
+                            self.request_builder
+                                .config
+                                .context_compaction
+                                .as_ref()
+                                .expect("compact decision policy"),
+                            usage.clone(),
+                            sequence,
+                            output_continuation.compaction_guidance.as_deref(),
+                        ) {
+                            Ok((artifact, guidance)) => {
+                                output_continuation.compaction_guidance = Some(guidance);
+                                output_continuation
+                                    .context_compaction
+                                    .artifacts
+                                    .push(artifact.clone());
+                                output_continuation
+                                    .context_compaction
+                                    .last_compacted_item_count = continuation_items.len();
+                                provider_state = None;
+                                provider_state_absence =
+                                    Some(ProviderStateAbsenceReason::Invalidated);
+                                push_stream_item(
+                                    &mut items,
+                                    responses_context_compaction_event(
+                                        &request,
+                                        "context_compaction_completed",
+                                        BrainProviderStatusLevel::Info,
+                                        "Mid-turn Responses context compaction completed; previous-response chaining was deliberately rebuilt from the compacted replay projection.",
+                                        &usage,
+                                        Some(&artifact),
+                                    ),
+                                    &mut sink,
+                                );
+                                return Ok(yield_responses_wake(
+                                    &request,
+                                    &self.request_builder.config,
+                                    items,
+                                    &mut sink,
+                                    &base_history,
+                                    continuation_items,
+                                    committed_output_items,
+                                    last_response_id,
+                                    last_usage,
+                                    no_progress_state,
+                                    output_continuation,
+                                    provider_state,
+                                    provider_state_absence,
+                                    metrics,
+                                ));
+                            }
+                            Err(summary) => {
+                                push_stream_item(
+                                    &mut items,
+                                    responses_context_compaction_event(
+                                        &request,
+                                        "context_compaction_failed",
+                                        BrainProviderStatusLevel::Error,
+                                        &summary,
+                                        &usage,
+                                        None,
+                                    ),
+                                    &mut sink,
+                                );
+                                return Ok(attention_responses_wake(
+                                    &request,
+                                    &self.request_builder.config,
+                                    items,
+                                    &mut sink,
+                                    &base_history,
+                                    continuation_items,
+                                    committed_output_items,
+                                    last_response_id,
+                                    last_usage,
+                                    no_progress_state,
+                                    output_continuation,
+                                    provider_state,
+                                    provider_state_absence,
+                                    metrics,
+                                    responses_context_compaction_attention(summary),
+                                ));
+                            }
+                        }
+                    }
+                    Ok(BrainContextCompactionDecision::Disabled)
+                    | Ok(BrainContextCompactionDecision::BelowThreshold(_)) => {}
+                    Err(message) => {
+                        return Err(CoreError::new(
+                            CoreErrorKind::InvalidInput,
+                            format!("invalid Responses context compaction policy: {message}"),
+                        ));
+                    }
+                }
+            }
             let mut planned_request = self.request_builder.build_for_strategy(
                 &request,
                 provider_state.as_ref(),
@@ -2076,7 +2254,7 @@ where
             );
             apply_output_continuation_guidance(
                 &mut planned_request.request,
-                output_continuation.provider_guidance.as_deref(),
+                responses_continuation_guidance(&output_continuation).as_deref(),
             );
             if let Some(reason) = planned_request.fallback_reason {
                 metrics.observe_fallback(reason);
@@ -2144,7 +2322,7 @@ where
                         );
                         apply_output_continuation_guidance(
                             &mut replay_request,
-                            output_continuation.provider_guidance.as_deref(),
+                            responses_continuation_guidance(&output_continuation).as_deref(),
                         );
                         let replay_fingerprint = request_fingerprint(&replay_request);
                         let replay_input_items = replay_request.input.clone();
@@ -2201,25 +2379,27 @@ where
                                 )
                             }
                             Err(error) => {
+                                pause_on_provider_context_limit!(error);
                                 return Ok(failed_result(
                                     &request,
                                     items,
                                     error,
                                     metrics.finish(),
                                     &mut sink,
-                                ))
+                                ));
                             }
                         };
                         let disposition = match disposition {
                             Ok(done) => done,
                             Err(error) => {
+                                pause_on_provider_context_limit!(error);
                                 return Ok(failed_result(
                                     &request,
                                     items,
                                     error,
                                     metrics.finish(),
                                     &mut sink,
-                                ))
+                                ));
                             }
                         };
                         if matches!(&disposition, ResponsesProviderDisposition::Complete) {
@@ -2286,6 +2466,7 @@ where
                         }
                         continue;
                     }
+                    pause_on_provider_context_limit!(error);
                     return Ok(failed_result(
                         &request,
                         items,
@@ -2314,13 +2495,14 @@ where
             let disposition = match disposition {
                 Ok(done) => done,
                 Err(error) => {
+                    pause_on_provider_context_limit!(error);
                     return Ok(failed_result(
                         &request,
                         items,
                         error,
                         metrics.finish(),
                         &mut sink,
-                    ))
+                    ));
                 }
             };
             if matches!(&disposition, ResponsesProviderDisposition::Complete) {
@@ -2494,7 +2676,11 @@ where
             return Err(ResponsesStreamError::ClosedBeforeComplete);
         }
         if completed {
-            *output_continuation = ResponsesOutputContinuationState::default();
+            output_continuation.overlap_text.clear();
+            output_continuation.overlap_reasoning.clear();
+            output_continuation.accumulated_text.clear();
+            output_continuation.accumulated_reasoning.clear();
+            output_continuation.provider_guidance = None;
         }
         if completed && pending_calls.is_empty() {
             return Ok(ResponsesProviderDisposition::Complete);
@@ -2695,6 +2881,180 @@ where
             None => ResponsesProviderDisposition::Continue,
         })
     }
+}
+
+fn responses_continuation_guidance(state: &ResponsesOutputContinuationState) -> Option<String> {
+    let parts = [
+        state.compaction_guidance.as_deref(),
+        state.provider_guidance.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|value| !value.trim().is_empty())
+    .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
+}
+
+fn responses_context_compaction_event(
+    request: &BrainWakeRequest,
+    kind: &str,
+    level: BrainProviderStatusLevel,
+    message: &str,
+    usage: &rusty_crew_brain_runtime::BrainContextUsageSnapshot,
+    artifact: Option<&BrainContextCompactionArtifact>,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level,
+            message: message.to_string(),
+            metadata_json: Some(
+                json!({
+                    "kind": kind,
+                    "usage": usage,
+                    "artifact": artifact,
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn responses_context_compaction_failure_event(
+    request: &BrainWakeRequest,
+    message: &str,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Error,
+            message: message.to_string(),
+            metadata_json: Some(
+                json!({
+                    "kind": "context_compaction_failed",
+                    "reasonCode": "provider_context_limit_before_compaction",
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn responses_context_compaction_attention(summary: String) -> BrainWakeAttention {
+    BrainWakeAttention {
+        reason: LogicalTurnAttentionReason::InvariantRepairRequired,
+        reason_code: "responses_context_compaction_attention".to_string(),
+        summary,
+        evidence_refs: vec!["context_compaction".to_string()],
+        resolution_actions: vec![
+            LogicalTurnResolutionAction::RetryProviderOperation,
+            LogicalTurnResolutionAction::Cancel,
+        ],
+        retry_unchanged_safe: false,
+        consecutive_no_progress_samples: 0,
+    }
+}
+
+fn compact_responses_items(
+    items: &mut Vec<ResponsesInputItem>,
+    policy: &BrainContextCompactionPolicy,
+    usage_before: rusty_crew_brain_runtime::BrainContextUsageSnapshot,
+    sequence: u64,
+    prior_guidance: Option<&str>,
+) -> Result<(BrainContextCompactionArtifact, String), String> {
+    let mut recent_start = items.len().saturating_sub(4);
+    while recent_start > 0
+        && matches!(
+            items.get(recent_start),
+            Some(ResponsesInputItem::FunctionCallOutput { .. })
+        )
+    {
+        recent_start -= 1;
+    }
+    if recent_start == 0 {
+        return Err(
+            "Responses context pressure exceeded the configured threshold, but no completed continuation exchange can be compacted without touching the current tool context"
+                .to_string(),
+        );
+    }
+    let compacted = &items[..recent_start];
+    let summary_budget = policy
+        .target_tokens()
+        .saturating_mul(4)
+        .saturating_div(4)
+        .clamp(256, 4096) as usize;
+    let mut summary = String::from(
+        "[Rusty Crew mid-turn context summary]\nEarlier completed Responses exchanges were compacted from provider input only. Raw transcript, reasoning telemetry, and tool effects remain authoritative.\n",
+    );
+    if let Some(prior) = prior_guidance {
+        summary.push_str(truncate_utf8_responses(
+            prior,
+            summary_budget.saturating_div(3),
+        ));
+        summary.push('\n');
+    }
+    for item in compacted {
+        let line = match item {
+            ResponsesInputItem::UserMessage { content } => format!("user: {content}\n"),
+            ResponsesInputItem::AssistantMessage { content } => {
+                format!("assistant: {content}\n")
+            }
+            ResponsesInputItem::Reasoning { summary, .. } => {
+                format!(
+                    "reasoning summary: {}\n",
+                    summary.as_deref().unwrap_or("retained")
+                )
+            }
+            ResponsesInputItem::FunctionCall {
+                name, arguments, ..
+            } => format!("tool call: {name}({arguments})\n"),
+            ResponsesInputItem::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            } => format!("tool result {call_id} error={is_error}: {output}\n"),
+            ResponsesInputItem::ReplayHint { .. } => "provider replay hint retained\n".to_string(),
+        };
+        let remaining = summary_budget.saturating_sub(summary.len());
+        if remaining <= 32 {
+            break;
+        }
+        summary.push_str(truncate_utf8_responses(&line, remaining.min(320)));
+    }
+    let replacement = items[recent_start..].to_vec();
+    let estimated_tokens_after = serde_json::to_vec(&(&replacement, &summary))
+        .map(|value| (value.len() as u64).saturating_add(3) / 4)
+        .map_err(|error| format!("serialize compacted Responses context: {error}"))?;
+    if estimated_tokens_after >= usage_before.input_tokens {
+        return Err(
+            "Responses context compaction could not produce a smaller provider projection while preserving the current tool exchange"
+                .to_string(),
+        );
+    }
+    let artifact = BrainContextCompactionArtifact {
+        sequence,
+        strategy_id: policy.strategy_id.clone(),
+        reason_code: "context_fill_threshold_exceeded".to_string(),
+        usage_before,
+        estimated_tokens_after,
+        compacted_item_count: compacted.len() as u64,
+        retained_item_count: replacement.len() as u64,
+        summary_text: summary.clone(),
+        provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+    };
+    *items = replacement;
+    Ok((artifact, summary))
+}
+
+fn truncate_utf8_responses(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &value[..boundary]
 }
 
 impl<C, T> BrainWakeStreamProducer for ResponsesReplayBrain<C, T>
@@ -4791,6 +5151,199 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn mid_turn_context_compaction_rebuilds_responses_replay_before_continuing() {
+        let mut scripts = (1..=6)
+            .map(|round| {
+                Ok(vec![
+                    ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                        id: Some(format!("item-{round}")),
+                        call_id: format!("call-{round}"),
+                        name: "lookup".to_string(),
+                        arguments: format!(r#"{{"round":{round}}}"#),
+                    }),
+                    ResponsesEvent::Completed {
+                        response_id: format!("response-{round}"),
+                        usage: Some(ResponsesTokenUsage {
+                            input_tokens: if round >= 5 { 20_000 } else { 100 },
+                            cached_input_tokens: 0,
+                            output_tokens: 10,
+                            reasoning_output_tokens: 0,
+                            total_tokens: if round >= 5 { 20_010 } else { 110 },
+                        }),
+                    },
+                ])
+            })
+            .collect::<Vec<_>>();
+        scripts.push(Ok(vec![
+            ResponsesEvent::TextDelta("responses compaction complete".to_string()),
+            ResponsesEvent::Completed {
+                response_id: "response-final".to_string(),
+                usage: None,
+            },
+        ]));
+        let mut config = ResponsesBrainConfig::previous_response_chain("gpt-5");
+        config.context_compaction = Some(BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 22_000,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 55,
+        });
+        let mut client = FakeResponsesClient::new(scripts);
+        for call_id in ["call-1", "call-1", "call-1", "call-1", "call-4", "call-5"] {
+            client = client.expect_function_output(call_id);
+        }
+        let mut brain = brain_with_config(
+            client,
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: format!("{}-tool-result", "x".repeat(3000)),
+                    is_error: false,
+                    state_fingerprint: "changing-state".to_string(),
+                },
+            )]),
+            config,
+        );
+
+        let first = brain.wake(wake_request(None, None)).unwrap();
+        assert!(
+            first.yielded,
+            "attention: {:?}, requests: {}",
+            first.attention,
+            brain.client.requests().len()
+        );
+        let first_items = first.stream.drain_until_closed().unwrap();
+        assert!(first_items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ProviderStatus { metadata_json: Some(metadata), .. }
+                    if metadata.contains("context_compaction_completed"))
+        )));
+        let checkpoint = responses_continuation_state(
+            first
+                .continuation_state
+                .as_ref()
+                .expect("Responses checkpoint"),
+        )
+        .expect("valid Responses checkpoint");
+        assert_eq!(
+            checkpoint
+                .output_continuation
+                .context_compaction
+                .artifacts
+                .len(),
+            1
+        );
+        assert_eq!(
+            checkpoint.output_continuation.context_compaction.artifacts[0]
+                .provider_chain_action
+                .as_deref(),
+            Some("rebuild_replay_after_compaction")
+        );
+        assert_eq!(
+            checkpoint.provider_state_absence,
+            Some(ProviderStateAbsenceReason::Invalidated)
+        );
+
+        let mut resumed = wake_request(None, None);
+        resumed.continuation_state = first.continuation_state;
+        let second = brain.wake(resumed).unwrap();
+        let second_items = second.stream.drain_until_closed().unwrap();
+        assert!(second.yielded);
+        let second_checkpoint = responses_continuation_state(
+            second
+                .continuation_state
+                .as_ref()
+                .expect("second Responses checkpoint"),
+        )
+        .expect("valid second Responses checkpoint");
+        assert_eq!(
+            second_checkpoint
+                .output_continuation
+                .context_compaction
+                .artifacts
+                .len(),
+            2
+        );
+
+        let mut resumed = wake_request(None, None);
+        resumed.continuation_state = second.continuation_state;
+        let third = brain.wake(resumed).unwrap();
+        let third_items = third.stream.drain_until_terminal().unwrap();
+        assert!(!third.yielded);
+        assert!(
+            third_items.iter().any(|item| matches!(
+                item,
+                BrainWakeStreamItem::Event { event }
+                    if matches!(&event.event, BrainEvent::TextDelta { text }
+                        if text == "responses compaction complete")
+            )),
+            "third wake items: {third_items:#?}"
+        );
+        assert!(!first_items
+            .iter()
+            .chain(second_items.iter())
+            .chain(third_items.iter())
+            .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+        assert_eq!(
+            first_items
+                .iter()
+                .chain(second_items.iter())
+                .chain(third_items.iter())
+                .filter(|item| matches!(
+                    item,
+                    BrainWakeStreamItem::Event { event }
+                        if matches!(event.event, BrainEvent::ToolCallFinished { .. })
+                ))
+                .count(),
+            6,
+        );
+    }
+
+    #[test]
+    fn provider_context_rejection_pauses_compaction_turn_for_attention() {
+        let mut config = ResponsesBrainConfig::replay("gpt-5");
+        config.context_compaction = Some(BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 1_000,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 55,
+        });
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Err(ResponsesStreamError::Transport(
+                "context_length_exceeded".to_string(),
+            ))]),
+            MapToolExecutor::default(),
+            config,
+        );
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_closed().unwrap();
+
+        assert_eq!(
+            result
+                .attention
+                .as_ref()
+                .map(|value| value.reason_code.as_str()),
+            Some("responses_context_compaction_attention")
+        );
+        assert!(result.continuation_state.is_some());
+        assert!(items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ProviderStatus { metadata_json: Some(metadata), .. }
+                    if metadata.contains("context_compaction_failed"))
+        )));
+        assert!(!items
+            .iter()
+            .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
     }
 
     #[test]

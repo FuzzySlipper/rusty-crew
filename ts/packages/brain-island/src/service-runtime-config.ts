@@ -1043,6 +1043,7 @@ function modelProviderToBrainModelConfig(
         : "openai-completions",
     apiKeyEnv,
     credentialKind,
+    contextWindowTokens: provider.contextWindowTokens,
     temperatureMilli: provider.temperatureMilli,
     maxOutputTokens: provider.maxOutputTokens,
     reasoningEffort: provider.reasoningEffort,
@@ -1428,6 +1429,12 @@ function brainModuleDiagnostics(input: {
       ...(input.profile.profile.modelConfig.baseUrl === undefined
         ? {}
         : { baseUrl: input.profile.profile.modelConfig.baseUrl }),
+      ...(input.profile.profile.modelConfig.contextWindowTokens === undefined
+        ? {}
+        : {
+            contextWindowTokens:
+              input.profile.profile.modelConfig.contextWindowTokens,
+          }),
       ...(input.profile.profile.modelConfig.maxOutputTokens === undefined
         ? {}
         : {
@@ -1455,6 +1462,22 @@ function brainModuleDiagnostics(input: {
             },
           }),
     },
+    ...(input.profile.profile.contextPolicy === undefined
+      ? {}
+      : {
+          contextCompaction: {
+            enabled: input.profile.profile.contextPolicy.enabled,
+            autoCompactionEnabled:
+              input.profile.profile.contextPolicy.autoCompactionEnabled,
+            strategyId: input.profile.profile.contextPolicy.strategyId,
+            compactAtPercent:
+              input.profile.profile.contextPolicy.compactAtPercent,
+            targetPercentAfterCompaction:
+              input.profile.profile.contextPolicy.targetPercentAfterCompaction,
+            contextWindowTokens:
+              input.profile.profile.modelConfig.contextWindowTokens,
+          },
+        }),
     providerStateMode: input.strategy.providerState.mode,
     providerStateRebuild: input.moduleStrategy.providerState.rebuild,
     strategyDiagnostics: input.moduleStrategy.diagnostics,

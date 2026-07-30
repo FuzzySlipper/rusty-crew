@@ -628,8 +628,9 @@ async function appendBrainEventToChatLog(
       });
       return;
     case "provider_status":
+      const compactionKind = contextCompactionEventKind(event.metadataJson);
       await context.appendChatEvent(session.sessionId, {
-        kind: "provider_status",
+        kind: compactionKind ?? "provider_status",
         payload: {
           wake_id: wakeId,
           level: event.level,
@@ -679,6 +680,29 @@ async function appendBrainEventToChatLog(
       // supplies both events in the same order when a completion packet is
       // absent (timeout/provider failure).
       return;
+  }
+}
+
+function contextCompactionEventKind(
+  metadataJson: string | null | undefined,
+):
+  | "context_compaction_started"
+  | "context_compaction_completed"
+  | "context_compaction_failed"
+  | undefined {
+  if (!metadataJson) return undefined;
+  try {
+    const parsed = JSON.parse(metadataJson) as { kind?: unknown };
+    switch (parsed.kind) {
+      case "context_compaction_started":
+      case "context_compaction_completed":
+      case "context_compaction_failed":
+        return parsed.kind;
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
   }
 }
 

@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "service": {
+    "kind": "debug",
+    "baseUrl": "http://127.0.0.1:9348",
+    "storage": "sqlite"
+  },
+  "scenarios": [
+    {
+      "profileId": "task-6408-chat-1785386712",
+      "sessionId": "task-6408-chat-1785386712-session",
+      "providerProtocol": "chat_completions",
+      "logicalTurnId": "turn:f3dde8f358014782986c588a9f2cb74e7b8bba0d759f2c9def2cd7113f720cf4",
+      "continuationCount": 2,
+      "operatorState": "completed",
+      "providerOperations": 7,
+      "toolOperations": 6,
+      "completedTools": [
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "terminal",
+        "search_files"
+      ],
+      "compactionEvents": [
+        {
+          "sequenceId": 392,
+          "kind": "context_compaction_started",
+          "usage": {
+            "contextWindowTokens": 128000,
+            "fillPercent": 20,
+            "inputTokens": 24598,
+            "source": "provider"
+          },
+          "artifact": null
+        },
+        {
+          "sequenceId": 393,
+          "kind": "context_compaction_completed",
+          "usage": {
+            "contextWindowTokens": 128000,
+            "fillPercent": 20,
+            "inputTokens": 24598,
+            "source": "provider"
+          },
+          "artifact": {
+            "compactedItemCount": 18,
+            "estimatedTokensAfter": 9561,
+            "providerChainAction": null,
+            "reasonCode": "context_fill_threshold_exceeded",
+            "retainedItemCount": 11,
+            "sequence": 1,
+            "strategyId": "rolling_summary_compaction",
+            "usageBefore": {
+              "contextWindowTokens": 128000,
+              "fillPercent": 20,
+              "inputTokens": 24598,
+              "source": "provider"
+            },
+            "summaryTextBytes": 3915
+          }
+        }
+      ],
+      "failureEvents": []
+    },
+    {
+      "profileId": "task-6408-responses-fresh-1785386957",
+      "sessionId": "task-6408-responses-fresh-1785386957-session",
+      "providerProtocol": "responses",
+      "logicalTurnId": "turn:036503cf2a90f65a2d521462fc2f7aa25a070dda15231ebd06a7197f15850b99",
+      "continuationCount": 2,
+      "operatorState": "completed",
+      "providerOperations": 9,
+      "toolOperations": 8,
+      "completedTools": [
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "git_status",
+        "search_files"
+      ],
+      "compactionEvents": [
+        {
+          "sequenceId": 17,
+          "kind": "context_compaction_started",
+          "usage": {
+            "contextWindowTokens": 250000,
+            "fillPercent": 5,
+            "inputTokens": 10275,
+            "source": "provider"
+          },
+          "artifact": null
+        },
+        {
+          "sequenceId": 18,
+          "kind": "context_compaction_completed",
+          "usage": {
+            "contextWindowTokens": 250000,
+            "fillPercent": 5,
+            "inputTokens": 10275,
+            "source": "provider"
+          },
+          "artifact": {
+            "compactedItemCount": 6,
+            "estimatedTokensAfter": 3651,
+            "providerChainAction": "rebuild_replay_after_compaction",
+            "reasonCode": "context_fill_threshold_exceeded",
+            "retainedItemCount": 4,
+            "sequence": 1,
+            "strategyId": "rolling_summary_compaction",
+            "usageBefore": {
+              "contextWindowTokens": 250000,
+              "fillPercent": 5,
+              "inputTokens": 10275,
+              "source": "provider"
+            },
+            "summaryTextBytes": 1459
+          }
+        }
+      ],
+      "failureEvents": []
+    }
+  ],
+  "rustyView": {
+    "status": "blocked_by_client_projection_bug",
+    "taskId": 6370,
+    "denMessageId": 25841,
+    "observedError": "TypeError: Cannot read properties of undefined (reading findIndex)",
+    "screenshot": "rusty-view-responses-compaction-debug.png",
+    "backendReadback": "Crew API returned all 35 Responses events while the selected View transcript remained blank"
+  }
+}

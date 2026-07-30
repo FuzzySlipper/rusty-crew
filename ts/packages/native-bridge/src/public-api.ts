@@ -307,6 +307,7 @@ export interface OpenAiResponsesBrainRunInput {
     providerRequestTimeoutMs?: number;
     workQuantumContinuationRounds?: number;
     noProgressAttentionThreshold?: number;
+    contextCompaction?: NativeBrainContextCompactionPolicy;
   };
   client?:
     | { mode: "fake" }
@@ -357,6 +358,7 @@ export interface ChatCompletionsBrainRunInput {
     maxOutputTokens?: number;
     workQuantumToolRounds?: number;
     noProgressAttentionThreshold?: number;
+    contextCompaction?: NativeBrainContextCompactionPolicy;
     finalMessageFallbackText?: string;
   };
   client?:
@@ -366,6 +368,15 @@ export interface ChatCompletionsBrainRunInput {
         baseUrl: string;
         apiKey?: string;
       };
+}
+
+export interface NativeBrainContextCompactionPolicy {
+  enabled: boolean;
+  autoCompactionEnabled: boolean;
+  strategyId: string;
+  contextWindowTokens: number;
+  compactAtPercent: number;
+  targetPercentAfterCompaction: number;
 }
 
 export interface ChatCompletionsToolRequest {

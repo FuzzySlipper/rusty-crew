@@ -953,6 +953,18 @@ fn sqlite_logical_turn_survives_over_512_yields_restart_and_cancel() {
         }
     }
 
+    let sqlite_turn = engine
+        .get_logical_turn(&LogicalTurnId::new("turn-1"))
+        .unwrap()
+        .expect("SQLite logical turn");
+    let sqlite_compaction = engine
+        .get_logical_turn_checkpoint(&sqlite_turn.current_continuation_id)
+        .unwrap()
+        .expect("SQLite continuation checkpoint");
+    assert_eq!(
+        sqlite_compaction.module_state.payload["contextCompaction"]["artifacts"][0]["sequence"],
+        513
+    );
     let diagnostic = engine
         .logical_turn_diagnostics(&LogicalTurnDiagnosticQuery {
             logical_turn_id: Some(LogicalTurnId::new("turn-1")),
@@ -1123,6 +1135,14 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
         .unwrap();
     assert_eq!(turn.continuation_sequence, 513);
     assert_eq!(turn.phase, LogicalTurnPhase::Yielded);
+    let persisted_compaction = engine
+        .get_logical_turn_checkpoint(&turn.current_continuation_id)
+        .unwrap()
+        .expect("PostgreSQL continuation checkpoint");
+    assert_eq!(
+        persisted_compaction.module_state.payload["contextCompaction"]["artifacts"][0]["sequence"],
+        513
+    );
     assert_eq!(
         engine
             .list_logical_turn_operations(&LogicalTurnId::new("turn-1"))
@@ -1352,7 +1372,17 @@ fn yield_request_at(
             module_id: "test-brain".into(),
             payload_version: "1".into(),
             payload_fingerprint: fingerprint,
-            payload: json!({"cursor": sequence}),
+            payload: json!({
+                "cursor": sequence,
+                "contextCompaction": {
+                    "artifacts": [{
+                        "sequence": sequence,
+                        "strategyId": "rolling_summary_compaction",
+                        "reasonCode": "context_fill_threshold_exceeded",
+                        "summaryText": format!("compaction {sequence}")
+                    }]
+                }
+            }),
         },
         operation_cursor: sequence,
         projection_cursor: sequence,

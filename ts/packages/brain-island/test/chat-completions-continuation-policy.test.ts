@@ -108,6 +108,18 @@ test("Chat Completions host sends the work quantum to the native boundary", asyn
           provider: "test",
           modelName: "test-model",
           api: "openai-completions",
+          contextWindowTokens: 16_000,
+        },
+        contextPolicy: {
+          enabled: true,
+          strategyId: "rolling_summary_compaction",
+          autoCompactionEnabled: true,
+          compactAtPercent: 80,
+          targetPercentAfterCompaction: 55,
+          maxContextPercentForWake: 95,
+          debugVisibility: "status",
+          includeDebugEventsInModelContext: false,
+          strategyConfig: {},
         },
       },
       skills: [],
@@ -126,6 +138,14 @@ test("Chat Completions host sends the work quantum to the native boundary", asyn
     capturedConfig?.noProgressAttentionThreshold,
     DEFAULT_CHAT_COMPLETIONS_NO_PROGRESS_ATTENTION_THRESHOLD,
   );
+  assert.deepEqual(capturedConfig?.contextCompaction, {
+    enabled: true,
+    autoCompactionEnabled: true,
+    strategyId: "rolling_summary_compaction",
+    contextWindowTokens: 16_000,
+    compactAtPercent: 80,
+    targetPercentAfterCompaction: 55,
+  });
 });
 
 test("Chat Completions host sends role bootstrap messages only before provider state exists", async () => {

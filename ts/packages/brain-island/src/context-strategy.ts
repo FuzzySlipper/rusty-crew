@@ -73,8 +73,8 @@ const CONTEXT_STRATEGY_DESCRIPTORS: ContextStrategyDescriptor[] = [
     id: "rolling_summary_compaction",
     label: "Rolling Summary Compaction",
     description:
-      "Plans context-fill-triggered compaction into durable summary artifacts.",
-    status: "planned",
+      "Compacts long mid-turn model projections in Rust while preserving the durable transcript and continuation provenance.",
+    status: "active",
     supportsAutoCompaction: true,
     modelFacingDebugDefault: false,
   },

@@ -552,6 +552,9 @@ function profileRuntimeMutationContext(state: ServiceState) {
       eventType: string;
       summaryPrefix: string;
     }) => applyServiceRuntimeConfigFromDisk(state, options),
+    rebuildBrainRuntime: async (profileId: string) => {
+      await rebuildServiceBrainRuntime(state, profileId as ProfileId);
+    },
   };
 }
 
@@ -6122,6 +6125,7 @@ function modelProviderToBrainModelConfig(
         : "openai-completions",
     apiKeyEnv,
     credentialKind,
+    contextWindowTokens: provider.contextWindowTokens,
     temperatureMilli: provider.temperatureMilli,
     maxOutputTokens: provider.maxOutputTokens,
     reasoningEffort: provider.reasoningEffort,

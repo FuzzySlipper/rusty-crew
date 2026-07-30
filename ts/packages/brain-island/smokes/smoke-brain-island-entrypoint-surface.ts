@@ -63,7 +63,6 @@ const runtimeExportGroups: Record<string, string[]> = {
     "createMemorySpaceToolResolver",
     "contextStrategyCatalog",
     "estimateContextUsage",
-    "evaluateContextCompactionTrigger",
   ],
   diagnosticsObservation: [
     "createAgentActivityObservationEvent",

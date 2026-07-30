@@ -224,6 +224,24 @@ function createRustChatCompletionsBrainHostExecutor(
           workQuantumToolRounds: chatCompletionsWorkQuantumToolRounds(),
           noProgressAttentionThreshold:
             chatCompletionsNoProgressAttentionThreshold(),
+          ...(context.profile.profile.contextPolicy &&
+          context.profile.profile.modelConfig.contextWindowTokens
+            ? {
+                contextCompaction: {
+                  enabled: context.profile.profile.contextPolicy.enabled,
+                  autoCompactionEnabled:
+                    context.profile.profile.contextPolicy.autoCompactionEnabled,
+                  strategyId: context.profile.profile.contextPolicy.strategyId,
+                  contextWindowTokens:
+                    context.profile.profile.modelConfig.contextWindowTokens,
+                  compactAtPercent:
+                    context.profile.profile.contextPolicy.compactAtPercent,
+                  targetPercentAfterCompaction:
+                    context.profile.profile.contextPolicy
+                      .targetPercentAfterCompaction,
+                },
+              }
+            : {}),
         },
         client,
       };

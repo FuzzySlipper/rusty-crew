@@ -49,6 +49,7 @@ export interface ProfileRegistryRuntimeConfigMutationContext {
     eventType: string;
     summaryPrefix: string;
   }): Promise<RustyCrewRuntimeConfigApplyResult>;
+  rebuildBrainRuntime(profileId: string): Promise<void>;
 }
 
 export interface ProfileRegistryRuntimeConfigPlan {
@@ -203,6 +204,7 @@ export async function applyProfileRegistryRuntimeConfigEffects(
   runtimeConfigPath: string;
   mcpBindings: { removed: number; added: number };
   applyResult: RustyCrewRuntimeConfigApplyResult;
+  brainRebuilt: boolean;
 }> {
   const profilePath = safeProfileConfigPath(
     context.runtimeConfig.profilesDir,
@@ -240,11 +242,15 @@ export async function applyProfileRegistryRuntimeConfigEffects(
     eventType: "profile_runtime_config_updated",
     summaryPrefix: `Profile ${record.profileId} runtime config updated`,
   });
+  if (plan.implications.runtimeRebuildRecommended) {
+    await context.rebuildBrainRuntime(record.profileId);
+  }
   return {
     profilePath,
     runtimeConfigPath: context.serviceConfigFile,
     mcpBindings: { removed, added: runtimeMcpBindings.length },
     applyResult,
+    brainRebuilt: plan.implications.runtimeRebuildRecommended,
   };
 }
 

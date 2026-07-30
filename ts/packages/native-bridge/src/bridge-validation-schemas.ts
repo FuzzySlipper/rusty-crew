@@ -1174,6 +1174,22 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
         noProgressAttentionThreshold: Type.Optional(
           Type.Integer({ minimum: 2 }),
         ),
+        contextCompaction: Type.Optional(
+          Type.Object(
+            {
+              enabled: Type.Boolean(),
+              autoCompactionEnabled: Type.Boolean(),
+              strategyId: Type.String({ minLength: 1 }),
+              contextWindowTokens: Type.Integer({ minimum: 1 }),
+              compactAtPercent: Type.Integer({ minimum: 1, maximum: 100 }),
+              targetPercentAfterCompaction: Type.Integer({
+                minimum: 0,
+                maximum: 99,
+              }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
       },
       { additionalProperties: true },
     ),
@@ -1281,6 +1297,22 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
         workQuantumToolRounds: Type.Optional(Type.Integer({ minimum: 1 })),
         noProgressAttentionThreshold: Type.Optional(
           Type.Integer({ minimum: 2 }),
+        ),
+        contextCompaction: Type.Optional(
+          Type.Object(
+            {
+              enabled: Type.Boolean(),
+              autoCompactionEnabled: Type.Boolean(),
+              strategyId: Type.String({ minLength: 1 }),
+              contextWindowTokens: Type.Integer({ minimum: 1 }),
+              compactAtPercent: Type.Integer({ minimum: 1, maximum: 100 }),
+              targetPercentAfterCompaction: Type.Integer({
+                minimum: 0,
+                maximum: 99,
+              }),
+            },
+            { additionalProperties: false },
+          ),
         ),
         finalMessageFallbackText: Type.Optional(Type.String()),
       },

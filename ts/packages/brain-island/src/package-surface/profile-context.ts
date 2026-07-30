@@ -106,14 +106,3 @@ export type {
   ContextTokenBudget,
   ContextUsageEstimate,
 } from "../context-estimate.js";
-export {
-  contextFillPercent,
-  evaluateContextCompactionTrigger,
-} from "../context-compaction-trigger.js";
-export type {
-  ContextCompactionAttemptRef,
-  ContextCompactionAttemptStatus,
-  ContextCompactionDecisionStatus,
-  ContextCompactionTriggerDecision,
-  ContextCompactionTriggerInput,
-} from "../context-compaction-trigger.js";

@@ -1267,6 +1267,7 @@ name = "rusty-crew-chat-completions-brain"
 version = "0.1.0"
 dependencies = [
  "reqwest",
+ "rusty-crew-brain-runtime",
  "rusty-crew-core-protocol",
  "serde",
  "serde_json",
@@ -1415,6 +1416,7 @@ name = "rusty-crew-openai-responses-brain"
 version = "0.1.0"
 dependencies = [
  "reqwest",
+ "rusty-crew-brain-runtime",
  "rusty-crew-core-bridge-api",
  "rusty-crew-core-protocol",
  "serde",

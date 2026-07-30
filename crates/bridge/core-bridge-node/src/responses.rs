@@ -1,9 +1,9 @@
 use super::*;
 use rusty_crew_brain_runtime::{
-    BrainRuntimeError, BufferedBrainHostToolResult, BufferedBrainHostToolStatus,
-    BufferedBrainTurnCoordinator, BufferedBrainTurnError, BufferedBrainTurnLimits,
-    BufferedBrainTurnPhase, BufferedBrainTurnRegistry, BufferedBrainTurnRun,
-    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutputPoll,
+    BrainContextCompactionPolicy, BrainRuntimeError, BufferedBrainHostToolResult,
+    BufferedBrainHostToolStatus, BufferedBrainTurnCoordinator, BufferedBrainTurnError,
+    BufferedBrainTurnLimits, BufferedBrainTurnPhase, BufferedBrainTurnRegistry,
+    BufferedBrainTurnRun, BufferedNeutralPendingToolRequest, BufferedNeutralToolOutputPoll,
 };
 use rusty_crew_core_protocol::BrainWakeAttention;
 use serde::Serialize;
@@ -54,6 +54,8 @@ struct JsOpenAiResponsesBrainConfig {
     work_quantum_continuation_rounds: Option<usize>,
     #[serde(default)]
     no_progress_attention_threshold: Option<u32>,
+    #[serde(default)]
+    context_compaction: Option<BrainContextCompactionPolicy>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -779,6 +781,15 @@ where
     config.provider_request_timeout_ms = input.config.provider_request_timeout_ms;
     if let Some(no_progress_attention_threshold) = input.config.no_progress_attention_threshold {
         config.no_progress_attention_threshold = no_progress_attention_threshold;
+    }
+    config.context_compaction = input.config.context_compaction;
+    if let Some(policy) = config.context_compaction.as_ref() {
+        policy.validate().map_err(|message| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid Responses context compaction policy: {message}"),
+            )
+        })?;
     }
     if let Some(work_quantum_continuation_rounds) = input.config.work_quantum_continuation_rounds {
         if work_quantum_continuation_rounds == 0 {

@@ -3,6 +3,12 @@
 Context compaction writes derived artifact records. It does not delete or
 rewrite raw transcript storage.
 
+There are two artifact lifetimes. Mid-turn artifacts are embedded atomically in
+the brain continuation checkpoint with the replacement model projection; see
+[`mid-turn-context-compaction.md`](mid-turn-context-compaction.md). The records
+described below are session-level derived artifacts for cross-turn readback and
+future context strategies. They are not a competing mid-turn lifecycle store.
+
 ## Shape
 
 `ContextCompactionArtifact` records:

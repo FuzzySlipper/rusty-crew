@@ -1,9 +1,9 @@
 use super::*;
 use rusty_crew_brain_runtime::{
-    BrainRuntimeError, BufferedBrainHostToolResult, BufferedBrainHostToolStatus,
-    BufferedBrainTurnCoordinator, BufferedBrainTurnError, BufferedBrainTurnLimits,
-    BufferedBrainTurnRegistry, BufferedBrainTurnRun, BufferedNeutralPendingToolRequest,
-    BufferedNeutralToolOutputPoll,
+    BrainContextCompactionPolicy, BrainRuntimeError, BufferedBrainHostToolResult,
+    BufferedBrainHostToolStatus, BufferedBrainTurnCoordinator, BufferedBrainTurnError,
+    BufferedBrainTurnLimits, BufferedBrainTurnRegistry, BufferedBrainTurnRun,
+    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutputPoll,
 };
 use rusty_crew_chat_completions_brain::{
     ChatCompletionMessage, ChatCompletionsBrainLoop, ChatCompletionsBrainLoopConfig,
@@ -75,6 +75,8 @@ struct JsChatCompletionsBrainConfig {
     work_quantum_tool_rounds: Option<usize>,
     #[serde(default)]
     no_progress_attention_threshold: Option<u32>,
+    #[serde(default)]
+    context_compaction: Option<BrainContextCompactionPolicy>,
     #[serde(default)]
     final_message_fallback_text: Option<String>,
 }
@@ -446,7 +448,16 @@ fn run_chat_completions_brain_with_buffered_tools(
             .config
             .no_progress_attention_threshold
             .unwrap_or(DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD),
+        context_compaction: input.config.context_compaction.clone(),
     };
+    if let Some(policy) = loop_config.context_compaction.as_ref() {
+        policy.validate().map_err(|message| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid chat-completions context compaction policy: {message}"),
+            )
+        })?;
+    }
     let descriptors = input
         .tools
         .iter()

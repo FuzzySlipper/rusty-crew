@@ -582,6 +582,7 @@ export interface BrainModelConfig {
   api?: string;
   apiKeyEnv?: string;
   credentialKind?: "api_key" | "openai_oauth" | "legacy_raw_api_key";
+  contextWindowTokens?: number;
   temperatureMilli?: number;
   maxOutputTokens?: number;
   reasoningEffort?: string;

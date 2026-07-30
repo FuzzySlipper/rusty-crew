@@ -108,6 +108,18 @@ test("Responses host forwards strategy quantum and continuation to Rust", async 
           provider: "test",
           modelName: "test-model",
           api: "responses",
+          contextWindowTokens: 32_000,
+        },
+        contextPolicy: {
+          enabled: true,
+          strategyId: "rolling_summary_compaction",
+          autoCompactionEnabled: true,
+          compactAtPercent: 80,
+          targetPercentAfterCompaction: 55,
+          maxContextPercentForWake: 95,
+          debugVisibility: "status",
+          includeDebugEventsInModelContext: false,
+          strategyConfig: {},
         },
       },
       skills: [],
@@ -131,6 +143,14 @@ test("Responses host forwards strategy quantum and continuation to Rust", async 
     captured?.config.noProgressAttentionThreshold,
     DEFAULT_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD,
   );
+  assert.deepEqual(captured?.config.contextCompaction, {
+    enabled: true,
+    autoCompactionEnabled: true,
+    strategyId: "rolling_summary_compaction",
+    contextWindowTokens: 32_000,
+    compactAtPercent: 80,
+    targetPercentAfterCompaction: 55,
+  });
   assert.deepEqual(captured?.continuationState, continuationState);
   assert.equal(result.outcome, "yielded");
   assert.deepEqual(result.continuationState, continuationState);
