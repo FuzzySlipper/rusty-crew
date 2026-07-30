@@ -16,6 +16,8 @@ const evidenceRoot =
   process.env.RUSTY_CREW_LONG_TURN_EVIDENCE_ROOT ??
   "/home/system/rusty-crew-debug/evidence/task-6371";
 const suffix = Date.now().toString(36);
+const keepProfilesForBrowserEvidence =
+  process.env.RUSTY_CREW_LONG_TURN_KEEP_PROFILES === "1";
 const forbiddenReasonCodes = [
   "chat_completions_continuation_limit_exceeded",
   "responses_continuation_limit_exceeded",
@@ -56,7 +58,9 @@ try {
   );
   console.log(JSON.stringify({ ...evidence, evidenceDirectory }, null, 2));
 } finally {
-  for (const profileId of profiles.reverse()) {
+  for (const profileId of keepProfilesForBrowserEvidence
+    ? []
+    : profiles.reverse()) {
     await api(
       "POST",
       `/v1/admin/control/profiles/${encodeURIComponent(profileId)}/delete`,
@@ -67,6 +71,11 @@ try {
     ).catch((error: unknown) => {
       console.error(`profile cleanup failed for ${profileId}`, error);
     });
+  }
+  if (keepProfilesForBrowserEvidence && profiles.length > 0) {
+    console.error(
+      `preserved task 6371 profiles for browser evidence: ${profiles.join(", ")}`,
+    );
   }
 }
 

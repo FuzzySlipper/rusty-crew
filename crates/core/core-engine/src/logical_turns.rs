@@ -144,7 +144,12 @@ impl CoreEngine {
                 ),
             ));
         }
-        let continuation_state = resumed.then(|| claim.checkpoint.module_state.clone());
+        // A restarted service also rediscovers an epoch that crashed before its
+        // first provider-owned checkpoint. The admission checkpoint only holds
+        // frozen Rust input; it is not a brain continuation payload.
+        let continuation_state = (resumed
+            && claim.checkpoint.yield_reason != ContinuationYieldReason::InitialAdmission)
+            .then(|| claim.checkpoint.module_state.clone());
         Ok(LogicalTurnWakePreparation {
             body_state_json,
             system_prompt,

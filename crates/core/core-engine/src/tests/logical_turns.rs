@@ -446,6 +446,80 @@ fn prepared_chat_turn_yields_and_restart_resumes_frozen_input_exactly_once() {
 }
 
 #[test]
+fn restart_during_initial_epoch_replays_frozen_input_without_admission_payload() {
+    let cases = [
+        (
+            "initial-epoch-chat-restart",
+            "initial-epoch-chat-session",
+            "prepared-logical-profile",
+            chat_completions_registration(),
+        ),
+        (
+            "initial-epoch-responses-restart",
+            "initial-epoch-responses-session",
+            "prepared-responses-profile",
+            openai_responses_registration(),
+        ),
+    ];
+
+    for (data_label, session_id, profile_id, registration) in cases {
+        let data_dir = unique_data_dir(data_label);
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let session = engine
+            .create_session(session_config(
+                session_id,
+                &format!("{session_id}-agent"),
+                profile_id,
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .enqueue_body_follow_up_message(
+                &session.session_id,
+                AgentId::new("operator"),
+                "original input",
+                Some(format!("{session_id}-message")),
+            )
+            .unwrap();
+        let first = engine
+            .prepare_logical_turn_wake(
+                &registration,
+                &session.session_id,
+                "source-wake",
+                "frozen system prompt".into(),
+                br#"{"messages":["frozen role"]}"#.to_vec(),
+            )
+            .unwrap();
+        assert!(first.continuation_state.is_none());
+        let logical_turn_id = first.claim.record.logical_turn_id.clone();
+        drop(engine);
+
+        let restarted = test_engine_with_data_dir(data_dir.clone());
+        let resumed = restarted
+            .prepare_logical_turn_wake(
+                &registration,
+                &session.session_id,
+                "replacement-wake",
+                "replacement system prompt".into(),
+                br#"{"messages":["replacement role"]}"#.to_vec(),
+            )
+            .unwrap();
+        assert_eq!(resumed.claim.record.logical_turn_id, logical_turn_id);
+        assert_eq!(resumed.system_prompt, "frozen system prompt");
+        assert_eq!(
+            resumed.role_assembly_json,
+            br#"{"messages":["frozen role"]}"#
+        );
+        assert!(resumed.continuation_state.is_none());
+
+        restarted
+            .settle_logical_turn_epoch(&resumed.claim, LogicalTurnEpochResult::Completed)
+            .unwrap();
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+}
+
+#[test]
 fn prepared_responses_turn_restores_opaque_checkpoint_after_restart() {
     let data_dir = unique_data_dir("logical-turn-responses-restart");
     let engine = test_engine_with_data_dir(data_dir.clone());

@@ -1,9 +1,7 @@
 # Logical-turn continuation live certification
 
 Task 6371 certifies the Rust-owned durable logical-turn continuation path across
-both production brain protocols. The backend and live-provider portions are
-complete. Rusty View browser certification remains owned by task 6370 and must
-land before task 6371 is closed.
+both production brain protocols and the deployed Rusty View operator surface.
 
 ## Deterministic coverage
 
@@ -34,10 +32,10 @@ npm run smoke:logical-turn-continuation-live-debug-service \
   -w @rusty-crew/brain-island
 ```
 
-The accepted run used port 9348 and wrote its persistent result to:
+The final backend run used port 9348 and wrote its persistent result to:
 
 ```text
-/home/system/rusty-crew-debug/evidence/task-6371/ms67mdar/live-provider-results.json
+/home/system/rusty-crew-debug/evidence/task-6371/ms72upgy/live-provider-results.json
 ```
 
 Observed results:
@@ -53,7 +51,7 @@ Completions turn was cancelled from `queued_to_continue` and reached one
 `cancelled` terminal without a completed terminal. Neither old continuation
 limit reason code appeared.
 
-The run also exposed and fixed two restart/scheduling races:
+The backend runs exposed and fixed two restart/scheduling races:
 
 - restart reconciliation no longer fabricates `service_restart_interrupted`
   while Rust owns a nonterminal logical turn;
@@ -63,6 +61,36 @@ The run also exposed and fixed two restart/scheduling races:
 Startup now asks Rust to republish runnable continuation tickets only after the
 service event subscription exists. Rust claim/ticket authority keeps that
 operation idempotent.
+
+## Deployed Rusty View proof
+
+The deployed View on the debug service completed two real Chromium scenarios:
+
+```text
+/home/system/rusty-crew-debug/evidence/task-6371/rusty-view-responses-restart-3103113
+/home/system/rusty-crew-debug/evidence/task-6371/rusty-view-operator-cancel-3105820
+```
+
+Each directory retains screenshots, the browser trace, visible transcript,
+console and page-error records, View debug snapshots, and a machine-readable
+evidence packet.
+
+The Responses scenario used `responses-proxy-cert-5389`, executed four tools
+across five continuations, restarted the debug service during the first
+provider epoch, reconnected SSE, completed once, and kept the terminal logical
+turn diagnostic visible. The cancellation scenario used `tester-chat`, exposed
+the active logical turn and cancel control, and reached one `cancelled` terminal
+with reason `operator_cancelled`.
+
+The browser run found two gaps that narrower smokes did not:
+
+- a restart during the first provider epoch rediscovered the Rust admission
+  checkpoint and incorrectly passed it to Responses as provider continuation
+  state; Rust now distinguishes frozen-input admission from a provider-owned
+  checkpoint, with both brain modules covered by a restart regression;
+- View replaced completed lifecycle evidence with the empty active-turn
+  diagnostics page; it now revision-merges SSE lifecycle state so terminal
+  diagnostics remain inspectable.
 
 The smoke temporarily set both work quanta to `1`, then restored the debug
 service defaults to `64`. The production service on port 9347 was not touched.
@@ -108,11 +136,3 @@ The Rust segment of `npm run verify:offline` also passed before its TypeScript
 bridge ratchets identified and drove the new operation's direct validation
 coverage. The final exact commit must pass GitHub jobs `Verify Offline` and
 `Verify Postgres Backend`.
-
-## Remaining browser closure
-
-Task 6370 must render continuation count, cumulative rounds, progress, and
-attention state from the generated APIs and SSE contract. Its browser proof
-must demonstrate live progress through multiple yields, restart/reconnect
-replay without duplicate transcript effects, and explicit operator cancel.
-Screenshots and machine-readable browser evidence belong with that task.
