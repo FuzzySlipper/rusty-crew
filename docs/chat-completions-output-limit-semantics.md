@@ -6,9 +6,10 @@ success signals. Rust owns their interpretation in the native
 
 - `stop` completes the provider response normally.
 - `tool_calls` continues through the bounded tool loop.
-- `length` does not emit `BrainEvent::Finished`. A response with no tool-call
-  fragment still terminates with `chat_completions_output_limit_exceeded` when
-  no fully parsed tool call is available.
+- `length` does not emit `BrainEvent::Finished`. A response with no actionable
+  tool call preserves its partial text and reasoning, checkpoints the same
+  logical turn, and yields for another provider request. It is not a terminal
+  wake failure.
 - A tool call remains actionable when the provider reports `length` only when
   the provider supplied an argument string and its complete contents parse as
   a JSON object. Missing, null, non-string, empty, and whitespace-only argument
@@ -24,9 +25,10 @@ success signals. Rust owns their interpretation in the native
   enter the same bounded recovery path instead of becoming generic transport
   failures.
 - A malformed response never executes any call from that provider round. The
-  Rust brain instead supplies deterministic model-visible feedback and permits
-  one provider recovery attempt by default. The feedback says that no tool ran,
-  includes the field-level diagnostics, and asks for one complete JSON object.
+  Rust brain instead supplies deterministic model-visible feedback, checkpoints
+  the same logical turn, and yields for recovery. The feedback says that no
+  tool ran, includes the field-level diagnostics, and asks for one complete
+  JSON object.
 - Recovery is temporary wake-local context. The malformed assistant fragment
   and runtime-generated feedback are sent to the next provider request but are
   excluded from durable provider history. Successful tool rounds before and
@@ -35,9 +37,10 @@ success signals. Rust owns their interpretation in the native
   only completed assistant tool-call and tool-result messages, never malformed
   fragments or synthetic recovery feedback.
 - A partial assistant message is replayed only when it contains visible text.
-  Reasoning-only fragments remain observable but are not placed in recovery
-  request history because some OpenAI-compatible providers reject assistant
-  messages without content or executable tool calls.
+  Reasoning-only fragments remain observable and checkpointed for duplicate
+  suppression, but are not placed in provider request history because some
+  OpenAI-compatible providers reject assistant messages without content or
+  executable tool calls.
 - Recovery emits a degraded provider status with kind
   `malformed_tool_call_recovery`, the attempt count, the triggering reason code,
   and affected tool names. Partial text, reasoning, and malformed-fragment
@@ -47,18 +50,20 @@ success signals. Rust owns their interpretation in the native
   the configured no-progress threshold, Rust checkpoints the same logical turn
   as `attention_required` instead of failing it.
 
-The output-limit failure preserves all text, reasoning, and completed tool
-events emitted before the terminal provider event. It also emits an info-level
-provider status with `finish_reason: length` in structured metadata. Service
-chat projection therefore records the partial transcript and a failed terminal
-event instead of a successful empty or partial completion.
+Output-limit continuation preserves all text, reasoning, and completed tool
+events emitted before the provider boundary. It emits an info-level finish
+status plus a degraded `output_limit_continuation` status, then projects a
+logical-turn yield without fabricating a user message or completed assistant
+message. Replayed provider prefixes are suppressed from the transcript. A
+completed, valid tool call at the boundary executes once before continuation;
+partial or malformed calls never execute.
 
 Rusty Crew does not increase a provider's output-token setting. Provider
 configuration remains the operator's authority, and an incomplete provider
-result remains visible. Malformed-call recovery runs only when a tool fragment
-is present but unsafe to execute. It records correction and attention status,
-preserves completed work in the continuation checkpoint, and never turns a
-healthy repeated operation into a count-based failure.
+result remains visible. Both ordinary output continuation and malformed-call
+recovery use the shared progress policy. Equivalent repetition pauses as
+durable operator attention with retry and cancel actions; advancing output may
+continue for as many provider requests as the logical turn needs.
 
 ## Verification
 
@@ -108,3 +113,7 @@ truncation failed with `chat_completions_output_limit_exceeded`. A subsequent
 short `write_file` turn in the same session completed and returned
 `RECOVERY_SESSION_OK`, proving the failed turn did not strand the session. The
 disposable profile and temporary files were removed after certification.
+
+Task 6407 replaced the remaining terminal output-exhaustion behavior and
+certified it with a deliberately small provider request budget. See
+`docs/evidence/task-6407-output-exhaustion-live.md`.

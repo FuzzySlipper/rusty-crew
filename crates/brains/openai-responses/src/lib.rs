@@ -1017,9 +1017,21 @@ struct ResponsesContinuationStateV1 {
     last_response_id: Option<String>,
     last_usage: Option<ResponsesTokenUsage>,
     no_progress_state: BrainNoProgressState,
+    #[serde(default)]
+    output_continuation: ResponsesOutputContinuationState,
     provider_state: Option<BrainWakeProviderStateInput>,
     provider_state_absence: Option<ProviderStateAbsenceReason>,
     metrics: ResponsesContinuationMetrics,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponsesOutputContinuationState {
+    overlap_text: String,
+    overlap_reasoning: String,
+    accumulated_text: String,
+    accumulated_reasoning: String,
+    provider_guidance: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1820,6 +1832,7 @@ pub struct ResponsesReplayBrain<C, T> {
 enum ResponsesProviderDisposition {
     Complete,
     Continue,
+    Yield,
     AttentionRequired(BrainWakeAttention),
 }
 
@@ -1836,23 +1849,69 @@ fn push_stream_item(
     items.push(item);
 }
 
-fn streaming_item_from_provider_event(
+fn projected_streaming_item_from_provider_event(
     request: &BrainWakeRequest,
     provider_event: &ResponsesEvent,
+    pending_text_overlap: &mut String,
+    pending_reasoning_overlap: &mut String,
+    projected_text: &mut String,
+    projected_reasoning: &mut String,
 ) -> Option<BrainWakeStreamItem> {
     match provider_event {
         ResponsesEvent::TextDelta(text) => {
-            Some(event(request, BrainEvent::TextDelta { text: text.clone() }))
+            let projected = suppress_responses_replayed_prefix(pending_text_overlap, text);
+            if projected.is_empty() {
+                None
+            } else {
+                projected_text.push_str(&projected);
+                Some(event(request, BrainEvent::TextDelta { text: projected }))
+            }
         }
-        ResponsesEvent::ReasoningDelta(text) => Some(event(
-            request,
-            BrainEvent::ReasoningDelta {
-                text: text.clone(),
-                format: Some("openai-responses".to_string()),
-            },
-        )),
+        ResponsesEvent::ReasoningDelta(text) => {
+            let projected = suppress_responses_replayed_prefix(pending_reasoning_overlap, text);
+            if projected.is_empty() {
+                None
+            } else {
+                projected_reasoning.push_str(&projected);
+                Some(event(
+                    request,
+                    BrainEvent::ReasoningDelta {
+                        text: projected,
+                        format: Some("openai-responses".to_string()),
+                    },
+                ))
+            }
+        }
         _ => None,
     }
+}
+
+fn suppress_responses_replayed_prefix(overlap: &mut String, delta: &str) -> String {
+    if overlap.is_empty() || delta.is_empty() {
+        return delta.to_string();
+    }
+    if overlap.starts_with(delta) {
+        overlap.drain(..delta.len());
+        return String::new();
+    }
+    if delta.starts_with(overlap.as_str()) {
+        let suffix = delta[overlap.len()..].to_string();
+        overlap.clear();
+        return suffix;
+    }
+    overlap.clear();
+    delta.to_string()
+}
+
+fn apply_output_continuation_guidance(request: &mut ResponsesRequest, guidance: Option<&str>) {
+    let Some(guidance) = guidance else {
+        return;
+    };
+    let instructions = request.instructions.get_or_insert_with(String::new);
+    if !instructions.is_empty() {
+        instructions.push_str("\n\n");
+    }
+    instructions.push_str(guidance);
 }
 
 impl<C, T> ResponsesReplayBrain<C, T>
@@ -1993,6 +2052,10 @@ where
             .as_ref()
             .map(|state| state.no_progress_state.clone())
             .unwrap_or_default();
+        let mut output_continuation = restored
+            .as_ref()
+            .map(|state| state.output_continuation.clone())
+            .unwrap_or_default();
         let no_progress_policy =
             BrainNoProgressPolicy::new(self.request_builder.config.no_progress_attention_threshold)
                 .map_err(|message| {
@@ -2004,12 +2067,16 @@ where
         let mut epoch_continuation_round_count = 0usize;
 
         loop {
-            let planned_request = self.request_builder.build_for_strategy(
+            let mut planned_request = self.request_builder.build_for_strategy(
                 &request,
                 provider_state.as_ref(),
                 provider_state_absence.as_ref(),
                 base_history.clone(),
                 continuation_items.clone(),
+            );
+            apply_output_continuation_guidance(
+                &mut planned_request.request,
+                output_continuation.provider_guidance.as_deref(),
             );
             if let Some(reason) = planned_request.fallback_reason {
                 metrics.observe_fallback(reason);
@@ -2024,14 +2091,30 @@ where
             metrics.observe_request(&planned_request.request);
             let request_started_at = Instant::now();
             let mut observed_deltas = Vec::new();
+            let mut pending_text_overlap = output_continuation.overlap_text.clone();
+            let mut pending_reasoning_overlap = output_continuation.overlap_reasoning.clone();
+            let mut projected_text = String::new();
+            let mut projected_reasoning = String::new();
             let events = match self.client.stream_observed(
                 planned_request.request.clone(),
                 &mut |provider_event| {
-                    if let Some(item) = streaming_item_from_provider_event(&request, provider_event)
-                    {
+                    let item = projected_streaming_item_from_provider_event(
+                        &request,
+                        provider_event,
+                        &mut pending_text_overlap,
+                        &mut pending_reasoning_overlap,
+                        &mut projected_text,
+                        &mut projected_reasoning,
+                    );
+                    if let Some(item) = item.as_ref() {
                         if let Some(sink) = sink.as_deref_mut() {
                             sink(item.clone());
                         }
+                    }
+                    if matches!(
+                        provider_event,
+                        ResponsesEvent::TextDelta(_) | ResponsesEvent::ReasoningDelta(_)
+                    ) {
                         observed_deltas.push(item);
                     }
                 },
@@ -2053,26 +2136,47 @@ where
                             ),
                             &mut sink,
                         );
-                        let replay_request = self.request_builder.build_replay(
+                        let mut replay_request = self.request_builder.build_replay(
                             &request,
                             provider_state.as_ref(),
                             base_history.clone(),
                             continuation_items.clone(),
+                        );
+                        apply_output_continuation_guidance(
+                            &mut replay_request,
+                            output_continuation.provider_guidance.as_deref(),
                         );
                         let replay_fingerprint = request_fingerprint(&replay_request);
                         let replay_input_items = replay_request.input.clone();
                         metrics.observe_request(&replay_request);
                         let request_started_at = Instant::now();
                         let mut observed_deltas = Vec::new();
+                        let mut pending_text_overlap = output_continuation.overlap_text.clone();
+                        let mut pending_reasoning_overlap =
+                            output_continuation.overlap_reasoning.clone();
+                        let mut projected_text = String::new();
+                        let mut projected_reasoning = String::new();
                         let disposition = match self.client.stream_observed(
                             replay_request,
                             &mut |provider_event| {
-                                if let Some(item) =
-                                    streaming_item_from_provider_event(&request, provider_event)
-                                {
+                                let item = projected_streaming_item_from_provider_event(
+                                    &request,
+                                    provider_event,
+                                    &mut pending_text_overlap,
+                                    &mut pending_reasoning_overlap,
+                                    &mut projected_text,
+                                    &mut projected_reasoning,
+                                );
+                                if let Some(item) = item.as_ref() {
                                     if let Some(sink) = sink.as_deref_mut() {
                                         sink(item.clone());
                                     }
+                                }
+                                if matches!(
+                                    provider_event,
+                                    ResponsesEvent::TextDelta(_)
+                                        | ResponsesEvent::ReasoningDelta(_)
+                                ) {
                                     observed_deltas.push(item);
                                 }
                             },
@@ -2083,7 +2187,9 @@ where
                                     &request,
                                     &mut items,
                                     events,
-                                    observed_deltas.len(),
+                                    &observed_deltas,
+                                    &projected_text,
+                                    &projected_reasoning,
                                     &mut sink,
                                     &mut continuation_items,
                                     &mut committed_output_items,
@@ -2091,6 +2197,7 @@ where
                                     &mut last_usage,
                                     no_progress_policy,
                                     &mut no_progress_state,
+                                    &mut output_continuation,
                                 )
                             }
                             Err(error) => {
@@ -2131,6 +2238,8 @@ where
                                 metrics.finish(),
                             ));
                         }
+                        let must_yield =
+                            matches!(&disposition, ResponsesProviderDisposition::Yield);
                         if let ResponsesProviderDisposition::AttentionRequired(attention) =
                             disposition
                         {
@@ -2145,6 +2254,7 @@ where
                                 last_response_id,
                                 last_usage,
                                 no_progress_state,
+                                output_continuation,
                                 provider_state,
                                 provider_state_absence,
                                 metrics,
@@ -2153,8 +2263,9 @@ where
                         }
                         metrics.observe_continuation_round();
                         epoch_continuation_round_count += 1;
-                        if epoch_continuation_round_count
-                            >= self.request_builder.config.work_quantum_continuation_rounds
+                        if must_yield
+                            || epoch_continuation_round_count
+                                >= self.request_builder.config.work_quantum_continuation_rounds
                         {
                             return Ok(yield_responses_wake(
                                 &request,
@@ -2167,6 +2278,7 @@ where
                                 last_response_id,
                                 last_usage,
                                 no_progress_state,
+                                output_continuation,
                                 provider_state,
                                 provider_state_absence,
                                 metrics,
@@ -2187,7 +2299,9 @@ where
                 &request,
                 &mut items,
                 events,
-                observed_deltas.len(),
+                &observed_deltas,
+                &projected_text,
+                &projected_reasoning,
                 &mut sink,
                 &mut continuation_items,
                 &mut committed_output_items,
@@ -2195,6 +2309,7 @@ where
                 &mut last_usage,
                 no_progress_policy,
                 &mut no_progress_state,
+                &mut output_continuation,
             );
             let disposition = match disposition {
                 Ok(done) => done,
@@ -2224,6 +2339,7 @@ where
                     metrics.finish(),
                 ));
             }
+            let must_yield = matches!(&disposition, ResponsesProviderDisposition::Yield);
             if let ResponsesProviderDisposition::AttentionRequired(attention) = disposition {
                 return Ok(attention_responses_wake(
                     &request,
@@ -2236,6 +2352,7 @@ where
                     last_response_id,
                     last_usage,
                     no_progress_state,
+                    output_continuation,
                     provider_state,
                     provider_state_absence,
                     metrics,
@@ -2244,8 +2361,9 @@ where
             }
             metrics.observe_continuation_round();
             epoch_continuation_round_count += 1;
-            if epoch_continuation_round_count
-                >= self.request_builder.config.work_quantum_continuation_rounds
+            if must_yield
+                || epoch_continuation_round_count
+                    >= self.request_builder.config.work_quantum_continuation_rounds
             {
                 return Ok(yield_responses_wake(
                     &request,
@@ -2258,6 +2376,7 @@ where
                     last_response_id,
                     last_usage,
                     no_progress_state,
+                    output_continuation,
                     provider_state,
                     provider_state_absence,
                     metrics,
@@ -2272,7 +2391,9 @@ where
         request: &BrainWakeRequest,
         items: &mut Vec<BrainWakeStreamItem>,
         events: Vec<ResponsesEvent>,
-        eagerly_streamed_delta_count: usize,
+        eagerly_streamed_deltas: &[Option<BrainWakeStreamItem>],
+        projected_text: &str,
+        projected_reasoning: &str,
         sink: &mut BrainWakeItemSink<'_>,
         continuation_items: &mut Vec<ResponsesInputItem>,
         committed_output_items: &mut Vec<ResponsesOutputItem>,
@@ -2280,38 +2401,54 @@ where
         last_usage: &mut Option<ResponsesTokenUsage>,
         no_progress_policy: BrainNoProgressPolicy,
         no_progress_state: &mut BrainNoProgressState,
+        output_continuation: &mut ResponsesOutputContinuationState,
     ) -> Result<ResponsesProviderDisposition, ResponsesStreamError> {
         let mut completed = false;
+        let mut incomplete = None;
         let mut pending_calls = Vec::new();
         let mut observed_delta_index = 0;
         let mut assistant_progress = Sha256::new();
+        let mut raw_text = String::new();
+        let mut raw_reasoning = String::new();
         for provider_event in events {
             match provider_event {
                 ResponsesEvent::TextDelta(text) => {
                     assistant_progress.update(b"text");
                     assistant_progress.update(text.as_bytes());
-                    let item = event(request, BrainEvent::TextDelta { text });
-                    if observed_delta_index < eagerly_streamed_delta_count {
-                        items.push(item);
+                    raw_text.push_str(&text);
+                    if let Some(observed) = eagerly_streamed_deltas.get(observed_delta_index) {
+                        if let Some(item) = observed {
+                            items.push(item.clone());
+                        }
                     } else {
-                        push_stream_item(items, item, sink);
+                        push_stream_item(
+                            items,
+                            event(request, BrainEvent::TextDelta { text }),
+                            sink,
+                        );
                     }
                     observed_delta_index += 1;
                 }
                 ResponsesEvent::ReasoningDelta(delta) => {
                     assistant_progress.update(b"reasoning");
                     assistant_progress.update(delta.as_bytes());
-                    let item = event(
-                        request,
-                        BrainEvent::ReasoningDelta {
-                            text: delta,
-                            format: Some("openai-responses".to_string()),
-                        },
-                    );
-                    if observed_delta_index < eagerly_streamed_delta_count {
-                        items.push(item);
+                    raw_reasoning.push_str(&delta);
+                    if let Some(observed) = eagerly_streamed_deltas.get(observed_delta_index) {
+                        if let Some(item) = observed {
+                            items.push(item.clone());
+                        }
                     } else {
-                        push_stream_item(items, item, sink);
+                        push_stream_item(
+                            items,
+                            event(
+                                request,
+                                BrainEvent::ReasoningDelta {
+                                    text: delta,
+                                    format: Some("openai-responses".to_string()),
+                                },
+                            ),
+                            sink,
+                        );
                     }
                     observed_delta_index += 1;
                 }
@@ -2349,15 +2486,100 @@ where
                     return Err(ResponsesStreamError::ResponseFailed(message));
                 }
                 ResponsesEvent::Incomplete(message) => {
-                    return Err(ResponsesStreamError::ResponseIncomplete(message));
+                    incomplete = Some(message);
                 }
             }
         }
-        if !completed {
+        if !completed && incomplete.is_none() {
             return Err(ResponsesStreamError::ClosedBeforeComplete);
         }
-        if pending_calls.is_empty() {
+        if completed {
+            *output_continuation = ResponsesOutputContinuationState::default();
+        }
+        if completed && pending_calls.is_empty() {
             return Ok(ResponsesProviderDisposition::Complete);
+        }
+
+        let mut output_attention = None;
+        if let Some(incomplete_message) = incomplete.as_deref() {
+            output_continuation
+                .accumulated_text
+                .push_str(projected_text);
+            output_continuation
+                .accumulated_reasoning
+                .push_str(projected_reasoning);
+            output_continuation.overlap_text = raw_text.clone();
+            output_continuation.overlap_reasoning = raw_reasoning.clone();
+            output_continuation.provider_guidance = Some(format!(
+                "[Rusty Crew output continuation] The previous Responses request ended incomplete ({incomplete_message}). Continue exactly where the assistant output stopped. Do not repeat text or reasoning already emitted, and finish the requested work or next complete tool call."
+            ));
+            if !projected_text.is_empty() {
+                continuation_items.push(ResponsesInputItem::AssistantMessage {
+                    content: projected_text.to_string(),
+                });
+            }
+            push_stream_item(
+                items,
+                event(
+                    request,
+                    BrainEvent::ProviderStatus {
+                        level: BrainProviderStatusLevel::Degraded,
+                        message: "Responses provider exhausted its per-request output budget; the same logical turn was checkpointed for continuation.".to_string(),
+                        metadata_json: Some(
+                            json!({
+                                "kind": "output_limit_continuation",
+                                "provider_message": incomplete_message,
+                                "attention_threshold": no_progress_policy.attention_threshold(),
+                            })
+                            .to_string(),
+                        ),
+                    },
+                ),
+                sink,
+            );
+            if pending_calls.is_empty() {
+                let state_json = serde_json::to_string(continuation_items).unwrap_or_default();
+                let disposition = no_progress_policy.observe(
+                    no_progress_state,
+                    BrainProgressSample {
+                        intent_fingerprint: progress_fingerprint(&[
+                            "responses_output_limit_continuation",
+                            incomplete_message,
+                        ]),
+                        result_fingerprint: progress_fingerprint(&[&raw_text, &raw_reasoning]),
+                        state_fingerprint: progress_fingerprint(&[&state_json]),
+                        assistant_progress_fingerprint: progress_fingerprint(&[
+                            &output_continuation.accumulated_text,
+                            &output_continuation.accumulated_reasoning,
+                        ]),
+                        result_class: BrainProgressResultClass::MalformedProviderOutput,
+                    },
+                );
+                if let BrainProgressDisposition::AttentionRequired {
+                    consecutive_samples,
+                } = disposition
+                {
+                    let reason_code = "responses_output_limit_no_progress";
+                    let summary = format!(
+                        "provider repeatedly exhausted its output budget without advancing the assistant response ({consecutive_samples} equivalent repetitions)"
+                    );
+                    push_stream_item(
+                        items,
+                        responses_no_progress_attention_event(
+                            request,
+                            reason_code,
+                            &summary,
+                            consecutive_samples,
+                        ),
+                        sink,
+                    );
+                    output_attention = Some(responses_no_progress_attention(
+                        reason_code,
+                        summary,
+                        consecutive_samples,
+                    ));
+                }
+            }
         }
         let assistant_progress_fingerprint = format!("{:x}", assistant_progress.finalize());
         let mut attention = None;
@@ -2467,8 +2689,9 @@ where
                 ));
             }
         }
-        Ok(match attention {
+        Ok(match attention.or(output_attention) {
             Some(attention) => ResponsesProviderDisposition::AttentionRequired(attention),
+            None if incomplete.is_some() => ResponsesProviderDisposition::Yield,
             None => ResponsesProviderDisposition::Continue,
         })
     }
@@ -2558,6 +2781,7 @@ fn yield_responses_wake(
     last_response_id: Option<String>,
     last_usage: Option<ResponsesTokenUsage>,
     no_progress_state: BrainNoProgressState,
+    output_continuation: ResponsesOutputContinuationState,
     provider_state: Option<BrainWakeProviderStateInput>,
     provider_state_absence: Option<ProviderStateAbsenceReason>,
     metrics: ResponsesTransportMetricsBuilder,
@@ -2573,6 +2797,7 @@ fn yield_responses_wake(
         last_response_id,
         last_usage,
         no_progress_state,
+        output_continuation,
         provider_state,
         provider_state_absence,
         metrics: metrics.checkpoint(),
@@ -2605,6 +2830,7 @@ fn attention_responses_wake(
     last_response_id: Option<String>,
     last_usage: Option<ResponsesTokenUsage>,
     no_progress_state: BrainNoProgressState,
+    output_continuation: ResponsesOutputContinuationState,
     provider_state: Option<BrainWakeProviderStateInput>,
     provider_state_absence: Option<ProviderStateAbsenceReason>,
     metrics: ResponsesTransportMetricsBuilder,
@@ -2621,6 +2847,7 @@ fn attention_responses_wake(
         last_response_id,
         last_usage,
         no_progress_state,
+        output_continuation,
         provider_state,
         provider_state_absence,
         metrics: metrics.checkpoint(),
@@ -4381,7 +4608,6 @@ mod tests {
     fn provider_failure_and_closed_stream_do_not_commit_provider_state() {
         for script in [
             Ok(vec![ResponsesEvent::Failed("rate limited".to_string())]),
-            Ok(vec![ResponsesEvent::Incomplete("max output".to_string())]),
             Err(ResponsesStreamError::RequestTimeout),
             Ok(vec![ResponsesEvent::TextDelta("partial".to_string())]),
         ] {
@@ -4397,6 +4623,174 @@ mod tests {
             ));
             assert!(result.provider_state.is_none());
         }
+    }
+
+    #[test]
+    fn incomplete_response_yields_and_resumes_without_duplicate_text_or_reasoning() {
+        let mut brain = brain_with(
+            FakeResponsesClient::new(vec![
+                Ok(vec![
+                    ResponsesEvent::ReasoningDelta("checking the tree".to_string()),
+                    ResponsesEvent::TextDelta("partial answer".to_string()),
+                    ResponsesEvent::Incomplete("max output tokens".to_string()),
+                ]),
+                Ok(vec![
+                    ResponsesEvent::ReasoningDelta("checking the tree".to_string()),
+                    ResponsesEvent::TextDelta("partial answer".to_string()),
+                    ResponsesEvent::TextDelta(" completed".to_string()),
+                    ResponsesEvent::Completed {
+                        response_id: "resp-complete".to_string(),
+                        usage: None,
+                    },
+                ]),
+            ]),
+            MapToolExecutor::default(),
+        );
+
+        let first = brain.wake(wake_request(None, None)).unwrap();
+        assert!(first.yielded);
+        assert!(first.continuation_state.is_some());
+        let mut streamed = first.stream.drain_until_closed().unwrap();
+        let mut resumed_request = wake_request(None, None);
+        resumed_request.continuation_state = first.continuation_state;
+        let second = brain.wake(resumed_request).unwrap();
+        assert!(!second.yielded);
+        streamed.extend(second.stream.drain_until_terminal().unwrap());
+
+        let text = streamed
+            .iter()
+            .filter_map(|item| match item {
+                BrainWakeStreamItem::Event { event } => match &event.event {
+                    BrainEvent::TextDelta { text } => Some(text.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<String>();
+        let reasoning = streamed
+            .iter()
+            .filter_map(|item| match item {
+                BrainWakeStreamItem::Event { event } => match &event.event {
+                    BrainEvent::ReasoningDelta { text, .. } => Some(text.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(text, "partial answer completed");
+        assert_eq!(reasoning, "checking the tree");
+        assert!(brain.client.requests()[1]
+            .instructions
+            .as_deref()
+            .is_some_and(|instructions| instructions.contains("Continue exactly where")));
+        assert!(!streamed
+            .iter()
+            .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+    }
+
+    #[test]
+    fn repeated_incomplete_response_requires_attention_instead_of_failing() {
+        let incomplete = || {
+            Ok(vec![
+                ResponsesEvent::TextDelta("same partial".to_string()),
+                ResponsesEvent::Incomplete("max output tokens".to_string()),
+            ])
+        };
+        let mut brain = brain_with(
+            FakeResponsesClient::new(vec![incomplete(), incomplete(), incomplete(), incomplete()]),
+            MapToolExecutor::default(),
+        );
+        let mut continuation_state = None;
+        let mut attention = None;
+        let mut streamed = Vec::new();
+        for _ in 0..4 {
+            let mut request = wake_request(None, None);
+            request.continuation_state = continuation_state;
+            let output = brain.wake(request).unwrap();
+            streamed.extend(output.stream.drain_until_closed().unwrap());
+            continuation_state = output.continuation_state;
+            if output.attention.is_some() {
+                attention = output.attention;
+                break;
+            }
+        }
+
+        let attention = attention.expect("repeated output exhaustion attention");
+        assert_eq!(attention.reason_code, "responses_output_limit_no_progress");
+        assert!(attention
+            .resolution_actions
+            .contains(&LogicalTurnResolutionAction::RetryProviderOperation));
+        assert!(attention
+            .resolution_actions
+            .contains(&LogicalTurnResolutionAction::Cancel));
+        assert_eq!(
+            streamed
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    BrainWakeStreamItem::Event { event }
+                        if matches!(&event.event, BrainEvent::TextDelta { text } if text == "same partial")
+                ))
+                .count(),
+            1
+        );
+        assert!(!streamed
+            .iter()
+            .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+    }
+
+    #[test]
+    fn completed_tool_call_at_output_limit_executes_once_then_resumes() {
+        let mut brain = brain_with(
+            FakeResponsesClient::new(vec![
+                Ok(vec![
+                    ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                        id: Some("item-1".to_string()),
+                        call_id: "call-1".to_string(),
+                        name: "lookup".to_string(),
+                        arguments: r#"{"query":"rust"}"#.to_string(),
+                    }),
+                    ResponsesEvent::Incomplete("max output tokens".to_string()),
+                ]),
+                Ok(vec![ResponsesEvent::Completed {
+                    response_id: "resp-after-tool".to_string(),
+                    usage: None,
+                }]),
+            ])
+            .expect_function_output("call-1"),
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "found rust".to_string(),
+                    is_error: false,
+                    state_fingerprint: "state-1".to_string(),
+                },
+            )]),
+        );
+
+        let first = brain.wake(wake_request(None, None)).unwrap();
+        assert!(first.yielded);
+        let first_items = first.stream.drain_until_closed().unwrap();
+        let mut resumed_request = wake_request(None, None);
+        resumed_request.continuation_state = first.continuation_state;
+        let second = brain.wake(resumed_request).unwrap();
+        let second_items = second.stream.drain_until_terminal().unwrap();
+        assert!(matches!(
+            second_items.last(),
+            Some(BrainWakeStreamItem::Actions { .. })
+        ));
+        assert_eq!(
+            first_items
+                .iter()
+                .chain(second_items.iter())
+                .filter(|item| matches!(
+                    item,
+                    BrainWakeStreamItem::Event { event }
+                        if matches!(&event.event, BrainEvent::ToolCallFinished { tool_name, .. } if tool_name == "lookup")
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]

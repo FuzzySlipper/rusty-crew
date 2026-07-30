@@ -1481,8 +1481,7 @@ where
                         result_class: BrainProgressResultClass::MalformedProviderOutput,
                     },
                 );
-                if !projected_assistant_text.is_empty() || !projected_assistant_reasoning.is_empty()
-                {
+                if !projected_assistant_text.is_empty() {
                     messages.push(assistant_partial_message(
                         &projected_assistant_text,
                         &projected_assistant_reasoning,
@@ -1499,7 +1498,7 @@ where
                     let summary = format!(
                         "provider repeatedly exhausted its output budget without advancing the assistant response ({consecutive_samples} equivalent repetitions)"
                     );
-                    messages.push(ChatCompletionMessage::user(format!(
+                    messages.push(ChatCompletionMessage::system(format!(
                         "[Rusty Crew operator attention] {summary}. Wait for operator retry or cancellation instead of restarting this response unchanged."
                     )));
                     push_stream_item(
@@ -1573,9 +1572,9 @@ where
                 let recovery_number = no_progress_state
                     .consecutive_no_progress_samples
                     .saturating_add(1);
-                messages.push(ChatCompletionMessage::user(output_limit_recovery_feedback(
-                    recovery_number,
-                )));
+                messages.push(ChatCompletionMessage::system(
+                    output_limit_recovery_feedback(recovery_number),
+                ));
                 push_stream_item(
                     &mut stream,
                     output_limit_recovery_status(
@@ -1585,7 +1584,58 @@ where
                     ),
                     &mut sink,
                 );
-                continue;
+                let continuation_state = match chat_completions_continuation_output(
+                    messages,
+                    durable_messages,
+                    input_images,
+                    no_progress_state,
+                    provider_request_count,
+                    tool_round_count,
+                    provider_event_counts.clone(),
+                    provider_request_debug_samples.clone(),
+                    output_limit_overlap_text,
+                    output_limit_overlap_reasoning,
+                    output_limit_accumulated_text,
+                    output_limit_accumulated_reasoning,
+                ) {
+                    Ok(state) => state,
+                    Err(message) => {
+                        push_stream_item(
+                            &mut stream,
+                            wake_failed_item_with_reason(
+                                &input.context,
+                                CoreErrorKind::InternalError,
+                                "chat_completions_continuation_checkpoint_failed",
+                                message,
+                            ),
+                            &mut sink,
+                        );
+                        return ChatCompletionsBrainLoopOutput {
+                            stream,
+                            completed: false,
+                            yielded: false,
+                            attention: None,
+                            provider_request_count,
+                            tool_round_count,
+                            provider_event_counts,
+                            provider_request_debug_samples,
+                            provider_state: None,
+                            continuation_state: None,
+                        };
+                    }
+                };
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    yielded: true,
+                    attention: None,
+                    provider_request_count,
+                    tool_round_count,
+                    provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
+                    continuation_state: Some(continuation_state),
+                };
             }
 
             output_limit_overlap_text.clear();
@@ -4959,22 +5009,39 @@ mod tests {
             Vec::new(),
         );
 
-        let output = brain.wake_with_messages(
-            context(),
-            vec![ChatCompletionMessage::user("finish the implementation")],
-        );
+        let mut continuation_state = None;
+        let mut all_events = Vec::new();
+        let mut attention = None;
+        let mut final_debug_samples = Vec::new();
+        for round in 0..4 {
+            let output = brain.wake(ChatCompletionsBrainLoopInput {
+                context: context(),
+                messages: vec![ChatCompletionMessage::user("finish the implementation")],
+                input_images: Vec::new(),
+                provider_state: None,
+                continuation_state,
+                final_message_fallback: None,
+            });
+            all_events.extend(events(&output.stream));
+            final_debug_samples = output.provider_request_debug_samples.clone();
+            continuation_state = output.continuation_state;
+            if round < 3 {
+                assert!(output.yielded);
+            }
+            if output.attention.is_some() {
+                attention = output.attention;
+                break;
+            }
+        }
 
-        assert!(!output.completed);
-        assert!(output.attention.is_some());
-        assert!(output.continuation_state.is_some());
-        assert!(
-            events(&output.stream).contains(&BrainEvent::ReasoningDelta {
-                text: "still working through the implementation".to_string(),
-                format: Some(CANONICAL_REASONING_FORMAT.to_string()),
-            })
-        );
-        assert!(!events(&output.stream).contains(&BrainEvent::Finished));
-        assert!(events(&output.stream).iter().any(|event| matches!(
+        assert!(attention.is_some());
+        assert!(continuation_state.is_some());
+        assert!(all_events.contains(&BrainEvent::ReasoningDelta {
+            text: "still working through the implementation".to_string(),
+            format: Some(CANONICAL_REASONING_FORMAT.to_string()),
+        }));
+        assert!(!all_events.contains(&BrainEvent::Finished));
+        assert!(all_events.iter().any(|event| matches!(
             event,
             BrainEvent::ProviderStatus {
                 level: BrainProviderStatusLevel::Info,
@@ -4984,24 +5051,30 @@ mod tests {
                 && metadata == r#"{"finish_reason":"length"}"#
         )));
         assert_eq!(
-            events(&output.stream)
+            all_events
                 .iter()
                 .filter(|event| matches!(event, BrainEvent::ReasoningDelta { .. }))
                 .count(),
             1,
             "replayed reasoning prefix must not be projected twice"
         );
-        assert!(!output
-            .stream
-            .iter()
-            .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
-        let attention = output.attention.expect("output-limit attention");
+        let attention = attention.expect("output-limit attention");
         assert!(attention
             .resolution_actions
             .contains(&LogicalTurnResolutionAction::RetryProviderOperation));
         assert!(attention
             .resolution_actions
             .contains(&LogicalTurnResolutionAction::Cancel));
+        assert!(final_debug_samples.iter().all(|request| {
+            request["messages"].as_array().is_none_or(|messages| {
+                messages.iter().all(|message| {
+                    message["role"] != "assistant"
+                        || message["content"]
+                            .as_str()
+                            .is_some_and(|content| !content.is_empty())
+                })
+            })
+        }));
     }
 
     #[test]
@@ -5028,21 +5101,39 @@ mod tests {
             Vec::new(),
         );
 
-        let output = brain.wake_with_messages(
-            context(),
-            vec![ChatCompletionMessage::user("apply the patch")],
-        );
+        let first = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: vec![ChatCompletionMessage::user("apply the patch")],
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: None,
+            final_message_fallback: None,
+        });
+        assert!(first.yielded);
+        assert!(!first.completed);
+        let mut all_events = events(&first.stream);
+        let second = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: vec![ChatCompletionMessage::user(
+                "replacement input must not join the resumed turn",
+            )],
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: first.continuation_state,
+            final_message_fallback: None,
+        });
+        all_events.extend(events(&second.stream));
 
-        assert!(output.completed);
-        assert_eq!(terminal_kind(&output.stream), "actions");
-        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+        assert!(second.completed);
+        assert_eq!(terminal_kind(&second.stream), "actions");
+        assert!(all_events.contains(&BrainEvent::TextDelta {
             text: "I found the target files and started the patch".to_string(),
         }));
-        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+        assert!(all_events.contains(&BrainEvent::TextDelta {
             text: " successfully".to_string(),
         }));
         assert_eq!(
-            events(&output.stream)
+            all_events
                 .iter()
                 .filter_map(|event| match event {
                     BrainEvent::TextDelta { text } => Some(text.as_str()),
@@ -5051,11 +5142,24 @@ mod tests {
                 .collect::<String>(),
             "I found the target files and started the patch successfully"
         );
-        assert!(!output
+        assert!(!first
             .stream
             .iter()
+            .chain(second.stream.iter())
             .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
-        assert!(events(&output.stream).contains(&BrainEvent::Finished));
+        assert!(all_events.contains(&BrainEvent::Finished));
+        let resumed_messages = second.provider_request_debug_samples[1]["messages"]
+            .as_array()
+            .expect("resumed provider messages");
+        assert!(resumed_messages.iter().any(|message| {
+            message["role"] == "system"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("Continue exactly where"))
+        }));
+        assert!(!resumed_messages.iter().any(|message| {
+            message["content"] == "replacement input must not join the resumed turn"
+        }));
     }
 
     #[test]
