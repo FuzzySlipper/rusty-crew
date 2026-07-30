@@ -209,6 +209,9 @@ impl CoreEngine {
                 )
             };
 
+            let (session_status, execution) =
+                self.project_agent_directory_execution(&session, runtime_kind)?;
+
             entries.push(AgentDirectoryEntry {
                 agent_id: session.agent_id,
                 session_id: session.session_id,
@@ -217,7 +220,8 @@ impl CoreEngine {
                     .and_then(|profile| profile.display_name.clone())
                     .unwrap_or(session.profile_id.0),
                 session_kind: session.kind,
-                session_status: session.status,
+                session_status,
+                execution,
                 runtime_kind,
                 runtime_id,
                 binding_id,

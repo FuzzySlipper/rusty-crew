@@ -178,11 +178,6 @@ pub struct RuntimeActivityFinding {
 pub struct RuntimeActivityCensusQuery {
     pub stall_after_ms: Option<u64>,
     pub recent_abnormal_limit: Option<u32>,
-    /// Transitional service projection of sessions currently executing a
-    /// wake. Rust compares it with durable activity; it never treats it as
-    /// execution authority.
-    #[serde(default)]
-    pub projected_active_session_ids: Option<Vec<SessionId>>,
     #[serde(default)]
     pub live_evidence: Vec<RuntimeActivityLiveEvidence>,
 }
@@ -192,7 +187,6 @@ impl Default for RuntimeActivityCensusQuery {
         Self {
             stall_after_ms: Some(5 * 60 * 1_000),
             recent_abnormal_limit: Some(100),
-            projected_active_session_ids: None,
             live_evidence: Vec::new(),
         }
     }

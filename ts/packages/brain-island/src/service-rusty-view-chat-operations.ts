@@ -105,7 +105,6 @@ export interface RustyViewChatOperationsContext {
   providerRequestDebugStore: ProviderRequestDebugStore;
   toolMediaAttachments: ToolMediaAttachmentStore;
   now(): string;
-  projectSessionState?(session: SessionState): SessionState;
   appendChatEvent(
     sessionId: SessionId,
     event: Pick<ChatEvent, "kind" | "payload">,
@@ -907,7 +906,6 @@ export async function queryRustyViewChatSessionSummaries(
     ...page,
     items: page.items.map((facts) => ({
       ...facts,
-      session: context.projectSessionState?.(facts.session) ?? facts.session,
     })),
   };
 }
@@ -923,7 +921,8 @@ export async function readRustyViewChatSession(
     include_alternates: input.includeAlternates,
   });
   return {
-    session: context.projectSessionState?.(result.session) ?? result.session,
+    session: result.session,
+    execution: result.execution,
     events: result.events as ChatEvent[],
     latest_cursor: result.latest_cursor,
     has_more: result.has_more,

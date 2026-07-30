@@ -15,6 +15,7 @@ import type {
   ProjectId,
   RunId,
   SessionId,
+  SessionExecutionState,
   SessionState,
   TaskId,
   ToolCallMetadata,
@@ -149,6 +150,8 @@ export function toNativeCoreEvent(event: CoreEvent): unknown {
       return { type: event.type, update: toNativeDenDataUpdate(event.update) };
     case "brain_wake_requested":
       return { type: event.type, session_id: event.sessionId };
+    case "session_execution_observed":
+      return { type: event.type, execution: event.execution };
     case "logical_turn_lifecycle_observed":
       return { type: event.type, lifecycle: event.lifecycle };
     case "brain_event_observed":
@@ -419,6 +422,8 @@ export function toCoreEvent(event: RawCoreEvent): CoreEvent {
       };
     case "brain_wake_requested":
       return { type: event.type, sessionId: event.session_id };
+    case "session_execution_observed":
+      return { type: event.type, execution: event.execution };
     case "logical_turn_lifecycle_observed":
       return { type: event.type, lifecycle: event.lifecycle };
     case "brain_event_observed":
@@ -663,6 +668,10 @@ export type RawCoreEvent =
       };
     }
   | { type: "brain_wake_requested"; session_id: SessionId }
+  | {
+      type: "session_execution_observed";
+      execution: SessionExecutionState;
+    }
   | {
       type: "logical_turn_lifecycle_observed";
       lifecycle: RawLogicalTurnLifecycleEvent;

@@ -62,6 +62,7 @@ export const RUSTY_VIEW_LOGICAL_TURN_EVENT_KIND_VALUES = [
 
 export const RUSTY_VIEW_CHAT_EVENT_KIND_VALUES = [
   "session_snapshot",
+  "session_execution_changed",
   "message_created",
   "assistant_turn_started",
   "assistant_text_delta",

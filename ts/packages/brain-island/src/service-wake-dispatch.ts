@@ -5,6 +5,7 @@ import type {
   CoreEvent,
   ProfileId,
   RuntimeActivityFinish,
+  SessionExecutionState,
   SessionId,
   SessionState,
   SubscriptionHandle,
@@ -73,6 +74,7 @@ export interface ServiceWakeDispatchContext {
     | "planRoleplayMechanicProfile"
     | "beginRuntimeActivity"
     | "finishRuntimeActivity"
+    | "readChatSession"
     | "subscribeEvents"
     | "unsubscribeEvents"
     | "wakeBrain"
@@ -157,6 +159,7 @@ export async function dispatchWake(
     | undefined;
   let dispatchActivityStarted = false;
   let dispatchFinish: RuntimeActivityFinish | undefined;
+  let lastObservedExecution: SessionExecutionState | undefined;
   if (context.inFlightWakes.has(sessionId)) {
     context.deferredWakeSessions.add(sessionId);
     return {
@@ -303,6 +306,13 @@ export async function dispatchWake(
       events: observed.events,
       observationContext,
     });
+    for (let index = observed.events.length - 1; index >= 0; index -= 1) {
+      const observedEvent = observed.events[index];
+      if (observedEvent?.type === "session_execution_observed") {
+        lastObservedExecution = observedEvent.execution;
+        break;
+      }
+    }
     const accepted = observed.accepted;
     const completionPacket = wakeCompletionPacket(observed.events);
     const completionSummary = wakeCompletionSummary(observed.events);
@@ -435,19 +445,46 @@ export async function dispatchWake(
     return report;
   } finally {
     if (dispatchActivityStarted && dispatchFinish !== undefined) {
-      await context.bridge
-        .finishRuntimeActivity(dispatchFinish)
-        .catch((error: unknown) => {
+      try {
+        await context.bridge.finishRuntimeActivity(dispatchFinish);
+      } catch (error: unknown) {
+        context.recordEvent({
+          source: "service-host",
+          eventType: "runtime_activity_record_failed",
+          severity: "warning",
+          summary: errorMessage(error, "wake dispatch activity finish failed"),
+        });
+      }
+      if (appendChatEvents && activeWake !== undefined) {
+        try {
+          const readback = await context.bridge.readChatSession({
+            session_id: activeWake.session.sessionId,
+            cursor: null,
+            limit: 1,
+            include_alternates: false,
+          });
+          if (
+            lastObservedExecution === undefined ||
+            executionTransitionKey(lastObservedExecution) !==
+              executionTransitionKey(readback.execution)
+          ) {
+            await context.appendChatEvent(activeWake.session.sessionId, {
+              kind: "session_execution_changed",
+              payload: { execution: readback.execution },
+            });
+          }
+        } catch (error: unknown) {
           context.recordEvent({
             source: "service-host",
-            eventType: "runtime_activity_record_failed",
+            eventType: "session_execution_projection_failed",
             severity: "warning",
             summary: errorMessage(
               error,
-              "wake dispatch activity finish failed",
+              "wake terminal execution projection failed",
             ),
           });
-        });
+        }
+      }
     }
     context.inFlightWakes.delete(sessionId);
     if (context.deferredWakeSessions.delete(sessionId)) {
@@ -472,6 +509,19 @@ export async function dispatchWake(
       });
     }
   }
+}
+
+function executionTransitionKey(execution: SessionExecutionState): string {
+  return JSON.stringify([
+    execution.sessionId,
+    execution.lifecycleStatus,
+    execution.phase,
+    execution.source,
+    execution.wakeId ?? null,
+    execution.logicalTurnId ?? null,
+    execution.lastOutcome ?? null,
+    execution.reasonCode ?? null,
+  ]);
 }
 
 function runtimeDispatchFinish(
@@ -509,6 +559,14 @@ export async function appendCoreEventsToChatLog(
         event.wakeId ?? undefined,
         event.event,
       );
+    } else if (
+      event.type === "session_execution_observed" &&
+      event.execution.sessionId === session.sessionId
+    ) {
+      await context.appendChatEvent(session.sessionId, {
+        kind: "session_execution_changed",
+        payload: { execution: event.execution },
+      });
     } else if (
       event.type === "logical_turn_lifecycle_observed" &&
       event.lifecycle.sessionId === session.sessionId
@@ -859,6 +917,7 @@ async function observeWakeEvents<T>(
 ): Promise<{ accepted: T; events: CoreEvent[] }> {
   const subscription = await context.bridge.subscribeEvents({
     eventKinds: [
+      "session_execution_observed",
       "logical_turn_lifecycle_observed",
       "brain_event_observed",
       "brain_actions_accepted",

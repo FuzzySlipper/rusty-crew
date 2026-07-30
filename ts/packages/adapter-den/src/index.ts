@@ -199,6 +199,8 @@ function summarizeCoreEvent(event: CoreEvent): string {
       return `den ${event.update.entityKind} updated ${event.update.entityId}`;
     case "brain_wake_requested":
       return `brain wake requested for ${event.sessionId}`;
+    case "session_execution_observed":
+      return `session execution ${event.execution.phase} for ${event.execution.sessionId}`;
     case "logical_turn_lifecycle_observed":
       return `logical turn ${event.lifecycle.phase} for ${event.lifecycle.sessionId}: ${event.lifecycle.summary}`;
     case "brain_event_observed":

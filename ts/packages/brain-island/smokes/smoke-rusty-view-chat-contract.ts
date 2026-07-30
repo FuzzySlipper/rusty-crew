@@ -51,6 +51,14 @@ assert.deepEqual(chatEvent.required, [
 assert.deepEqual(schema("ChatEventKind").enum, [
   ...RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
 ]);
+assert.ok(
+  schema("ChatSessionSummary").required?.includes("execution"),
+  "chat session summaries must expose canonical execution state",
+);
+assert.equal(
+  schema("ChatSessionSummary").properties?.execution?.$ref,
+  "./external-runtime-api-v0.openapi.json#/components/schemas/SessionExecutionState",
+);
 assert.deepEqual(schema("LogicalTurnLifecyclePayload").required, [
   ...RUSTY_VIEW_LOGICAL_TURN_EVENT_REQUIRED_FIELDS,
 ]);
@@ -67,6 +75,16 @@ assert.ok(
   ),
   "logical-turn lifecycle payload must be part of ChatEventPayload",
 );
+assert.ok(
+  schema("ChatEventPayload").oneOf?.some(
+    (candidate) =>
+      candidate.$ref === "#/components/schemas/SessionExecutionChangedPayload",
+  ),
+  "session execution payload must be part of ChatEventPayload",
+);
+assert.deepEqual(schema("SessionExecutionChangedPayload").required, [
+  "execution",
+]);
 assert.deepEqual(schema("LogicalTurnResolutionAction").enum, [
   "retry_unchanged",
   "retry_provider_operation",

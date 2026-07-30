@@ -40,6 +40,7 @@ mod runtime_activity;
 mod runtime_admin;
 mod runtime_admin_store;
 mod scheduler;
+mod session_execution;
 mod session_store;
 mod sessions;
 
@@ -172,8 +173,9 @@ use rusty_crew_core_protocol::{
     RuntimeActivityProgress, RuntimeActivityRecord, RuntimeActivityStatus, RuntimeActivityView,
     ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
     ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery, SessionConfig,
-    SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
-    TurnProjectionId, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
+    SessionExecutionOutcome, SessionExecutionPhase, SessionExecutionSource, SessionExecutionState,
+    SessionId, SessionKind, SessionLifecycleStatus, SessionState, SessionStatus, ShutdownSummary,
+    ToolProfile, TurnProjectionId, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use serde_json::json;

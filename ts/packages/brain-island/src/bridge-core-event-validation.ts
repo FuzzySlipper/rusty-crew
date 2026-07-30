@@ -76,6 +76,10 @@ export function rustCoreEventValidationError(
       return hasString(value, "session_id")
         ? undefined
         : "invalid brain_wake_requested.session_id";
+    case "session_execution_observed":
+      return isSessionExecutionState(value.execution)
+        ? undefined
+        : "invalid session_execution_observed.execution";
     case "brain_event_observed":
       return hasString(value, "session_id") &&
         nullableString(value.wake_id) &&
@@ -93,6 +97,27 @@ export function rustCoreEventValidationError(
     default:
       return `unsupported type ${value.type}`;
   }
+}
+
+function isSessionExecutionState(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    strings(value, ["sessionId", "updatedAt"]) &&
+    member(value.lifecycleStatus, ["live", "archived"] as const) &&
+    member(value.phase, [
+      "idle",
+      "queued",
+      "active",
+      "waiting",
+      "paused",
+      "cancelling",
+    ] as const) &&
+    member(value.source, [
+      "session_lifecycle",
+      "logical_turn",
+      "runtime_activity",
+    ] as const)
+  );
 }
 
 function isSessionState(value: unknown): boolean {

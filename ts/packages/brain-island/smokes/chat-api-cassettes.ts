@@ -257,11 +257,21 @@ function assertChatSessionSummary(value: unknown, path: string): void {
   assertString(value.profile_id, `${path}.profile_id`);
   assertString(value.kind, `${path}.kind`);
   assertString(value.status, `${path}.status`);
+  assertSessionExecution(value.execution, `${path}.execution`);
   assertString(value.latest_cursor, `${path}.latest_cursor`);
   assertIsoTimestamp(value.created_at, `${path}.created_at`);
   assertIsoTimestamp(value.updated_at, `${path}.updated_at`);
   assertNumber(value.message_count, `${path}.message_count`);
   assertNumber(value.tool_event_count, `${path}.tool_event_count`);
+}
+
+function assertSessionExecution(value: unknown, path: string): void {
+  assertObject(value, path);
+  assertString(value.sessionId, `${path}.sessionId`);
+  assertString(value.lifecycleStatus, `${path}.lifecycleStatus`);
+  assertString(value.phase, `${path}.phase`);
+  assertString(value.source, `${path}.source`);
+  assertIsoTimestamp(value.updatedAt, `${path}.updatedAt`);
 }
 
 function assertEventKinds(events: unknown[], kinds: readonly string[]): void {

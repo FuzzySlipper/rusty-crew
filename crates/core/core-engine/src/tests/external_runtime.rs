@@ -726,6 +726,41 @@ fn agent_directory_projects_same_service_direct_and_external_routability() {
     assert_eq!(direct.runtime_kind, AgentDirectoryRuntimeKind::DirectBrain);
     assert!(direct.routable);
     assert!(direct.binding_id.is_none());
+    assert_eq!(
+        direct.execution.as_ref().map(|execution| execution.phase),
+        Some(SessionExecutionPhase::Idle)
+    );
+
+    engine
+        .begin_runtime_activity(RuntimeActivityBegin {
+            activity_id: RuntimeActivityId::new("wake:directory-direct"),
+            parent_activity_id: None,
+            kind: RuntimeActivityKind::Wake,
+            owner: RuntimeActivityOwner::RustBrain,
+            agent_id: Some(direct.agent_id.clone()),
+            profile_id: Some(direct.profile_id.clone()),
+            session_id: Some(direct.session_id.clone()),
+            wake_id: Some("directory-direct".into()),
+            phase: "running".into(),
+            summary: None,
+            provider_alias: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+        })
+        .unwrap();
+    let active_direct = engine
+        .list_agent_directory()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.agent_id == AgentId::new("direct-agent"))
+        .unwrap();
+    assert_eq!(active_direct.session_status, SessionStatus::Active);
+    assert_eq!(
+        active_direct.execution.map(|execution| execution.phase),
+        Some(SessionExecutionPhase::Active)
+    );
 
     let external = directory
         .iter()
@@ -740,6 +775,7 @@ fn agent_directory_projects_same_service_direct_and_external_routability() {
         external.binding_id,
         Some(ExternalBindingId::new("codex-binding"))
     );
+    assert!(external.execution.is_none());
     assert!(external.routable);
 
     let mut paused = saved_binding.clone();

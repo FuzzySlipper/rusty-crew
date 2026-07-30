@@ -68,6 +68,7 @@ import type {
   RuntimeActivityFinish,
   RuntimeActivityProgress,
   RuntimeActivityRecord,
+  SessionExecutionState,
   ScheduledHostJobManualRunRequest,
   ScheduledHostJobRegistrationInput,
   ScheduledHostRunClaimQuery,
@@ -1925,6 +1926,7 @@ export interface NativeExactPage<T> {
 
 export interface NativeChatSessionReadFacts {
   session: SessionState;
+  execution: SessionExecutionState;
   message_count: number;
   latest_cursor: string;
   source: NativeChatReadModelPage["source"];
@@ -1936,6 +1938,7 @@ export interface NativeChatSessionSummaryPage {
 
 export interface NativeChatSessionReadResult {
   session: SessionState;
+  execution: SessionExecutionState;
   events: NativeChatEventLogEvent[];
   latest_cursor: string;
   has_more: boolean;

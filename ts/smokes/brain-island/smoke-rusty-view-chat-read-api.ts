@@ -74,6 +74,9 @@ try {
   );
   assert.ok(listedChatSession, "chat-session should be listed");
   assert.equal(typeof listedChatSession.latest_cursor, "string");
+  assert.equal(listedChatSession.status, "idle");
+  assert.equal(listedChatSession.execution.phase, "idle");
+  assert.equal(listedChatSession.execution.lifecycleStatus, "live");
 
   await host.bridge.routeAgentMessage(
     "human-operator" as AgentId,
@@ -85,6 +88,11 @@ try {
   const opened = await get("/v1/chat/sessions/chat-session", token);
   assert.equal(opened.status, 200);
   assert.equal(opened.body.data.session.session_id, "chat-session");
+  assert.deepEqual(
+    opened.body.data.session.execution,
+    listedChatSession.execution,
+    "reconnect readback should use the same canonical execution snapshot as the list",
+  );
   assert.deepEqual(
     opened.body.data.events.map((event: { kind: string }) => event.kind),
     ["session_snapshot", "message_created"],
@@ -265,6 +273,10 @@ try {
     sent.body.data.wake_id,
     "assistant completion events should carry wake_id for client reconciliation",
   );
+  assert.ok(
+    streamedEvents.some((event) => event.kind === "session_execution_changed"),
+    "active streams should carry canonical execution transitions",
+  );
 
   const retainedSend = await post(
     "/v1/chat/sessions/chat-retention-session/messages",
@@ -282,15 +294,21 @@ try {
     token,
   );
   assert.equal(retainedReplay.status, 200);
-  assert.equal(
-    retainedReplay.body.data.items[0]?.kind,
-    "assistant_turn_started",
+  const retainedStartIndex = retainedReplay.body.data.items.findIndex(
+    (event: { kind: string }) => event.kind === "assistant_turn_started",
+  );
+  const retainedFirstDeltaIndex = retainedReplay.body.data.items.findIndex(
+    (event: { kind: string; payload?: { text?: string } }) =>
+      event.kind === "assistant_text_delta" &&
+      event.payload?.text === " retained-delta-0",
+  );
+  assert.ok(
+    retainedStartIndex >= 0,
     "chat event retention should not drop the start of a long streamed wake",
   );
-  assert.equal(
-    retainedReplay.body.data.items[1]?.payload?.text,
-    " retained-delta-0",
-    "chat event retention should preserve early deltas from long streamed wakes",
+  assert.ok(
+    retainedFirstDeltaIndex > retainedStartIndex,
+    "chat event retention should preserve early deltas after the wake starts",
   );
   const retainedOpen = await get(
     "/v1/chat/sessions/chat-retention-session",
@@ -298,10 +316,11 @@ try {
   );
   assert.equal(retainedOpen.status, 200, JSON.stringify(retainedOpen.body));
   assert.equal(retainedOpen.body.data.has_more_before, true);
-  assert.equal(
-    retainedOpen.body.data.events[1]?.kind,
-    "assistant_text_delta",
-    "fresh session opens should return the latest retained event window",
+  assert.ok(
+    retainedOpen.body.data.events.some(
+      (event: { kind: string }) => event.kind === "assistant_text_delta",
+    ),
+    "fresh session opens should return streamed deltas in the latest retained event window",
   );
   assert.notEqual(
     retainedOpen.body.data.events[1]?.payload?.text,
@@ -396,6 +415,9 @@ try {
     (item: { session_id: string }) => item.session_id === "chat-session",
   );
   assert.ok(postTurnSession, "chat-session should be listed after chat turn");
+  assert.equal(postTurnSession.status, "idle");
+  assert.equal(postTurnSession.execution.phase, "idle");
+  assert.equal(postTurnSession.execution.lastOutcome, "completed");
   assert.notEqual(
     postTurnSession.latest_cursor,
     "chat-session:0",
@@ -411,6 +433,10 @@ try {
   assert.equal(
     postTurnOpen.body.data.session.latest_cursor,
     postTurnSession.latest_cursor,
+  );
+  assert.deepEqual(
+    postTurnOpen.body.data.session.execution,
+    postTurnSession.execution,
   );
   assert.ok(postTurnOpen.body.data.session.message_count >= 2);
   assert.ok(
@@ -815,16 +841,22 @@ try {
     token,
   );
   assert.equal(persistedRetainedReplay.status, 200);
-  assert.deepEqual(
-    persistedRetainedReplay.body.data.items
-      .slice(0, 3)
-      .map((event: { kind: string }) => event.kind),
-    ["message_created", "assistant_turn_started", "assistant_text_delta"],
-    "durable chat event replay should preserve the beginning of a long wake after restart",
-  );
   assert.equal(
-    persistedRetainedReplay.body.data.items[2]?.payload?.text,
-    " retained-delta-0",
+    persistedRetainedReplay.body.data.items[0]?.kind,
+    "message_created",
+  );
+  const persistedStartIndex = persistedRetainedReplay.body.data.items.findIndex(
+    (event: { kind: string }) => event.kind === "assistant_turn_started",
+  );
+  const persistedFirstDeltaIndex =
+    persistedRetainedReplay.body.data.items.findIndex(
+      (event: { kind: string; payload?: { text?: string } }) =>
+        event.kind === "assistant_text_delta" &&
+        event.payload?.text === " retained-delta-0",
+    );
+  assert.ok(
+    persistedStartIndex >= 0 && persistedFirstDeltaIndex > persistedStartIndex,
+    "durable chat event replay should preserve the beginning of a long wake after restart",
   );
 
   const persistedRetainedEvents = await readAllChatEvents(
@@ -1045,7 +1077,16 @@ try {
     registry.body.data.commands.map(
       (command: { name: string }) => command.name,
     ),
-    ["help", "status", "session", "model", "new", "reload-mcp"],
+    [
+      "help",
+      "status",
+      "session",
+      "model",
+      "effort",
+      "archive",
+      "new",
+      "reload-mcp",
+    ],
   );
   const newDescriptor = registry.body.data.commands.find(
     (command: { name: string }) => command.name === "new",

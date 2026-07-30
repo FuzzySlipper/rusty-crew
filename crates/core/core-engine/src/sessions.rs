@@ -65,6 +65,7 @@ impl CoreEngine {
                     self.sessions.apply_config(&config)?;
                     let state = self.sessions.reactivate_session(&config.session_id, now)?;
                     save_engine_session(&self.store, &state)?;
+                    self.publish_session_execution(&config.session_id)?;
                     return Ok(state);
                 }
                 let state = self.sessions.apply_config(&config)?;
@@ -77,11 +78,15 @@ impl CoreEngine {
     }
 
     pub fn get_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
-        self.sessions.get_session(session_id)
+        self.project_session_execution(self.sessions.get_session(session_id)?)
     }
 
     pub fn list_sessions(&self) -> CoreResult<Vec<SessionState>> {
-        self.sessions.all_sessions()
+        self.sessions
+            .all_sessions()?
+            .into_iter()
+            .map(|session| self.project_session_execution(session))
+            .collect()
     }
 
     pub fn set_session_reasoning_effort(
@@ -106,6 +111,7 @@ impl CoreEngine {
         self.bus.publish(CoreEvent::SessionArchived {
             session_id: session_id.clone(),
         })?;
+        self.publish_session_execution(session_id)?;
         if state.kind == SessionKind::Delegated {
             if !load_delegated_worker_run_by_session(&self.store, session_id)?
                 .as_ref()

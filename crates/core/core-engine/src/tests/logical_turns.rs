@@ -744,6 +744,13 @@ fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
         .unwrap();
     let admission = admission(&session.session_id);
     engine.admit_logical_turn(&admission).unwrap();
+    assert_eq!(
+        engine
+            .session_execution_state(&session.session_id)
+            .unwrap()
+            .phase,
+        SessionExecutionPhase::Queued
+    );
     assert!(matches!(
         lifecycle_events.recv_timeout(Duration::from_secs(1)).unwrap(),
         CoreEvent::LogicalTurnLifecycleObserved { lifecycle }
@@ -762,10 +769,24 @@ fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
         })
         .unwrap();
     assert_eq!(claim.record.phase, LogicalTurnPhase::Running);
+    assert_eq!(
+        engine
+            .session_execution_state(&session.session_id)
+            .unwrap()
+            .phase,
+        SessionExecutionPhase::Active
+    );
 
     let yield_request = yield_request(&claim);
     let yielded = engine.yield_logical_turn(&yield_request).unwrap();
     assert_eq!(yielded.record.phase, LogicalTurnPhase::Yielded);
+    assert_eq!(
+        engine
+            .session_execution_state(&session.session_id)
+            .unwrap()
+            .phase,
+        SessionExecutionPhase::Queued
+    );
     assert!(!yielded.replayed);
     let replay = engine.yield_logical_turn(&yield_request).unwrap();
     assert!(replay.replayed);
@@ -784,6 +805,13 @@ fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
         .unwrap()
         .unwrap();
     assert_eq!(turn.phase, LogicalTurnPhase::Runnable);
+    assert_eq!(
+        restarted
+            .session_execution_state(&session.session_id)
+            .unwrap()
+            .phase,
+        SessionExecutionPhase::Queued
+    );
     assert_eq!(turn.current_continuation_id.0, "continuation-1");
     assert_eq!(
         restarted.logical_turn_continuation_tickets().unwrap().len(),
@@ -831,6 +859,12 @@ fn logical_turn_cancellation_fences_restart_resurrection() {
         })
         .unwrap();
     assert_eq!(receipt.record.phase, LogicalTurnPhase::Cancelled);
+    let execution = engine.session_execution_state(&session.session_id).unwrap();
+    assert_eq!(execution.phase, SessionExecutionPhase::Idle);
+    assert_eq!(
+        execution.last_outcome,
+        Some(SessionExecutionOutcome::Cancelled)
+    );
     assert!(engine
         .logical_turn_continuation_tickets()
         .unwrap()

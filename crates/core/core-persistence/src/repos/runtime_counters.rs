@@ -324,6 +324,7 @@ fn event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> {
         | CoreEvent::AgentRoundObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::SessionExecutionObserved { .. }
         | CoreEvent::LogicalTurnLifecycleObserved { .. } => Vec::new(),
     }
 }

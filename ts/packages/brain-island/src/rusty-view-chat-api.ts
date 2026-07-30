@@ -135,6 +135,7 @@ export interface ChatSessionSummary {
   profile_id: string;
   kind: string;
   status: string;
+  execution: import("@rusty-crew/contracts").SessionExecutionState;
   latest_cursor: string;
   created_at: string;
   updated_at: string;
@@ -167,6 +168,7 @@ export type ChatReadModelSource =
 
 export interface ChatSessionReadFacts {
   session: SessionState;
+  execution: import("@rusty-crew/contracts").SessionExecutionState;
   message_count: number;
   latest_cursor: string;
   source: ChatReadModelSource;
@@ -196,6 +198,7 @@ export interface ChatSessionReadInput {
 
 export interface ChatSessionReadProjection {
   session: SessionState;
+  execution: import("@rusty-crew/contracts").SessionExecutionState;
   events: ChatEvent[];
   latest_cursor: string;
   has_more: boolean;
@@ -213,6 +216,7 @@ export interface ChatEvent {
   created_at: string;
   kind:
     | "session_snapshot"
+    | "session_execution_changed"
     | "message_created"
     | "assistant_turn_started"
     | "assistant_text_delta"
@@ -2370,6 +2374,7 @@ async function sessionPage(
   const items = await Promise.all(
     page.items.map(async (facts) =>
       sessionSummary(facts.session, {
+        execution: facts.execution,
         messageCount: facts.message_count,
         latestCursor: facts.latest_cursor,
         effectiveDefaults: await context.effectiveSessionDefaults?.(
@@ -2405,6 +2410,7 @@ async function openSessionResult(
     includeAlternates,
   });
   const summary = sessionSummary(read.session, {
+    execution: read.execution,
     messageCount: read.message_count,
     latestCursor: read.latest_cursor,
     effectiveDefaults: await context.effectiveSessionDefaults?.(read.session),
@@ -2452,6 +2458,7 @@ async function eventPageResult(
 function sessionSummary(
   session: SessionState,
   options: {
+    execution: import("@rusty-crew/contracts").SessionExecutionState;
     messageCount: number;
     latestCursor?: string;
     effectiveDefaults?: Record<string, unknown>;
@@ -2468,6 +2475,7 @@ function sessionSummary(
     profile_id: session.profileId,
     kind: session.kind,
     status: session.status,
+    execution: options.execution,
     latest_cursor:
       options.latestCursor ??
       cursorFor(session.sessionId, session.brainTurnCount),

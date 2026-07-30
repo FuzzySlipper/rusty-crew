@@ -15,6 +15,7 @@ import type {
   NativeExactPage,
 } from "./public-api.js";
 import { toSessionState, type RawSessionState } from "./session-wire.js";
+import type { SessionExecutionState } from "@rusty-crew/contracts";
 
 type ChatMethodName =
   | "saveMessageSlot"
@@ -65,6 +66,7 @@ type ChatMethodName =
 
 interface RawChatSessionReadFacts {
   session: RawSessionState;
+  execution: SessionExecutionState;
   message_count: number;
   latest_cursor: string;
   source: NativeChatReadModelPage["source"];
@@ -76,6 +78,7 @@ interface RawChatSessionSummaryPage {
 
 interface RawChatSessionReadResult {
   session: RawSessionState;
+  execution: SessionExecutionState;
   events: NativeChatEventLogEvent[];
   latest_cursor: string;
   has_more: boolean;
@@ -293,6 +296,7 @@ function toNativeChatSessionReadResult(
 ): NativeChatSessionReadResult {
   return {
     session: toSessionState(raw.session),
+    execution: raw.execution,
     events: raw.events,
     latest_cursor: raw.latest_cursor,
     has_more: raw.has_more,

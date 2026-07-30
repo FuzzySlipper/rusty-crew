@@ -1796,6 +1796,12 @@
             ]
           },
           "displayLabel": { "type": "string" },
+          "execution": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionExecutionState" },
+              { "type": "null" }
+            ]
+          },
           "profileId": { "type": "string" },
           "routabilityReasonCode": { "type": ["string", "null"] },
           "routable": { "type": "boolean" },
@@ -3019,6 +3025,19 @@
           },
           {
             "properties": {
+              "execution": {
+                "$ref": "#/components/schemas/SessionExecutionState"
+              },
+              "type": {
+                "const": "session_execution_observed",
+                "type": "string"
+              }
+            },
+            "required": ["type", "execution"],
+            "type": "object"
+          },
+          {
+            "properties": {
               "lifecycle": {
                 "$ref": "#/components/schemas/LogicalTurnLifecycleEvent"
               },
@@ -3073,6 +3092,7 @@
           "external_event_injected",
           "den_data_updated",
           "brain_wake_requested",
+          "session_execution_observed",
           "logical_turn_lifecycle_observed",
           "brain_event_observed",
           "brain_actions_accepted",
@@ -5619,12 +5639,6 @@
             },
             "type": "array"
           },
-          "projectedActiveSessionIds": {
-            "default": null,
-            "description": "Transitional service projection of sessions currently executing a\nwake. Rust compares it with durable activity; it never treats it as\nexecution authority.",
-            "items": { "type": "string" },
-            "type": ["array", "null"]
-          },
           "recentAbnormalLimit": {
             "format": "uint32",
             "minimum": 0,
@@ -5907,6 +5921,48 @@
         ],
         "type": "object"
       },
+      "SessionExecutionOutcome": {
+        "enum": ["completed", "failed", "cancelled", "interrupted"],
+        "type": "string"
+      },
+      "SessionExecutionPhase": {
+        "enum": ["idle", "queued", "active", "waiting", "paused", "cancelling"],
+        "type": "string"
+      },
+      "SessionExecutionSource": {
+        "enum": ["session_lifecycle", "logical_turn", "runtime_activity"],
+        "type": "string"
+      },
+      "SessionExecutionState": {
+        "properties": {
+          "lastOutcome": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionExecutionOutcome" },
+              { "type": "null" }
+            ]
+          },
+          "lifecycleStatus": {
+            "$ref": "#/components/schemas/SessionLifecycleStatus"
+          },
+          "logicalTurnId": { "type": ["string", "null"] },
+          "phase": { "$ref": "#/components/schemas/SessionExecutionPhase" },
+          "reasonCode": { "type": ["string", "null"] },
+          "sessionId": { "type": "string" },
+          "source": { "$ref": "#/components/schemas/SessionExecutionSource" },
+          "startedAt": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "updatedAt": { "type": "string" },
+          "wakeId": { "type": ["string", "null"] }
+        },
+        "required": [
+          "sessionId",
+          "lifecycleStatus",
+          "phase",
+          "source",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "SessionHistoryWindow": {
         "properties": {
           "max_messages": {
@@ -5923,6 +5979,10 @@
       },
       "SessionKind": {
         "enum": ["full", "worker", "delegated"],
+        "type": "string"
+      },
+      "SessionLifecycleStatus": {
+        "enum": ["live", "archived"],
         "type": "string"
       },
       "SessionState": {

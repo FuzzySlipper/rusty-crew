@@ -389,6 +389,9 @@ pub(crate) fn event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
         CoreEvent::BrainWakeRequested { session_id }
         | CoreEvent::BrainEventObserved { session_id, .. }
         | CoreEvent::BrainActionsAccepted { session_id, .. } => vec![session_id.clone()],
+        CoreEvent::SessionExecutionObserved { execution } => {
+            vec![execution.session_id.clone()]
+        }
         CoreEvent::LogicalTurnLifecycleObserved { lifecycle } => {
             vec![lifecycle.session_id.clone()]
         }
@@ -423,6 +426,7 @@ pub(crate) fn event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::SessionExecutionObserved { .. }
         | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { .. }
         | CoreEvent::BrainActionsAccepted { .. }
@@ -450,6 +454,7 @@ fn event_correlation_ids(event: &CoreEvent) -> Vec<String> {
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
         | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::SessionExecutionObserved { .. }
         | CoreEvent::LogicalTurnLifecycleObserved { .. }
         | CoreEvent::BrainEventObserved { .. }
         | CoreEvent::BrainActionsAccepted { .. }
@@ -469,6 +474,9 @@ fn event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
             wake_id: Some(wake_id),
             ..
         } => vec![wake_id.clone()],
+        CoreEvent::SessionExecutionObserved { execution } => {
+            execution.wake_id.clone().into_iter().collect()
+        }
         CoreEvent::SessionArchived { .. }
         | CoreEvent::AgentMessageRouted { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }

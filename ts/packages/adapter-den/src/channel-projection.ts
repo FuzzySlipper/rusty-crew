@@ -267,6 +267,16 @@ function activitySummary(event: CoreEvent): {
         text: `Brain wake requested for ${event.sessionId}`,
         severity: "info",
       };
+    case "session_execution_observed":
+      return {
+        text: `Session execution ${event.execution.phase} for ${event.execution.sessionId}`,
+        severity:
+          event.execution.lastOutcome === "failed"
+            ? "error"
+            : event.execution.phase === "paused"
+              ? "warning"
+              : "info",
+      };
     case "logical_turn_lifecycle_observed":
       return {
         text: `Logical turn ${event.lifecycle.phase} for ${event.lifecycle.sessionId}: ${event.lifecycle.summary}`,

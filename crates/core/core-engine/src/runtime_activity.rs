@@ -11,6 +11,11 @@ impl CoreEngine {
         input: RuntimeActivityBegin,
     ) -> CoreResult<RuntimeActivityRecord> {
         validate_runtime_activity_begin(&input)?;
+        let previous_execution = input
+            .session_id
+            .as_ref()
+            .map(|session_id| self.session_execution_state(session_id))
+            .transpose()?;
         if let Some(session_id) = input.session_id.as_ref() {
             let session = self.get_session(session_id)?;
             validate_activity_session_identity(
@@ -20,7 +25,7 @@ impl CoreEngine {
             )?;
         }
         let now = self.now();
-        self.store.insert_runtime_activity(&RuntimeActivityRecord {
+        let record = self.store.insert_runtime_activity(&RuntimeActivityRecord {
             activity_id: input.activity_id,
             service_instance_id: self.service_instance_id.clone(),
             parent_activity_id: input.parent_activity_id,
@@ -43,7 +48,11 @@ impl CoreEngine {
             last_progress_at: now,
             terminal_at: None,
             revision: 1,
-        })
+        })?;
+        if let Some(session_id) = record.session_id.as_ref() {
+            self.publish_session_execution_transition(session_id, previous_execution.as_ref())?;
+        }
+        Ok(record)
     }
 
     pub fn progress_runtime_activity(
@@ -71,6 +80,11 @@ impl CoreEngine {
                 ),
             ));
         }
+        let previous_execution = record
+            .session_id
+            .as_ref()
+            .map(|session_id| self.session_execution_state(session_id))
+            .transpose()?;
         let expected_revision = record.revision;
         record.phase = input.phase;
         if input.summary.is_some() {
@@ -84,8 +98,13 @@ impl CoreEngine {
         }
         record.last_progress_at = self.now();
         record.revision += 1;
-        self.store
-            .update_runtime_activity(&record, expected_revision)
+        let record = self
+            .store
+            .update_runtime_activity(&record, expected_revision)?;
+        if let Some(session_id) = record.session_id.as_ref() {
+            self.publish_session_execution_transition(session_id, previous_execution.as_ref())?;
+        }
+        Ok(record)
     }
 
     pub fn finish_runtime_activity(
@@ -113,6 +132,11 @@ impl CoreEngine {
         if record.status.is_terminal() {
             return Ok(record);
         }
+        let previous_execution = record
+            .session_id
+            .as_ref()
+            .map(|session_id| self.session_execution_state(session_id))
+            .transpose()?;
         let expected_revision = record.revision;
         let now = self.now();
         record.status = input.status;
@@ -124,8 +148,13 @@ impl CoreEngine {
         record.last_progress_at = now.clone();
         record.terminal_at = Some(now);
         record.revision += 1;
-        self.store
-            .update_runtime_activity(&record, expected_revision)
+        let record = self
+            .store
+            .update_runtime_activity(&record, expected_revision)?;
+        if let Some(session_id) = record.session_id.as_ref() {
+            self.publish_session_execution_transition(session_id, previous_execution.as_ref())?;
+        }
+        Ok(record)
     }
 
     pub fn runtime_activity_census(
@@ -138,9 +167,6 @@ impl CoreEngine {
             Some(MAX_CENSUS_RECORDS),
         )?;
         let mut findings = Vec::new();
-        let projected_active_session_ids = query
-            .projected_active_session_ids
-            .map(|session_ids| session_ids.into_iter().collect::<HashSet<_>>());
         let live_ids = query
             .live_evidence
             .iter()
@@ -249,11 +275,8 @@ impl CoreEngine {
                                 "runtime activity identity does not match the session projection",
                             ));
                         } else if activity_requires_active_session_projection(record.kind) {
-                            let projected_active = projected_active_session_ids
-                                .as_ref()
-                                .map(|session_ids| session_ids.contains(session_id))
-                                .unwrap_or(session.status == SessionStatus::Active);
-                            if !projected_active {
+                            let execution = self.session_execution_state(session_id)?;
+                            if !execution.phase.is_working() {
                                 findings.push(activity_finding(
                                     RuntimeActivityFindingCode::SessionProjectionMismatch,
                                     record,

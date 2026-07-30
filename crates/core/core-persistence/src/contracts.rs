@@ -798,6 +798,7 @@ pub struct ChatSessionSummaryPageQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionReadFacts {
     pub session: SessionState,
+    pub execution: rusty_crew_core_protocol::SessionExecutionState,
     pub message_count: u64,
     pub latest_cursor: String,
     pub source: ChatReadModelSource,
@@ -819,6 +820,7 @@ pub struct ChatSessionReadQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatSessionReadResult {
     pub session: SessionState,
+    pub execution: rusty_crew_core_protocol::SessionExecutionState,
     pub events: Vec<ChatEventLogEvent>,
     pub latest_cursor: String,
     pub has_more: bool,

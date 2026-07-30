@@ -23,6 +23,16 @@
                 "profile_id": "narrator-fsm-cert-rp",
                 "kind": "full",
                 "status": "idle",
+                "execution": {
+                  "sessionId": "narrator-fsm-cert-rp-session",
+                  "lifecycleStatus": "live",
+                  "phase": "idle",
+                  "source": "runtime_activity",
+                  "lastOutcome": "completed",
+                  "reasonCode": "wake_completed",
+                  "summary": "narrator wake completed",
+                  "updatedAt": "2026-07-07T12:57:36.120Z"
+                },
                 "latest_cursor": "narrator-fsm-cert-rp-session:389",
                 "created_at": "2026-07-07T12:55:10.391683661Z",
                 "updated_at": "2026-07-07T12:55:10.391683661Z",
@@ -65,6 +75,16 @@
               "profile_id": "narrator-fsm-cert-rp",
               "kind": "full",
               "status": "idle",
+              "execution": {
+                "sessionId": "narrator-fsm-cert-rp-session",
+                "lifecycleStatus": "live",
+                "phase": "idle",
+                "source": "runtime_activity",
+                "lastOutcome": "completed",
+                "reasonCode": "wake_completed",
+                "summary": "narrator wake completed",
+                "updatedAt": "2026-07-07T12:57:36.120Z"
+              },
               "latest_cursor": "narrator-fsm-cert-rp-session:389",
               "created_at": "2026-07-07T12:55:10.391683661Z",
               "updated_at": "2026-07-07T12:55:10.391683661Z",

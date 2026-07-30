@@ -648,6 +648,7 @@ impl CoreEngine {
             self.bus.publish(CoreEvent::LogicalTurnLifecycleObserved {
                 lifecycle: record.event.clone(),
             })?;
+            self.publish_session_execution(&record.event.session_id)?;
             self.store
                 .mark_logical_turn_outbox_delivered(&record.event.projection_id.0, &self.now())?;
         }

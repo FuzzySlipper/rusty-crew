@@ -222,6 +222,20 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn list_runtime_activities_for_session(
+        &self,
+        session_id: &SessionId,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<RuntimeActivityRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_runtime_activities_for_session(session_id, limit),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.list_runtime_activities_for_session(session_id, limit)
+            }
+        }
+    }
+
     pub fn interrupt_runtime_activities_from_other_instances(
         &self,
         current_service_instance_id: &str,

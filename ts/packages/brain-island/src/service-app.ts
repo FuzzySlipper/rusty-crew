@@ -238,10 +238,6 @@ import {
 } from "./service-chat-event-log.js";
 import { reconcileInterruptedChatTurns } from "./service-chat-restart-reconciliation.js";
 import {
-  listProjectedServiceSessions as listProjectedServiceSessionsFromModule,
-  projectInFlightSessionState,
-} from "./service-session-state-projection.js";
-import {
   createRustyViewAttachment,
   createRustyViewConversationBranch,
   createRustyViewConversationSnapshot,
@@ -751,8 +747,6 @@ function rustyViewChatOperationsContext(
     providerRequestDebugStore: state.providerRequestDebugStore,
     toolMediaAttachments: state.toolMediaAttachments,
     now: state.now,
-    projectSessionState: (session) =>
-      projectInFlightSessionState(session, state.inFlightWakes),
     appendChatEvent: (sessionId, event) =>
       appendChatEventFromModule(chatEventLogContext(state), sessionId, event),
     listChatEventsAfterCursor: (session, cursor, limit) =>
@@ -772,10 +766,7 @@ function rustyViewChatOperationsContext(
 async function listProjectedServiceSessions(
   state: ServiceState,
 ): Promise<SessionState[]> {
-  return listProjectedServiceSessionsFromModule({
-    bridge: state.bridge,
-    inFlightWakes: state.inFlightWakes,
-  });
+  return state.bridge.listSessions();
 }
 
 function rustyViewSlashCommandContext(
@@ -1807,11 +1798,6 @@ async function handleHttpRequest(
       await buildDiagnosticsContext(state, {
         includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
         curatorUrl: isCuratorAdminReadRoute(url.pathname) ? url : undefined,
-        activitySessionProjection:
-          url.pathname === "/v1/admin/diagnostics/activities" &&
-          url.searchParams.get("sessionProjection") === "durable"
-            ? "durable"
-            : "service",
       }),
     );
   }
@@ -2015,21 +2001,9 @@ async function buildDiagnosticsContext(
   options: {
     includeProfileRegistry?: boolean;
     curatorUrl?: URL;
-    activitySessionProjection?: "service" | "durable";
   } = {},
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
-  const projectedActiveSessionIds =
-    options.activitySessionProjection === "durable"
-      ? await state.bridge
-          .listSessions()
-          .then((sessions) =>
-            sessions
-              .filter((session) => session.status === "active")
-              .map((session) => session.sessionId),
-          )
-          .catch(() => [])
-      : [...state.inFlightWakes];
   const [
     runtimeSummary,
     sessions,
@@ -2054,11 +2028,7 @@ async function buildDiagnosticsContext(
       .catch(() => undefined),
     state.bridge.providerStateDiagnostics().catch(() => []),
     state.bridge.bufferedBrainRunDiagnostics().catch(() => undefined),
-    state.bridge
-      .runtimeActivityCensus({
-        projectedActiveSessionIds,
-      })
-      .catch(() => undefined),
+    state.bridge.runtimeActivityCensus({}).catch(() => undefined),
     buildMemorySpaceDiagnostics(state).catch(() => undefined),
   ]);
   const profileRegistry = options.includeProfileRegistry

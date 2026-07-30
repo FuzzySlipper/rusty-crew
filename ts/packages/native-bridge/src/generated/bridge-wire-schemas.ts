@@ -3034,6 +3034,96 @@ export const bridgeWireSchemaArtifact = {
           "displayLabel": {
             "type": "string"
           },
+          "execution": {
+            "properties": {
+              "lastOutcome": {
+                "enum": [
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "interrupted",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lifecycleStatus": {
+                "enum": [
+                  "live",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              "logicalTurnId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "enum": [
+                  "idle",
+                  "queued",
+                  "active",
+                  "waiting",
+                  "paused",
+                  "cancelling"
+                ],
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "session_lifecycle",
+                  "logical_turn",
+                  "runtime_activity"
+                ],
+                "type": "string"
+              },
+              "startedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "wakeId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "sessionId",
+              "lifecycleStatus",
+              "phase",
+              "source",
+              "updatedAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "profileId": {
             "type": "string"
           },
@@ -11643,6 +11733,93 @@ export const bridgeWireSchemaArtifact = {
           },
           "type": "array"
         },
+        "execution": {
+          "properties": {
+            "lastOutcome": {
+              "enum": [
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lifecycleStatus": {
+              "enum": [
+                "live",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "logicalTurnId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phase": {
+              "enum": [
+                "idle",
+                "queued",
+                "active",
+                "waiting",
+                "paused",
+                "cancelling"
+              ],
+              "type": "string"
+            },
+            "reasonCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "session_lifecycle",
+                "logical_turn",
+                "runtime_activity"
+              ],
+              "type": "string"
+            },
+            "startedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "wakeId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "sessionId",
+            "lifecycleStatus",
+            "phase",
+            "source",
+            "updatedAt"
+          ],
+          "type": "object"
+        },
         "has_more": {
           "type": "boolean"
         },
@@ -12231,6 +12408,7 @@ export const bridgeWireSchemaArtifact = {
       },
       "required": [
         "session",
+        "execution",
         "events",
         "latest_cursor",
         "has_more",
@@ -12250,6 +12428,93 @@ export const bridgeWireSchemaArtifact = {
             "items": {
               "items": {
                 "properties": {
+                  "execution": {
+                    "properties": {
+                      "lastOutcome": {
+                        "enum": [
+                          "completed",
+                          "failed",
+                          "cancelled",
+                          "interrupted",
+                          null
+                        ],
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lifecycleStatus": {
+                        "enum": [
+                          "live",
+                          "archived"
+                        ],
+                        "type": "string"
+                      },
+                      "logicalTurnId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "phase": {
+                        "enum": [
+                          "idle",
+                          "queued",
+                          "active",
+                          "waiting",
+                          "paused",
+                          "cancelling"
+                        ],
+                        "type": "string"
+                      },
+                      "reasonCode": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "enum": [
+                          "session_lifecycle",
+                          "logical_turn",
+                          "runtime_activity"
+                        ],
+                        "type": "string"
+                      },
+                      "startedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "summary": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      },
+                      "wakeId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "sessionId",
+                      "lifecycleStatus",
+                      "phase",
+                      "source",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
                   "latest_cursor": {
                     "type": "string"
                   },
@@ -12456,6 +12721,7 @@ export const bridgeWireSchemaArtifact = {
                 },
                 "required": [
                   "session",
+                  "execution",
                   "message_count",
                   "latest_cursor",
                   "source"

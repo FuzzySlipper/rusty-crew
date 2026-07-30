@@ -183,6 +183,7 @@ impl CoreEngine {
         })?;
         if event_page.total > 0 {
             return Ok(ChatSessionReadResult {
+                execution: self.session_execution_state(&session.session_id)?,
                 session,
                 events: event_page.items,
                 latest_cursor: event_page.latest_cursor,
@@ -201,6 +202,7 @@ impl CoreEngine {
             limit: Some(query.limit),
         })?;
         Ok(ChatSessionReadResult {
+            execution: self.session_execution_state(&session.session_id)?,
             session,
             events: read_model
                 .items
@@ -248,6 +250,7 @@ impl CoreEngine {
                 })?;
                 if event_page.total > 0 {
                     return Ok(ChatSessionReadFacts {
+                        execution: self.session_execution_state(&session.session_id)?,
                         session,
                         message_count: event_page.message_count,
                         latest_cursor: event_page.latest_cursor,
@@ -264,6 +267,7 @@ impl CoreEngine {
                 })?;
                 if slot_page.total > 0 {
                     return Ok(ChatSessionReadFacts {
+                        execution: self.session_execution_state(&session.session_id)?,
                         latest_cursor: chat_cursor_for(&session.session_id, slot_page.total),
                         session,
                         message_count: slot_page.total,
@@ -275,6 +279,7 @@ impl CoreEngine {
                     .pending_messages;
                 let message_count = pending.len() as u64;
                 Ok(ChatSessionReadFacts {
+                    execution: self.session_execution_state(&session.session_id)?,
                     latest_cursor: chat_cursor_for(&session.session_id, message_count),
                     session,
                     message_count,

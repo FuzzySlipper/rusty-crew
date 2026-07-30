@@ -60,6 +60,8 @@ pub struct AgentDirectoryEntry {
     pub display_label: String,
     pub session_kind: SessionKind,
     pub session_status: SessionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::SessionExecutionState>,
     pub runtime_kind: AgentDirectoryRuntimeKind,
     pub runtime_id: Option<ExternalRuntimeId>,
     pub binding_id: Option<ExternalBindingId>,

@@ -187,6 +187,40 @@ impl PostgresBackendStore {
             .collect()
     }
 
+    pub fn list_runtime_activities_for_session(
+        &self,
+        session_id: &SessionId,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<RuntimeActivityRecord>> {
+        let schema = self.quoted_schema();
+        let limit = i64::from(
+            limit
+                .unwrap_or(DEFAULT_ACTIVITY_LIMIT)
+                .clamp(1, MAX_ACTIVITY_LIMIT),
+        );
+        self.client()?
+            .query(
+                &format!(
+                    "SELECT record_json FROM {schema}.runtime_activities
+                     WHERE session_id = $1
+                     ORDER BY last_progress_at DESC, activity_id ASC
+                     LIMIT $2"
+                ),
+                &[&session_id.0, &limit],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL session runtime activities", error))?
+            .iter()
+            .map(|row| {
+                from_json_text::<RuntimeActivityRecord>(row.get(0)).map_err(|error| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        format!("decode PostgreSQL session runtime activity: {error}"),
+                    )
+                })
+            })
+            .collect()
+    }
+
     pub fn interrupt_runtime_activities_from_other_instances(
         &self,
         current_service_instance_id: &str,

@@ -144,6 +144,7 @@ export type AgentDirectoryEntry = {
   bindingId?: string | null;
   bindingStatus?: ExternalBindingStatus | null;
   displayLabel: string;
+  execution?: SessionExecutionState | null;
   profileId: string;
   routabilityReasonCode?: string | null;
   routable: boolean;
@@ -631,6 +632,9 @@ export type CoreEvent = {
   sessionId: SessionId;
   type: "brain_wake_requested";
 } | {
+  execution: SessionExecutionState;
+  type: "session_execution_observed";
+} | {
   lifecycle: LogicalTurnLifecycleEvent;
   type: "logical_turn_lifecycle_observed";
 } | {
@@ -647,7 +651,7 @@ export type CoreEvent = {
   type: "completion_packet_delivered";
 };
 
-export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "logical_turn_lifecycle_observed" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
+export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "session_execution_observed" | "logical_turn_lifecycle_observed" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
 
 export type CrewAgentSessionCreationOutcome = "created" | "replayed" | "recovered";
 
@@ -1634,7 +1638,6 @@ export type RuntimeActivityCensus = {
 
 export type RuntimeActivityCensusQuery = {
   liveEvidence?: Array<RuntimeActivityLiveEvidence>;
-  projectedActiveSessionIds?: Array<string> | null;
   recentAbnormalLimit?: number | null;
   stallAfterMs?: number | null;
 };
@@ -1761,6 +1764,26 @@ export type SessionConfig = {
   toolProfile: ToolProfile;
 };
 
+export type SessionExecutionOutcome = "completed" | "failed" | "cancelled" | "interrupted";
+
+export type SessionExecutionPhase = "idle" | "queued" | "active" | "waiting" | "paused" | "cancelling";
+
+export type SessionExecutionSource = "session_lifecycle" | "logical_turn" | "runtime_activity";
+
+export type SessionExecutionState = {
+  lastOutcome?: SessionExecutionOutcome | null;
+  lifecycleStatus: SessionLifecycleStatus;
+  logicalTurnId?: string | null;
+  phase: SessionExecutionPhase;
+  reasonCode?: string | null;
+  sessionId: string;
+  source: SessionExecutionSource;
+  startedAt?: string | null;
+  summary?: string | null;
+  updatedAt: string;
+  wakeId?: string | null;
+};
+
 export type SessionHistoryWindow = {
   maxMessages?: number | null;
 };
@@ -1770,6 +1793,8 @@ export type SessionInferenceOverrides = {
 };
 
 export type SessionKind = "full" | "worker" | "delegated";
+
+export type SessionLifecycleStatus = "live" | "archived";
 
 export type SessionState = {
   agentId: AgentId;
