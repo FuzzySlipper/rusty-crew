@@ -260,6 +260,22 @@ export interface ChatEvent {
   payload: Record<string, unknown>;
 }
 
+export interface LogicalTurnLifecycleChatPayload {
+  logical_turn_id: string;
+  projection_id: string;
+  continuation_id: string;
+  continuation_count: number;
+  execution_epoch_id?: string | null;
+  wake_id: string;
+  phase: string;
+  operator_state: string;
+  progress_classification: string;
+  reason_code: string;
+  summary: string;
+  progress: Record<string, unknown>;
+  logical_turn_revision: number;
+}
+
 export interface ChatReadModelPageInput {
   session: SessionState;
   cursor?: string | null;

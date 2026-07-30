@@ -48,6 +48,18 @@ export const RUSTY_VIEW_CHAT_PATHS = {
   sessionCommands: "/v1/chat/sessions/{session_id}/commands",
 } as const;
 
+export const RUSTY_VIEW_LOGICAL_TURN_EVENT_KIND_VALUES = [
+  "logical_turn_admitted",
+  "logical_turn_continuing",
+  "logical_turn_yielding",
+  "logical_turn_queued_to_continue",
+  "logical_turn_attention_required",
+  "logical_turn_cancelling",
+  "logical_turn_completed",
+  "logical_turn_cancelled",
+  "logical_turn_failed",
+] as const;
+
 export const RUSTY_VIEW_CHAT_EVENT_KIND_VALUES = [
   "session_snapshot",
   "message_created",
@@ -68,15 +80,7 @@ export const RUSTY_VIEW_CHAT_EVENT_KIND_VALUES = [
   "context_compaction_started",
   "context_compaction_completed",
   "context_compaction_failed",
-  "logical_turn_admitted",
-  "logical_turn_continuing",
-  "logical_turn_yielding",
-  "logical_turn_queued_to_continue",
-  "logical_turn_attention_required",
-  "logical_turn_cancelling",
-  "logical_turn_completed",
-  "logical_turn_cancelled",
-  "logical_turn_failed",
+  ...RUSTY_VIEW_LOGICAL_TURN_EVENT_KIND_VALUES,
   "message_slot_created",
   "message_variant_created",
   "message_variant_deleted",
@@ -103,6 +107,21 @@ export const RUSTY_VIEW_CHAT_EVENT_REQUIRED_FIELDS = [
   "created_at",
   "kind",
   "payload",
+] as const;
+
+export const RUSTY_VIEW_LOGICAL_TURN_EVENT_REQUIRED_FIELDS = [
+  "logical_turn_id",
+  "projection_id",
+  "continuation_id",
+  "continuation_count",
+  "wake_id",
+  "phase",
+  "operator_state",
+  "progress_classification",
+  "reason_code",
+  "summary",
+  "progress",
+  "logical_turn_revision",
 ] as const;
 
 export const RUSTY_VIEW_MESSAGE_SLOT_REQUIRED_FIELDS = [

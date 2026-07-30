@@ -14,6 +14,8 @@ import {
   RUSTY_VIEW_CHAT_EVENT_REQUIRED_FIELDS,
   RUSTY_VIEW_CHAT_OPENAPI_PATH,
   RUSTY_VIEW_CHAT_PATHS,
+  RUSTY_VIEW_LOGICAL_TURN_EVENT_KIND_VALUES,
+  RUSTY_VIEW_LOGICAL_TURN_EVENT_REQUIRED_FIELDS,
   RUSTY_VIEW_MESSAGE_SLOT_REQUIRED_FIELDS,
 } from "../src/rusty-view-chat-contract.js";
 
@@ -49,6 +51,35 @@ assert.deepEqual(chatEvent.required, [
 assert.deepEqual(schema("ChatEventKind").enum, [
   ...RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
 ]);
+assert.deepEqual(schema("LogicalTurnLifecyclePayload").required, [
+  ...RUSTY_VIEW_LOGICAL_TURN_EVENT_REQUIRED_FIELDS,
+]);
+for (const kind of RUSTY_VIEW_LOGICAL_TURN_EVENT_KIND_VALUES) {
+  assert.ok(
+    schema("ChatEventKind").enum?.includes(kind),
+    `emitted logical-turn event ${kind} is missing from ChatEventKind`,
+  );
+}
+assert.ok(
+  schema("ChatEventPayload").oneOf?.some(
+    (candidate) =>
+      candidate.$ref === "#/components/schemas/LogicalTurnLifecyclePayload",
+  ),
+  "logical-turn lifecycle payload must be part of ChatEventPayload",
+);
+assert.deepEqual(schema("LogicalTurnResolutionAction").enum, [
+  "retry_unchanged",
+  "retry_provider_operation",
+  "confirm_tool_completed",
+  "confirm_tool_not_completed",
+  "rebind",
+  "cancel",
+]);
+assert.equal(
+  contract.paths[RUSTY_VIEW_CHAT_PATHS.logicalTurns]?.get?.responses["200"]
+    ?.content?.["application/json"]?.schema?.allOf?.[1]?.properties?.data?.$ref,
+  "#/components/schemas/LogicalTurnDiagnosticPage",
+);
 
 assert.deepEqual(schema("MemorySurfaceOwner").enum, [
   "crew",
@@ -275,5 +306,6 @@ interface JsonSchema {
   enum?: string[];
   required?: string[];
   oneOf?: JsonSchema[];
+  allOf?: JsonSchema[];
   properties?: Record<string, JsonSchema>;
 }

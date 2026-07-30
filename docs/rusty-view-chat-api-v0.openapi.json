@@ -321,7 +321,16 @@
             "description": "Logical-turn diagnostic page",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ApiEnvelope" }
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/LogicalTurnDiagnosticPage" }
+                      }
+                    }
+                  ]
+                }
               }
             }
           }
@@ -346,21 +355,27 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["expectedRevision"],
-                "properties": {
-                  "expectedRevision": { "type": "integer", "minimum": 0 },
-                  "reasonCode": { "type": "string" },
-                  "summary": { "type": "string" }
-                }
-              }
+              "schema": { "$ref": "#/components/schemas/LogicalTurnCancelRequest" }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Idempotent logical-turn cancellation receipt"
+            "description": "Idempotent logical-turn cancellation receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/LogicalTurnControlReceipt" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "409": { "description": "Logical-turn revision conflict" }
         }
@@ -383,26 +398,27 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["expectedRevision", "action"],
-                "properties": {
-                  "expectedRevision": { "type": "integer", "minimum": 0 },
-                  "action": {
-                    "type": "string",
-                    "enum": [
-                      "retry_unchanged",
-                      "retry_provider_operation"
-                    ]
-                  }
-                }
-              }
+              "schema": { "$ref": "#/components/schemas/LogicalTurnResolveRequest" }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Logical-turn attention resolution receipt"
+            "description": "Logical-turn attention resolution receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/LogicalTurnControlReceipt" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "409": { "description": "Logical-turn revision conflict" }
         }
@@ -1822,6 +1838,15 @@
           "context_compaction_started",
           "context_compaction_completed",
           "context_compaction_failed",
+          "logical_turn_admitted",
+          "logical_turn_continuing",
+          "logical_turn_yielding",
+          "logical_turn_queued_to_continue",
+          "logical_turn_attention_required",
+          "logical_turn_cancelling",
+          "logical_turn_completed",
+          "logical_turn_cancelled",
+          "logical_turn_failed",
           "message_slot_created",
           "message_variant_created",
           "message_variant_deleted",
@@ -1851,6 +1876,7 @@
           { "$ref": "#/components/schemas/ToolCallPayload" },
           { "$ref": "#/components/schemas/CommandPayload" },
           { "$ref": "#/components/schemas/ContextDebugPayload" },
+          { "$ref": "#/components/schemas/LogicalTurnLifecyclePayload" },
           { "$ref": "#/components/schemas/MessageSlotPayload" },
           { "$ref": "#/components/schemas/MessageVariantPayload" },
           { "$ref": "#/components/schemas/ConversationTreePayload" },
@@ -2056,6 +2082,231 @@
           "reason_code": { "type": "string" },
           "ui_debug": { "type": "boolean", "const": true },
           "model_facing": { "type": "boolean", "const": false }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnLifecyclePayload": {
+        "type": "object",
+        "required": [
+          "logical_turn_id",
+          "projection_id",
+          "continuation_id",
+          "continuation_count",
+          "wake_id",
+          "phase",
+          "operator_state",
+          "progress_classification",
+          "reason_code",
+          "summary",
+          "progress",
+          "logical_turn_revision"
+        ],
+        "properties": {
+          "logical_turn_id": { "type": "string" },
+          "projection_id": { "type": "string" },
+          "continuation_id": { "type": "string" },
+          "continuation_count": { "type": "integer", "minimum": 0 },
+          "execution_epoch_id": { "type": ["string", "null"] },
+          "wake_id": { "type": "string" },
+          "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
+          "operator_state": { "$ref": "#/components/schemas/LogicalTurnOperatorState" },
+          "progress_classification": { "$ref": "#/components/schemas/LogicalTurnProgressClassification" },
+          "reason_code": { "type": "string" },
+          "summary": { "type": "string" },
+          "progress": { "$ref": "#/components/schemas/LogicalTurnProgress" },
+          "logical_turn_revision": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnPhase": {
+        "type": "string",
+        "enum": [
+          "admitted",
+          "runnable",
+          "running",
+          "yielded",
+          "attention_required",
+          "cancel_requested",
+          "completed",
+          "cancelled",
+          "failed"
+        ]
+      },
+      "LogicalTurnOperatorState": {
+        "type": "string",
+        "enum": [
+          "queued_to_continue",
+          "running",
+          "paused_for_attention",
+          "cancelling",
+          "completed",
+          "cancelled",
+          "failed"
+        ]
+      },
+      "LogicalTurnProgressClassification": {
+        "type": "string",
+        "enum": [
+          "admitted",
+          "provider_progress",
+          "tool_progress",
+          "semantic_progress",
+          "liveness_only",
+          "no_progress",
+          "attention_required",
+          "completed",
+          "cancelled",
+          "failed"
+        ]
+      },
+      "LogicalTurnProgress": {
+        "type": "object",
+        "required": [
+          "semanticRevision",
+          "committedProviderOperations",
+          "committedToolOperations",
+          "committedProjectionCursor",
+          "assistantContentBytes",
+          "acceptedActionCount",
+          "delegatedCompletionCount",
+          "stateFingerprint",
+          "lastLivenessAt",
+          "lastSemanticProgressAt"
+        ],
+        "properties": {
+          "semanticRevision": { "type": "integer", "minimum": 0 },
+          "committedProviderOperations": { "type": "integer", "minimum": 0 },
+          "committedToolOperations": { "type": "integer", "minimum": 0 },
+          "committedProjectionCursor": { "type": "integer", "minimum": 0 },
+          "assistantContentBytes": { "type": "integer", "minimum": 0 },
+          "acceptedActionCount": { "type": "integer", "minimum": 0 },
+          "delegatedCompletionCount": { "type": "integer", "minimum": 0 },
+          "consecutiveNoProgressSamples": { "type": "integer", "minimum": 0 },
+          "stateFingerprint": { "type": "string" },
+          "lastLivenessAt": { "type": "string", "format": "date-time" },
+          "lastSemanticProgressAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnResolutionAction": {
+        "type": "string",
+        "enum": [
+          "retry_unchanged",
+          "retry_provider_operation",
+          "confirm_tool_completed",
+          "confirm_tool_not_completed",
+          "rebind",
+          "cancel"
+        ]
+      },
+      "LogicalTurnAttention": {
+        "type": "object",
+        "required": [
+          "reason",
+          "reasonCode",
+          "summary",
+          "requiredAt",
+          "retryUnchangedSafe"
+        ],
+        "properties": {
+          "reason": { "type": "string" },
+          "reasonCode": { "type": "string" },
+          "summary": { "type": "string" },
+          "requiredAt": { "type": "string", "format": "date-time" },
+          "retryUnchangedSafe": { "type": "boolean" },
+          "resolutionActions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LogicalTurnResolutionAction" }
+          },
+          "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnDiagnostic": {
+        "type": "object",
+        "required": [
+          "logicalTurnId",
+          "sessionId",
+          "sourceWakeId",
+          "phase",
+          "operatorState",
+          "currentContinuationId",
+          "continuationCount",
+          "providerRequestTotal",
+          "toolRoundTotal",
+          "progressClassification",
+          "lastProgressAt",
+          "lastLivenessAt",
+          "reasonCode",
+          "summary",
+          "revision",
+          "admittedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "logicalTurnId": { "type": "string" },
+          "sessionId": { "type": "string" },
+          "sourceWakeId": { "type": "string" },
+          "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
+          "operatorState": { "$ref": "#/components/schemas/LogicalTurnOperatorState" },
+          "currentContinuationId": { "type": "string" },
+          "activeExecutionEpochId": { "type": ["string", "null"] },
+          "continuationCount": { "type": "integer", "minimum": 0 },
+          "providerRequestTotal": { "type": "integer", "minimum": 0 },
+          "toolRoundTotal": { "type": "integer", "minimum": 0 },
+          "progressClassification": { "$ref": "#/components/schemas/LogicalTurnProgressClassification" },
+          "lastProgressAt": { "type": "string", "format": "date-time" },
+          "lastLivenessAt": { "type": "string", "format": "date-time" },
+          "reasonCode": { "type": "string" },
+          "summary": { "type": "string" },
+          "attention": { "oneOf": [{ "$ref": "#/components/schemas/LogicalTurnAttention" }, { "type": "null" }] },
+          "revision": { "type": "integer", "minimum": 0 },
+          "admittedAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "terminalAt": { "type": ["string", "null"], "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnDiagnosticPage": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LogicalTurnDiagnostic" }
+          },
+          "total": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnCancelRequest": {
+        "type": "object",
+        "required": ["expectedRevision"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 0 },
+          "reasonCode": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnResolveRequest": {
+        "type": "object",
+        "required": ["expectedRevision", "action"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 0 },
+          "action": { "$ref": "#/components/schemas/LogicalTurnResolutionAction" }
+        },
+        "additionalProperties": false
+      },
+      "LogicalTurnControlReceipt": {
+        "type": "object",
+        "required": ["replayed", "record"],
+        "properties": {
+          "replayed": { "type": "boolean" },
+          "alreadyTerminal": { "type": "boolean" },
+          "action": { "$ref": "#/components/schemas/LogicalTurnResolutionAction" },
+          "record": { "type": "object", "additionalProperties": true },
+          "checkpoint": { "type": "object", "additionalProperties": true }
         },
         "additionalProperties": false
       },
