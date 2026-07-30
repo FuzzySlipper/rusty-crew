@@ -126,6 +126,127 @@ fn production_operation_receipts_are_durable_and_cancellation_fenced() {
 }
 
 #[test]
+fn restart_unknown_tool_outcome_resolutions_reconcile_operation_and_turn_atomically() {
+    for (suffix, action, expected_phase) in [
+        (
+            "completed",
+            LogicalTurnResolutionAction::ConfirmToolCompleted,
+            LogicalTurnOperationPhase::Completed,
+        ),
+        (
+            "not-completed",
+            LogicalTurnResolutionAction::ConfirmToolNotCompleted,
+            LogicalTurnOperationPhase::Superseded,
+        ),
+    ] {
+        let data_dir = unique_data_dir(&format!("logical-turn-outcome-{suffix}"));
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let session = engine
+            .create_session(session_config(
+                &format!("outcome-session-{suffix}"),
+                &format!("outcome-agent-{suffix}"),
+                "prepared-logical-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let prepared = engine
+            .prepare_logical_turn_wake(
+                &chat_completions_registration(),
+                &session.session_id,
+                &format!("outcome-wake-{suffix}"),
+                "system prompt".into(),
+                br#"{"messages":[]}"#.to_vec(),
+            )
+            .unwrap();
+        let operation_id = BrainOperationId::new(format!("operation:outcome:{suffix}"));
+        engine
+            .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+                operation: LogicalTurnOperationRecord {
+                    operation_id: operation_id.clone(),
+                    logical_turn_id: prepared.claim.record.logical_turn_id.clone(),
+                    continuation_id: prepared.claim.record.current_continuation_id.clone(),
+                    execution_epoch_id: prepared.claim.record.active_epoch_id.clone().unwrap(),
+                    kind: LogicalTurnOperationKind::HostToolExecution,
+                    phase: LogicalTurnOperationPhase::Leased,
+                    request_fingerprint: "request-fingerprint".into(),
+                    idempotency_key: operation_id.0.clone(),
+                    lease_holder: prepared.claim.record.claim_holder.clone(),
+                    lease_generation: prepared.claim.record.claim_generation,
+                    lease_expires_at: prepared.claim.record.claim_expires_at.clone(),
+                    result_ref: None,
+                    result_payload: None,
+                    reason_code: None,
+                    revision: 1,
+                    created_at: NOW.into(),
+                    updated_at: NOW.into(),
+                },
+                expected_turn_revision: prepared.claim.record.revision,
+                expected_claim_generation: prepared.claim.record.claim_generation.unwrap(),
+                expected_cancellation_generation: prepared.claim.record.cancellation_generation,
+            })
+            .unwrap();
+        let logical_turn_id = prepared.claim.record.logical_turn_id.clone();
+        drop(engine);
+
+        let restarted = test_engine_with_data_dir(data_dir.clone());
+        let attention = restarted
+            .get_logical_turn(&logical_turn_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(attention.phase, LogicalTurnPhase::AttentionRequired);
+        assert_eq!(
+            attention.attention.as_ref().unwrap().reason,
+            LogicalTurnAttentionReason::ToolOutcomeUnknown
+        );
+        assert!(attention
+            .attention
+            .as_ref()
+            .unwrap()
+            .resolution_actions
+            .contains(&action));
+        let unknown = restarted
+            .list_logical_turn_operations(&logical_turn_id)
+            .unwrap();
+        assert_eq!(unknown.len(), 1);
+        assert_eq!(unknown[0].phase, LogicalTurnOperationPhase::OutcomeUnknown);
+
+        let resolved = restarted
+            .resolve_logical_turn_attention_for_operator(
+                &logical_turn_id,
+                attention.revision,
+                action,
+            )
+            .unwrap();
+        assert_eq!(resolved.record.phase, LogicalTurnPhase::Runnable);
+        assert!(resolved.record.attention.is_none());
+        assert_eq!(
+            restarted.logical_turn_continuation_tickets().unwrap().len(),
+            1
+        );
+        let reconciled = restarted
+            .list_logical_turn_operations(&logical_turn_id)
+            .unwrap();
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].phase, expected_phase);
+        if action == LogicalTurnResolutionAction::ConfirmToolCompleted {
+            assert_eq!(
+                reconciled[0].result_payload.as_ref().unwrap()["reasonCode"],
+                "operator_confirmed_tool_completed"
+            );
+        } else {
+            assert!(reconciled[0].result_payload.is_none());
+        }
+        let stale = restarted.resolve_logical_turn_attention_for_operator(
+            &logical_turn_id,
+            attention.revision,
+            action,
+        );
+        assert!(stale.is_err());
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+}
+
+#[test]
 fn logical_turn_diagnostics_preserve_progress_across_restart_and_cancel_yielded_turns() {
     let data_dir = unique_data_dir("logical-turn-diagnostics-restart");
     let engine = test_engine_with_data_dir(data_dir.clone());
@@ -535,7 +656,7 @@ fn logical_turn_yields_idempotently_and_restart_resumes_without_new_input() {
         .create_session(session_config(
             "logical-session",
             "logical-agent",
-            "logical-profile",
+            "prepared-logical-profile",
             SessionKind::Full,
         ))
         .unwrap();
@@ -1019,6 +1140,51 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
             now: NOW.into(),
         })
         .unwrap();
+    let outcome_session = engine
+        .create_session(session_config(
+            "logical-postgres-outcome-session",
+            "logical-postgres-outcome-agent",
+            "prepared-logical-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let outcome = engine
+        .prepare_logical_turn_wake(
+            &chat_completions_registration(),
+            &outcome_session.session_id,
+            "logical-postgres-outcome-wake",
+            "system prompt".into(),
+            br#"{"messages":[]}"#.to_vec(),
+        )
+        .unwrap();
+    let outcome_turn_id = outcome.claim.record.logical_turn_id.clone();
+    let outcome_operation_id = BrainOperationId::new("operation:postgres:outcome");
+    engine
+        .lease_logical_turn_operation(&LogicalTurnOperationLeaseRequest {
+            operation: LogicalTurnOperationRecord {
+                operation_id: outcome_operation_id.clone(),
+                logical_turn_id: outcome_turn_id.clone(),
+                continuation_id: outcome.claim.record.current_continuation_id.clone(),
+                execution_epoch_id: outcome.claim.record.active_epoch_id.clone().unwrap(),
+                kind: LogicalTurnOperationKind::HostToolExecution,
+                phase: LogicalTurnOperationPhase::Leased,
+                request_fingerprint: "postgres-outcome-request".into(),
+                idempotency_key: outcome_operation_id.0,
+                lease_holder: outcome.claim.record.claim_holder.clone(),
+                lease_generation: outcome.claim.record.claim_generation,
+                lease_expires_at: outcome.claim.record.claim_expires_at.clone(),
+                result_ref: None,
+                result_payload: None,
+                reason_code: None,
+                revision: 1,
+                created_at: NOW.into(),
+                updated_at: NOW.into(),
+            },
+            expected_turn_revision: outcome.claim.record.revision,
+            expected_claim_generation: outcome.claim.record.claim_generation.unwrap(),
+            expected_cancellation_generation: outcome.claim.record.cancellation_generation,
+        })
+        .unwrap();
     drop(engine);
 
     let restarted = CoreEngine::initialize(config).unwrap();
@@ -1033,6 +1199,25 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
             .unwrap()
             .phase,
         LogicalTurnPhase::Cancelled
+    );
+    let outcome_attention = restarted
+        .get_logical_turn(&outcome_turn_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(outcome_attention.phase, LogicalTurnPhase::AttentionRequired);
+    restarted
+        .resolve_logical_turn_attention_for_operator(
+            &outcome_turn_id,
+            outcome_attention.revision,
+            LogicalTurnResolutionAction::ConfirmToolNotCompleted,
+        )
+        .unwrap();
+    assert_eq!(
+        restarted
+            .list_logical_turn_operations(&outcome_turn_id)
+            .unwrap()[0]
+            .phase,
+        LogicalTurnOperationPhase::Superseded
     );
     drop(restarted);
 

@@ -511,10 +511,10 @@ fn prepare_host_tool_operation(
     let sequence = active
         .next_host_tool_operation
         .fetch_add(1, Ordering::SeqCst);
-    let operation_id = BrainOperationId::new(format!(
+    let base_operation_id = format!(
         "operation:{}:{}:host-tool:{sequence}",
         active.claim.record.logical_turn_id.0, active.claim.record.current_continuation_id.0,
-    ));
+    );
     let request_fingerprint = sha256_text(
         &serde_json::json!({"name": name, "argumentsJson": arguments_json}).to_string(),
     );
@@ -522,25 +522,31 @@ fn prepare_host_tool_operation(
         .engine()?
         .list_logical_turn_operations(&active.claim.record.logical_turn_id)?
         .into_iter()
-        .find(|operation| operation.operation_id == operation_id);
-    if let Some(existing) = existing {
+        .filter_map(|operation| {
+            host_tool_operation_attempt(&base_operation_id, &operation.operation_id.0)
+                .map(|attempt| (attempt, operation))
+        })
+        .max_by_key(|(attempt, _)| *attempt);
+    let mut operation_id = BrainOperationId::new(base_operation_id.clone());
+    if let Some((attempt, existing)) = existing {
         if existing.request_fingerprint != request_fingerprint {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 format!("logical turn replay diverged at host tool operation {sequence}"),
             ));
         }
-        active
-            .host_tool_operations
-            .lock()
-            .map_err(|_| {
-                CoreError::new(
-                    CoreErrorKind::InternalError,
-                    "host tool operation map is poisoned",
-                )
-            })?
-            .insert(call_id.clone(), operation_id);
+        operation_id = existing.operation_id.clone();
         if existing.phase == LogicalTurnOperationPhase::Completed {
+            active
+                .host_tool_operations
+                .lock()
+                .map_err(|_| {
+                    CoreError::new(
+                        CoreErrorKind::InternalError,
+                        "host tool operation map is poisoned",
+                    )
+                })?
+                .insert(call_id.clone(), operation_id);
             let mut payload = existing.result_payload.ok_or_else(|| {
                 CoreError::new(
                     CoreErrorKind::PersistenceFailure,
@@ -583,10 +589,17 @@ fn prepare_host_tool_operation(
         if existing.phase == LogicalTurnOperationPhase::CompletedAfterCancel {
             return Ok(false);
         }
-        return Err(CoreError::new(
-            CoreErrorKind::ActionRejected,
-            "host tool operation already exists without a replayable completed result",
-        ));
+        if existing.phase == LogicalTurnOperationPhase::Superseded {
+            operation_id = BrainOperationId::new(format!(
+                "{base_operation_id}:retry:{}",
+                attempt.saturating_add(1)
+            ));
+        } else {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "host tool operation already exists without a replayable completed result",
+            ));
+        }
     }
 
     let epoch_id = active.claim.record.active_epoch_id.clone().ok_or_else(|| {
@@ -634,6 +647,17 @@ fn prepare_host_tool_operation(
         })?
         .insert(call_id, operation_id);
     Ok(true)
+}
+
+fn host_tool_operation_attempt(base_operation_id: &str, operation_id: &str) -> Option<u64> {
+    if operation_id == base_operation_id {
+        return Some(0);
+    }
+    operation_id
+        .strip_prefix(base_operation_id)?
+        .strip_prefix(":retry:")?
+        .parse()
+        .ok()
 }
 
 fn complete_host_tool_operation(bridge: &NativeBridge, input_json: &str) -> CoreResult<bool> {
@@ -860,6 +884,21 @@ fn finish_native_brain_activity_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_tool_retry_operation_ids_are_ordered_and_do_not_shadow_the_base_receipt() {
+        let base = "operation:turn:continuation:host-tool:0";
+        assert_eq!(host_tool_operation_attempt(base, base), Some(0));
+        assert_eq!(
+            host_tool_operation_attempt(base, &format!("{base}:retry:1")),
+            Some(1)
+        );
+        assert_eq!(
+            host_tool_operation_attempt(base, &format!("{base}:retry:42")),
+            Some(42)
+        );
+        assert_eq!(host_tool_operation_attempt(base, "operation:other"), None);
+    }
 
     #[test]
     fn production_host_tool_dispatch_persists_lease_and_result_before_consumption() {

@@ -1937,7 +1937,7 @@
     "/v1/admin/logical-turns/{logical_turn_id}/resolve": {
       "post": {
         "operationId": "adminLogicalTurnsResolve",
-        "summary": "Resolve operator attention and queue the logical turn to continue.",
+        "summary": "Resolve operator attention, including unknown tool outcomes, and queue the logical turn to continue.",
         "tags": ["session"],
         "security": [{ "AdminBearer": [] }],
         "parameters": [
@@ -3728,7 +3728,7 @@
     "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve": {
       "post": {
         "operationId": "chatSessionsLogicalTurnsResolve",
-        "summary": "Resolve operator attention for a chat logical turn and queue it to continue.",
+        "summary": "Resolve operator attention for a chat logical turn, including unknown tool outcomes, and queue it to continue.",
         "tags": ["chat", "session"],
         "security": [{ "ChatBearer": [] }],
         "parameters": [

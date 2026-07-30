@@ -161,7 +161,7 @@ export async function handleLogicalTurnRoute(
       return invalidInput(
         request.requestId,
         "invalid_logical_turn_resolution_action",
-        "action must be retry_unchanged or retry_provider_operation",
+        "action must be retry_unchanged, retry_provider_operation, confirm_tool_completed, or confirm_tool_not_completed",
       );
     }
     const receipt = await context.resolveLogicalTurnAttention({
@@ -384,7 +384,10 @@ function boolParam(url: URL, key: string): boolean {
 function resolutionAction(
   value: unknown,
 ): LogicalTurnResolutionAction | undefined {
-  return value === "retry_unchanged" || value === "retry_provider_operation"
+  return value === "retry_unchanged" ||
+    value === "retry_provider_operation" ||
+    value === "confirm_tool_completed" ||
+    value === "confirm_tool_not_completed"
     ? value
     : undefined;
 }

@@ -604,7 +604,7 @@ export const API_CAPABILITIES = [
     "admin.logical_turns.resolve",
     "POST",
     "/v1/admin/logical-turns/{logical_turn_id}/resolve",
-    "Resolve operator attention and queue the logical turn to continue.",
+    "Resolve operator attention, including unknown tool outcomes, and queue the logical turn to continue.",
     ["session"],
   ),
   readCapability(
@@ -627,7 +627,7 @@ export const API_CAPABILITIES = [
     "chat.sessions.logical_turns.resolve",
     "POST",
     "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve",
-    "Resolve operator attention for a chat logical turn and queue it to continue.",
+    "Resolve operator attention for a chat logical turn, including unknown tool outcomes, and queue it to continue.",
     "chat",
     ["chat", "session"],
   ),

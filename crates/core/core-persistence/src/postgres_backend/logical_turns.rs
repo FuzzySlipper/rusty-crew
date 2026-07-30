@@ -458,6 +458,7 @@ impl PostgresBackendStore {
                     "attention-required logical turn has no current checkpoint",
                 )
             })?;
+        reconcile_unknown_host_tool_operation_pg(&mut tx, &schema, &record, request)?;
         let expected_revision = record.revision;
         record.phase = LogicalTurnPhase::Runnable;
         record.attention = None;
@@ -984,23 +985,46 @@ impl PostgresBackendStore {
                 )?;
                 continue;
             }
-            let leased_host_tool: bool = tx.query_one(
-                &format!("SELECT EXISTS(SELECT 1 FROM {schema}.logical_brain_turn_operations WHERE logical_turn_id=$1 AND kind='host_tool_execution' AND phase='leased')"),
-                &[&record.logical_turn_id.0],
-            ).map_err(|error| postgres_error("inspect PostgreSQL logical turn leased tools", error))?.get(0);
-            if record.phase == LogicalTurnPhase::Running && leased_host_tool {
+            let unknown_host_tools = if record.phase == LogicalTurnPhase::Running {
+                mark_leased_host_tools_outcome_unknown_pg(
+                    &mut tx,
+                    &schema,
+                    &record.logical_turn_id,
+                    now,
+                )?
+            } else {
+                Vec::new()
+            };
+            if !unknown_host_tools.is_empty() {
                 let expected_revision = record.revision;
                 record.phase = LogicalTurnPhase::AttentionRequired;
+                let unambiguous = unknown_host_tools.len() == 1;
                 record.attention = Some(rusty_crew_core_protocol::LogicalTurnAttention {
-                    reason: rusty_crew_core_protocol::LogicalTurnAttentionReason::ToolOutcomeUnknown,
-                    reason_code: "host_tool_outcome_unknown_after_restart".into(),
-                    summary: "a host tool lease was active when the service stopped".into(),
+                    reason: if unambiguous {
+                        rusty_crew_core_protocol::LogicalTurnAttentionReason::ToolOutcomeUnknown
+                    } else {
+                        rusty_crew_core_protocol::LogicalTurnAttentionReason::InvariantRepairRequired
+                    },
+                    reason_code: if unambiguous {
+                        "host_tool_outcome_unknown_after_restart".into()
+                    } else {
+                        "multiple_host_tool_outcomes_unknown_after_restart".into()
+                    },
+                    summary: if unambiguous {
+                        "a host tool lease was active when the service stopped".into()
+                    } else {
+                        "multiple host tool leases were active when the service stopped; automatic outcome confirmation is unsafe".into()
+                    },
                     evidence_refs: Vec::new(),
-                    resolution_actions: vec![
-                        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted,
-                        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted,
-                        rusty_crew_core_protocol::LogicalTurnResolutionAction::Cancel,
-                    ],
+                    resolution_actions: if unambiguous {
+                        vec![
+                            rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted,
+                            rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted,
+                            rusty_crew_core_protocol::LogicalTurnResolutionAction::Cancel,
+                        ]
+                    } else {
+                        vec![rusty_crew_core_protocol::LogicalTurnResolutionAction::Cancel]
+                    },
                     retry_unchanged_safe: false,
                     required_at: now.clone(),
                 });
@@ -1168,6 +1192,113 @@ fn update_operation_pg(
         ));
     }
     Ok(())
+}
+
+fn mark_leased_host_tools_outcome_unknown_pg(
+    client: &mut impl GenericClient,
+    schema: &str,
+    logical_turn_id: &LogicalTurnId,
+    now: &rusty_crew_core_protocol::IsoTimestamp,
+) -> CoreResult<Vec<LogicalTurnOperationRecord>> {
+    let rows = client
+        .query(
+            &format!(
+                "SELECT record_json FROM {schema}.logical_brain_turn_operations
+                 WHERE logical_turn_id=$1 AND kind='host_tool_execution' AND phase='leased'
+                 ORDER BY operation_id FOR UPDATE"
+            ),
+            &[&logical_turn_id.0],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL leased host tools", error))?;
+    let mut operations = rows
+        .into_iter()
+        .map(|row| {
+            decode_pg(
+                row.get::<_, String>(0).as_str(),
+                "leased host tool operation",
+            )
+        })
+        .collect::<CoreResult<Vec<LogicalTurnOperationRecord>>>()?;
+    for operation in &mut operations {
+        let expected_revision = operation.revision;
+        operation.phase = LogicalTurnOperationPhase::OutcomeUnknown;
+        operation.reason_code = Some("host_tool_outcome_unknown_after_restart".into());
+        operation.updated_at = now.clone();
+        operation.revision += 1;
+        update_operation_pg(client, schema, operation, expected_revision)?;
+    }
+    Ok(operations)
+}
+
+fn reconcile_unknown_host_tool_operation_pg(
+    client: &mut impl GenericClient,
+    schema: &str,
+    record: &LogicalTurnRecord,
+    request: &LogicalTurnAttentionResolutionRequest,
+) -> CoreResult<()> {
+    if !matches!(
+        request.action,
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted
+            | rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted
+    ) {
+        return Ok(());
+    }
+    let rows = client
+        .query(
+            &format!(
+                "SELECT record_json FROM {schema}.logical_brain_turn_operations
+                 WHERE logical_turn_id=$1 AND kind='host_tool_execution' AND phase='outcome_unknown'
+                 ORDER BY operation_id FOR UPDATE"
+            ),
+            &[&record.logical_turn_id.0],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL unknown host tools", error))?;
+    let mut operations = rows
+        .into_iter()
+        .map(|row| {
+            decode_pg(
+                row.get::<_, String>(0).as_str(),
+                "unknown host tool operation",
+            )
+        })
+        .collect::<CoreResult<Vec<LogicalTurnOperationRecord>>>()?;
+    if operations.len() != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "tool outcome confirmation requires exactly one outcome-unknown host operation",
+        ));
+    }
+    let operation = operations.first_mut().expect("one operation checked");
+    let expected_revision = operation.revision;
+    operation.updated_at = request.now.clone();
+    operation.revision += 1;
+    match request.action {
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted => {
+            operation.phase = LogicalTurnOperationPhase::Completed;
+            operation.reason_code = Some("operator_confirmed_tool_completed".into());
+            operation.result_ref = Some(format!(
+                "operator-confirmed:{}:{}",
+                operation.operation_id.0, operation.revision
+            ));
+            operation.result_payload = Some(serde_json::json!({
+                "output": "[Rusty Crew operator confirmation] The tool completed before the service restart, but its original output was unavailable.",
+                "status": "succeeded",
+                "retryable": false,
+                "reasonCode": "operator_confirmed_tool_completed",
+                "action": "operator_confirmation",
+                "summary": "operator confirmed the unknown host tool outcome as completed",
+                "stateFingerprint": format!("operator-confirmed:{}", operation.operation_id.0),
+            }));
+        }
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted => {
+            operation.phase = LogicalTurnOperationPhase::Superseded;
+            operation.reason_code = Some("operator_confirmed_tool_not_completed".into());
+            operation.result_ref = None;
+            operation.result_payload = None;
+        }
+        _ => unreachable!("confirmation actions filtered above"),
+    }
+    update_operation_pg(client, schema, operation, expected_revision)
 }
 
 fn load_turn_pg_for_update(

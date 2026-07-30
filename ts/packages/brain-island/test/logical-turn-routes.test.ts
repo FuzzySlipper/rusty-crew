@@ -83,6 +83,41 @@ test("active cancellation relies on the running wake observer instead of duplica
   assert.deepEqual(emitted, []);
 });
 
+test("operator tool-outcome confirmations use the advertised resolution actions", async () => {
+  for (const action of [
+    "confirm_tool_completed",
+    "confirm_tool_not_completed",
+  ] as const) {
+    const result = await handleLogicalTurnRoute(
+      {
+        method: "POST",
+        url: new URL(
+          "http://local/v1/chat/sessions/session-a/logical-turns/turn-a/resolve",
+        ),
+        body: { expectedRevision: 3, action },
+        requestId: `resolve-${action}`,
+      },
+      routeContext("yielded"),
+    );
+    assert.equal(result.status, 200);
+    assert.equal(
+      (result.body as { data: { action: string } }).data.action,
+      action,
+    );
+  }
+
+  const invalid = await handleLogicalTurnRoute(
+    {
+      method: "POST",
+      url: new URL("http://local/v1/admin/logical-turns/turn-a/resolve"),
+      body: { expectedRevision: 3, action: "rebind" },
+      requestId: "resolve-unadvertised-rebind",
+    },
+    routeContext("yielded"),
+  );
+  assert.equal(invalid.status, 400);
+});
+
 function routeContext(
   initialState: "yielded" | "running",
   emitted: string[] = [],

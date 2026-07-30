@@ -417,6 +417,7 @@ impl CoordinationStore {
                     "attention-required logical turn has no current checkpoint",
                 )
             })?;
+        reconcile_unknown_host_tool_operation(&tx, &record, request)?;
         let expected_revision = record.revision;
         record.phase = LogicalTurnPhase::Runnable;
         record.attention = None;
@@ -919,20 +920,41 @@ impl CoordinationStore {
                 insert_outbox(&tx, &event)?;
                 continue;
             }
-            let leased_host_tool = has_leased_host_tool(&tx, &record.logical_turn_id)?;
-            if record.phase == LogicalTurnPhase::Running && leased_host_tool {
+            let unknown_host_tools = if record.phase == LogicalTurnPhase::Running {
+                mark_leased_host_tools_outcome_unknown(&tx, &record.logical_turn_id, now)?
+            } else {
+                Vec::new()
+            };
+            if !unknown_host_tools.is_empty() {
                 let expected_revision = record.revision;
                 record.phase = LogicalTurnPhase::AttentionRequired;
+                let unambiguous = unknown_host_tools.len() == 1;
                 record.attention = Some(rusty_crew_core_protocol::LogicalTurnAttention {
-                    reason: rusty_crew_core_protocol::LogicalTurnAttentionReason::ToolOutcomeUnknown,
-                    reason_code: "host_tool_outcome_unknown_after_restart".into(),
-                    summary: "a host tool lease was active when the service stopped".into(),
+                    reason: if unambiguous {
+                        rusty_crew_core_protocol::LogicalTurnAttentionReason::ToolOutcomeUnknown
+                    } else {
+                        rusty_crew_core_protocol::LogicalTurnAttentionReason::InvariantRepairRequired
+                    },
+                    reason_code: if unambiguous {
+                        "host_tool_outcome_unknown_after_restart".into()
+                    } else {
+                        "multiple_host_tool_outcomes_unknown_after_restart".into()
+                    },
+                    summary: if unambiguous {
+                        "a host tool lease was active when the service stopped".into()
+                    } else {
+                        "multiple host tool leases were active when the service stopped; automatic outcome confirmation is unsafe".into()
+                    },
                     evidence_refs: Vec::new(),
-                    resolution_actions: vec![
-                        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted,
-                        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted,
-                        rusty_crew_core_protocol::LogicalTurnResolutionAction::Cancel,
-                    ],
+                    resolution_actions: if unambiguous {
+                        vec![
+                            rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted,
+                            rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted,
+                            rusty_crew_core_protocol::LogicalTurnResolutionAction::Cancel,
+                        ]
+                    } else {
+                        vec![rusty_crew_core_protocol::LogicalTurnResolutionAction::Cancel]
+                    },
                     retry_unchanged_safe: false,
                     required_at: now.clone(),
                 });
@@ -1105,6 +1127,8 @@ pub(crate) fn validate_attention_resolution(
             request.action,
             rusty_crew_core_protocol::LogicalTurnResolutionAction::RetryUnchanged
                 | rusty_crew_core_protocol::LogicalTurnResolutionAction::RetryProviderOperation
+                | rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted
+                | rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted
         )
         || (request.action == rusty_crew_core_protocol::LogicalTurnResolutionAction::RetryUnchanged
             && !attention.retry_unchanged_safe)
@@ -1117,6 +1141,18 @@ pub(crate) fn validate_attention_resolution(
         return Err(CoreError::new(
             CoreErrorKind::ActionRejected,
             "logical turn attention resolution is not valid for the current state",
+        ));
+    }
+    if matches!(
+        request.action,
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted
+            | rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted
+    ) && attention.reason
+        != rusty_crew_core_protocol::LogicalTurnAttentionReason::ToolOutcomeUnknown
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "tool outcome confirmation requires tool-outcome-unknown attention",
         ));
     }
     validate_lifecycle_identity(record, &request.lifecycle_event)
@@ -1468,19 +1504,107 @@ fn load_all_turns(conn: &rusqlite::Connection) -> CoreResult<Vec<LogicalTurnReco
     .collect()
 }
 
-fn has_leased_host_tool(
+fn mark_leased_host_tools_outcome_unknown(
     tx: &rusqlite::Transaction<'_>,
     logical_turn_id: &LogicalTurnId,
-) -> CoreResult<bool> {
-    tx.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM logical_brain_turn_operations
-            WHERE logical_turn_id = ?1 AND kind = 'host_tool_execution' AND phase = 'leased'
-         )",
-        params![logical_turn_id.0],
-        |row| row.get(0),
-    )
-    .map_err(|error| persistence_error("inspect logical turn leased tools", error))
+    now: &IsoTimestamp,
+) -> CoreResult<Vec<LogicalTurnOperationRecord>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT record_json FROM logical_brain_turn_operations
+             WHERE logical_turn_id = ?1 AND kind = 'host_tool_execution' AND phase = 'leased'
+             ORDER BY operation_id",
+        )
+        .map_err(|error| persistence_error("prepare leased host tool query", error))?;
+    let rows = stmt
+        .query_map(params![logical_turn_id.0], |row| row.get::<_, String>(0))
+        .map_err(|error| persistence_error("query leased host tools", error))?;
+    let mut operations = rows
+        .map(|row| {
+            row.map_err(|error| persistence_error("read leased host tool", error))
+                .and_then(|raw| decode(&raw, "leased host tool operation"))
+        })
+        .collect::<CoreResult<Vec<LogicalTurnOperationRecord>>>()?;
+    drop(stmt);
+    for operation in &mut operations {
+        let expected_revision = operation.revision;
+        operation.phase = LogicalTurnOperationPhase::OutcomeUnknown;
+        operation.reason_code = Some("host_tool_outcome_unknown_after_restart".into());
+        operation.updated_at = now.clone();
+        operation.revision += 1;
+        update_operation(tx, operation, expected_revision)?;
+    }
+    Ok(operations)
+}
+
+fn reconcile_unknown_host_tool_operation(
+    tx: &rusqlite::Transaction<'_>,
+    record: &LogicalTurnRecord,
+    request: &LogicalTurnAttentionResolutionRequest,
+) -> CoreResult<()> {
+    if !matches!(
+        request.action,
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted
+            | rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted
+    ) {
+        return Ok(());
+    }
+    let mut stmt = tx
+        .prepare(
+            "SELECT record_json FROM logical_brain_turn_operations
+             WHERE logical_turn_id = ?1 AND kind = 'host_tool_execution' AND phase = 'outcome_unknown'
+             ORDER BY operation_id",
+        )
+        .map_err(|error| persistence_error("prepare unknown host tool query", error))?;
+    let rows = stmt
+        .query_map(params![record.logical_turn_id.0], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| persistence_error("query unknown host tools", error))?;
+    let mut operations = rows
+        .map(|row| {
+            row.map_err(|error| persistence_error("read unknown host tool", error))
+                .and_then(|raw| decode(&raw, "unknown host tool operation"))
+        })
+        .collect::<CoreResult<Vec<LogicalTurnOperationRecord>>>()?;
+    drop(stmt);
+    if operations.len() != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "tool outcome confirmation requires exactly one outcome-unknown host operation",
+        ));
+    }
+    let operation = operations.first_mut().expect("one operation checked");
+    let expected_revision = operation.revision;
+    operation.updated_at = request.now.clone();
+    operation.revision += 1;
+    match request.action {
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolCompleted => {
+            operation.phase = LogicalTurnOperationPhase::Completed;
+            operation.reason_code = Some("operator_confirmed_tool_completed".into());
+            operation.result_ref = Some(format!(
+                "operator-confirmed:{}:{}",
+                operation.operation_id.0, operation.revision
+            ));
+            operation.result_payload = Some(serde_json::json!({
+                "output": "[Rusty Crew operator confirmation] The tool completed before the service restart, but its original output was unavailable.",
+                "status": "succeeded",
+                "retryable": false,
+                "reasonCode": "operator_confirmed_tool_completed",
+                "action": "operator_confirmation",
+                "summary": "operator confirmed the unknown host tool outcome as completed",
+                "stateFingerprint": format!("operator-confirmed:{}", operation.operation_id.0),
+            }));
+        }
+        rusty_crew_core_protocol::LogicalTurnResolutionAction::ConfirmToolNotCompleted => {
+            operation.phase = LogicalTurnOperationPhase::Superseded;
+            operation.reason_code = Some("operator_confirmed_tool_not_completed".into());
+            operation.result_ref = None;
+            operation.result_payload = None;
+        }
+        _ => unreachable!("confirmation actions filtered above"),
+    }
+    update_operation(tx, operation, expected_revision)
 }
 
 pub(crate) fn lifecycle_for_record(
