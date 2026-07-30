@@ -4434,6 +4434,7 @@
             "$ref": "#/components/schemas/LogicalTurnOperatorState"
           },
           "phase": { "$ref": "#/components/schemas/LogicalTurnPhase" },
+          "progress": { "$ref": "#/components/schemas/LogicalTurnProgress" },
           "progressClassification": {
             "$ref": "#/components/schemas/LogicalTurnProgressClassification"
           },
@@ -4466,6 +4467,7 @@
           "phase",
           "operatorState",
           "progressClassification",
+          "progress",
           "lastProgressAt",
           "lastLivenessAt",
           "reasonCode",

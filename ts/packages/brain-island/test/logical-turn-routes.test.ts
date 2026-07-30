@@ -48,7 +48,7 @@ test("logical-turn routes expose session-scoped diagnostics and reject mismatche
 });
 
 test("yielded cancellation emits one cancelling and one cancelled chat event", async () => {
-  const emitted: string[] = [];
+  const emitted: EmittedLifecycleEvent[] = [];
   const context = routeContext("yielded", emitted);
   const result = await handleLogicalTurnRoute(
     {
@@ -61,14 +61,20 @@ test("yielded cancellation emits one cancelling and one cancelled chat event", a
     context,
   );
   assert.equal(result.status, 200);
-  assert.deepEqual(emitted, [
-    "logical_turn_cancelling",
-    "logical_turn_cancelled",
-  ]);
+  assert.deepEqual(
+    emitted.map((event) => event.kind),
+    ["logical_turn_cancelling", "logical_turn_cancelled"],
+  );
+  assertLifecyclePayload(emitted[0], "cancelling", 4);
+  assertLifecyclePayload(emitted[1], "cancelled", 4);
+  assert.notEqual(
+    emitted[0]?.payload.projection_id,
+    emitted[1]?.payload.projection_id,
+  );
 });
 
 test("active cancellation relies on the running wake observer instead of duplicating SSE", async () => {
-  const emitted: string[] = [];
+  const emitted: EmittedLifecycleEvent[] = [];
   const context = routeContext("running", emitted);
   const result = await handleLogicalTurnRoute(
     {
@@ -88,6 +94,7 @@ test("operator tool-outcome confirmations use the advertised resolution actions"
     "confirm_tool_completed",
     "confirm_tool_not_completed",
   ] as const) {
+    const emitted: EmittedLifecycleEvent[] = [];
     const result = await handleLogicalTurnRoute(
       {
         method: "POST",
@@ -97,13 +104,16 @@ test("operator tool-outcome confirmations use the advertised resolution actions"
         body: { expectedRevision: 3, action },
         requestId: `resolve-${action}`,
       },
-      routeContext("yielded"),
+      routeContext("yielded", emitted),
     );
     assert.equal(result.status, 200);
     assert.equal(
       (result.body as { data: { action: string } }).data.action,
       action,
     );
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0]?.kind, "logical_turn_continuing");
+    assertLifecyclePayload(emitted[0], "continuing", 3);
   }
 
   const invalid = await handleLogicalTurnRoute(
@@ -120,7 +130,7 @@ test("operator tool-outcome confirmations use the advertised resolution actions"
 
 function routeContext(
   initialState: "yielded" | "running",
-  emitted: string[] = [],
+  emitted: EmittedLifecycleEvent[] = [],
 ): LogicalTurnRouteContext {
   let state: LogicalTurnOperatorState =
     initialState === "running" ? "running" : "queued_to_continue";
@@ -152,7 +162,7 @@ function routeContext(
       };
     },
     async appendChatLifecycleEvent(event) {
-      emitted.push(event.kind);
+      emitted.push(event);
     },
     now: () => "2026-07-29T00:00:00Z",
   };
@@ -177,6 +187,7 @@ function diagnostic(operatorState: LogicalTurnOperatorState) {
     operatorState,
     progressClassification:
       operatorState === "cancelled" ? "cancelled" : "tool_progress",
+    progress: checkpoint().progress,
     lastProgressAt: "2026-07-29T00:00:00Z",
     lastLivenessAt: "2026-07-29T00:00:00Z",
     reasonCode:
@@ -194,6 +205,29 @@ function diagnostic(operatorState: LogicalTurnOperatorState) {
       ? { terminalAt: "2026-07-29T00:00:00Z" }
       : {}),
   } as LogicalTurnDiagnosticPage["items"][number];
+}
+
+interface EmittedLifecycleEvent {
+  readonly kind:
+    | "logical_turn_continuing"
+    | "logical_turn_cancelling"
+    | "logical_turn_cancelled";
+  readonly payload: Record<string, unknown>;
+}
+
+function assertLifecyclePayload(
+  event: EmittedLifecycleEvent | undefined,
+  projectionKind: "continuing" | "cancelling" | "cancelled",
+  revision: number,
+): void {
+  assert.ok(event);
+  assert.equal(event.payload.logical_turn_id, "turn-a");
+  assert.equal(
+    event.payload.projection_id,
+    `projection:turn-a:${revision}:${projectionKind}`,
+  );
+  assert.deepEqual(event.payload.progress, checkpoint().progress);
+  assert.equal(event.payload.logical_turn_revision, revision);
 }
 
 function record(phase: "runnable" | "cancelled") {

@@ -136,12 +136,12 @@ export async function handleLogicalTurnRoute(
         diagnostic !== undefined &&
         beforeCancel?.operatorState !== "running"
       ) {
-        const payload = diagnosticPayload(diagnostic);
+        const cancellingPayload = diagnosticPayload(diagnostic, "cancelling");
         await context.appendChatLifecycleEvent?.({
           sessionId: diagnostic.sessionId,
           kind: "logical_turn_cancelling",
           payload: {
-            ...payload,
+            ...cancellingPayload,
             operator_state: "cancelling",
             reason_code: reasonCode,
             summary: "logical turn cancellation requested",
@@ -150,7 +150,7 @@ export async function handleLogicalTurnRoute(
         await context.appendChatLifecycleEvent?.({
           sessionId: diagnostic.sessionId,
           kind: "logical_turn_cancelled",
-          payload,
+          payload: diagnosticPayload(diagnostic, "cancelled"),
         });
       }
       return successRoute(request.requestId, receipt);
@@ -178,7 +178,7 @@ export async function handleLogicalTurnRoute(
       await context.appendChatLifecycleEvent?.({
         sessionId: diagnostic.sessionId,
         kind: "logical_turn_continuing",
-        payload: diagnosticPayload(diagnostic),
+        payload: diagnosticPayload(diagnostic, "continuing"),
       });
     }
     return successRoute(request.requestId, receipt);
@@ -205,9 +205,11 @@ async function currentDiagnostic(
 
 function diagnosticPayload(
   diagnostic: LogicalTurnDiagnostic,
+  projectionKind: "continuing" | "cancelling" | "cancelled",
 ): Record<string, unknown> {
   return {
     logical_turn_id: diagnostic.logicalTurnId,
+    projection_id: `projection:${diagnostic.logicalTurnId}:${diagnostic.revision}:${projectionKind}`,
     continuation_id: diagnostic.currentContinuationId,
     continuation_count: diagnostic.continuationCount,
     execution_epoch_id: diagnostic.activeExecutionEpochId,
@@ -221,6 +223,7 @@ function diagnosticPayload(
     last_liveness_at: diagnostic.lastLivenessAt,
     reason_code: diagnostic.reasonCode,
     summary: diagnostic.summary,
+    progress: diagnostic.progress,
     logical_turn_revision: diagnostic.revision,
   };
 }

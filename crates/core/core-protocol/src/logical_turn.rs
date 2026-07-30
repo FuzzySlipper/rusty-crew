@@ -450,6 +450,7 @@ pub struct LogicalTurnDiagnostic {
     pub phase: LogicalTurnPhase,
     pub operator_state: LogicalTurnOperatorState,
     pub progress_classification: LogicalTurnProgressClassification,
+    pub progress: LogicalTurnProgress,
     pub last_progress_at: IsoTimestamp,
     pub last_liveness_at: IsoTimestamp,
     pub reason_code: String,

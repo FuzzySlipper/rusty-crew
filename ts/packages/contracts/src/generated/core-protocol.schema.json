@@ -5055,6 +5055,9 @@
         "phase": {
           "$ref": "#/$defs/LogicalTurnPhase"
         },
+        "progress": {
+          "$ref": "#/$defs/LogicalTurnProgress"
+        },
         "progressClassification": {
           "$ref": "#/$defs/LogicalTurnProgressClassification"
         },
@@ -5106,6 +5109,7 @@
         "phase",
         "operatorState",
         "progressClassification",
+        "progress",
         "lastProgressAt",
         "lastLivenessAt",
         "reasonCode",

@@ -1227,6 +1227,7 @@ export type LogicalTurnDiagnostic = {
   logicalTurnId: string;
   operatorState: LogicalTurnOperatorState;
   phase: LogicalTurnPhase;
+  progress: LogicalTurnProgress;
   progressClassification: LogicalTurnProgressClassification;
   providerRequestTotal: number;
   reasonCode: string;
