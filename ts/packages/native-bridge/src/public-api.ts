@@ -2467,6 +2467,7 @@ export interface NativeBridgeModule
     action?: string;
     summary?: string;
     debugDetailId?: string;
+    stateFingerprint?: string;
   }): Promise<{
     moduleId: "chat-completions" | "openai-responses";
     wakeId: string;

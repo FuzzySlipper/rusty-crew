@@ -19,6 +19,7 @@ pub struct BufferedBrainHostToolResult {
     pub action: Option<String>,
     pub summary: Option<String>,
     pub debug_detail_id: Option<String>,
+    pub state_fingerprint: Option<String>,
 }
 
 impl BufferedBrainHostToolResult {
@@ -31,6 +32,7 @@ impl BufferedBrainHostToolResult {
             action: None,
             summary: None,
             debug_detail_id: None,
+            state_fingerprint: None,
         }
     }
 
@@ -43,6 +45,7 @@ impl BufferedBrainHostToolResult {
             action: Some("denied".to_string()),
             summary: None,
             debug_detail_id: None,
+            state_fingerprint: None,
         }
     }
 
@@ -59,6 +62,7 @@ impl BufferedBrainHostToolResult {
             action: Some("failed".to_string()),
             summary: None,
             debug_detail_id: None,
+            state_fingerprint: None,
         }
     }
 }
@@ -172,6 +176,7 @@ impl BufferedBrainToolFailurePolicy {
             provider_output: BufferedNeutralToolOutput {
                 output,
                 is_error: failure.is_some(),
+                state_fingerprint: result.state_fingerprint.clone().unwrap_or_default(),
             },
             failure,
             recovery_guidance,

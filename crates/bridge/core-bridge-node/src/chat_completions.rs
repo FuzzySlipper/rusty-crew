@@ -107,6 +107,8 @@ struct JsChatCompletionsToolOutputInput {
     summary: Option<String>,
     #[serde(default)]
     debug_detail_id: Option<String>,
+    #[serde(default)]
+    state_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,6 +271,7 @@ pub(crate) fn submit_chat_completions_tool_output_json(
                     action: input.action,
                     summary: input.summary,
                     debug_detail_id: input.debug_detail_id,
+                    state_fingerprint: input.state_fingerprint,
                 },
             )
         })
@@ -758,8 +761,10 @@ impl ChatCompletionsNeutralToolExecutor for BufferedChatCompletionsToolExecutor 
                 {
                     return Some(if output.is_error {
                         ChatCompletionsToolOutput::error(output.output)
+                            .with_state_fingerprint(output.state_fingerprint)
                     } else {
                         ChatCompletionsToolOutput::ok(output.output)
+                            .with_state_fingerprint(output.state_fingerprint)
                     });
                 }
                 if run.coordinator.phase().is_terminal() {

@@ -1177,6 +1177,7 @@ mod tests {
         BufferedNeutralToolOutput {
             output: value.to_string(),
             is_error: false,
+            state_fingerprint: String::new(),
         }
     }
 

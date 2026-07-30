@@ -129,6 +129,8 @@ struct JsOpenAiResponsesToolOutputInput {
     summary: Option<String>,
     #[serde(default)]
     debug_detail_id: Option<String>,
+    #[serde(default)]
+    state_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -378,6 +380,7 @@ pub(crate) fn submit_openai_responses_tool_output_json(
                     action: input.action,
                     summary: input.summary,
                     debug_detail_id: input.debug_detail_id,
+                    state_fingerprint: input.state_fingerprint,
                 },
             )
         })
@@ -491,6 +494,7 @@ impl NeutralToolExecutor for EchoNeutralToolExecutor {
         NeutralToolOutput {
             output: format!("{} completed by Rust Responses bridge", call.name),
             is_error: false,
+            state_fingerprint: String::new(),
         }
     }
 }
@@ -524,6 +528,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                             self.wake_id, call.call_id
                         ),
                         is_error: true,
+                        state_fingerprint: String::new(),
                     };
                 }
             }
@@ -538,6 +543,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                             self.wake_id, call.call_id, cancellation.summary
                         ),
                         is_error: true,
+                        state_fingerprint: String::new(),
                     });
                 }
                 if let BufferedNeutralToolOutputPoll::Ready(output) =
@@ -546,6 +552,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                     return Some(NeutralToolOutput {
                         output: output.output,
                         is_error: output.is_error,
+                        state_fingerprint: output.state_fingerprint,
                     });
                 }
                 if run.coordinator.phase().is_terminal() {
@@ -560,6 +567,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                             self.wake_id, call.call_id, summary
                         ),
                         is_error: true,
+                        state_fingerprint: String::new(),
                     });
                 }
                 None
@@ -573,6 +581,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                             self.wake_id, call.call_id
                         ),
                         is_error: true,
+                        state_fingerprint: String::new(),
                     };
                 }
                 Ok(None) => {}

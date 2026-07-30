@@ -39,6 +39,7 @@ export interface BrainHostToolExecutionResult {
   output: string;
   failure?: BrainHostToolFailure;
   suspend?: boolean;
+  stateFingerprint?: string;
 }
 
 export function prepareBrainHostToolRequest(
@@ -247,8 +248,10 @@ export async function executePreparedBrainHostToolRequest(
         });
       }
     }
+    const stateFingerprint = brainToolStateFingerprint(result);
     return {
       output: brainToolResultToHostOutput(result, mediaReferences),
+      ...(stateFingerprint === undefined ? {} : { stateFingerprint }),
       ...(result.terminate === true ? { suspend: true } : {}),
       ...(failure === undefined ? {} : { failure }),
     };
@@ -273,6 +276,33 @@ export async function executePreparedBrainHostToolRequest(
       },
     };
   }
+}
+
+function brainToolStateFingerprint(result: BrainToolResult): string | undefined {
+  const details = result.details;
+  if (!isRecord(details)) return undefined;
+  for (const key of [
+    "stateFingerprint",
+    "state_fingerprint",
+    "effectFingerprint",
+    "effect_fingerprint",
+  ]) {
+    const value = stringField(details, key)?.trim();
+    if (value) return `${key}:${value}`.slice(0, 512);
+  }
+  for (const key of [
+    "revision",
+    "resourceRevision",
+    "resource_revision",
+    "effectRevision",
+    "effect_revision",
+  ]) {
+    const value = details[key];
+    if (typeof value === "string" || typeof value === "number") {
+      return `${key}:${String(value)}`.slice(0, 512);
+    }
+  }
+  return undefined;
 }
 
 export function brainToolResultToDebugValue(

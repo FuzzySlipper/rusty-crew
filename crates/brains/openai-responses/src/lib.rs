@@ -1004,6 +1004,7 @@ pub struct PendingResponsesFunctionCall {
 pub struct NeutralToolOutput {
     pub output: String,
     pub is_error: bool,
+    pub state_fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2397,7 +2398,7 @@ where
                         if output.is_error { "error" } else { "success" },
                         &output.output,
                     ]),
-                    state_fingerprint: String::new(),
+                    state_fingerprint: output.state_fingerprint.clone(),
                     assistant_progress_fingerprint: assistant_progress_fingerprint.clone(),
                     result_class: if output.is_error {
                         BrainProgressResultClass::Failed
@@ -3011,6 +3012,7 @@ impl NeutralToolExecutor for MapToolExecutor {
             .unwrap_or_else(|| NeutralToolOutput {
                 output: format!("tool {} is unavailable", call.name),
                 is_error: true,
+                state_fingerprint: String::new(),
             })
     }
 }
@@ -3776,6 +3778,7 @@ mod tests {
             NeutralToolOutput {
                 output: "found rust".to_string(),
                 is_error: false,
+                state_fingerprint: String::new(),
             },
         )]);
         let mut brain = brain_with(client, tools);
@@ -3895,6 +3898,7 @@ mod tests {
                 NeutralToolOutput {
                     output: "same answer".to_string(),
                     is_error: false,
+                    state_fingerprint: String::new(),
                 },
             )]),
         );
@@ -3942,6 +3946,7 @@ mod tests {
                 NeutralToolOutput {
                     output: "dependency unavailable".to_string(),
                     is_error: true,
+                    state_fingerprint: String::new(),
                 },
             )]),
         );
@@ -3959,6 +3964,90 @@ mod tests {
         assert_eq!(attention.reason_code, "responses_tool_no_progress");
         assert_eq!(attention.consecutive_no_progress_samples, 3);
         assert!(result.continuation_state.is_some());
+    }
+
+    #[test]
+    fn repeated_failed_function_calls_continue_when_host_state_changes() {
+        #[derive(Debug)]
+        struct StateAdvancingTool {
+            outputs: std::sync::Mutex<VecDeque<NeutralToolOutput>>,
+        }
+
+        impl NeutralToolExecutor for StateAdvancingTool {
+            fn execute(&self, _call: &PendingResponsesFunctionCall) -> NeutralToolOutput {
+                self.outputs
+                    .lock()
+                    .expect("state tool mutex")
+                    .pop_front()
+                    .expect("scripted state output")
+            }
+        }
+
+        let repeated_call = |call_id: &str, response_id: &str| {
+            Ok(vec![
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: None,
+                    call_id: call_id.to_string(),
+                    name: "lookup".to_string(),
+                    arguments: r#"{"query":"same"}"#.to_string(),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: response_id.to_string(),
+                    usage: None,
+                },
+            ])
+        };
+        let client = FakeResponsesClient::new(vec![
+            repeated_call("call-repeat", "resp-1"),
+            repeated_call("call-repeat", "resp-2"),
+            repeated_call("call-repeat", "resp-3"),
+            repeated_call("call-repeat", "resp-4"),
+            Ok(vec![
+                ResponsesEvent::TextDelta("recovered after state changes".into()),
+                ResponsesEvent::Completed {
+                    response_id: "resp-final".into(),
+                    usage: None,
+                },
+            ]),
+        ])
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat");
+        let tool = StateAdvancingTool {
+            outputs: std::sync::Mutex::new(
+                (1..=4)
+                    .map(|revision| NeutralToolOutput {
+                        output: "dependency unavailable".into(),
+                        is_error: true,
+                        state_fingerprint: format!("resource-revision:{revision}"),
+                    })
+                    .collect(),
+            ),
+        };
+        let mut brain = ResponsesReplayBrain::new(
+            client,
+            tool,
+            ResponsesBrainConfig::replay("gpt-5"),
+            vec![NeutralBrainTool {
+                name: "lookup".into(),
+                description: "Look up data".into(),
+                input_schema: json!({"type":"object"}),
+            }],
+        );
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_closed().unwrap();
+
+        assert!(result.attention.is_none());
+        assert!(result.provider_state.is_some());
+        assert!(items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if event.event == BrainEvent::TextDelta {
+                    text: "recovered after state changes".into()
+                }
+        )));
     }
 
     #[test]
@@ -4003,6 +4092,7 @@ mod tests {
                 NeutralToolOutput {
                     output: "evidence".to_string(),
                     is_error: false,
+                    state_fingerprint: String::new(),
                 },
             )]),
             config,
@@ -4078,6 +4168,7 @@ mod tests {
                 NeutralToolOutput {
                     output: "evidence".to_string(),
                     is_error: false,
+                    state_fingerprint: String::new(),
                 },
             )]),
             config,
@@ -4230,6 +4321,7 @@ mod tests {
                 NeutralToolOutput {
                     output: "evidence".to_string(),
                     is_error: false,
+                    state_fingerprint: String::new(),
                 },
             )]),
             config,

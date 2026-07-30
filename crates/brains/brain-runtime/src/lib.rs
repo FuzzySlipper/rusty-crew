@@ -79,6 +79,8 @@ pub struct BufferedNeutralPendingToolRequest {
 pub struct BufferedNeutralToolOutput {
     pub output: String,
     pub is_error: bool,
+    #[serde(default)]
+    pub state_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]

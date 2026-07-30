@@ -241,6 +241,9 @@ export async function runBufferedBrainHost(options: {
           ...(request.debugDetailId === undefined
             ? {}
             : { debugDetailId: request.debugDetailId }),
+          ...(output.stateFingerprint === undefined
+            ? {}
+            : { stateFingerprint: output.stateFingerprint }),
         });
         if (output.suspend === true) {
           await cancelBufferedWake(
