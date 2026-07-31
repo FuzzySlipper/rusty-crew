@@ -5,7 +5,10 @@ import type {
   SessionId,
   SessionState,
 } from "@rusty-crew/contracts";
-import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
+import type {
+  NativeBridgeModule,
+  NativeRuntimeConfigPlan,
+} from "@rusty-crew/native-bridge";
 import type { ChatEvent } from "./rusty-view-chat-api.js";
 import type { RuntimeConfigFileForMutation } from "./service-profile-admin-mutations.js";
 import type {
@@ -53,6 +56,7 @@ export interface CrewSessionLifecycleContext {
   validateRuntimeConfigFile(value: unknown): Promise<{
     ok: boolean;
     diagnostics: Array<{ severity: string; message: string }>;
+    runtimePlan?: NativeRuntimeConfigPlan;
   }>;
   writeRuntimeConfigFile(value: unknown): Promise<void>;
   applyRuntimeConfigFromDisk(options: {
@@ -111,23 +115,35 @@ export async function archiveCrewSession(
 
   const runtimeConfigFile = await context.readRuntimeConfigFile();
   const previousRuntimeConfig = structuredClone(runtimeConfigFile.value);
+  const preArchivePlan = await assertValidRuntimeConfig(
+    context,
+    runtimeConfigFile.value,
+  );
+  const channelBindingIds = bindingIdsTargetingSession(
+    preArchivePlan.runtimeConfig.channelBindings,
+    session.sessionId,
+  );
+  const mcpBindingIds = bindingIdsTargetingSession(
+    preArchivePlan.runtimeConfig.mcpBindings,
+    session.sessionId,
+  );
   const sessionEntriesRemoved = removeEntriesBySessionId(
     runtimeConfigFile.array("sessions"),
     session.sessionId,
     "sessionId",
     "session_id",
   );
-  const channelBindingsDetached = removeEntriesBySessionId(
+  const channelBindingsDetached = removeEntriesByIds(
     runtimeConfigFile.array("channelBindings"),
-    session.sessionId,
-    "sessionId",
-    "session_id",
+    channelBindingIds,
+    "bindingId",
+    "binding_id",
   );
-  const mcpBindingsDetached = removeEntriesBySessionId(
+  const mcpBindingsDetached = removeEntriesByIds(
     runtimeConfigFile.array("mcpBindings"),
-    session.sessionId,
-    "sessionId",
-    "session_id",
+    mcpBindingIds,
+    "bindingId",
+    "binding_id",
   );
   const scheduledJobsRemoved = removeEntriesBySessionId(
     runtimeConfigFile.array("scheduledJobs"),
@@ -335,16 +351,48 @@ async function markProfileSessionRefArchived(
 async function assertValidRuntimeConfig(
   context: CrewSessionLifecycleContext,
   value: unknown,
-): Promise<void> {
+): Promise<NativeRuntimeConfigPlan> {
   const validation = await context.validateRuntimeConfigFile(value);
-  if (validation.ok) return;
+  if (validation.ok && validation.runtimePlan !== undefined) {
+    return validation.runtimePlan;
+  }
   const message = validation.diagnostics.find(
     (diagnostic) => diagnostic.severity === "error",
   )?.message;
   throw new CrewSessionLifecycleError(
     "crew_session_runtime_config_invalid",
-    message ?? "Crew session runtime config mutation was invalid.",
+    message ??
+      "Crew session runtime config mutation did not produce a canonical Rust plan.",
   );
+}
+
+function bindingIdsTargetingSession(
+  bindings: ReadonlyArray<{ bindingId: string; sessionId?: string }>,
+  sessionId: string,
+): Set<string> {
+  return new Set(
+    bindings
+      .filter((binding) => binding.sessionId === sessionId)
+      .map((binding) => binding.bindingId),
+  );
+}
+
+function removeEntriesByIds(
+  entries: unknown[],
+  ids: ReadonlySet<string>,
+  camelKey: string,
+  snakeKey: string,
+): number {
+  let removed = 0;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!isRecord(entry)) continue;
+    const id = entry[camelKey] ?? entry[snakeKey];
+    if (typeof id !== "string" || !ids.has(id)) continue;
+    entries.splice(index, 1);
+    removed += 1;
+  }
+  return removed;
 }
 
 function removeEntriesBySessionId(

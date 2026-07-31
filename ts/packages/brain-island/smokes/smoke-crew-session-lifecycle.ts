@@ -42,7 +42,6 @@ let runtimeValue: Record<string, unknown> = {
       adapterId: "den-channels",
       provider: "den_channels",
       agentId: session.agentId,
-      sessionId: session.sessionId,
       profileId: session.profileId,
       externalChannelId: "40",
       status: "active",
@@ -52,7 +51,6 @@ let runtimeValue: Record<string, unknown> = {
       adapterId: "den-channels",
       provider: "den_channels",
       agentId: "other-agent",
-      sessionId: "other-session",
       profileId: "other-profile",
       externalChannelId: "41",
       status: "active",
@@ -63,7 +61,6 @@ let runtimeValue: Record<string, unknown> = {
       bindingId: "mcp-1",
       adapterId: "mcp-ts-main",
       agentId: session.agentId,
-      sessionId: session.sessionId,
       profileId: session.profileId,
       serverNames: ["den"],
       endpointRef: "config://mcp/den",
@@ -75,7 +72,6 @@ let runtimeValue: Record<string, unknown> = {
       bindingId: "mcp-unrelated",
       adapterId: "mcp-ts-main",
       agentId: "other-agent",
-      sessionId: "other-session",
       profileId: "other-profile",
       serverNames: ["den"],
       endpointRef: "config://mcp/den",
@@ -93,12 +89,13 @@ let runtimeValue: Record<string, unknown> = {
     },
   ],
 };
+const validUnscoped = await validateWithNativeRust(runtimeValue);
+assert.ok(
+  validUnscoped.ok,
+  `unscoped bindings must be valid before archive: ${JSON.stringify(validUnscoped.diagnostics)}`,
+);
 const orphanedDraft = structuredClone(runtimeValue);
 (orphanedDraft.sessions as unknown[]).splice(0, 1);
-delete (orphanedDraft.channelBindings as Array<Record<string, unknown>>)[0]
-  ?.sessionId;
-delete (orphanedDraft.mcpBindings as Array<Record<string, unknown>>)[0]
-  ?.sessionId;
 const orphanedValidation = await validateWithNativeRust(orphanedDraft);
 assert.ok(
   orphanedValidation.diagnostics.some(
@@ -274,15 +271,16 @@ async function validateWithNativeRust(value: unknown) {
   ]) {
     profileIds.add(binding.profileId);
   }
-  const validation = await nativeBridge.validateRuntimeConfigDraft({
+  const runtimePlan = await nativeBridge.planRuntimeConfig({
     runtimeConfig,
     profiles: [...profileIds].map((profileId) => ({ profileId })),
   });
   return {
-    ok: !validation.diagnostics.some(
+    ok: !runtimePlan.diagnostics.some(
       (diagnostic) => diagnostic.severity === "error",
     ),
-    diagnostics: validation.diagnostics,
+    diagnostics: runtimePlan.diagnostics,
+    runtimePlan,
   };
 }
 

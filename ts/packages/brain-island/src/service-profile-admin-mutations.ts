@@ -12,6 +12,7 @@ import type {
   NativeCreateProfilePlan,
   NativeModelProviderRecord,
   NativeProfilePurgeReport,
+  NativeRuntimeConfigPlan,
 } from "@rusty-crew/native-bridge";
 import type { AdminControlCommand } from "./admin-control-api.js";
 import { createLocalToolProfileStore } from "./local-tool-profiles.js";
@@ -133,7 +134,7 @@ export interface RuntimeConfigDraftPlan {
     explicitChannelLifecycle: true;
     explicitSessionLifecycle: true;
   };
-  runtimePlan?: unknown;
+  runtimePlan?: NativeRuntimeConfigPlan;
 }
 
 export async function readServiceProfileConfig(
@@ -207,7 +208,7 @@ export async function planServiceProfileUpdate(
     context.runtimeConfig.profilesDir,
     profileId as ProfileId,
   ).catch(() => undefined);
-  let runtimePlan: unknown;
+  let runtimePlan: NativeRuntimeConfigPlan | undefined;
   if (parsedDraft !== undefined) {
     const profiles = await loadRuntimeConfigProfilesReplacing(
       context,
@@ -902,7 +903,7 @@ async function planRuntimeConfigValue(
       path: diagnostic.path,
       message: diagnostic.message,
     }));
-  let runtimePlan: unknown;
+  let runtimePlan: NativeRuntimeConfigPlan | undefined;
   if (!diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
     const plan = await planRuntimeConfigWithRust({
       bridge: context.bridge,

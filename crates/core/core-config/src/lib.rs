@@ -944,6 +944,8 @@ pub fn plan_runtime_config(input: &RuntimeConfigValidationInput) -> RuntimeConfi
         }
     }
 
+    resolve_unique_binding_targets(&mut runtime_config);
+
     let diagnostics = validate_runtime_config_draft(&runtime_config, &input.profiles).diagnostics;
     RuntimeConfigPlan {
         runtime_config,
@@ -951,6 +953,37 @@ pub fn plan_runtime_config(input: &RuntimeConfigValidationInput) -> RuntimeConfi
         derived_scheduled_jobs,
         derived_mcp_bindings,
     }
+}
+
+fn resolve_unique_binding_targets(runtime_config: &mut RuntimeConfigDraft) {
+    let sessions = &runtime_config.sessions;
+    for binding in &mut runtime_config.channel_bindings {
+        if binding.session_id.is_none() {
+            binding.session_id =
+                unique_binding_target_session(sessions, &binding.agent_id, &binding.profile_id);
+        }
+    }
+    for binding in &mut runtime_config.mcp_bindings {
+        if binding.session_id.is_none() {
+            binding.session_id =
+                unique_binding_target_session(sessions, &binding.agent_id, &binding.profile_id);
+        }
+    }
+}
+
+fn unique_binding_target_session(
+    sessions: &[SessionConfigDraft],
+    agent_id: &AgentId,
+    profile_id: &ProfileId,
+) -> Option<SessionId> {
+    let mut matches = sessions
+        .iter()
+        .filter(|session| session.agent_id == *agent_id && session.profile_id == *profile_id);
+    let target = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(target.session_id.clone())
 }
 
 pub fn plan_delegated_role_lifecycle(
@@ -4214,6 +4247,31 @@ mod tests {
         assert!(idempotent.ok(), "{:?}", idempotent.diagnostics);
         assert!(idempotent.derived_scheduled_jobs.is_empty());
         assert!(idempotent.derived_mcp_bindings.is_empty());
+    }
+
+    #[test]
+    fn plans_unique_unscoped_bindings_with_canonical_session_targets() {
+        let mut draft = valid_draft();
+        draft.channel_bindings[0].session_id = None;
+        draft.mcp_bindings[0].session_id = None;
+
+        let validation = validate_runtime_config_draft(&draft, &[profile("runner")]);
+        assert!(validation.ok(), "{:?}", validation.diagnostics);
+
+        let plan = plan_runtime_config(&RuntimeConfigValidationInput {
+            runtime_config: draft,
+            profiles: vec![profile("runner")],
+        });
+
+        assert!(plan.ok(), "{:?}", plan.diagnostics);
+        assert_eq!(
+            plan.runtime_config.channel_bindings[0].session_id,
+            Some(SessionId::new("runner-session"))
+        );
+        assert_eq!(
+            plan.runtime_config.mcp_bindings[0].session_id,
+            Some(SessionId::new("runner-session"))
+        );
     }
 
     #[test]
