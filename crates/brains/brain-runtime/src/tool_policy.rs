@@ -10,6 +10,13 @@ pub enum BufferedBrainHostToolStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BufferedBrainHostTurnDisposition {
+    CompleteTurn,
+    SuspendExternal,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BufferedBrainHostToolResult {
     pub status: BufferedBrainHostToolStatus,
@@ -20,6 +27,7 @@ pub struct BufferedBrainHostToolResult {
     pub summary: Option<String>,
     pub debug_detail_id: Option<String>,
     pub state_fingerprint: Option<String>,
+    pub turn_disposition: Option<BufferedBrainHostTurnDisposition>,
 }
 
 impl BufferedBrainHostToolResult {
@@ -33,6 +41,7 @@ impl BufferedBrainHostToolResult {
             summary: None,
             debug_detail_id: None,
             state_fingerprint: None,
+            turn_disposition: None,
         }
     }
 
@@ -46,6 +55,7 @@ impl BufferedBrainHostToolResult {
             summary: None,
             debug_detail_id: None,
             state_fingerprint: None,
+            turn_disposition: None,
         }
     }
 
@@ -63,6 +73,7 @@ impl BufferedBrainHostToolResult {
             summary: None,
             debug_detail_id: None,
             state_fingerprint: None,
+            turn_disposition: None,
         }
     }
 }

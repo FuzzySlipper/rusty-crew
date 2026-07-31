@@ -240,6 +240,6 @@ function result(
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
-    terminate: details.ok,
+    ...(details.ok ? { turnDisposition: "complete_turn" as const } : {}),
   };
 }

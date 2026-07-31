@@ -98,6 +98,10 @@ status: blocked
     assert.ok(tool, `${name} should be selected`);
     const result = await tool.execute(`${name}-call`, params);
     assert.equal((result.details as { ok?: boolean }).ok, expectedOk);
+    assert.equal(
+      result.turnDisposition,
+      expectedOk ? "complete_turn" : undefined,
+    );
   }
 }
 

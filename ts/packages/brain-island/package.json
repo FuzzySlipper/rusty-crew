@@ -83,6 +83,7 @@
     "smoke:rusty-view-chat-authority-boundary": "tsx smokes/smoke-rusty-view-chat-authority-boundary.ts",
     "smoke:chat-rust-authority-live-debug-service": "tsx smokes/chat-rust-authority-live-debug-service.ts",
     "smoke:session-execution-live-debug-service": "tsx smokes/session-execution-live-debug-service.ts",
+    "smoke:completion-tool-turn-disposition-live-debug-service": "tsx smokes/completion-tool-turn-disposition-live-debug-service.ts",
     "smoke:logical-turn-continuation-live-debug-service": "tsx smokes/logical-turn-continuation-live-debug-service.ts",
     "smoke:chat-completions-reasoning-live-debug-service": "tsx smokes/chat-completions-reasoning-live-debug-service.ts",
     "smoke:chat-completions-deepseek-live-debug-service": "RUSTY_CREW_REASONING_CERT_DIALECT=deepseek tsx smokes/chat-completions-reasoning-live-debug-service.ts",

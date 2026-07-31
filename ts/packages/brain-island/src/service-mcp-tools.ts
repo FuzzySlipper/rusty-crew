@@ -271,7 +271,10 @@ export function createServiceMcpToolResolver(input: {
                   commitSha: gate.commitSha,
                   now: new Date().toISOString(),
                 });
-                result = { ...result, terminate: true };
+                result = {
+                  ...result,
+                  turnDisposition: "suspend_external",
+                };
               }
             }
             await input.bridge?.submitBrainEvent({

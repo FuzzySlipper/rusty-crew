@@ -934,7 +934,8 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
     )
     .unwrap();
 
-    let terminal = (0..100)
+    let mut post_tool_items = Vec::new();
+    let _terminal = (0..100)
         .find_map(|_| {
             let drain: serde_json::Value = serde_json::from_str(
                 &crate::chat_completions::drain_chat_completions_brain_stream_json(
@@ -945,6 +946,7 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
                 .unwrap(),
             )
             .unwrap();
+            post_tool_items.extend(drain["items"].as_array().unwrap().iter().cloned());
             if drain["terminal"] == true {
                 Some(drain)
             } else {
@@ -954,9 +956,7 @@ fn chat_completions_buffered_bridge_streams_started_and_tool_request_before_comp
         })
         .expect("fake provider should finish after host tool output");
     assert_eq!(
-        terminal["items"]
-            .as_array()
-            .unwrap()
+        post_tool_items
             .iter()
             .filter(|item| item["type"] == "actions")
             .count(),

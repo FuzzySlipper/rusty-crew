@@ -36,7 +36,10 @@ import {
   type PreparedBrainHostToolRequest,
 } from "./tool-execution-host.js";
 import type { BrainToolMediaSink } from "./brain-tool-media.js";
-import type { BrainToolResult } from "./brain-tool.js";
+import type {
+  BrainToolResult,
+  BrainToolTurnDisposition,
+} from "./brain-tool.js";
 
 export type BufferedBrainProviderRun =
   | {
@@ -156,6 +159,7 @@ export async function runBufferedBrainHost(options: {
   let streamFailure:
     | { reasonCode: string; source: string; message: string }
     | undefined;
+  let requestedTurnDisposition: BrainToolTurnDisposition | undefined;
   const toolDebugReferences = createBrainHostToolDebugReferences();
   let toolUpdateProjection = Promise.resolve();
   try {
@@ -244,13 +248,26 @@ export async function runBufferedBrainHost(options: {
           ...(output.stateFingerprint === undefined
             ? {}
             : { stateFingerprint: output.stateFingerprint }),
+          ...(output.turnDisposition === undefined
+            ? {}
+            : { turnDisposition: output.turnDisposition }),
         });
-        if (output.suspend === true) {
-          await cancelBufferedWake(
-            "external_gate_wait",
-            `wake ${started.wakeId} suspended until its external GitHub gate is terminal`,
-          );
-          break;
+        if (output.turnDisposition !== undefined) {
+          if (
+            requestedTurnDisposition !== undefined &&
+            requestedTurnDisposition !== output.turnDisposition
+          ) {
+            throw new BufferedBrainWakeError(
+              "conflicting_tool_turn_disposition",
+              "brain_tool_host",
+              `wake ${started.wakeId} received conflicting tool turn dispositions ${requestedTurnDisposition} and ${output.turnDisposition}`,
+              drained.transportMetrics,
+              brainEventCounts,
+              brainStreamItemCounts,
+              streamRetentionMetrics,
+            );
+          }
+          requestedTurnDisposition = output.turnDisposition;
         }
       }
       if (drained.error !== undefined) {
@@ -280,6 +297,7 @@ export async function runBufferedBrainHost(options: {
           );
         }
         const plannedActions =
+          requestedTurnDisposition === undefined &&
           !drained.yielded &&
           drained.attention === undefined &&
           options.planActions

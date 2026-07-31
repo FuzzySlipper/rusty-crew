@@ -10,12 +10,15 @@ import type {
   McpToolExecutionResult,
   McpToolExecutor,
 } from "./service-adapter-ports.js";
-import type { BrainToolContent } from "./brain-tool.js";
+import type {
+  BrainToolContent,
+  BrainToolTurnDisposition,
+} from "./brain-tool.js";
 
 export interface BrainCompatibleToolResult<TDetails = unknown> {
   content: BrainToolContent[];
   details: TDetails;
-  terminate?: boolean;
+  turnDisposition?: BrainToolTurnDisposition;
 }
 
 export interface BrainCompatibleTool<

@@ -2482,6 +2482,7 @@ export interface NativeBridgeModule
     summary?: string;
     debugDetailId?: string;
     stateFingerprint?: string;
+    turnDisposition?: "complete_turn" | "suspend_external";
   }): Promise<{
     moduleId: "chat-completions" | "openai-responses";
     wakeId: string;

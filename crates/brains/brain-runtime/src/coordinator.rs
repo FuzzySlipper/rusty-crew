@@ -1,9 +1,9 @@
 use crate::{
     BrainRuntimeError, BrainRuntimeResult, BufferedBrainHostToolResult,
-    BufferedBrainStreamRetentionMetrics, BufferedBrainToolFailurePolicy,
-    BufferedBrainToolPolicyDecision, BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic,
-    BufferedNeutralCancellation, BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput,
-    BufferedNeutralToolOutputPoll,
+    BufferedBrainHostTurnDisposition, BufferedBrainStreamRetentionMetrics,
+    BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision,
+    BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic, BufferedNeutralCancellation,
+    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput, BufferedNeutralToolOutputPoll,
 };
 use rusty_crew_core_protocol::{
     BrainEvent, BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId,
@@ -245,6 +245,12 @@ pub struct BufferedBrainHostToolSubmission {
     pub decision: BufferedBrainToolPolicyDecision,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferedBrainHostToolOutput {
+    pub output: BufferedNeutralToolOutput,
+    pub turn_disposition: Option<BufferedBrainHostTurnDisposition>,
+}
+
 #[derive(Debug)]
 pub struct BufferedBrainTurnCoordinator {
     module_id: String,
@@ -267,6 +273,7 @@ pub struct BufferedBrainTurnCoordinator {
     pending_tool_requests: HashMap<String, BufferedNeutralPendingToolRequest>,
     undelivered_tool_request_ids: VecDeque<String>,
     submitted_tool_outputs: HashMap<String, BufferedNeutralToolOutput>,
+    submitted_tool_dispositions: HashMap<String, Option<BufferedBrainHostTurnDisposition>>,
     accepted_tool_outputs: HashMap<String, BufferedNeutralToolOutput>,
     accepted_host_tool_results: HashMap<String, BufferedBrainHostToolResult>,
     accepted_host_tool_decisions: HashMap<String, BufferedBrainToolPolicyDecision>,
@@ -319,6 +326,7 @@ impl BufferedBrainTurnCoordinator {
             pending_tool_requests: HashMap::new(),
             undelivered_tool_request_ids: VecDeque::new(),
             submitted_tool_outputs: HashMap::new(),
+            submitted_tool_dispositions: HashMap::new(),
             accepted_tool_outputs: HashMap::new(),
             accepted_host_tool_results: HashMap::new(),
             accepted_host_tool_decisions: HashMap::new(),
@@ -655,6 +663,8 @@ impl BufferedBrainTurnCoordinator {
             self.limits.max_tool_output_bytes,
         );
         self.submit_tool_output_at(call_id, decision.provider_output.clone(), now)?;
+        self.submitted_tool_dispositions
+            .insert(call_id.to_string(), result.turn_disposition);
         self.accepted_host_tool_results
             .insert(call_id.to_string(), result);
         self.accepted_host_tool_decisions
@@ -731,6 +741,18 @@ impl BufferedBrainTurnCoordinator {
             Some(output) => BufferedNeutralToolOutputPoll::Ready(output),
             None => BufferedNeutralToolOutputPoll::Pending,
         }
+    }
+
+    pub fn poll_submitted_host_tool_output(
+        &mut self,
+        call_id: &str,
+    ) -> Option<BufferedBrainHostToolOutput> {
+        let output = self.take_submitted_tool_output(call_id)?;
+        let turn_disposition = self.submitted_tool_dispositions.remove(call_id).flatten();
+        Some(BufferedBrainHostToolOutput {
+            output,
+            turn_disposition,
+        })
     }
 
     pub fn set_provider_state_output(
@@ -945,6 +967,7 @@ impl BufferedBrainTurnCoordinator {
         self.pending_tool_requests.clear();
         self.undelivered_tool_request_ids.clear();
         self.submitted_tool_outputs.clear();
+        self.submitted_tool_dispositions.clear();
         self.terminal = Some(BufferedBrainTurnTerminal {
             reason_code,
             summary,
@@ -1392,6 +1415,29 @@ mod tests {
             turn.take_submitted_tool_output("call-1"),
             Some(submission.decision.provider_output)
         );
+    }
+
+    #[test]
+    fn host_tool_turn_disposition_survives_until_provider_poll_exactly_once() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        turn.queue_tool_request(tool_request("call-1"))
+            .expect("queue");
+        let mut result = BufferedBrainHostToolResult::succeeded("completion accepted");
+        result.turn_disposition = Some(BufferedBrainHostTurnDisposition::CompleteTurn);
+
+        turn.submit_host_tool_result("call-1", result)
+            .expect("submit completion result");
+
+        let ready = turn
+            .poll_submitted_host_tool_output("call-1")
+            .expect("provider output");
+        assert_eq!(ready.output.output, "completion accepted");
+        assert_eq!(
+            ready.turn_disposition,
+            Some(BufferedBrainHostTurnDisposition::CompleteTurn)
+        );
+        assert!(turn.poll_submitted_host_tool_output("call-1").is_none());
     }
 
     #[test]

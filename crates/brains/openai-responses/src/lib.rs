@@ -16,7 +16,7 @@ pub use openai_oauth::{
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
     decide_context_compaction, is_context_limit_provider_error, BrainContextCompactionArtifact,
-    BrainContextCompactionDecision, BrainContextCompactionPolicy,
+    BrainContextCompactionDecision, BrainContextCompactionPolicy, BufferedBrainHostTurnDisposition,
 };
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
@@ -1011,6 +1011,7 @@ pub struct NeutralToolOutput {
     pub output: String,
     pub is_error: bool,
     pub state_fingerprint: String,
+    pub turn_disposition: Option<BufferedBrainHostTurnDisposition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2769,6 +2770,7 @@ where
         }
         let assistant_progress_fingerprint = format!("{:x}", assistant_progress.finalize());
         let mut attention = None;
+        let mut requested_turn_disposition = None;
         for call in pending_calls {
             push_stream_item(
                 items,
@@ -2849,6 +2851,9 @@ where
                 output: output.output,
                 is_error: output.is_error,
             });
+            if output.turn_disposition.is_some() {
+                requested_turn_disposition = output.turn_disposition;
+            }
             if let BrainProgressDisposition::AttentionRequired {
                 consecutive_samples,
             } = disposition
@@ -2877,6 +2882,7 @@ where
         }
         Ok(match attention.or(output_attention) {
             Some(attention) => ResponsesProviderDisposition::AttentionRequired(attention),
+            None if requested_turn_disposition.is_some() => ResponsesProviderDisposition::Complete,
             None if incomplete.is_some() => ResponsesProviderDisposition::Yield,
             None => ResponsesProviderDisposition::Continue,
         })
@@ -3600,6 +3606,7 @@ impl NeutralToolExecutor for MapToolExecutor {
                 output: format!("tool {} is unavailable", call.name),
                 is_error: true,
                 state_fingerprint: String::new(),
+                turn_disposition: None,
             })
     }
 }
@@ -4366,6 +4373,7 @@ mod tests {
                 output: "found rust".to_string(),
                 is_error: false,
                 state_fingerprint: String::new(),
+                turn_disposition: None,
             },
         )]);
         let mut brain = brain_with(client, tools);
@@ -4413,6 +4421,50 @@ mod tests {
             record.item_type == "function_call_output"
                 && record.call_id.as_deref() == Some("call-1")
         }));
+    }
+
+    #[test]
+    fn tool_requested_completion_finishes_after_tool_event_without_another_provider_request() {
+        let client = FakeResponsesClient::new(vec![Ok(vec![
+            ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                id: Some("item-complete".to_string()),
+                call_id: "call-complete".to_string(),
+                name: "complete".to_string(),
+                arguments: "{}".to_string(),
+            }),
+            ResponsesEvent::Completed {
+                response_id: "resp-complete".to_string(),
+                usage: None,
+            },
+        ])]);
+        let tools = MapToolExecutor::new([(
+            "complete".to_string(),
+            NeutralToolOutput {
+                output: "completion accepted".to_string(),
+                is_error: false,
+                state_fingerprint: String::new(),
+                turn_disposition: Some(BufferedBrainHostTurnDisposition::CompleteTurn),
+            },
+        )]);
+        let mut brain = brain_with(client, tools);
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+
+        assert_eq!(result.transport_metrics.provider_request_count, 1);
+        assert!(items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(
+                    &event.event,
+                    BrainEvent::ToolCallFinished { tool_name, is_error, .. }
+                        if tool_name == "complete" && !is_error
+                )
+        )));
+        assert!(matches!(
+            items.last(),
+            Some(BrainWakeStreamItem::Actions { .. })
+        ));
     }
 
     #[test]
@@ -4486,6 +4538,7 @@ mod tests {
                     output: "same answer".to_string(),
                     is_error: false,
                     state_fingerprint: String::new(),
+                    turn_disposition: None,
                 },
             )]),
         );
@@ -4534,6 +4587,7 @@ mod tests {
                     output: "dependency unavailable".to_string(),
                     is_error: true,
                     state_fingerprint: String::new(),
+                    turn_disposition: None,
                 },
             )]),
         );
@@ -4608,6 +4662,7 @@ mod tests {
                         output: "dependency unavailable".into(),
                         is_error: true,
                         state_fingerprint: format!("resource-revision:{revision}"),
+                        turn_disposition: None,
                     })
                     .collect(),
             ),
@@ -4680,6 +4735,7 @@ mod tests {
                     output: "evidence".to_string(),
                     is_error: false,
                     state_fingerprint: String::new(),
+                    turn_disposition: None,
                 },
             )]),
             config,
@@ -4756,6 +4812,7 @@ mod tests {
                     output: "evidence".to_string(),
                     is_error: false,
                     state_fingerprint: String::new(),
+                    turn_disposition: None,
                 },
             )]),
             config,
@@ -4909,6 +4966,7 @@ mod tests {
                     output: "evidence".to_string(),
                     is_error: false,
                     state_fingerprint: String::new(),
+                    turn_disposition: None,
                 },
             )]),
             config,
@@ -5124,6 +5182,7 @@ mod tests {
                     output: "found rust".to_string(),
                     is_error: false,
                     state_fingerprint: "state-1".to_string(),
+                    turn_disposition: None,
                 },
             )]),
         );
@@ -5205,6 +5264,7 @@ mod tests {
                     output: format!("{}-tool-result", "x".repeat(3000)),
                     is_error: false,
                     state_fingerprint: "changing-state".to_string(),
+                    turn_disposition: None,
                 },
             )]),
             config,

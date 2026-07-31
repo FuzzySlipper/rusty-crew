@@ -3,6 +3,8 @@ import type { BrainWakeInput } from "./index.js";
 
 export type BrainToolExecutionMode = "sequential" | "parallel";
 
+export type BrainToolTurnDisposition = "complete_turn" | "suspend_external";
+
 export type BrainToolContent =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
@@ -10,7 +12,7 @@ export type BrainToolContent =
 export interface BrainToolResult<TDetails = unknown> {
   content: BrainToolContent[];
   details: TDetails;
-  terminate?: boolean;
+  turnDisposition?: BrainToolTurnDisposition;
 }
 
 export type BrainToolUpdateCallback<TDetails = unknown> = (

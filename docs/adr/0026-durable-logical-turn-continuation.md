@@ -358,6 +358,30 @@ provisional -> superseded
 ```
 
 Only committed provider messages and tool results enter future model context.
+
+### Tool-requested turn disposition
+
+Tool execution has two intentional stop semantics that must remain distinct at
+the brain-host boundary:
+
+- `complete_turn` means the tool has produced the terminal action for the
+  current logical turn, such as `deliver_completion_md`.
+- `suspend_external` means an external waiter has been registered and a later
+  external event will request the next wake, such as a pending GitHub check
+  gate.
+
+These are typed dispositions, not a generic terminate boolean. The disposition
+travels with the committed host-tool result into the Rust provider loop. The
+loop emits the ordinary tool-result event, records the result in provider
+state, and then emits its successful terminal action without issuing another
+provider request. It does not simulate completion by cancelling the native
+run. Explicit operator cancellation and unexpected native terminal failures
+retain their normal cancellation or failure semantics.
+
+For `suspend_external`, registration of the external waiter happens before the
+host-tool result is submitted. The current wake then completes cleanly, while
+the waiter owns admission of the later wake when the external event becomes
+terminal.
 Provisional segments may appear in Rusty View, but retry/restart emits a typed
 supersession event so the canonical chat read model replaces or withdraws them
 instead of appending duplicate text.

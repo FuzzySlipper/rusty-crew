@@ -1,9 +1,9 @@
 use super::*;
 use rusty_crew_brain_runtime::{
     BrainContextCompactionPolicy, BrainRuntimeError, BufferedBrainHostToolResult,
-    BufferedBrainHostToolStatus, BufferedBrainTurnCoordinator, BufferedBrainTurnError,
-    BufferedBrainTurnLimits, BufferedBrainTurnPhase, BufferedBrainTurnRegistry,
-    BufferedBrainTurnRun, BufferedNeutralPendingToolRequest, BufferedNeutralToolOutputPoll,
+    BufferedBrainHostToolStatus, BufferedBrainHostTurnDisposition, BufferedBrainTurnCoordinator,
+    BufferedBrainTurnError, BufferedBrainTurnLimits, BufferedBrainTurnPhase,
+    BufferedBrainTurnRegistry, BufferedBrainTurnRun, BufferedNeutralPendingToolRequest,
 };
 use rusty_crew_core_protocol::BrainWakeAttention;
 use serde::Serialize;
@@ -133,6 +133,8 @@ struct JsOpenAiResponsesToolOutputInput {
     debug_detail_id: Option<String>,
     #[serde(default)]
     state_fingerprint: Option<String>,
+    #[serde(default)]
+    turn_disposition: Option<BufferedBrainHostTurnDisposition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -383,6 +385,7 @@ pub(crate) fn submit_openai_responses_tool_output_json(
                     summary: input.summary,
                     debug_detail_id: input.debug_detail_id,
                     state_fingerprint: input.state_fingerprint,
+                    turn_disposition: input.turn_disposition,
                 },
             )
         })
@@ -497,6 +500,7 @@ impl NeutralToolExecutor for EchoNeutralToolExecutor {
             output: format!("{} completed by Rust Responses bridge", call.name),
             is_error: false,
             state_fingerprint: String::new(),
+            turn_disposition: None,
         }
     }
 }
@@ -531,6 +535,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         ),
                         is_error: true,
                         state_fingerprint: String::new(),
+                        turn_disposition: None,
                     };
                 }
             }
@@ -546,15 +551,19 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         ),
                         is_error: true,
                         state_fingerprint: String::new(),
+                        turn_disposition: None,
                     });
                 }
-                if let BufferedNeutralToolOutputPoll::Ready(output) =
-                    run.coordinator.poll_submitted_tool_output(&call.call_id)
+                if let Some(ready) = run
+                    .coordinator
+                    .poll_submitted_host_tool_output(&call.call_id)
                 {
+                    let output = ready.output;
                     return Some(NeutralToolOutput {
                         output: output.output,
                         is_error: output.is_error,
                         state_fingerprint: output.state_fingerprint,
+                        turn_disposition: ready.turn_disposition,
                     });
                 }
                 if run.coordinator.phase().is_terminal() {
@@ -570,6 +579,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         ),
                         is_error: true,
                         state_fingerprint: String::new(),
+                        turn_disposition: None,
                     });
                 }
                 None
@@ -584,6 +594,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         ),
                         is_error: true,
                         state_fingerprint: String::new(),
+                        turn_disposition: None,
                     };
                 }
                 Ok(None) => {}

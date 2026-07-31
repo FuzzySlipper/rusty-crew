@@ -8,7 +8,10 @@ import type {
   ToolDescriptor,
   ToolProfile,
 } from "@rusty-crew/contracts";
-import type { BrainToolExecutionMode } from "../../src/brain-tool.js";
+import type {
+  BrainToolExecutionMode,
+  BrainToolTurnDisposition,
+} from "../../src/brain-tool.js";
 import type {
   BrainActionPlanner,
   BrainHostExecutor,
@@ -37,7 +40,7 @@ export interface AgentToolResult<TDetails = unknown> {
     | { type: "image"; data: string; mimeType: string }
   >;
   details: TDetails;
-  terminate?: boolean;
+  turnDisposition?: BrainToolTurnDisposition;
 }
 
 export type AgentToolUpdateCallback<TDetails = unknown> = (

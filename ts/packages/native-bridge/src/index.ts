@@ -1827,6 +1827,9 @@ function createNativeBridgeModule(
             ...(input.stateFingerprint === undefined
               ? {}
               : { stateFingerprint: input.stateFingerprint }),
+            ...(input.turnDisposition === undefined
+              ? {}
+              : { turnDisposition: input.turnDisposition }),
           }),
         ),
       ) as { module_id: string; wake_id: string; call_id: string };

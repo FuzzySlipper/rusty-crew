@@ -164,7 +164,9 @@ function toChatCompletionsToolResult<TDetails>(
     ),
     details: result.details,
   };
-  if (result.terminate !== undefined) mapped.terminate = result.terminate;
+  if (result.turnDisposition !== undefined) {
+    mapped.turnDisposition = result.turnDisposition;
+  }
   return mapped;
 }
 
@@ -183,7 +185,9 @@ function fromChatCompletionsToolResult<TDetails>(
     ),
     details: result.details,
   };
-  if (result.terminate !== undefined) mapped.terminate = result.terminate;
+  if (result.turnDisposition !== undefined) {
+    mapped.turnDisposition = result.turnDisposition;
+  }
   return mapped;
 }
 

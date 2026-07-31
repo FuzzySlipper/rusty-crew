@@ -10,6 +10,7 @@ use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
     decide_context_compaction, is_context_limit_provider_error, BrainContextCompactionArtifact,
     BrainContextCompactionDecision, BrainContextCompactionPolicy, BrainContextUsageSnapshot,
+    BufferedBrainHostTurnDisposition,
 };
 use rusty_crew_core_protocol::{
     BrainActionBatch, BrainContinuationPayload, BrainEvent, BrainEventEnvelope,
@@ -911,6 +912,7 @@ pub struct ChatCompletionsToolOutput {
     pub is_error: bool,
     pub cancelled: bool,
     pub state_fingerprint: String,
+    pub turn_disposition: Option<BufferedBrainHostTurnDisposition>,
 }
 
 impl ChatCompletionsToolOutput {
@@ -920,6 +922,7 @@ impl ChatCompletionsToolOutput {
             is_error: false,
             cancelled: false,
             state_fingerprint: String::new(),
+            turn_disposition: None,
         }
     }
 
@@ -929,6 +932,7 @@ impl ChatCompletionsToolOutput {
             is_error: true,
             cancelled: false,
             state_fingerprint: String::new(),
+            turn_disposition: None,
         }
     }
 
@@ -938,11 +942,20 @@ impl ChatCompletionsToolOutput {
             is_error: true,
             cancelled: true,
             state_fingerprint: String::new(),
+            turn_disposition: None,
         }
     }
 
     pub fn with_state_fingerprint(mut self, state_fingerprint: impl Into<String>) -> Self {
         self.state_fingerprint = state_fingerprint.into();
+        self
+    }
+
+    pub fn with_turn_disposition(
+        mut self,
+        turn_disposition: Option<BufferedBrainHostTurnDisposition>,
+    ) -> Self {
+        self.turn_disposition = turn_disposition;
         self
     }
 }
@@ -1972,6 +1985,7 @@ where
             ));
             output_limit_accumulated_text.clear();
             output_limit_accumulated_reasoning.clear();
+            let mut requested_turn_disposition = None;
             for call in tool_calls {
                 push_stream_item(
                     &mut stream,
@@ -2070,6 +2084,9 @@ where
                 );
                 messages.push(tool_message.clone());
                 durable_messages.push(tool_message);
+                if output.turn_disposition.is_some() {
+                    requested_turn_disposition = output.turn_disposition;
+                }
                 if let BrainProgressDisposition::AttentionRequired {
                     consecutive_samples,
                 } = disposition
@@ -2147,6 +2164,27 @@ where
                         continuation_state: Some(continuation_state),
                     };
                 }
+            }
+            if requested_turn_disposition.is_some() {
+                push_stream_item(&mut stream, success_actions_item(&input.context), &mut sink);
+                let provider_state = chat_completions_provider_state_output(
+                    &input.context,
+                    &self.request_builder.config,
+                    input.provider_state.as_ref(),
+                    durable_messages,
+                );
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: true,
+                    yielded: false,
+                    attention: None,
+                    provider_request_count,
+                    tool_round_count,
+                    provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state,
+                    continuation_state: None,
+                };
             }
             if epoch_tool_round_count >= self.config.work_quantum_tool_rounds {
                 let continuation_state = match chat_completions_continuation_output(
@@ -6136,6 +6174,39 @@ mod tests {
                 is_error: false,
                 ..
             } if tool_name == "lookup"
+        )));
+    }
+
+    #[test]
+    fn tool_requested_completion_finishes_after_tool_event_without_another_provider_request() {
+        let context = context();
+        let mut brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ToolCallFinished(tool_call("complete", "{}")),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("tool_calls".to_string()),
+                },
+            ])],
+            vec![ChatCompletionsToolOutput::ok("completion accepted")
+                .with_turn_disposition(Some(BufferedBrainHostTurnDisposition::CompleteTurn))],
+        );
+
+        let output = brain.wake_with_messages(
+            context,
+            vec![ChatCompletionMessage::user("finish the turn")],
+        );
+
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 1);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ToolCallFinished {
+                tool_name,
+                is_error: false,
+                ..
+            } if tool_name == "complete"
         )));
     }
 

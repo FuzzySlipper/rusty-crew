@@ -5,7 +5,11 @@ import {
   withToolCallDebugReference,
   type ToolCallDebugStore,
 } from "./tool-call-debug-store.js";
-import type { BrainTool, BrainToolResult } from "./brain-tool.js";
+import type {
+  BrainTool,
+  BrainToolResult,
+  BrainToolTurnDisposition,
+} from "./brain-tool.js";
 import type {
   BrainToolMediaReference,
   BrainToolMediaSink,
@@ -38,7 +42,7 @@ interface BrainHostToolFailure {
 export interface BrainHostToolExecutionResult {
   output: string;
   failure?: BrainHostToolFailure;
-  suspend?: boolean;
+  turnDisposition?: BrainToolTurnDisposition;
   stateFingerprint?: string;
 }
 
@@ -252,7 +256,9 @@ export async function executePreparedBrainHostToolRequest(
     return {
       output: brainToolResultToHostOutput(result, mediaReferences),
       ...(stateFingerprint === undefined ? {} : { stateFingerprint }),
-      ...(result.terminate === true ? { suspend: true } : {}),
+      ...(result.turnDisposition === undefined
+        ? {}
+        : { turnDisposition: result.turnDisposition }),
       ...(failure === undefined ? {} : { failure }),
     };
   } catch (error) {
