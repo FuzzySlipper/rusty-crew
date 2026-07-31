@@ -117,13 +117,13 @@ export async function archiveCrewSession(
     "sessionId",
     "session_id",
   );
-  const channelBindingsDetached = detachSessionReferences(
+  const channelBindingsDetached = removeEntriesBySessionId(
     runtimeConfigFile.array("channelBindings"),
     session.sessionId,
     "sessionId",
     "session_id",
   );
-  const mcpBindingsDetached = detachSessionReferences(
+  const mcpBindingsDetached = removeEntriesBySessionId(
     runtimeConfigFile.array("mcpBindings"),
     session.sessionId,
     "sessionId",
@@ -361,26 +361,6 @@ function removeEntriesBySessionId(
     removed += 1;
   }
   return removed;
-}
-
-function detachSessionReferences(
-  entries: unknown[],
-  sessionId: string,
-  camelKey: string,
-  snakeKey: string,
-): number {
-  let changed = 0;
-  for (const entry of entries) {
-    if (
-      !isRecord(entry) ||
-      entrySessionRef(entry, camelKey, snakeKey) !== sessionId
-    )
-      continue;
-    delete entry[camelKey];
-    delete entry[snakeKey];
-    changed += 1;
-  }
-  return changed;
 }
 
 function replaceSessionReferences(

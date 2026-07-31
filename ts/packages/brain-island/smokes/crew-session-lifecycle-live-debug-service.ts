@@ -28,6 +28,12 @@ try {
     providerAlias,
     kind: "full",
     localToolProfileId: "basic_chat",
+    mcpBindings: [
+      {
+        serverId: "den",
+        toolProfileKey: "planner",
+      },
+    ],
     reason: "task-6326 live Crew session lifecycle certification",
   });
   assert.equal(createdProfile.status, 200, createdProfile.text);
@@ -55,11 +61,13 @@ try {
 
   await assertArchiveReadback(originalSessionId);
   await assertDirectorySession(profileId, originalSessionId, false);
+  await assertNoRuntimeMcpBinding(profileId, originalSessionId);
 
   await restartDebugService();
   await waitForHealth();
   await assertArchiveReadback(originalSessionId);
   await assertDirectorySession(profileId, originalSessionId, false);
+  await assertNoRuntimeMcpBinding(profileId, originalSessionId);
 
   const profile = await request(
     "GET",
@@ -284,6 +292,25 @@ async function assertDirectorySession(
       agent.routable === true,
   );
   assert.equal(found, present);
+}
+
+async function assertNoRuntimeMcpBinding(
+  expectedProfileId: string,
+  sessionId: string,
+): Promise<void> {
+  const catalog = await request("GET", "/v1/admin/mcp/servers");
+  assert.equal(catalog.status, 200, catalog.text);
+  const bindings = nested(catalog.json, ["data", "bindings"]);
+  assert.ok(Array.isArray(bindings));
+  assert.ok(
+    !bindings.some(
+      (binding) =>
+        isRecord(binding) &&
+        (binding.profileId === expectedProfileId ||
+          binding.sessionId === sessionId),
+    ),
+    "archive must remove the session-targeted MCP binding instead of leaving an orphan",
+  );
 }
 
 async function waitForTurn(

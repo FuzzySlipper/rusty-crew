@@ -5,6 +5,10 @@ import type {
   SessionState,
 } from "@rusty-crew/contracts";
 import {
+  loadNativeBridge,
+  type NativeRuntimeConfigDraft,
+} from "@rusty-crew/native-bridge";
+import {
   archiveCrewSession,
   createFreshCrewSession,
   CrewSessionLifecycleError,
@@ -13,6 +17,7 @@ import {
 import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
 
 const session = sessionState("session-alpha", "active");
+const nativeBridge = await loadNativeBridge();
 const order: string[] = [];
 let runtimeValue: Record<string, unknown> = {
   profilesDir: "/tmp/profiles",
@@ -24,11 +29,83 @@ let runtimeValue: Record<string, unknown> = {
       profileId: session.profileId,
       kind: "full",
     },
+    {
+      sessionId: "other-session",
+      agentId: "other-agent",
+      profileId: "other-profile",
+      kind: "full",
+    },
   ],
-  channelBindings: [{ bindingId: "channel-1", sessionId: session.sessionId }],
-  mcpBindings: [{ bindingId: "mcp-1", sessionId: session.sessionId }],
-  scheduledJobs: [{ id: "job-1", targetSessionId: session.sessionId }],
+  channelBindings: [
+    {
+      bindingId: "channel-1",
+      adapterId: "den-channels",
+      provider: "den_channels",
+      agentId: session.agentId,
+      sessionId: session.sessionId,
+      profileId: session.profileId,
+      externalChannelId: "40",
+      status: "active",
+    },
+    {
+      bindingId: "channel-unrelated",
+      adapterId: "den-channels",
+      provider: "den_channels",
+      agentId: "other-agent",
+      sessionId: "other-session",
+      profileId: "other-profile",
+      externalChannelId: "41",
+      status: "active",
+    },
+  ],
+  mcpBindings: [
+    {
+      bindingId: "mcp-1",
+      adapterId: "mcp-ts-main",
+      agentId: session.agentId,
+      sessionId: session.sessionId,
+      profileId: session.profileId,
+      serverNames: ["den"],
+      endpointRef: "config://mcp/den",
+      transport: "streamable_http",
+      toolProfileKey: "runner",
+      status: "active",
+    },
+    {
+      bindingId: "mcp-unrelated",
+      adapterId: "mcp-ts-main",
+      agentId: "other-agent",
+      sessionId: "other-session",
+      profileId: "other-profile",
+      serverNames: ["den"],
+      endpointRef: "config://mcp/den",
+      transport: "streamable_http",
+      toolProfileKey: "runner",
+      status: "active",
+    },
+  ],
+  scheduledJobs: [
+    {
+      id: "job-1",
+      schedule: "0 * * * *",
+      shape: "session_wake",
+      targetSessionId: session.sessionId,
+    },
+  ],
 };
+const orphanedDraft = structuredClone(runtimeValue);
+(orphanedDraft.sessions as unknown[]).splice(0, 1);
+delete (orphanedDraft.channelBindings as Array<Record<string, unknown>>)[0]
+  ?.sessionId;
+delete (orphanedDraft.mcpBindings as Array<Record<string, unknown>>)[0]
+  ?.sessionId;
+const orphanedValidation = await validateWithNativeRust(orphanedDraft);
+assert.ok(
+  orphanedValidation.diagnostics.some(
+    (diagnostic) => diagnostic.code === "binding_target_missing",
+  ),
+  "the native Rust validator must reject the former orphan-binding archive shape",
+);
 const context = lifecycleContext();
 const archived = await archiveCrewSession(context, {
   sessionId: session.sessionId,
@@ -39,15 +116,23 @@ const archived = await archiveCrewSession(context, {
 assert.deepEqual(order.slice(0, 3), ["write", "command_completed", "archive"]);
 assert.equal(archived.session.status, "archived");
 assert.equal(archived.commandEventCursor, "session-alpha:2");
-assert.equal((runtimeValue.sessions as unknown[]).length, 0);
-assert.equal(
-  (runtimeValue.channelBindings as Array<Record<string, unknown>>)[0]
-    ?.sessionId,
-  undefined,
+assert.deepEqual(
+  (runtimeValue.sessions as Array<Record<string, unknown>>).map(
+    (configuredSession) => configuredSession.sessionId,
+  ),
+  ["other-session"],
 );
-assert.equal(
-  (runtimeValue.mcpBindings as Array<Record<string, unknown>>)[0]?.sessionId,
-  undefined,
+assert.deepEqual(
+  (runtimeValue.channelBindings as Array<Record<string, unknown>>).map(
+    (binding) => binding.bindingId,
+  ),
+  ["channel-unrelated"],
+);
+assert.deepEqual(
+  (runtimeValue.mcpBindings as Array<Record<string, unknown>>).map(
+    (binding) => binding.bindingId,
+  ),
+  ["mcp-unrelated"],
 );
 assert.equal((runtimeValue.scheduledJobs as unknown[]).length, 0);
 
@@ -156,7 +241,7 @@ function lifecycleContext(
         return created;
       },
     }),
-    validateRuntimeConfigFile: async () => ({ ok: true, diagnostics: [] }),
+    validateRuntimeConfigFile: validateWithNativeRust,
     writeRuntimeConfigFile: async (value) => {
       order.push("write");
       runtimeValue = value as Record<string, unknown>;
@@ -174,6 +259,30 @@ function lifecycleContext(
         payload: event.payload,
       };
     },
+  };
+}
+
+async function validateWithNativeRust(value: unknown) {
+  const runtimeConfig = value as NativeRuntimeConfigDraft;
+  const profileIds = new Set<string>(["prime"]);
+  for (const configuredSession of runtimeConfig.sessions ?? []) {
+    profileIds.add(configuredSession.profileId);
+  }
+  for (const binding of [
+    ...(runtimeConfig.channelBindings ?? []),
+    ...(runtimeConfig.mcpBindings ?? []),
+  ]) {
+    profileIds.add(binding.profileId);
+  }
+  const validation = await nativeBridge.validateRuntimeConfigDraft({
+    runtimeConfig,
+    profiles: [...profileIds].map((profileId) => ({ profileId })),
+  });
+  return {
+    ok: !validation.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    ),
+    diagnostics: validation.diagnostics,
   };
 }
 
