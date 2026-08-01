@@ -40,6 +40,8 @@ Operator setup references:
 
 - `deployment-and-storage.md` — canonical service-root, systemd, SQLite, and
   PostgreSQL setup guide.
+- `external-runtime-event-retention.md` — terminal-turn checkpoints, bounded
+  replay/debug retention, cursor safety, and filesystem headroom diagnostics.
 - `model-providers.md` — canonical provider alias, protocol, credential, OAuth,
   profile assignment, and refresh guide.
 - `local-service-runbook.md` — detailed current-machine operation and recovery.

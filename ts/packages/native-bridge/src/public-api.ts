@@ -93,6 +93,12 @@ import type {
   ChatCompletionsInputImage,
 } from "./chat-completions-public-api.js";
 import type { NativeCrewSessionBridgeMethods } from "./crew-session-public-api.js";
+import type {
+  NativeExternalRuntimeEventRetentionReport,
+  NativeRuntimeExternalEventStorageDiagnostics,
+  NativeRuntimeFilesystemHeadroom,
+  NativeRuntimeMaintenancePolicy,
+} from "./external-event-retention-public-api.js";
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
 import type {
   NativeModelProviderCredentialKind,
@@ -139,6 +145,12 @@ export type {
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
 } from "./chat-completions-public-api.js";
+export type {
+  NativeExternalRuntimeEventRetentionReport,
+  NativeRuntimeExternalEventStorageDiagnostics,
+  NativeRuntimeFilesystemHeadroom,
+  NativeRuntimeMaintenancePolicy,
+} from "./external-event-retention-public-api.js";
 
 export interface NativeSessionConfigInput {
   sessionId: string;
@@ -926,6 +938,8 @@ export interface NativeRuntimeStorageDiagnostics {
   searchHealthy: boolean;
   pressureSignals: NativeRuntimeStoragePressureSignal[];
   pressure: boolean;
+  externalRuntimeEvents: NativeRuntimeExternalEventStorageDiagnostics;
+  filesystemHeadroom: NativeRuntimeFilesystemHeadroom;
 }
 
 export interface NativeBufferedBrainRunModuleDiagnostics {
@@ -984,17 +998,6 @@ export interface NativeBufferedBrainRunCleanupSummary {
   modules: NativeBufferedBrainRunCleanupModuleReport[];
 }
 
-export interface NativeRuntimeMaintenancePolicy {
-  expireQueuedMessagesAt?: string;
-  purgeTerminalQueuedMessagesBefore?: string;
-  expireProviderWireStatesAt?: string;
-  compactSessionMemoryAt?: string;
-  sessionMemoryMaxActiveRecordsPerScope?: number;
-  sessionMemoryArchiveBatchSize?: number;
-  runWalCheckpoint?: boolean;
-  runOptimize?: boolean;
-}
-
 export interface NativeSessionMemoryCompactionReport {
   enabled: boolean;
   scopesInspected: number;
@@ -1014,6 +1017,7 @@ export interface NativeRuntimeMaintenanceReport {
   purgedTerminalQueueMessages: number;
   expiredProviderWireStates: number;
   sessionMemoryCompaction: NativeSessionMemoryCompactionReport;
+  externalRuntimeEventRetention: NativeExternalRuntimeEventRetentionReport;
   walCheckpointRan: boolean;
   optimizeRan: boolean;
 }

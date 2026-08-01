@@ -116,7 +116,7 @@ use rusty_crew_core_protocol::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -172,6 +172,62 @@ const DB_FILE_NAME: &str = "coordination.sqlite3";
 #[derive(Debug, Clone)]
 pub struct CoordinationStore {
     conn: Arc<Mutex<Connection>>,
+    database_path: Arc<PathBuf>,
+    filesystem_warning_free_percent: Option<u32>,
+}
+
+fn filesystem_headroom(
+    path: Option<&Path>,
+    source: &str,
+    warning_free_percent: Option<u32>,
+) -> RuntimeFilesystemHeadroom {
+    let Some(path) = path else {
+        return RuntimeFilesystemHeadroom {
+            available: false,
+            source: source.to_string(),
+            path: None,
+            total_bytes: None,
+            free_bytes: None,
+            free_percent: None,
+            warning_free_percent,
+            warning_active: false,
+            detail: "backing filesystem path is not configured".to_string(),
+        };
+    };
+    let display_path = path.display().to_string();
+    match (fs2::total_space(path), fs2::available_space(path)) {
+        (Ok(total_bytes), Ok(free_bytes)) => {
+            let free_percent = if total_bytes == 0 {
+                0
+            } else {
+                ((free_bytes as u128 * 100) / total_bytes as u128) as u32
+            };
+            let warning_active =
+                warning_free_percent.is_some_and(|threshold| free_percent <= threshold);
+            RuntimeFilesystemHeadroom {
+                available: true,
+                source: source.to_string(),
+                path: Some(display_path),
+                total_bytes: Some(total_bytes),
+                free_bytes: Some(free_bytes),
+                free_percent: Some(free_percent),
+                warning_free_percent,
+                warning_active,
+                detail: format!("backing filesystem free space is {free_percent}%"),
+            }
+        }
+        (total, free) => RuntimeFilesystemHeadroom {
+            available: false,
+            source: source.to_string(),
+            path: Some(display_path),
+            total_bytes: total.ok(),
+            free_bytes: free.ok(),
+            free_percent: None,
+            warning_free_percent,
+            warning_active: false,
+            detail: "backing filesystem capacity could not be read".to_string(),
+        },
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

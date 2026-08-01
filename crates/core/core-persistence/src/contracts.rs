@@ -2791,8 +2791,25 @@ pub struct RuntimeMaintenancePolicy {
     pub compact_session_memory_at: Option<IsoTimestamp>,
     pub session_memory_max_active_records_per_scope: Option<u32>,
     pub session_memory_archive_batch_size: Option<u32>,
+    pub compact_terminal_external_runtime_events_before: Option<IsoTimestamp>,
+    pub external_runtime_event_retention_at: Option<IsoTimestamp>,
+    pub external_runtime_event_terminal_turn_batch_size: Option<u32>,
     pub run_wal_checkpoint: bool,
     pub run_optimize: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExternalRuntimeEventRetentionReport {
+    pub enabled: bool,
+    pub cutoff: Option<IsoTimestamp>,
+    pub terminal_turn_batch_size: Option<u32>,
+    pub terminal_turns_inspected: u64,
+    pub terminal_turns_compacted: u64,
+    pub checkpoints_created: u64,
+    pub events_deleted: u64,
+    pub estimated_reclaimed_bytes: u64,
+    pub oldest_retained_sequence: Option<u64>,
+    pub oldest_retained_at: Option<IsoTimestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -2842,6 +2859,30 @@ pub struct RuntimeStoragePressureSignal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeExternalEventStorageDiagnostics {
+    pub event_rows: u64,
+    pub estimated_event_bytes: u64,
+    pub checkpoint_rows: u64,
+    pub oldest_sequence: Option<u64>,
+    pub oldest_created_at: Option<IsoTimestamp>,
+    pub newest_sequence: Option<u64>,
+    pub newest_created_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeFilesystemHeadroom {
+    pub available: bool,
+    pub source: String,
+    pub path: Option<String>,
+    pub total_bytes: Option<u64>,
+    pub free_bytes: Option<u64>,
+    pub free_percent: Option<u32>,
+    pub warning_free_percent: Option<u32>,
+    pub warning_active: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStorageConnectionHealth {
     pub backend: String,
     pub status: String,
@@ -2874,6 +2915,8 @@ pub struct RuntimeStorageDiagnostics {
     pub search_healthy: bool,
     pub pressure_signals: Vec<RuntimeStoragePressureSignal>,
     pub pressure: bool,
+    pub external_runtime_events: RuntimeExternalEventStorageDiagnostics,
+    pub filesystem_headroom: RuntimeFilesystemHeadroom,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2884,6 +2927,7 @@ pub struct RuntimeMaintenanceReport {
     pub purged_terminal_queue_messages: u64,
     pub expired_provider_wire_states: u64,
     pub session_memory_compaction: SessionMemoryCompactionReport,
+    pub external_runtime_event_retention: ExternalRuntimeEventRetentionReport,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
 }
@@ -3336,6 +3380,8 @@ pub enum DiagnosticTable {
     ExternalControlReceipts,
     ExternalInteractions,
     ExternalRuntimeEvents,
+    ExternalRuntimeEventCursors,
+    ExternalRuntimeEventCheckpoints,
     AgentRoutes,
     AgentMessageDeliveryReceipts,
     AgentCorrelatedRounds,
@@ -3414,6 +3460,8 @@ impl DiagnosticTable {
         Self::ExternalControlReceipts,
         Self::ExternalInteractions,
         Self::ExternalRuntimeEvents,
+        Self::ExternalRuntimeEventCursors,
+        Self::ExternalRuntimeEventCheckpoints,
         Self::AgentRoutes,
         Self::AgentMessageDeliveryReceipts,
         Self::AgentCorrelatedRounds,
@@ -3492,6 +3540,8 @@ impl DiagnosticTable {
             "external_control_receipts" => Ok(Self::ExternalControlReceipts),
             "external_interactions" => Ok(Self::ExternalInteractions),
             "external_runtime_events" => Ok(Self::ExternalRuntimeEvents),
+            "external_runtime_event_cursors" => Ok(Self::ExternalRuntimeEventCursors),
+            "external_runtime_event_checkpoints" => Ok(Self::ExternalRuntimeEventCheckpoints),
             "agent_routes" => Ok(Self::AgentRoutes),
             "agent_message_delivery_receipts" => Ok(Self::AgentMessageDeliveryReceipts),
             "agent_correlated_rounds" => Ok(Self::AgentCorrelatedRounds),
@@ -3575,6 +3625,8 @@ impl DiagnosticTable {
             Self::ExternalControlReceipts => "external_control_receipts",
             Self::ExternalInteractions => "external_interactions",
             Self::ExternalRuntimeEvents => "external_runtime_events",
+            Self::ExternalRuntimeEventCursors => "external_runtime_event_cursors",
+            Self::ExternalRuntimeEventCheckpoints => "external_runtime_event_checkpoints",
             Self::AgentRoutes => "agent_routes",
             Self::AgentMessageDeliveryReceipts => "agent_message_delivery_receipts",
             Self::AgentCorrelatedRounds => "agent_correlated_rounds",

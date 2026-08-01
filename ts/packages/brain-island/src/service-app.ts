@@ -1222,7 +1222,10 @@ function engineStorageConfig(
   env: RustyCrewServiceEnv,
 ): EngineStorageConfig {
   if (storage.backend === "sqlite") {
-    return { backend: "sqlite" };
+    return {
+      backend: "sqlite",
+      filesystemWarningFreePercent: storage.filesystemWarningFreePercent,
+    };
   }
   if (storage.postgres.bootMode !== "active") {
     throw new Error(
@@ -1243,6 +1246,8 @@ function engineStorageConfig(
     schema: storage.postgres.schema,
     maxConnections: storage.postgres.maxConnections,
     statementTimeoutMs: storage.postgres.statementTimeoutMs,
+    backingFilesystemPath: storage.postgres.backingFilesystemPath,
+    filesystemWarningFreePercent: storage.filesystemWarningFreePercent,
   };
 }
 
@@ -4151,6 +4156,17 @@ function createServiceControlExecutor(
         ),
         sessionMemoryArchiveBatchSize: optionalNumber(
           command.body.sessionMemoryArchiveBatchSize,
+        ),
+        compactTerminalExternalRuntimeEventsBefore: optionalBodyString(
+          command,
+          "compactTerminalExternalRuntimeEventsBefore",
+        ),
+        externalRuntimeEventRetentionAt: optionalBodyString(
+          command,
+          "externalRuntimeEventRetentionAt",
+        ),
+        externalRuntimeEventTerminalTurnBatchSize: optionalNumber(
+          command.body.externalRuntimeEventTerminalTurnBatchSize,
         ),
         runWalCheckpoint: optionalBodyBoolean(command, "runWalCheckpoint"),
         runOptimize: optionalBodyBoolean(command, "runOptimize"),

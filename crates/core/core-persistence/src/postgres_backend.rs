@@ -70,32 +70,33 @@ use crate::{
     DataBankScopeWrite, DelegatedCompletion, DeleteChatMessageVariantRequest, DenRuntimeReference,
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord,
     DurableMessageStatus, DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
-    EnsureActiveChatConversationBranchResult, ExactPage, ExternalBindingStatus, IsoTimestamp,
-    LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
-    LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord,
-    MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
-    MessageVariantId, MessageVariantQuery, MessageVariantRecord, MessageVariantSource,
-    MessageVariantStatus, MessageVariantWrite, ModelProviderCredential,
-    ModelProviderCredentialKind, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
-    ModelProviderCredentialUnlink, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
-    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
-    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
-    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
-    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest,
-    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
-    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
-    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
-    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
-    RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
-    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeActivityId,
-    RuntimeActivityRecord, RuntimeActivityStatus, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord,
+    EnsureActiveChatConversationBranchResult, ExactPage, ExternalBindingStatus,
+    ExternalRuntimeEventRetentionReport, IsoTimestamp, LoreRecallEntry, LoreRecallQuery,
+    LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord, McpBindingQuery,
+    McpBindingRecord, MessageBlockId, MessageBlockRecord, MessageId, MessageSlotId,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
+    ModelProviderCredential, ModelProviderCredentialKind, ModelProviderCredentialLink,
+    ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink, ModelProviderProtocol,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
+    ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
+    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
+    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
+    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
+    QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
+    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
+    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy,
+    RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus,
+    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId,
+    RuntimeActivityId, RuntimeActivityRecord, RuntimeActivityStatus, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
+    RuntimeEventRecord, RuntimeExternalEventStorageDiagnostics, RuntimeFilesystemHeadroom,
     RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic,
     RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
     RuntimeStorageCapability, RuntimeStorageConnectionHealth, RuntimeStorageTableCount,
@@ -132,7 +133,8 @@ use rusty_crew_core_protocol::{
     MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor, MemorySpaceId, MemoryVisibilityModel,
     MemoryWritePolicy, ParentConsumptionPolicy, SessionActivityDigest, SessionActivityDigestQuery,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 const DEFAULT_POSTGRES_POOL_SIZE: usize = 4;
 const MAX_POSTGRES_POOL_SIZE: usize = 64;
@@ -165,11 +167,15 @@ pub struct PostgresBackendDiagnostics {
     pub capabilities: Vec<RuntimeStorageCapability>,
     pub repository_groups: Vec<RuntimeRepositoryGroupDiagnostic>,
     pub connection_health: RuntimeStorageConnectionHealth,
+    pub external_runtime_events: RuntimeExternalEventStorageDiagnostics,
+    pub filesystem_headroom: RuntimeFilesystemHeadroom,
 }
 
 pub struct PostgresBackendStore {
     schema: String,
     pool: PostgresConnectionPool,
+    backing_filesystem_path: Option<PathBuf>,
+    filesystem_warning_free_percent: Option<u32>,
 }
 
 impl std::fmt::Debug for PostgresBackendStore {
@@ -204,10 +210,22 @@ impl PostgresBackendStore {
         schema: &str,
         max_connections: Option<u32>,
     ) -> CoreResult<Self> {
+        Self::connect_with_storage_options(database_url, schema, max_connections, None, None)
+    }
+
+    pub fn connect_with_storage_options(
+        database_url: &str,
+        schema: &str,
+        max_connections: Option<u32>,
+        backing_filesystem_path: Option<String>,
+        filesystem_warning_free_percent: Option<u32>,
+    ) -> CoreResult<Self> {
         validate_postgres_identifier("postgres schema", schema)?;
         let store = Self {
             schema: schema.to_string(),
             pool: PostgresConnectionPool::new(database_url, max_connections),
+            backing_filesystem_path: backing_filesystem_path.map(PathBuf::from),
+            filesystem_warning_free_percent,
         };
         store.migrate()?;
         Ok(store)
@@ -1418,6 +1436,36 @@ impl PostgresBackendStore {
         })
     }
 
+    fn external_runtime_event_storage_diagnostics(
+        &self,
+    ) -> CoreResult<RuntimeExternalEventStorageDiagnostics> {
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*), COALESCE(SUM(OCTET_LENGTH(record_json)), 0),
+                            MIN(sequence_id), MIN(created_at), MAX(sequence_id), MAX(created_at)
+                       FROM {schema}.external_runtime_events"
+                ),
+                &[],
+            )
+            .map_err(|error| postgres_error("read PostgreSQL external event diagnostics", error))?;
+        Ok(RuntimeExternalEventStorageDiagnostics {
+            event_rows: row.get::<_, i64>(0).max(0) as u64,
+            estimated_event_bytes: row.get::<_, i64>(1).max(0) as u64,
+            checkpoint_rows: self.table_rows("external_runtime_event_checkpoints")?,
+            oldest_sequence: row
+                .get::<_, Option<i64>>(2)
+                .map(|value| value.max(0) as u64),
+            oldest_created_at: row.get(3),
+            newest_sequence: row
+                .get::<_, Option<i64>>(4)
+                .map(|value| value.max(0) as u64),
+            newest_created_at: row.get(5),
+        })
+    }
+
     pub fn run_maintenance(
         &self,
         policy: &RuntimeMaintenancePolicy,
@@ -1426,6 +1474,7 @@ impl PostgresBackendStore {
         let mut expired_queue_messages = 0;
         let mut purged_terminal_queue_messages = 0;
         let mut expired_provider_wire_states = 0;
+        let mut external_runtime_event_retention = ExternalRuntimeEventRetentionReport::default();
         {
             let mut client = self.client()?;
             let mut tx = client
@@ -1453,6 +1502,29 @@ impl PostgresBackendStore {
                 }
                 expired_provider_wire_states = expiring.len() as u64;
             }
+            match (
+                &policy.compact_terminal_external_runtime_events_before,
+                &policy.external_runtime_event_retention_at,
+                policy.external_runtime_event_terminal_turn_batch_size,
+            ) {
+                (None, None, None) => {}
+                (Some(cutoff), Some(checkpointed_at), Some(batch_size)) => {
+                    external_runtime_event_retention =
+                        external_runtime::compact_terminal_external_runtime_events_in_tx(
+                            &mut tx,
+                            &self.quoted_schema(),
+                            cutoff,
+                            checkpointed_at,
+                            batch_size,
+                        )?;
+                }
+                _ => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "external runtime event retention requires cutoff, retention timestamp, and terminal turn batch size together",
+                    ));
+                }
+            }
             tx.commit()
                 .map_err(|error| postgres_error("commit PostgreSQL runtime maintenance", error))?;
         }
@@ -1464,6 +1536,7 @@ impl PostgresBackendStore {
             purged_terminal_queue_messages,
             expired_provider_wire_states,
             session_memory_compaction: SessionMemoryCompactionReport::default(),
+            external_runtime_event_retention,
             wal_checkpoint_ran: false,
             optimize_ran: false,
         })
@@ -1726,6 +1799,14 @@ impl PostgresBackendStore {
                     rows: self.table_rows("external_runtime_events")?,
                 },
                 RuntimeStorageTableCount {
+                    table: "external_runtime_event_cursors".to_string(),
+                    rows: self.table_rows("external_runtime_event_cursors")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "external_runtime_event_checkpoints".to_string(),
+                    rows: self.table_rows("external_runtime_event_checkpoints")?,
+                },
+                RuntimeStorageTableCount {
                     table: "agent_message_delivery_receipts".to_string(),
                     rows: self.table_rows("agent_message_delivery_receipts")?,
                 },
@@ -1737,6 +1818,12 @@ impl PostgresBackendStore {
             capabilities: postgres_backend_capabilities(),
             repository_groups: postgres_backend_repository_groups(),
             connection_health: self.pool.health()?,
+            external_runtime_events: self.external_runtime_event_storage_diagnostics()?,
+            filesystem_headroom: crate::filesystem_headroom(
+                self.backing_filesystem_path.as_deref(),
+                "configured_postgres_backing_path",
+                self.filesystem_warning_free_percent,
+            ),
         })
     }
 
@@ -16176,6 +16263,95 @@ mod tests {
                 .list_external_turns_for_native_thread(&turn.runtime_id, "native-thread",)
                 .unwrap(),
             vec![turn.clone()]
+        );
+        let mut starting_turn = turn.clone();
+        starting_turn.phase = rusty_crew_core_protocol::ExternalTurnPhase::Starting;
+        starting_turn.updated_at = "2026-07-10T00:00:01Z".into();
+        let starting_turn = store.update_external_turn(&starting_turn, 1).unwrap();
+        let mut active_turn = starting_turn.clone();
+        active_turn.phase = rusty_crew_core_protocol::ExternalTurnPhase::Active;
+        active_turn.native_turn_id = Some("native-turn-retention".into());
+        active_turn.updated_at = "2026-07-10T00:00:02Z".into();
+        let active_turn = store
+            .update_external_turn(&active_turn, starting_turn.revision)
+            .unwrap();
+        for (event_id, kind) in [
+            ("postgres-event-delta", "assistant_text_delta"),
+            ("postgres-event-command", "command_activity"),
+            ("postgres-event-lifecycle", "turn_lifecycle"),
+        ] {
+            store
+                .append_external_runtime_event_allocated(
+                    &rusty_crew_core_protocol::ExternalRuntimeEventInput {
+                        event_id: event_id.into(),
+                        session_id: Some(session.session_id.clone()),
+                        created_at: "2026-07-10T00:00:02.500Z".into(),
+                        kind: kind.into(),
+                        runtime_id: turn.runtime_id.clone(),
+                        native_thread_id: Some("native-thread".into()),
+                        native_turn_id: Some("native-turn-retention".into()),
+                        item_id: None,
+                        request_id: Some(turn.request.request_id.0.clone()),
+                        payload: json!({"value": "postgres-retention-proof"}),
+                        raw_detail_ref: None,
+                    },
+                )
+                .unwrap();
+        }
+        let mut completed_turn = active_turn.clone();
+        completed_turn.phase = rusty_crew_core_protocol::ExternalTurnPhase::Completed;
+        completed_turn.capacity_lease_id = None;
+        completed_turn.updated_at = "2026-07-10T00:00:03Z".into();
+        store
+            .update_external_turn(&completed_turn, active_turn.revision)
+            .unwrap();
+        let retention = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                compact_terminal_external_runtime_events_before: Some(
+                    "2026-07-11T00:00:00Z".into(),
+                ),
+                external_runtime_event_retention_at: Some("2026-07-12T00:00:00Z".into()),
+                external_runtime_event_terminal_turn_batch_size: Some(10),
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+        assert_eq!(retention.external_runtime_event_retention.events_deleted, 2);
+        assert_eq!(
+            store
+                .query_external_runtime_events(&turn.runtime_id, 0, 10)
+                .unwrap()
+                .iter()
+                .map(|event| (event.sequence_id, event.kind.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(3, "turn_lifecycle")]
+        );
+        assert_eq!(
+            store
+                .append_external_runtime_event_allocated(
+                    &rusty_crew_core_protocol::ExternalRuntimeEventInput {
+                        event_id: "postgres-event-after-retention".into(),
+                        session_id: Some(session.session_id.clone()),
+                        created_at: "2026-07-12T00:00:01Z".into(),
+                        kind: "runtime_status".into(),
+                        runtime_id: turn.runtime_id.clone(),
+                        native_thread_id: Some("native-thread".into()),
+                        native_turn_id: None,
+                        item_id: None,
+                        request_id: None,
+                        payload: json!({}),
+                        raw_detail_ref: None,
+                    },
+                )
+                .unwrap()
+                .sequence_id,
+            4
+        );
+        let retention_diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            retention_diagnostics
+                .external_runtime_events
+                .checkpoint_rows,
+            1
         );
         let queued = QueuedMessageRecord {
             message_id: "queued-external-turn-a".into(),

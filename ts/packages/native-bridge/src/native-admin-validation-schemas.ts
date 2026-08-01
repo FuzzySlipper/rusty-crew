@@ -228,6 +228,32 @@ export const nativeRuntimeStorageDiagnosticsSchema = Type.Object(
     searchHealthy: Type.Boolean(),
     pressureSignals: Type.Array(pressureSignalSchema),
     pressure: Type.Boolean(),
+    externalRuntimeEvents: Type.Object(
+      {
+        eventRows: Type.Number(),
+        estimatedEventBytes: Type.Number(),
+        checkpointRows: Type.Number(),
+        oldestSequence: Type.Optional(Type.Number()),
+        oldestCreatedAt: optionalString,
+        newestSequence: Type.Optional(Type.Number()),
+        newestCreatedAt: optionalString,
+      },
+      { additionalProperties: false },
+    ),
+    filesystemHeadroom: Type.Object(
+      {
+        available: Type.Boolean(),
+        source: Type.String(),
+        path: optionalString,
+        totalBytes: Type.Optional(Type.Number()),
+        freeBytes: Type.Optional(Type.Number()),
+        freePercent: Type.Optional(Type.Number()),
+        warningFreePercent: Type.Optional(Type.Number()),
+        warningActive: Type.Boolean(),
+        detail: Type.String(),
+      },
+      { additionalProperties: false },
+    ),
   },
   { additionalProperties: false },
 );
@@ -247,6 +273,22 @@ const sessionMemoryCompactionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const externalRuntimeEventRetentionSchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    cutoff: optionalString,
+    terminalTurnBatchSize: Type.Optional(Type.Number()),
+    terminalTurnsInspected: Type.Number(),
+    terminalTurnsCompacted: Type.Number(),
+    checkpointsCreated: Type.Number(),
+    eventsDeleted: Type.Number(),
+    estimatedReclaimedBytes: Type.Number(),
+    oldestRetainedSequence: Type.Optional(Type.Number()),
+    oldestRetainedAt: optionalString,
+  },
+  { additionalProperties: false },
+);
+
 export const nativeRuntimeMaintenanceReportSchema = Type.Object(
   {
     sizeBefore: nativeRuntimeDatabaseSizeSchema,
@@ -255,6 +297,7 @@ export const nativeRuntimeMaintenanceReportSchema = Type.Object(
     purgedTerminalQueueMessages: Type.Number(),
     expiredProviderWireStates: Type.Number(),
     sessionMemoryCompaction: sessionMemoryCompactionSchema,
+    externalRuntimeEventRetention: externalRuntimeEventRetentionSchema,
     walCheckpointRan: Type.Boolean(),
     optimizeRan: Type.Boolean(),
   },

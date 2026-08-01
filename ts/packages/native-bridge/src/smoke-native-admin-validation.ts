@@ -41,6 +41,14 @@ const maintenance = {
     recordsSuperseded: 0,
     skippedScopes: 0,
   },
+  externalRuntimeEventRetention: {
+    enabled: false,
+    terminalTurnsInspected: 0,
+    terminalTurnsCompacted: 0,
+    checkpointsCreated: 0,
+    eventsDeleted: 0,
+    estimatedReclaimedBytes: 0,
+  },
   walCheckpointRan: false,
   optimizeRan: false,
 };
@@ -72,6 +80,22 @@ const diagnostics = {
   searchHealthy: true,
   pressureSignals: [],
   pressure: false,
+  externalRuntimeEvents: {
+    eventRows: 0,
+    estimatedEventBytes: 0,
+    checkpointRows: 0,
+  },
+  filesystemHeadroom: {
+    available: true,
+    source: "sqlite_database_path",
+    path: "/tmp/coordination.sqlite3",
+    totalBytes: 1024,
+    freeBytes: 512,
+    freePercent: 50,
+    warningFreePercent: 10,
+    warningActive: false,
+    detail: "backing filesystem free space is 50%",
+  },
 };
 const simpleKv = [
   {

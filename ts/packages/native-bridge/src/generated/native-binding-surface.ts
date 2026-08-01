@@ -363,6 +363,8 @@ export interface JsEngineConfig {
   postgresSchema?: string
   postgresMaxConnections?: number
   postgresStatementTimeoutMs?: number
+  backingFilesystemPath?: string
+  filesystemWarningFreePercent?: number
 }
 
 export interface JsEventReceipt {
@@ -375,6 +377,19 @@ export interface JsEventSubscription {
   sessionId?: string
   agentId?: string
   adapterId?: string
+}
+
+export interface JsExternalRuntimeEventRetentionReport {
+  enabled: boolean
+  cutoff?: string
+  terminalTurnBatchSize?: number
+  terminalTurnsInspected: number
+  terminalTurnsCompacted: number
+  checkpointsCreated: number
+  eventsDeleted: number
+  estimatedReclaimedBytes: number
+  oldestRetainedSequence?: number
+  oldestRetainedAt?: string
 }
 
 export interface JsPlatformAdapterRegistration {
@@ -519,6 +534,28 @@ export interface JsRuntimeDatabaseSize {
   walBytes: number
 }
 
+export interface JsRuntimeExternalEventStorageDiagnostics {
+  eventRows: number
+  estimatedEventBytes: number
+  checkpointRows: number
+  oldestSequence?: number
+  oldestCreatedAt?: string
+  newestSequence?: number
+  newestCreatedAt?: string
+}
+
+export interface JsRuntimeFilesystemHeadroom {
+  available: boolean
+  source: string
+  path?: string
+  totalBytes?: number
+  freeBytes?: number
+  freePercent?: number
+  warningFreePercent?: number
+  warningActive: boolean
+  detail: string
+}
+
 export interface JsRuntimeInstalledModuleSchemaDiagnostic {
   moduleId: string
   installedVersion: number
@@ -534,6 +571,9 @@ export interface JsRuntimeMaintenancePolicy {
   compactSessionMemoryAt?: string
   sessionMemoryMaxActiveRecordsPerScope?: number
   sessionMemoryArchiveBatchSize?: number
+  compactTerminalExternalRuntimeEventsBefore?: string
+  externalRuntimeEventRetentionAt?: string
+  externalRuntimeEventTerminalTurnBatchSize?: number
   runWalCheckpoint?: boolean
   runOptimize?: boolean
 }
@@ -545,6 +585,7 @@ export interface JsRuntimeMaintenanceReport {
   purgedTerminalQueueMessages: number
   expiredProviderWireStates: number
   sessionMemoryCompaction: JsSessionMemoryCompactionReport
+  externalRuntimeEventRetention: JsExternalRuntimeEventRetentionReport
   walCheckpointRan: boolean
   optimizeRan: boolean
 }
@@ -715,6 +756,8 @@ export interface JsRuntimeStorageDiagnostics {
   searchHealthy: boolean
   pressureSignals: Array<JsRuntimeStoragePressureSignal>
   pressure: boolean
+  externalRuntimeEvents: JsRuntimeExternalEventStorageDiagnostics
+  filesystemHeadroom: JsRuntimeFilesystemHeadroom
 }
 
 export interface JsRuntimeStoragePressureSignal {

@@ -1141,6 +1141,8 @@ fn postgres_logical_turn_checkpoint_restart_and_cancel_match_sqlite() {
             schema: schema.clone(),
             max_connections: None,
             statement_timeout_ms: None,
+            backing_filesystem_path: None,
+            filesystem_warning_free_percent: None,
         }),
     };
     let mut engine = CoreEngine::initialize(config.clone()).unwrap();

@@ -339,7 +339,7 @@ async function planEffectiveRuntimeConfig(
     profiles,
   });
   assertRuntimeConfigPlan(plan.diagnostics);
-  return runtimeConfigFromGraphPlan(plan, source, profiles);
+  return runtimeConfigFromGraphPlan(plan, source, profiles, serviceConfig);
 }
 
 async function loadRuntimeProfiles(
@@ -673,6 +673,7 @@ function runtimeConfigFromGraphPlan(
   plan: NativeRuntimeGraphPlan,
   source: RuntimeGraphAuthoredSource,
   profiles: readonly ProfileConfig[],
+  serviceConfig: RustyCrewServiceConfig,
 ): RustyCrewRuntimeConfig {
   const effective = plan.runtimeConfig;
   const profilesById = new Map(
@@ -693,7 +694,17 @@ function runtimeConfigFromGraphPlan(
   return {
     profilesDir: effective.profilesDir,
     ...(effective.skillsDir == null ? {} : { skillsDir: effective.skillsDir }),
-    storage: effective.storage,
+    storage: {
+      ...effective.storage,
+      postgres: {
+        ...effective.storage.postgres,
+        backingFilesystemPath:
+          serviceConfig.storage.postgres.backingFilesystemPath,
+      },
+      filesystemWarningFreePercent:
+        serviceConfig.storage.filesystemWarningFreePercent,
+      externalEventRetention: serviceConfig.storage.externalEventRetention,
+    },
     denObservation: source.denObservation,
     mcpServers: source.mcpServers,
     imageGeneration: source.imageGeneration,

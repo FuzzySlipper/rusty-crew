@@ -116,9 +116,11 @@ owns = [
   "external_control_receipts",
   "external_interactions",
   "external_runtime_events",
+  "external_runtime_event_cursors",
+  "external_runtime_event_checkpoints",
   "external_correlated_rounds",
 ]
-notes = "External runtime registrations, private compatibility probe evidence, durable certification history, exclusive controller generations, idempotent agent-session creation, Crew/native identity correlation, turn/control/interaction state, normalized replay events, and the retired pre-runtime-neutral round migration table."
+notes = "External runtime registrations, private compatibility probe evidence, durable certification history, exclusive controller generations, idempotent agent-session creation, Crew/native identity correlation, turn/control/interaction state, normalized replay events with monotonic cursors and terminal-turn retention checkpoints, and the retired pre-runtime-neutral round migration table."
 
 [[scope]]
 id = "profile_registry"

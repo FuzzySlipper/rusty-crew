@@ -139,6 +139,9 @@ RUSTY_CREW_STORAGE_BACKEND=sqlite
 RUSTY_CREW_SQLITE_PATH=coordination.sqlite3
 RUSTY_CREW_SQLITE_WAL=true
 RUSTY_CREW_SQLITE_BUSY_TIMEOUT_MS=5000
+RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT=10
+RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS=7
+RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE=100
 ```
 
 A relative `RUSTY_CREW_SQLITE_PATH` resolves under
@@ -177,6 +180,10 @@ RUSTY_CREW_POSTGRES_DATABASE_URL_ENV=RUSTY_CREW_DATABASE_URL
 RUSTY_CREW_POSTGRES_SCHEMA=rusty_crew
 RUSTY_CREW_POSTGRES_MAX_CONNECTIONS=10
 RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS=30000
+RUSTY_CREW_POSTGRES_BACKING_FILESYSTEM_PATH=/path/visible/on-the-postgres-host
+RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT=10
+RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS=14
+RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE=100
 ```
 
 `RUSTY_CREW_POSTGRES_BOOT_MODE=active` and a populated URL variable are both
@@ -186,6 +193,12 @@ development/proof modes, not production deployment modes.
 Startup applies the backend's versioned migration ledger and fails closed on
 unsupported future schema versions. Use an explicit deployment-scoped schema;
 two services using the same database still need different schemas.
+
+The PostgreSQL backing filesystem path is optional and should only be set when
+the database host path is visible to the Crew process. Retention itself is
+disabled unless both age and batch settings are present. See
+`external-runtime-event-retention.md` for the event durability classes and
+checkpoint contract.
 
 The repo's live systemd unit loads the database secret before the service env:
 

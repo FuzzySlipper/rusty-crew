@@ -52,12 +52,16 @@ pub struct EngineConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub enum EngineStorageConfig {
-    Sqlite,
+    Sqlite {
+        filesystem_warning_free_percent: Option<u32>,
+    },
     Postgres {
         database_url: String,
         schema: String,
         max_connections: Option<u32>,
         statement_timeout_ms: Option<u32>,
+        backing_filesystem_path: Option<String>,
+        filesystem_warning_free_percent: Option<u32>,
     },
 }
 
@@ -76,6 +80,8 @@ impl EngineStorageConfig {
             schema,
             max_connections,
             statement_timeout_ms,
+            backing_filesystem_path: None,
+            filesystem_warning_free_percent: None,
         }
     }
 }
@@ -832,12 +838,20 @@ fn validate_engine_storage_config(
     diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
 ) {
     match storage {
-        EngineStorageConfig::Sqlite => {}
+        EngineStorageConfig::Sqlite {
+            filesystem_warning_free_percent,
+        } => validate_filesystem_warning_percent(
+            *filesystem_warning_free_percent,
+            "storage.filesystemWarningFreePercent",
+            diagnostics,
+        ),
         EngineStorageConfig::Postgres {
             database_url,
             schema,
             max_connections,
             statement_timeout_ms,
+            backing_filesystem_path,
+            filesystem_warning_free_percent,
         } => {
             if database_url.trim().is_empty() {
                 diagnostics.push(RuntimeConfigDiagnostic::error(
@@ -867,7 +881,36 @@ fn validate_engine_storage_config(
                     "Postgres statementTimeoutMs must be greater than zero when provided",
                 ));
             }
+            if backing_filesystem_path
+                .as_ref()
+                .is_some_and(|path| path.trim().is_empty())
+            {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "postgres_backing_filesystem_path_invalid",
+                    "storage.backingFilesystemPath",
+                    "Postgres backingFilesystemPath must be omitted or non-empty",
+                ));
+            }
+            validate_filesystem_warning_percent(
+                *filesystem_warning_free_percent,
+                "storage.filesystemWarningFreePercent",
+                diagnostics,
+            );
         }
+    }
+}
+
+fn validate_filesystem_warning_percent(
+    value: Option<u32>,
+    path: &str,
+    diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
+) {
+    if value.is_some_and(|percent| percent > 100) {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "filesystem_warning_free_percent_invalid",
+            path,
+            "filesystem warning free percent must be between 0 and 100",
+        ));
     }
 }
 
@@ -3573,6 +3616,8 @@ mod tests {
                 schema: DEFAULT_POSTGRES_SCHEMA.to_string(),
                 max_connections: Some(4),
                 statement_timeout_ms: Some(30_000),
+                backing_filesystem_path: None,
+                filesystem_warning_free_percent: None,
             },
         );
 
@@ -3600,6 +3645,8 @@ mod tests {
                 schema: String::new(),
                 max_connections: Some(0),
                 statement_timeout_ms: Some(0),
+                backing_filesystem_path: None,
+                filesystem_warning_free_percent: Some(101),
             }),
         });
 
@@ -3614,6 +3661,7 @@ mod tests {
                 "postgres_schema_required",
                 "postgres_max_connections_invalid",
                 "postgres_statement_timeout_invalid",
+                "filesystem_warning_free_percent_invalid",
             ],
         );
     }

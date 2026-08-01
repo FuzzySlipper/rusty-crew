@@ -12,13 +12,27 @@ impl CoreCoordinationStore {
         storage: Option<&EngineStorageConfig>,
     ) -> CoreResult<Self> {
         match storage {
-            None | Some(EngineStorageConfig::Sqlite) => Self::open_sqlite(engine_data_dir),
+            None => Self::open_sqlite(engine_data_dir),
+            Some(EngineStorageConfig::Sqlite {
+                filesystem_warning_free_percent,
+            }) => Ok(Self::Sqlite(CoordinationStore::open_with_diagnostics(
+                engine_data_dir,
+                *filesystem_warning_free_percent,
+            )?)),
             Some(EngineStorageConfig::Postgres {
                 database_url,
                 schema,
                 max_connections,
+                backing_filesystem_path,
+                filesystem_warning_free_percent,
                 ..
-            }) => Self::open_postgres_with_options(database_url, schema, *max_connections),
+            }) => Self::open_postgres_with_storage_options(
+                database_url,
+                schema,
+                *max_connections,
+                backing_filesystem_path.clone(),
+                *filesystem_warning_free_percent,
+            ),
         }
     }
 
@@ -50,6 +64,25 @@ impl CoreCoordinationStore {
         )))
     }
 
+    #[cfg(feature = "postgres")]
+    pub fn open_postgres_with_storage_options(
+        database_url: &str,
+        schema: &str,
+        max_connections: Option<u32>,
+        backing_filesystem_path: Option<String>,
+        filesystem_warning_free_percent: Option<u32>,
+    ) -> CoreResult<Self> {
+        Ok(Self::Postgres(Arc::new(
+            postgres_backend::PostgresBackendStore::connect_with_storage_options(
+                database_url,
+                schema,
+                max_connections,
+                backing_filesystem_path,
+                filesystem_warning_free_percent,
+            )?,
+        )))
+    }
+
     #[cfg(not(feature = "postgres"))]
     pub fn open_postgres(_database_url: &str, _schema: &str) -> CoreResult<Self> {
         Err(CoreError::new(
@@ -63,6 +96,20 @@ impl CoreCoordinationStore {
         _database_url: &str,
         _schema: &str,
         _max_connections: Option<u32>,
+    ) -> CoreResult<Self> {
+        Err(CoreError::new(
+            CoreErrorKind::AdapterUnavailable,
+            "PostgreSQL coordination backend is not compiled into this build",
+        ))
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    pub fn open_postgres_with_storage_options(
+        _database_url: &str,
+        _schema: &str,
+        _max_connections: Option<u32>,
+        _backing_filesystem_path: Option<String>,
+        _filesystem_warning_free_percent: Option<u32>,
     ) -> CoreResult<Self> {
         Err(CoreError::new(
             CoreErrorKind::AdapterUnavailable,
@@ -1222,6 +1269,28 @@ impl CoreCoordinationStore {
                 let diagnostics = postgres.storage_diagnostics()?;
                 let size = postgres.database_size()?;
                 let module_registry = self.storage_schema()?;
+                let pressure_signals = diagnostics
+                    .filesystem_headroom
+                    .free_percent
+                    .map(|free_percent| {
+                        vec![RuntimeStoragePressureSignal {
+                            name: "filesystem_free_percent".to_string(),
+                            active: diagnostics.filesystem_headroom.warning_active,
+                            severity: if diagnostics.filesystem_headroom.warning_active {
+                                "warning".to_string()
+                            } else {
+                                "info".to_string()
+                            },
+                            observed_value: free_percent as u64,
+                            threshold_value: diagnostics
+                                .filesystem_headroom
+                                .warning_free_percent
+                                .map(u64::from),
+                            detail: diagnostics.filesystem_headroom.detail.clone(),
+                        }]
+                    })
+                    .unwrap_or_default();
+                let pressure = pressure_signals.iter().any(|signal| signal.active);
                 Ok(RuntimeStorageDiagnostics {
                     backend: diagnostics.backend,
                     backend_label: diagnostics.backend_label,
@@ -1236,8 +1305,10 @@ impl CoreCoordinationStore {
                     module_registry,
                     index_checks: Vec::new(),
                     search_healthy: true,
-                    pressure_signals: Vec::new(),
-                    pressure: false,
+                    pressure_signals,
+                    pressure,
+                    external_runtime_events: diagnostics.external_runtime_events,
+                    filesystem_headroom: diagnostics.filesystem_headroom,
                 })
             }
         }
@@ -3770,18 +3841,81 @@ impl std::ops::Deref for CoreCoordinationStore {
     }
 }
 
+fn runtime_external_event_storage_diagnostics(
+    conn: &Connection,
+) -> CoreResult<RuntimeExternalEventStorageDiagnostics> {
+    let (
+        event_rows,
+        estimated_event_bytes,
+        oldest_sequence,
+        oldest_created_at,
+        newest_sequence,
+        newest_created_at,
+    ) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(record_json)), 0),
+                    MIN(sequence_id), MIN(created_at), MAX(sequence_id), MAX(created_at)
+               FROM external_runtime_events",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .map_err(|error| persistence_error("read external event storage diagnostics", error))?;
+    let checkpoint_rows = conn
+        .query_row(
+            "SELECT COUNT(*) FROM external_runtime_event_checkpoints",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| persistence_error("count external event checkpoints", error))?;
+    Ok(RuntimeExternalEventStorageDiagnostics {
+        event_rows: event_rows.max(0) as u64,
+        estimated_event_bytes: estimated_event_bytes.max(0) as u64,
+        checkpoint_rows: checkpoint_rows.max(0) as u64,
+        oldest_sequence: oldest_sequence.map(|value| value.max(0) as u64),
+        oldest_created_at,
+        newest_sequence: newest_sequence.map(|value| value.max(0) as u64),
+        newest_created_at,
+    })
+}
+
 impl CoordinationStore {
     pub fn open(engine_data_dir: impl AsRef<Path>) -> CoreResult<Self> {
+        Self::open_with_diagnostics(engine_data_dir, None)
+    }
+    pub fn open_with_diagnostics(
+        engine_data_dir: impl AsRef<Path>,
+        filesystem_warning_free_percent: Option<u32>,
+    ) -> CoreResult<Self> {
         fs::create_dir_all(engine_data_dir.as_ref())
             .map_err(|error| persistence_error("create coordination data directory", error))?;
-        Self::open_file(engine_data_dir.as_ref().join(DB_FILE_NAME))
+        Self::open_file_with_diagnostics(
+            engine_data_dir.as_ref().join(DB_FILE_NAME),
+            filesystem_warning_free_percent,
+        )
     }
     pub fn open_file(path: impl AsRef<Path>) -> CoreResult<Self> {
+        Self::open_file_with_diagnostics(path, None)
+    }
+    pub fn open_file_with_diagnostics(
+        path: impl AsRef<Path>,
+        filesystem_warning_free_percent: Option<u32>,
+    ) -> CoreResult<Self> {
         let conn = Connection::open(path.as_ref())
             .map_err(|error| persistence_error("open sqlite", error))?;
         configure_connection(&conn)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
+            database_path: Arc::new(path.as_ref().to_path_buf()),
+            filesystem_warning_free_percent,
         };
         store.migrate()?;
         Ok(store)
@@ -3812,8 +3946,28 @@ impl CoordinationStore {
             &compiled_module_schema_registry(),
             &sqlite_module_schema_capabilities(),
         )?;
-        let pressure_signals =
+        let external_runtime_events = runtime_external_event_storage_diagnostics(&conn)?;
+        let filesystem_headroom = filesystem_headroom(
+            Some(self.database_path.as_path()),
+            "sqlite_database_path",
+            self.filesystem_warning_free_percent,
+        );
+        let mut pressure_signals =
             sqlite_storage_pressure_signals(&size, &table_counts, &index_checks, search_healthy);
+        if let Some(free_percent) = filesystem_headroom.free_percent {
+            pressure_signals.push(RuntimeStoragePressureSignal {
+                name: "filesystem_free_percent".to_string(),
+                active: filesystem_headroom.warning_active,
+                severity: if filesystem_headroom.warning_active {
+                    "warning".to_string()
+                } else {
+                    "info".to_string()
+                },
+                observed_value: free_percent as u64,
+                threshold_value: filesystem_headroom.warning_free_percent.map(u64::from),
+                detail: filesystem_headroom.detail.clone(),
+            });
+        }
         let pressure = pressure_signals.iter().any(|signal| signal.active);
         Ok(RuntimeStorageDiagnostics {
             backend: "sqlite".to_string(),
@@ -3844,6 +3998,8 @@ impl CoordinationStore {
             search_healthy,
             pressure_signals,
             pressure,
+            external_runtime_events,
+            filesystem_headroom,
         })
     }
     pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
@@ -3871,6 +4027,7 @@ impl CoordinationStore {
         let mut purged_terminal_queue_messages = 0;
         let mut expired_provider_wire_states = 0;
         let mut session_memory_compaction = SessionMemoryCompactionReport::default();
+        let mut external_runtime_event_retention = ExternalRuntimeEventRetentionReport::default();
         {
             let mut conn = self.conn()?;
             let tx = conn
@@ -3888,6 +4045,28 @@ impl CoordinationStore {
             }
             if let Some(now) = &policy.compact_session_memory_at {
                 session_memory_compaction = compact_session_memory_records_in_tx(&tx, policy, now)?;
+            }
+            match (
+                &policy.compact_terminal_external_runtime_events_before,
+                &policy.external_runtime_event_retention_at,
+                policy.external_runtime_event_terminal_turn_batch_size,
+            ) {
+                (None, None, None) => {}
+                (Some(cutoff), Some(checkpointed_at), Some(batch_size)) => {
+                    external_runtime_event_retention =
+                        repos::external_runtime::compact_terminal_external_runtime_events_in_tx(
+                            &tx,
+                            cutoff,
+                            checkpointed_at,
+                            batch_size,
+                        )?;
+                }
+                _ => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "external runtime event retention requires cutoff, retention timestamp, and terminal turn batch size together",
+                    ));
+                }
             }
             tx.commit()
                 .map_err(|error| persistence_error("commit runtime maintenance", error))?;
@@ -3910,6 +4089,7 @@ impl CoordinationStore {
             purged_terminal_queue_messages,
             expired_provider_wire_states,
             session_memory_compaction,
+            external_runtime_event_retention,
             wal_checkpoint_ran: policy.run_wal_checkpoint,
             optimize_ran: policy.run_optimize,
         })

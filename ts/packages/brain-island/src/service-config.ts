@@ -73,6 +73,10 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_POSTGRES_BOOT_MODE?: string;
   RUSTY_CREW_POSTGRES_MAX_CONNECTIONS?: string;
   RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS?: string;
+  RUSTY_CREW_POSTGRES_BACKING_FILESYSTEM_PATH?: string;
+  RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT?: string;
+  RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS?: string;
+  RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -162,12 +166,21 @@ export interface RustyCrewPostgresStorageConfig {
   bootMode: "blocked" | "proof_admin" | "active";
   maxConnections: number;
   statementTimeoutMs: number;
+  backingFilesystemPath?: string;
+}
+
+export interface RustyCrewExternalEventRetentionConfig {
+  enabled: boolean;
+  ageDays?: number;
+  terminalTurnBatchSize?: number;
 }
 
 export interface RustyCrewStorageConfig {
   backend: RustyCrewStorageBackend;
   sqlite: RustyCrewSqliteStorageConfig;
   postgres: RustyCrewPostgresStorageConfig;
+  filesystemWarningFreePercent: number;
+  externalEventRetention: RustyCrewExternalEventRetentionConfig;
   implementationStatus: "active" | "blocked_unimplemented" | "proof_admin_only";
 }
 
@@ -651,6 +664,15 @@ function parsePositiveInteger(
   return parsed;
 }
 
+function parseOptionalPositiveInteger(
+  input: string | undefined,
+  name: string,
+): number | undefined {
+  const value = normalizeOptional(input);
+  if (value === undefined) return undefined;
+  return parsePositiveInteger(value, 1, name);
+}
+
 function parseBoolean(
   input: string | undefined,
   fallback: boolean,
@@ -728,6 +750,23 @@ function loadRustyCrewStorageConfig(
   const databaseUrlEnv =
     normalizeOptional(env.RUSTY_CREW_POSTGRES_DATABASE_URL_ENV) ??
     "RUSTY_CREW_DATABASE_URL";
+  const externalEventRetentionAgeDays = parseOptionalPositiveInteger(
+    env.RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS,
+    "RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS",
+  );
+  const externalEventRetentionTerminalTurnBatchSize =
+    parseOptionalPositiveInteger(
+      env.RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE,
+      "RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE",
+    );
+  if (
+    (externalEventRetentionAgeDays === undefined) !==
+    (externalEventRetentionTerminalTurnBatchSize === undefined)
+  ) {
+    throw new Error(
+      "RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS and RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE must be configured together",
+    );
+  }
   return {
     backend,
     sqlite: {
@@ -760,6 +799,19 @@ function loadRustyCrewStorageConfig(
         30_000,
         "RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS",
       ),
+      backingFilesystemPath: normalizeOptional(
+        env.RUSTY_CREW_POSTGRES_BACKING_FILESYSTEM_PATH,
+      ),
+    },
+    filesystemWarningFreePercent: parsePositiveInteger(
+      env.RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT,
+      10,
+      "RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT",
+    ),
+    externalEventRetention: {
+      enabled: externalEventRetentionAgeDays !== undefined,
+      ageDays: externalEventRetentionAgeDays,
+      terminalTurnBatchSize: externalEventRetentionTerminalTurnBatchSize,
     },
     implementationStatus:
       backend === "sqlite"
@@ -773,6 +825,11 @@ function loadRustyCrewStorageConfig(
 }
 
 function validateStorageConfig(config: RustyCrewStorageConfig): void {
+  if (config.filesystemWarningFreePercent > 100) {
+    throw new Error(
+      "RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT must be between 1 and 100",
+    );
+  }
   if (!config.sqlite.path.trim()) {
     throw new Error("RUSTY_CREW_SQLITE_PATH must not be empty");
   }

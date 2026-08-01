@@ -371,7 +371,9 @@ fn js_engine_storage_config(config: &JsEngineConfig) -> napi::Result<Option<Engi
         return Ok(None);
     };
     match backend {
-        "sqlite" => Ok(Some(EngineStorageConfig::Sqlite)),
+        "sqlite" => Ok(Some(EngineStorageConfig::Sqlite {
+            filesystem_warning_free_percent: config.filesystem_warning_free_percent,
+        })),
         "postgres" | "postgresql" => {
             let database_url = config.postgres_database_url.clone().ok_or_else(|| {
                 napi::Error::new(
@@ -385,12 +387,18 @@ fn js_engine_storage_config(config: &JsEngineConfig) -> napi::Result<Option<Engi
                     "postgresDatabaseUrl must not be empty",
                 ));
             }
-            Ok(Some(EngineStorageConfig::postgres_with_defaults(
+            Ok(Some(EngineStorageConfig::Postgres {
                 database_url,
-                config.postgres_schema.clone(),
-                config.postgres_max_connections,
-                config.postgres_statement_timeout_ms,
-            )))
+                schema: config
+                    .postgres_schema
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "rusty_crew".to_string()),
+                max_connections: config.postgres_max_connections,
+                statement_timeout_ms: config.postgres_statement_timeout_ms,
+                backing_filesystem_path: config.backing_filesystem_path.clone(),
+                filesystem_warning_free_percent: config.filesystem_warning_free_percent,
+            }))
         }
         other => Err(napi::Error::new(
             napi::Status::InvalidArg,

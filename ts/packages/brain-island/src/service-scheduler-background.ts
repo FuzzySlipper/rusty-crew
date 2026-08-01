@@ -89,10 +89,24 @@ export async function runSchedulerHeartbeat(
     });
     const curatorLifecycle =
       await runServiceCuratorLifecycleTransitions(context);
+    const maintenanceAt = context.now();
+    const retention = context.runtimeConfig.storage?.externalEventRetention;
     const maintenance = await context.bridge.runMaintenance({
-      expireQueuedMessagesAt: context.now(),
+      expireQueuedMessagesAt: maintenanceAt,
+      ...(retention?.enabled === true &&
+      retention.ageDays !== undefined &&
+      retention.terminalTurnBatchSize !== undefined
+        ? {
+            compactTerminalExternalRuntimeEventsBefore: new Date(
+              Date.parse(maintenanceAt) - retention.ageDays * 86_400_000,
+            ).toISOString(),
+            externalRuntimeEventRetentionAt: maintenanceAt,
+            externalRuntimeEventTerminalTurnBatchSize:
+              retention.terminalTurnBatchSize,
+          }
+        : {}),
     });
-    const summary = `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${runtimeActivitySettlements} deferred runtime activity settlements reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`;
+    const summary = `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${runtimeActivitySettlements} deferred runtime activity settlements reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired, ${maintenance.externalRuntimeEventRetention.eventsDeleted} external runtime events compacted.`;
     context.schedulerHeartbeat.lastCompletedAt = context.now();
     context.schedulerHeartbeat.lastDurationMs = Date.now() - startedMonotonic;
     context.schedulerHeartbeat.lastSummary = summary;
@@ -105,7 +119,8 @@ export async function runSchedulerHeartbeat(
       scheduledJobs.registered > 0 ||
       runtimeActivitySettlements > 0 ||
       curatorLifecycle.transitions.length > 0 ||
-      maintenance.expiredQueueMessages > 0
+      maintenance.expiredQueueMessages > 0 ||
+      maintenance.externalRuntimeEventRetention.eventsDeleted > 0
     ) {
       context.recordEvent({
         source: "service-host",

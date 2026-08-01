@@ -133,6 +133,10 @@ try {
     RUSTY_CREW_POSTGRES_SCHEMA: "rusty_crew_test",
     RUSTY_CREW_POSTGRES_MAX_CONNECTIONS: "4",
     RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS: "15000",
+    RUSTY_CREW_POSTGRES_BACKING_FILESYSTEM_PATH: "/srv/postgres",
+    RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT: "12",
+    RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS: "5",
+    RUSTY_CREW_EXTERNAL_EVENT_RETENTION_TERMINAL_TURN_BATCH_SIZE: "25",
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
@@ -183,6 +187,13 @@ try {
   assert.equal(config.telegram.pollIntervalMs, 3_000);
   assert.equal(config.telegram.pollTimeoutSeconds, 0);
   assert.equal(config.telegram.updateLimit, 10);
+  assert.equal(config.storage.postgres.backingFilesystemPath, "/srv/postgres");
+  assert.equal(config.storage.filesystemWarningFreePercent, 12);
+  assert.deepEqual(config.storage.externalEventRetention, {
+    enabled: true,
+    ageDays: 5,
+    terminalTurnBatchSize: 25,
+  });
   assert.equal(config.telegram.messageTtlMs, 60_000);
   assert.equal(config.telegram.adapterId, "telegram-field");
   assert.equal(config.storage.backend, "sqlite");
@@ -357,6 +368,25 @@ try {
     RUSTY_CREW_ADMIN_TOKEN: "loopback-token",
   });
   assert.equal(loopback.admin.allowLan, false);
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_EXTERNAL_EVENT_RETENTION_AGE_DAYS: "7",
+      }),
+    /must be configured together/,
+  );
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_STORAGE_FILESYSTEM_WARNING_FREE_PERCENT: "101",
+      }),
+    /between 1 and 100/,
+  );
 
   assert.throws(
     () =>

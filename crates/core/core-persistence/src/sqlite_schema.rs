@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 57;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 58;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -303,6 +303,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 57,
         description: "add durable logical brain turn continuation",
         apply: repos::logical_turns::migrate_v57_add_logical_turns,
+    },
+    SchemaMigration {
+        version: 58,
+        description: "add bounded external runtime event retention checkpoints",
+        apply: repos::external_runtime::migrate_v58_add_external_runtime_event_retention,
     },
 ];
 

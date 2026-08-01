@@ -4,7 +4,7 @@ use super::logical_turns::apply_postgres_logical_turns;
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 41;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 42;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -222,7 +222,66 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add durable logical brain turn continuation",
         apply: Some(apply_postgres_logical_turns),
     },
+    PostgresSchemaMigration {
+        version: 42,
+        description: "add bounded external runtime event retention checkpoints",
+        apply: Some(apply_postgres_external_runtime_event_retention),
+    },
 ];
+
+fn apply_postgres_external_runtime_event_retention(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.external_runtime_events ADD COLUMN native_thread_id TEXT;
+         ALTER TABLE {schema}.external_runtime_events ADD COLUMN native_turn_id TEXT;
+         UPDATE {schema}.external_runtime_events
+            SET native_thread_id = record_json::jsonb ->> 'nativeThreadId',
+                native_turn_id = record_json::jsonb ->> 'nativeTurnId';
+         CREATE INDEX external_runtime_events_turn_cursor_idx
+            ON {schema}.external_runtime_events(runtime_id, native_turn_id, sequence_id)
+            WHERE native_turn_id IS NOT NULL;
+         CREATE INDEX external_runtime_events_created_cursor_idx
+            ON {schema}.external_runtime_events(runtime_id, created_at, sequence_id);
+         CREATE INDEX external_turns_terminal_retention_idx
+            ON {schema}.external_turns(phase, updated_at, runtime_id, native_turn_id)
+            WHERE native_turn_id IS NOT NULL;
+         CREATE TABLE {schema}.external_runtime_event_cursors (
+            runtime_id TEXT PRIMARY KEY REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            next_sequence_id BIGINT NOT NULL
+         );
+         INSERT INTO {schema}.external_runtime_event_cursors(runtime_id, next_sequence_id)
+         SELECT registration.runtime_id, COALESCE(MAX(event.sequence_id), 0) + 1
+           FROM {schema}.external_runtime_registrations registration
+           LEFT JOIN {schema}.external_runtime_events event ON event.runtime_id = registration.runtime_id
+          GROUP BY registration.runtime_id;
+         CREATE TABLE {schema}.external_runtime_event_checkpoints (
+            runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+            native_turn_id TEXT NOT NULL,
+            native_thread_id TEXT NOT NULL,
+            session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
+            terminal_phase TEXT NOT NULL,
+            terminal_at TEXT NOT NULL,
+            first_sequence_id BIGINT NOT NULL,
+            last_sequence_id BIGINT NOT NULL,
+            compacted_event_count BIGINT NOT NULL,
+            estimated_compacted_bytes BIGINT NOT NULL,
+            kind_counts_json TEXT NOT NULL,
+            checkpointed_at TEXT NOT NULL,
+            policy_cutoff TEXT NOT NULL,
+            PRIMARY KEY(runtime_id, native_turn_id)
+         );
+         CREATE INDEX external_runtime_event_checkpoints_time_idx
+            ON {schema}.external_runtime_event_checkpoints(checkpointed_at, runtime_id, native_turn_id);"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL external runtime event retention checkpoints",
+            error,
+        )
+    })
+}
 
 fn apply_postgres_agent_routes(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
     tx.batch_execute(&format!(

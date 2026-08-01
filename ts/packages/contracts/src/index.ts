@@ -138,13 +138,18 @@ export interface EngineConfig {
 }
 
 export type EngineStorageConfig =
-  | { backend: "sqlite" }
+  | {
+      backend: "sqlite";
+      filesystemWarningFreePercent?: number;
+    }
   | {
       backend: "postgres";
       databaseUrl: string;
       schema: string;
       maxConnections?: number;
       statementTimeoutMs?: number;
+      backingFilesystemPath?: string;
+      filesystemWarningFreePercent?: number;
     };
 
 export interface ShutdownRequest {

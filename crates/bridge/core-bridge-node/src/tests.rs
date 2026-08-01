@@ -1378,6 +1378,8 @@ fn binding_runtime_census_tracks_native_wake_provider_and_tool_topology() {
             postgres_schema: None,
             postgres_max_connections: None,
             postgres_statement_timeout_ms: None,
+            backing_filesystem_path: None,
+            filesystem_warning_free_percent: None,
         })
         .unwrap();
     binding

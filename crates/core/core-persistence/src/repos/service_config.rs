@@ -569,6 +569,14 @@ fn purge_profile_in_tx(
     purge_delete(
         tx,
         &mut counts,
+        "external_runtime_event_checkpoints",
+        "DELETE FROM external_runtime_event_checkpoints
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
         "external_runtime_events",
         "DELETE FROM external_runtime_events
          WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",

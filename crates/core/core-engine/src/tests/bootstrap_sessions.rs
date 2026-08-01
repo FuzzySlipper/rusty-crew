@@ -698,6 +698,8 @@ fn postgres_engine_initialization_uses_postgres_without_sqlite_fallback() {
             schema,
             max_connections: None,
             statement_timeout_ms: None,
+            backing_filesystem_path: None,
+            filesystem_warning_free_percent: None,
         }),
     })
     .unwrap();

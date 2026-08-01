@@ -1329,22 +1329,41 @@ impl PostgresBackendStore {
         }
         let session_id = event.session_id.as_ref().map(|value| value.0.as_str());
         tx.execute(
-                &format!(
-                    "INSERT INTO {schema}.external_runtime_events
-                        (event_id, runtime_id, session_id, sequence_id, kind, created_at, record_json)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)"
-                ),
-                &[
-                    &event.event_id,
-                    &event.runtime_id.0,
-                    &session_id,
-                    &(event.sequence_id as i64),
-                    &event.kind,
-                    &event.created_at,
-                    &to_json_text(event)?,
-                ],
-            )
-            .map_err(|error| postgres_error("append PostgreSQL external runtime event", error))?;
+            &format!(
+                "INSERT INTO {schema}.external_runtime_events
+                        (event_id, runtime_id, session_id, sequence_id, kind, created_at,
+                         native_thread_id, native_turn_id, record_json)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+            ),
+            &[
+                &event.event_id,
+                &event.runtime_id.0,
+                &session_id,
+                &(event.sequence_id as i64),
+                &event.kind,
+                &event.created_at,
+                &event.native_thread_id,
+                &event.native_turn_id,
+                &to_json_text(event)?,
+            ],
+        )
+        .map_err(|error| postgres_error("append PostgreSQL external runtime event", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_runtime_event_cursors(runtime_id, next_sequence_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT(runtime_id) DO UPDATE SET next_sequence_id =
+                    GREATEST({schema}.external_runtime_event_cursors.next_sequence_id,
+                             EXCLUDED.next_sequence_id)"
+            ),
+            &[
+                &event.runtime_id.0,
+                &(event.sequence_id.saturating_add(1) as i64),
+            ],
+        )
+        .map_err(|error| {
+            postgres_error("advance PostgreSQL external runtime event cursor", error)
+        })?;
         tx.commit()
             .map_err(|error| postgres_error("commit PostgreSQL external runtime event", error))?;
         Ok(())
@@ -1384,11 +1403,25 @@ impl PostgresBackendStore {
                 "external runtime event id conflicts with a different payload",
             ));
         }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_runtime_event_cursors(runtime_id, next_sequence_id)
+                 SELECT $1, COALESCE(MAX(sequence_id), 0) + 1
+                   FROM {schema}.external_runtime_events WHERE runtime_id = $1
+                 ON CONFLICT(runtime_id) DO NOTHING"
+            ),
+            &[&input.runtime_id.0],
+        )
+        .map_err(|error| {
+            postgres_error("initialize PostgreSQL external runtime event cursor", error)
+        })?;
         let next_sequence = tx
             .query_one(
                 &format!(
-                    "SELECT COALESCE(MAX(sequence_id), 0) + 1
-                     FROM {schema}.external_runtime_events WHERE runtime_id = $1"
+                    "UPDATE {schema}.external_runtime_event_cursors
+                        SET next_sequence_id = next_sequence_id + 1
+                      WHERE runtime_id = $1
+                      RETURNING next_sequence_id - 1"
                 ),
                 &[&input.runtime_id.0],
             )
@@ -1401,8 +1434,9 @@ impl PostgresBackendStore {
         tx.execute(
             &format!(
                 "INSERT INTO {schema}.external_runtime_events
-                    (event_id, runtime_id, session_id, sequence_id, kind, created_at, record_json)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                    (event_id, runtime_id, session_id, sequence_id, kind, created_at,
+                     native_thread_id, native_turn_id, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
             ),
             &[
                 &event.event_id,
@@ -1411,6 +1445,8 @@ impl PostgresBackendStore {
                 &(event.sequence_id as i64),
                 &event.kind,
                 &event.created_at,
+                &event.native_thread_id,
+                &event.native_turn_id,
                 &to_json_text(&event)?,
             ],
         )
@@ -1813,6 +1849,205 @@ impl PostgresBackendStore {
             "list PostgreSQL pending external rounds",
         )
     }
+}
+
+pub(super) fn compact_terminal_external_runtime_events_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    cutoff: &IsoTimestamp,
+    checkpointed_at: &IsoTimestamp,
+    terminal_turn_batch_size: u32,
+) -> CoreResult<ExternalRuntimeEventRetentionReport> {
+    if terminal_turn_batch_size == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "external runtime event terminal turn batch size must be greater than zero",
+        ));
+    }
+    let candidates = tx
+        .query(
+            &format!(
+                "SELECT turn.runtime_id, turn.native_thread_id, turn.native_turn_id,
+                        turn.session_id, turn.phase, turn.updated_at
+                   FROM {schema}.external_turns turn
+                  WHERE turn.native_turn_id IS NOT NULL
+                    AND turn.phase IN ('completed', 'failed', 'interrupted', 'outcome_unknown')
+                    AND turn.updated_at < $1
+                    AND EXISTS (
+                        SELECT 1 FROM {schema}.external_runtime_events event
+                         WHERE event.runtime_id = turn.runtime_id
+                           AND event.native_turn_id = turn.native_turn_id
+                           AND event.kind IN (
+                               'assistant_text_delta', 'reasoning_delta', 'plan_delta',
+                               'item_lifecycle', 'command_activity', 'file_activity',
+                               'mcp_activity', 'dynamic_tool_activity'
+                           )
+                    )
+                  ORDER BY turn.updated_at, turn.runtime_id, turn.native_turn_id
+                  LIMIT $2"
+            ),
+            &[cutoff, &(terminal_turn_batch_size as i64)],
+        )
+        .map_err(|error| {
+            postgres_error("query PostgreSQL terminal external turn retention", error)
+        })?;
+    let mut report = ExternalRuntimeEventRetentionReport {
+        enabled: true,
+        cutoff: Some(cutoff.clone()),
+        terminal_turn_batch_size: Some(terminal_turn_batch_size),
+        terminal_turns_inspected: candidates.len() as u64,
+        ..ExternalRuntimeEventRetentionReport::default()
+    };
+    for candidate in candidates {
+        let runtime_id = candidate.get::<_, String>(0);
+        let native_thread_id = candidate.get::<_, String>(1);
+        let native_turn_id = candidate.get::<_, String>(2);
+        let session_id = candidate.get::<_, String>(3);
+        let phase = candidate.get::<_, String>(4);
+        let terminal_at = candidate.get::<_, String>(5);
+        let aggregates = tx
+            .query(
+                &format!(
+                    "SELECT kind, COUNT(*), MIN(sequence_id), MAX(sequence_id),
+                            COALESCE(SUM(LENGTH(record_json)), 0)
+                       FROM {schema}.external_runtime_events
+                      WHERE runtime_id = $1 AND native_turn_id = $2
+                        AND kind IN (
+                            'assistant_text_delta', 'reasoning_delta', 'plan_delta',
+                            'item_lifecycle', 'command_activity', 'file_activity',
+                            'mcp_activity', 'dynamic_tool_activity'
+                        )
+                      GROUP BY kind"
+                ),
+                &[&runtime_id, &native_turn_id],
+            )
+            .map_err(|error| {
+                postgres_error("summarize PostgreSQL external event compaction", error)
+            })?;
+        let mut kind_counts = BTreeMap::<String, u64>::new();
+        let mut first_sequence = None::<u64>;
+        let mut last_sequence = None::<u64>;
+        let mut event_count = 0_u64;
+        let mut estimated_bytes = 0_u64;
+        for aggregate in aggregates {
+            let kind = aggregate.get::<_, String>(0);
+            let count = aggregate.get::<_, i64>(1) as u64;
+            let first = aggregate.get::<_, i64>(2) as u64;
+            let last = aggregate.get::<_, i64>(3) as u64;
+            let bytes = aggregate.get::<_, i64>(4) as u64;
+            kind_counts.insert(kind, count);
+            event_count += count;
+            estimated_bytes += bytes;
+            first_sequence = Some(first_sequence.map_or(first, |current| current.min(first)));
+            last_sequence = Some(last_sequence.map_or(last, |current| current.max(last)));
+        }
+        let (Some(first_sequence), Some(last_sequence)) = (first_sequence, last_sequence) else {
+            continue;
+        };
+        let deleted_estimated_bytes = estimated_bytes;
+        let existing = tx
+            .query_opt(
+                &format!(
+                    "SELECT kind_counts_json, compacted_event_count, estimated_compacted_bytes,
+                            first_sequence_id, last_sequence_id
+                       FROM {schema}.external_runtime_event_checkpoints
+                      WHERE runtime_id = $1 AND native_turn_id = $2
+                      FOR UPDATE"
+                ),
+                &[&runtime_id, &native_turn_id],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL external event checkpoint", error))?;
+        let checkpoint_created = existing.is_none();
+        let (first_sequence, last_sequence, event_count, estimated_bytes) =
+            if let Some(existing) = existing {
+                let existing_counts: BTreeMap<String, u64> = parse_postgres_json(
+                    &existing.get::<_, String>(0),
+                    "parse PostgreSQL external event checkpoint",
+                )?;
+                for (kind, count) in existing_counts {
+                    *kind_counts.entry(kind).or_default() += count;
+                }
+                (
+                    first_sequence.min(existing.get::<_, i64>(3) as u64),
+                    last_sequence.max(existing.get::<_, i64>(4) as u64),
+                    event_count + existing.get::<_, i64>(1) as u64,
+                    estimated_bytes + existing.get::<_, i64>(2) as u64,
+                )
+            } else {
+                (first_sequence, last_sequence, event_count, estimated_bytes)
+            };
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.external_runtime_event_checkpoints (
+                    runtime_id, native_turn_id, native_thread_id, session_id, terminal_phase,
+                    terminal_at, first_sequence_id, last_sequence_id, compacted_event_count,
+                    estimated_compacted_bytes, kind_counts_json, checkpointed_at, policy_cutoff
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 ON CONFLICT(runtime_id, native_turn_id) DO UPDATE SET
+                    native_thread_id = EXCLUDED.native_thread_id,
+                    session_id = EXCLUDED.session_id,
+                    terminal_phase = EXCLUDED.terminal_phase,
+                    terminal_at = EXCLUDED.terminal_at,
+                    first_sequence_id = EXCLUDED.first_sequence_id,
+                    last_sequence_id = EXCLUDED.last_sequence_id,
+                    compacted_event_count = EXCLUDED.compacted_event_count,
+                    estimated_compacted_bytes = EXCLUDED.estimated_compacted_bytes,
+                    kind_counts_json = EXCLUDED.kind_counts_json,
+                    checkpointed_at = EXCLUDED.checkpointed_at,
+                    policy_cutoff = EXCLUDED.policy_cutoff"
+            ),
+            &[
+                &runtime_id,
+                &native_turn_id,
+                &native_thread_id,
+                &session_id,
+                &phase,
+                &terminal_at,
+                &(first_sequence as i64),
+                &(last_sequence as i64),
+                &(event_count as i64),
+                &(estimated_bytes as i64),
+                &to_json_text(&kind_counts)?,
+                checkpointed_at,
+                cutoff,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL external event checkpoint", error))?;
+        let deleted = tx
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.external_runtime_events
+                      WHERE runtime_id = $1 AND native_turn_id = $2
+                        AND kind IN (
+                            'assistant_text_delta', 'reasoning_delta', 'plan_delta',
+                            'item_lifecycle', 'command_activity', 'file_activity',
+                            'mcp_activity', 'dynamic_tool_activity'
+                        )"
+                ),
+                &[&runtime_id, &native_turn_id],
+            )
+            .map_err(|error| postgres_error("compact PostgreSQL external runtime events", error))?;
+        report.terminal_turns_compacted += 1;
+        if checkpoint_created {
+            report.checkpoints_created += 1;
+        }
+        report.events_deleted += deleted;
+        report.estimated_reclaimed_bytes += deleted_estimated_bytes;
+    }
+    if let Some(oldest) = tx
+        .query_opt(
+            &format!(
+                "SELECT sequence_id, created_at FROM {schema}.external_runtime_events
+                 ORDER BY created_at, sequence_id LIMIT 1"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL oldest retained external event", error))?
+    {
+        report.oldest_retained_sequence = Some(oldest.get::<_, i64>(0) as u64);
+        report.oldest_retained_at = Some(oldest.get(1));
+    }
+    Ok(report)
 }
 
 fn normalized_event_from_input(

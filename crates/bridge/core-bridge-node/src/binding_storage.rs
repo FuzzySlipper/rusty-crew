@@ -47,6 +47,11 @@ impl NativeBridgeBinding {
                 session_memory_max_active_records_per_scope: policy
                     .session_memory_max_active_records_per_scope,
                 session_memory_archive_batch_size: policy.session_memory_archive_batch_size,
+                compact_terminal_external_runtime_events_before: policy
+                    .compact_terminal_external_runtime_events_before,
+                external_runtime_event_retention_at: policy.external_runtime_event_retention_at,
+                external_runtime_event_terminal_turn_batch_size: policy
+                    .external_runtime_event_terminal_turn_batch_size,
                 run_wal_checkpoint: policy.run_wal_checkpoint.unwrap_or(false),
                 run_optimize: policy.run_optimize.unwrap_or(false),
             })

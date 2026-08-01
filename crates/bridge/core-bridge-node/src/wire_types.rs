@@ -13,6 +13,8 @@ pub struct JsEngineConfig {
     pub postgres_schema: Option<String>,
     pub postgres_max_connections: Option<u32>,
     pub postgres_statement_timeout_ms: Option<u32>,
+    pub backing_filesystem_path: Option<String>,
+    pub filesystem_warning_free_percent: Option<u32>,
 }
 
 #[napi_derive::napi(object)]
@@ -520,6 +522,32 @@ pub struct JsRuntimeStorageDiagnostics {
     pub search_healthy: bool,
     pub pressure_signals: Vec<JsRuntimeStoragePressureSignal>,
     pub pressure: bool,
+    pub external_runtime_events: JsRuntimeExternalEventStorageDiagnostics,
+    pub filesystem_headroom: JsRuntimeFilesystemHeadroom,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeExternalEventStorageDiagnostics {
+    pub event_rows: f64,
+    pub estimated_event_bytes: f64,
+    pub checkpoint_rows: f64,
+    pub oldest_sequence: Option<f64>,
+    pub oldest_created_at: Option<String>,
+    pub newest_sequence: Option<f64>,
+    pub newest_created_at: Option<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeFilesystemHeadroom {
+    pub available: bool,
+    pub source: String,
+    pub path: Option<String>,
+    pub total_bytes: Option<f64>,
+    pub free_bytes: Option<f64>,
+    pub free_percent: Option<u32>,
+    pub warning_free_percent: Option<u32>,
+    pub warning_active: bool,
+    pub detail: String,
 }
 
 #[napi_derive::napi(object)]
@@ -530,6 +558,9 @@ pub struct JsRuntimeMaintenancePolicy {
     pub compact_session_memory_at: Option<String>,
     pub session_memory_max_active_records_per_scope: Option<u32>,
     pub session_memory_archive_batch_size: Option<u32>,
+    pub compact_terminal_external_runtime_events_before: Option<String>,
+    pub external_runtime_event_retention_at: Option<String>,
+    pub external_runtime_event_terminal_turn_batch_size: Option<u32>,
     pub run_wal_checkpoint: Option<bool>,
     pub run_optimize: Option<bool>,
 }
@@ -555,8 +586,23 @@ pub struct JsRuntimeMaintenanceReport {
     pub purged_terminal_queue_messages: f64,
     pub expired_provider_wire_states: f64,
     pub session_memory_compaction: JsSessionMemoryCompactionReport,
+    pub external_runtime_event_retention: JsExternalRuntimeEventRetentionReport,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsExternalRuntimeEventRetentionReport {
+    pub enabled: bool,
+    pub cutoff: Option<String>,
+    pub terminal_turn_batch_size: Option<u32>,
+    pub terminal_turns_inspected: f64,
+    pub terminal_turns_compacted: f64,
+    pub checkpoints_created: f64,
+    pub events_deleted: f64,
+    pub estimated_reclaimed_bytes: f64,
+    pub oldest_retained_sequence: Option<f64>,
+    pub oldest_retained_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

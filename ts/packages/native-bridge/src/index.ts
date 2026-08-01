@@ -1370,6 +1370,12 @@ function createNativeBridgeModule(
           config.storage?.backend === "postgres"
             ? config.storage.statementTimeoutMs
             : undefined,
+        backingFilesystemPath:
+          config.storage?.backend === "postgres"
+            ? config.storage.backingFilesystemPath
+            : undefined,
+        filesystemWarningFreePercent:
+          config.storage?.filesystemWarningFreePercent,
       }) as EngineHandle,
     shutdownEngine: async (request) =>
       binding.shutdownEngine(request.engine, request.drainTimeoutMs),

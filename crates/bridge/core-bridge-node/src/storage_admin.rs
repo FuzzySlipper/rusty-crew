@@ -629,6 +629,38 @@ pub(crate) fn to_js_runtime_storage_diagnostics(
             .map(to_js_runtime_storage_pressure_signal)
             .collect(),
         pressure: diagnostics.pressure,
+        external_runtime_events: JsRuntimeExternalEventStorageDiagnostics {
+            event_rows: diagnostics.external_runtime_events.event_rows as f64,
+            estimated_event_bytes: diagnostics.external_runtime_events.estimated_event_bytes as f64,
+            checkpoint_rows: diagnostics.external_runtime_events.checkpoint_rows as f64,
+            oldest_sequence: diagnostics
+                .external_runtime_events
+                .oldest_sequence
+                .map(|value| value as f64),
+            oldest_created_at: diagnostics.external_runtime_events.oldest_created_at,
+            newest_sequence: diagnostics
+                .external_runtime_events
+                .newest_sequence
+                .map(|value| value as f64),
+            newest_created_at: diagnostics.external_runtime_events.newest_created_at,
+        },
+        filesystem_headroom: JsRuntimeFilesystemHeadroom {
+            available: diagnostics.filesystem_headroom.available,
+            source: diagnostics.filesystem_headroom.source,
+            path: diagnostics.filesystem_headroom.path,
+            total_bytes: diagnostics
+                .filesystem_headroom
+                .total_bytes
+                .map(|value| value as f64),
+            free_bytes: diagnostics
+                .filesystem_headroom
+                .free_bytes
+                .map(|value| value as f64),
+            free_percent: diagnostics.filesystem_headroom.free_percent,
+            warning_free_percent: diagnostics.filesystem_headroom.warning_free_percent,
+            warning_active: diagnostics.filesystem_headroom.warning_active,
+            detail: diagnostics.filesystem_headroom.detail,
+        },
     }
 }
 
@@ -644,6 +676,29 @@ pub(crate) fn to_js_runtime_maintenance_report(
         session_memory_compaction: to_js_session_memory_compaction_report(
             report.session_memory_compaction,
         ),
+        external_runtime_event_retention: JsExternalRuntimeEventRetentionReport {
+            enabled: report.external_runtime_event_retention.enabled,
+            cutoff: report.external_runtime_event_retention.cutoff,
+            terminal_turn_batch_size: report
+                .external_runtime_event_retention
+                .terminal_turn_batch_size,
+            terminal_turns_inspected: report
+                .external_runtime_event_retention
+                .terminal_turns_inspected as f64,
+            terminal_turns_compacted: report
+                .external_runtime_event_retention
+                .terminal_turns_compacted as f64,
+            checkpoints_created: report.external_runtime_event_retention.checkpoints_created as f64,
+            events_deleted: report.external_runtime_event_retention.events_deleted as f64,
+            estimated_reclaimed_bytes: report
+                .external_runtime_event_retention
+                .estimated_reclaimed_bytes as f64,
+            oldest_retained_sequence: report
+                .external_runtime_event_retention
+                .oldest_retained_sequence
+                .map(|value| value as f64),
+            oldest_retained_at: report.external_runtime_event_retention.oldest_retained_at,
+        },
         wal_checkpoint_ran: report.wal_checkpoint_ran,
         optimize_ran: report.optimize_ran,
     }
