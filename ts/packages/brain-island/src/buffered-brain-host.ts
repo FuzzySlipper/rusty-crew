@@ -194,9 +194,16 @@ export async function runBufferedBrainHost(options: {
           item,
           toolDebugReferences,
         );
-        if (options.submitEvent === undefined && debugItem.type === "event") {
-          events.push(debugItem.event);
-          continue;
+        if (debugItem.type === "event") {
+          if (
+            options.submitEvent === undefined ||
+            debugItem.event.event.type === "text_delta"
+          ) {
+            events.push(debugItem.event);
+          }
+          if (options.submitEvent === undefined) {
+            continue;
+          }
         }
         const failure = await projectStreamItem(
           options.bridge,

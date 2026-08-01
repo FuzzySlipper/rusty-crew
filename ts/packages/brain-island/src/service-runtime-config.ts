@@ -1806,7 +1806,7 @@ function completionActionFromEvents(input: {
       packet: {
         sessionId: input.wake.sessionId,
         status: "completed",
-        summary: text ? truncate(text, 480) : "LLM wake completed.",
+        summary: text ? truncate(text, 8_192) : "LLM wake completed.",
       } satisfies CompletionPacket,
     },
   ];

@@ -64,7 +64,23 @@ fn test_engine() -> CoreEngine {
 }
 
 fn test_engine_with_data_dir(data_dir: PathBuf) -> CoreEngine {
-    CoreEngine::initialize(test_engine_config(data_dir)).unwrap()
+    let engine = CoreEngine::initialize(test_engine_config(data_dir)).unwrap();
+    for profile_id in [
+        "coder-profile",
+        "proof-coder-profile",
+        "coder-profile-0",
+        "coder-profile-1",
+        "coder-profile-2",
+        "coder-profile-3",
+    ] {
+        engine
+            .register_profile_tool_profile(
+                ProfileId::new(profile_id),
+                ToolProfile { tools: Vec::new() },
+            )
+            .unwrap();
+    }
+    engine
 }
 
 fn test_engine_config(data_dir: PathBuf) -> EngineConfig {

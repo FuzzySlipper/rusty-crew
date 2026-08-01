@@ -160,6 +160,7 @@ export const resolveDelegationTools: BrainToolResolver = ({ wake, actions }) =>
   delegationTools({
     actions,
     parentResourceLimits: wake.state.session.resourceLimits,
+    defaultProfileId: wake.state.session.profileId,
   });
 
 export function delegationTools(context: DelegationToolContext): BrainTool[] {
@@ -493,7 +494,11 @@ function profileId(
   requested: string | undefined,
   context: DelegationToolContext,
 ): string {
-  return requested ?? context.defaultProfileId ?? "coder-profile";
+  const resolved = requested ?? context.defaultProfileId;
+  if (resolved === undefined) {
+    throw new Error("delegation_profile_required");
+  }
+  return resolved;
 }
 
 function bullets(values: readonly string[]): string {

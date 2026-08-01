@@ -140,6 +140,11 @@ Review the markdown delegation tool.`,
       goal: "Find the brain action submission path.",
       paths: ["ts/packages/brain-island/src", "crates/core"],
     });
+    await this.callTool("scout_codebase", {
+      profileId: "scout-specialist-profile",
+      goal: "Confirm an explicit scout profile overrides parent inheritance.",
+      paths: ["ts/packages/brain-island/src"],
+    });
     await this.callTool("summarize_files", {
       files: ["README.md", "docs/delegation-request-contract.md"],
       focus: "Delegation model",
@@ -210,8 +215,8 @@ const result = await brain.wake({
   },
 });
 
-assert.equal(result.actions.length, 9);
-assert.equal(plannerSawToolActions.length, 9);
+assert.equal(result.actions.length, 10);
+assert.equal(plannerSawToolActions.length, 10);
 assert.ok(
   result.actions.every((action) => action.type === "request_delegation"),
 );
@@ -223,6 +228,7 @@ const [
   fanOutMdFirst,
   fanOutMdSecond,
   scout,
+  explicitScout,
   summarize,
   findPaths,
 ] = result.actions.filter(
@@ -239,8 +245,12 @@ assert.equal(fanOutSecond?.fanOutFailurePolicy, "fail_soft");
 assert.equal(fanOutMdFirst?.fanOutGroupId, "md-fan-out");
 assert.equal(fanOutMdFirst?.correlationId, "md-review");
 assert.equal(fanOutMdSecond?.profileId, "packet-auditor-profile");
+assert.equal(scout?.profileId, profileId);
 assert.equal(scout?.resourceLimits?.maxDelegationDepth, 0);
+assert.equal(explicitScout?.profileId, "scout-specialist-profile");
+assert.equal(summarize?.profileId, profileId);
 assert.match(summarize?.prompt ?? "", /README\.md/);
+assert.equal(findPaths?.profileId, profileId);
 assert.match(findPaths?.prompt ?? "", /ToolProfile/);
 
 console.log(

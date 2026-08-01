@@ -585,8 +585,7 @@ impl CoreEngine {
     }
 
     fn tool_profile_for_profile(&self, profile_id: &ProfileId) -> CoreResult<ToolProfile> {
-        Ok(self
-            .profile_tool_profiles
+        self.profile_tool_profiles
             .lock()
             .map_err(|_| {
                 CoreError::new(
@@ -596,7 +595,7 @@ impl CoreEngine {
             })?
             .get(profile_id)
             .cloned()
-            .unwrap_or(ToolProfile { tools: Vec::new() }))
+            .ok_or_else(|| unregistered_delegation_profile_error(profile_id))
     }
 
     pub(crate) fn validate_delegation_invariants(
@@ -607,13 +606,22 @@ impl CoreEngine {
         let mut rejections = Vec::new();
         for (index, action) in batch.actions.iter().enumerate() {
             match action {
-                BrainAction::RequestDelegation { .. } => {
+                BrainAction::RequestDelegation { profile_id, .. } => {
                     if session.resource_limits.max_delegation_depth == Some(0) {
                         rejections.push(ActionRejection {
                             index: index as u32,
                             kind: CoreErrorKind::ActionRejected,
                             message: "request_delegation exceeds max_delegation_depth".to_string(),
                         });
+                    } else {
+                        match self.tool_profile_for_profile(profile_id) {
+                            Ok(_) => {}
+                            Err(error) => rejections.push(ActionRejection {
+                                index: index as u32,
+                                kind: error.kind,
+                                message: error.message,
+                            }),
+                        }
                     }
                 }
                 BrainAction::DeliverCompletion { packet } => {
@@ -888,6 +896,16 @@ impl CoreEngine {
 
         Ok(())
     }
+}
+
+fn unregistered_delegation_profile_error(profile_id: &ProfileId) -> CoreError {
+    CoreError::new(
+        CoreErrorKind::ActionRejected,
+        format!(
+            "delegation profile {} is not registered with a brain implementation",
+            profile_id.0
+        ),
+    )
 }
 
 pub fn delegated_session_id(

@@ -118,6 +118,53 @@ test("ordinary tool output continues without cancelling the native run", async (
   assert.equal(cancellations, 0);
 });
 
+test("live event submission retains text deltas for completion planning", async () => {
+  const submittedEvents: string[] = [];
+  let plannedText = "";
+  const bridge = {
+    startBrainRun: async () => ({
+      moduleId: "chat-completions" as const,
+      wakeId,
+    }),
+    drainBrainRun: async () => ({
+      items: [
+        {
+          type: "event" as const,
+          event: {
+            wakeId,
+            sessionId,
+            event: { type: "text_delta" as const, text: "scout evidence" },
+          },
+        },
+      ],
+      toolRequests: [],
+      terminal: true,
+    }),
+  } as unknown as NativeBridgeModule;
+
+  await runBufferedBrainHost({
+    bridge,
+    moduleLabel: "Chat Completions",
+    run: chatCompletionsRun(),
+    wake: wake(),
+    toolProfile: { tools: [] },
+    submitEvent: async (event) => {
+      submittedEvents.push(event.event.type);
+    },
+    planActions: ({ events }) => {
+      plannedText = events
+        .flatMap((event) =>
+          event.event.type === "text_delta" ? [event.event.text] : [],
+        )
+        .join("");
+      return [];
+    },
+  });
+
+  assert.deepEqual(submittedEvents, ["text_delta"]);
+  assert.equal(plannedText, "scout evidence");
+});
+
 test("a genuine native terminal error remains a buffered wake failure", async () => {
   const harness = dispositionBridge({
     terminalReasonCode: "provider_response_failed",

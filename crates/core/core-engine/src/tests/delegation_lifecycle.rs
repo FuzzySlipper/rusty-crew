@@ -885,3 +885,101 @@ fn delegated_sessions_resolve_tool_profile_from_requested_profile() {
         }
     );
 }
+
+#[test]
+fn delegation_rejects_unregistered_profile_before_creating_worker_state() {
+    let data_dir = unique_data_dir("delegated-unregistered-profile");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let planner = engine
+        .create_session(session_config(
+            "planner-session",
+            "planner",
+            "planner-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+
+    let receipt = engine
+        .execute_brain_actions(BrainActionBatch {
+            wake_id: "planner-wake".to_string(),
+            session_id: planner.session_id.clone(),
+            actions: vec![delegation_request_for_profile("missing-worker-profile")],
+        })
+        .unwrap();
+
+    assert_eq!(receipt.accepted_actions, 0);
+    assert_eq!(receipt.rejected_actions.len(), 1);
+    assert_eq!(
+        receipt.rejected_actions[0].kind,
+        CoreErrorKind::ActionRejected
+    );
+    assert_eq!(
+        receipt.rejected_actions[0].message,
+        "delegation profile missing-worker-profile is not registered with a brain implementation"
+    );
+    let store = CoordinationStore::open(data_dir).unwrap();
+    assert_eq!(store.count_rows("sessions").unwrap(), 1);
+    assert_eq!(store.count_rows("worker_runs").unwrap(), 0);
+}
+
+#[test]
+fn delegation_accepts_registered_profile_with_empty_tool_profile() {
+    let data_dir = unique_data_dir("delegated-empty-profile");
+    let engine = test_engine_with_data_dir(data_dir);
+    let planner = engine
+        .create_session(session_config(
+            "planner-session",
+            "planner",
+            "planner-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .register_profile_tool_profile(
+            ProfileId::new("empty-worker-profile"),
+            ToolProfile { tools: Vec::new() },
+        )
+        .unwrap();
+
+    let receipt = engine
+        .execute_brain_actions(BrainActionBatch {
+            wake_id: "planner-wake".to_string(),
+            session_id: planner.session_id.clone(),
+            actions: vec![delegation_request_for_profile("empty-worker-profile")],
+        })
+        .unwrap();
+
+    assert_eq!(receipt.accepted_actions, 1);
+    assert!(receipt.rejected_actions.is_empty());
+    let delegated = engine
+        .get_session(&delegated_session_id(
+            &planner.session_id,
+            "planner-wake",
+            0,
+        ))
+        .unwrap();
+    assert_eq!(delegated.profile_id, ProfileId::new("empty-worker-profile"));
+    assert!(delegated.tool_profile.tools.is_empty());
+}
+
+fn delegation_request_for_profile(profile_id: &str) -> BrainAction {
+    BrainAction::RequestDelegation {
+        profile_id: ProfileId::new(profile_id),
+        task_id: None,
+        prompt: "complete a delegated profile validation proof".to_string(),
+        expected_output: None,
+        resource_limits: Some(ResourceLimits {
+            workdir: Some("/home/dev/rusty-crew".to_string()),
+            max_duration_ms: None,
+            max_delegation_depth: Some(0),
+        }),
+        timeout_ms: None,
+        priority: None,
+        fan_out_group_id: None,
+        fan_out_max_concurrency: None,
+        fan_out_failure_policy: None,
+        correlation_id: None,
+        parent_consumption: None,
+        capacity_request: None,
+    }
+}

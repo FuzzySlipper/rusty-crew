@@ -4,6 +4,7 @@ import type {
   AgentId,
   BrainWakeProviderStateInput,
   ProfileId,
+  RunId,
   SessionHandle,
   SessionId,
 } from "@rusty-crew/contracts";
@@ -233,6 +234,96 @@ test("Chat Completions host sends role bootstrap messages only before provider s
       ],
       ["system\n\nrole instructions", "second question"],
     ],
+  );
+});
+
+test("Chat Completions host injects each delegated completion once", async () => {
+  const capturedMessages: ChatCompletionsBrainRunInput["messages"][] = [];
+  const bridge = {
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
+    ) => {
+      if (input.moduleId !== "chat-completions") {
+        throw new Error(`unexpected module ${input.moduleId}`);
+      }
+      capturedMessages.push(input.providerInput.messages);
+      return { moduleId: input.moduleId, wakeId: input.providerInput.wakeId };
+    },
+    drainBrainRun: async () => ({
+      items: [],
+      toolRequests: [],
+      terminal: true,
+    }),
+  } as unknown as NativeBridgeModule;
+  const context = {
+    bridge,
+    profile: {
+      profile: {
+        profileId: "continuation-profile" as ProfileId,
+        modelConfig: {
+          provider: "test",
+          modelName: "test-model",
+          api: "openai-completions",
+        },
+      },
+      skills: [],
+      toolSelection: { toolProfile: { tools: [] } },
+    },
+  } as unknown as BrainHostContext;
+  const brain = createChatCompletionsBrainHost(context, { mode: "fake" });
+  const completionMessage = [
+    "[Rusty Crew delegated completion]",
+    "run_id: run-1",
+    "child_session_id: child-1",
+    "status: completed",
+    "correlation_id: scout-1",
+    "summary:",
+    "scout evidence",
+  ].join("\n");
+  const wake = continuationWake();
+  wake.state.childCompletions = [
+    {
+      runId: "run-1" as RunId,
+      childSessionId: "child-1" as SessionId,
+      sourceWakeId: "parent-wake",
+      sourceActionIndex: 0,
+      correlationId: "scout-1",
+      parentConsumption: "await_completion",
+      packet: {
+        sessionId: "child-1" as SessionId,
+        status: "completed",
+        summary: "scout evidence",
+      },
+    },
+  ];
+
+  await brain.wake(wake);
+  await brain.wake({
+    ...wake,
+    wakeId: "continuation-wake-2",
+    providerState: {
+      moduleId: "chat-completions",
+      strategyId: "default",
+      profileFingerprint: "profile-fingerprint",
+      providerFingerprint: "provider-fingerprint",
+      payloadVersion: "chat-completions-history-v1",
+      payload: {
+        messages: [{ role: "user", content: completionMessage }],
+      },
+    },
+  });
+
+  assert.equal(
+    capturedMessages[0]?.filter(
+      (message) => message.content === completionMessage,
+    ).length,
+    1,
+  );
+  assert.equal(
+    capturedMessages[1]?.filter(
+      (message) => message.content === completionMessage,
+    ).length,
+    0,
   );
 });
 

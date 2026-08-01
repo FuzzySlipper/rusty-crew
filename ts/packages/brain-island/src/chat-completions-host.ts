@@ -378,6 +378,12 @@ function rustChatCompletionsMessages(
     wake.providerState === undefined
       ? (wake.roleAssembly.initialMessages ?? [])
       : [];
+  const priorContents = chatCompletionsProviderStateMessageContents(
+    wake.providerState,
+  );
+  const delegatedCompletions = wake.state.childCompletions
+    .map(delegatedCompletionMessage)
+    .filter((message) => !priorContents.has(message));
   return [
     ...(system ? [{ role: "system" as const, content: system }] : []),
     ...initialMessages.map((message) => ({
@@ -388,7 +394,51 @@ function rustChatCompletionsMessages(
       role: "user" as const,
       content: message.body,
     })),
+    ...delegatedCompletions.map((content) => ({
+      role: "user" as const,
+      content,
+    })),
   ];
+}
+
+function delegatedCompletionMessage(
+  completion: BrainWakeInput["state"]["childCompletions"][number],
+): string {
+  return [
+    "[Rusty Crew delegated completion]",
+    `run_id: ${completion.runId}`,
+    `child_session_id: ${completion.childSessionId}`,
+    `status: ${completion.packet.status}`,
+    completion.correlationId
+      ? `correlation_id: ${completion.correlationId}`
+      : undefined,
+    "summary:",
+    completion.packet.summary,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
+function chatCompletionsProviderStateMessageContents(
+  providerState: BrainWakeInput["providerState"],
+): Set<string> {
+  if (
+    providerState?.moduleId !== "chat-completions" ||
+    !isRecord(providerState.payload) ||
+    !Array.isArray(providerState.payload.messages)
+  ) {
+    return new Set();
+  }
+  return new Set(
+    providerState.payload.messages.flatMap((message) => {
+      if (!isRecord(message) || typeof message.content !== "string") return [];
+      return [message.content];
+    }),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function narratorImageContextEvents(

@@ -606,6 +606,12 @@ fn system_clock_writes_rfc3339_timestamps() {
         storage: None,
     })
     .unwrap();
+    engine
+        .register_profile_tool_profile(
+            ProfileId::new("coder-profile"),
+            ToolProfile { tools: Vec::new() },
+        )
+        .unwrap();
     let planner = engine
         .create_session(session_config(
             "planner-session",
