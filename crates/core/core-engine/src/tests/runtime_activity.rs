@@ -3,7 +3,76 @@ use rusty_crew_core_protocol::{
     RuntimeActivityBegin, RuntimeActivityCensusQuery, RuntimeActivityFindingCode,
     RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind, RuntimeActivityLiveEvidence,
     RuntimeActivityOwner, RuntimeActivityProgress, RuntimeActivityStatus,
+    RuntimeActivityWakeSettlement,
 };
+
+#[test]
+fn wake_settlement_terminalizes_rust_owned_activity_tree_idempotently() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "settlement-session",
+            "settlement-agent",
+            "settlement-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    for (activity_id, parent_activity_id, kind) in [
+        (
+            "wake:settlement",
+            Some(RuntimeActivityId::new("dispatch:settlement")),
+            RuntimeActivityKind::Wake,
+        ),
+        (
+            "provider:settlement",
+            Some(RuntimeActivityId::new("wake:settlement")),
+            RuntimeActivityKind::ProviderRequest,
+        ),
+    ] {
+        engine
+            .begin_runtime_activity(RuntimeActivityBegin {
+                activity_id: RuntimeActivityId::new(activity_id),
+                parent_activity_id,
+                kind,
+                owner: RuntimeActivityOwner::RustBrain,
+                agent_id: Some(session.agent_id.clone()),
+                profile_id: Some(session.profile_id.clone()),
+                session_id: Some(session.session_id.clone()),
+                wake_id: Some("settlement".into()),
+                phase: "running".into(),
+                summary: None,
+                provider_alias: None,
+                model: None,
+                tool_name: None,
+                process_id: None,
+                debug_detail_id: None,
+            })
+            .unwrap();
+    }
+    let request = RuntimeActivityWakeSettlement {
+        wake_id: "settlement".into(),
+        status: RuntimeActivityStatus::Failed,
+        reason_code: Some("postgres_storage_exhausted".into()),
+        summary: "wake persistence failed".into(),
+    };
+
+    let settled = engine
+        .settle_runtime_activity_wake(request.clone())
+        .unwrap();
+    assert_eq!(settled.len(), 2);
+    assert!(settled
+        .iter()
+        .all(|record| record.status == RuntimeActivityStatus::Failed));
+    assert!(settled
+        .iter()
+        .all(|record| record.reason_code.as_deref() == Some("postgres_storage_exhausted")));
+    let repeated = engine.settle_runtime_activity_wake(request).unwrap();
+    assert!(repeated.is_empty());
+    let census = engine
+        .runtime_activity_census(RuntimeActivityCensusQuery::default())
+        .unwrap();
+    assert!(census.active.is_empty());
+}
 
 #[test]
 fn census_reports_stable_runtime_mismatch_and_orphan_reason_codes() {

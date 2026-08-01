@@ -22,8 +22,9 @@ use rusty_crew_core_bridge_api::{
     ProfileId, RuntimeActivityBegin, RuntimeActivityCensus, RuntimeActivityCensusQuery,
     RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind, RuntimeActivityLiveEvidence,
     RuntimeActivityOwner, RuntimeActivityProgress, RuntimeActivityRecord, RuntimeActivityStatus,
-    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
-    ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
+    RuntimeActivityWakeSettlement, RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView,
+    SessionId, ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION,
+    OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
     plan_channel_ingress_route, plan_create_profile, plan_delegated_role_lifecycle,

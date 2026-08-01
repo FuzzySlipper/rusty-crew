@@ -620,6 +620,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
     schema!("begin_runtime_activity", protocol::RuntimeActivityRecord);
     schema!("progress_runtime_activity", protocol::RuntimeActivityRecord);
     schema!("finish_runtime_activity", protocol::RuntimeActivityRecord);
+    schema!(
+        "settle_runtime_activity_wake",
+        Vec<protocol::RuntimeActivityRecord>
+    );
     schema!("runtime_activity_census", protocol::RuntimeActivityCensus);
     schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
     schema!("list_agent_directory", Vec<protocol::AgentDirectoryEntry>);

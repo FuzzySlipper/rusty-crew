@@ -2552,6 +2552,15 @@ errors = "core_protocol::CoreError"
 summary = "Terminalize a runtime activity without introducing timeout-based cancellation."
 
 [[operation]]
+name = "settle_runtime_activity_wake"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeActivityWakeSettlement"
+output = "Vec<core_protocol::RuntimeActivityRecord>"
+errors = "core_protocol::CoreError"
+summary = "Idempotently terminalize the Rust-owned runtime activity tree for one wake after host-side settlement or recovery."
+
+[[operation]]
 name = "runtime_activity_census"
 surface = "stable"
 direction = "ts_to_rust"

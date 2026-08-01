@@ -61,6 +61,7 @@ struct ProtocolContractRoots {
     runtime_activity_begin: RuntimeActivityBegin,
     runtime_activity_progress: RuntimeActivityProgress,
     runtime_activity_finish: RuntimeActivityFinish,
+    runtime_activity_wake_settlement: RuntimeActivityWakeSettlement,
     runtime_activity_record: RuntimeActivityRecord,
     runtime_activity_live_evidence: RuntimeActivityLiveEvidence,
     runtime_activity_census_query: RuntimeActivityCensusQuery,

@@ -5,6 +5,7 @@ type RuntimeActivityMethodName =
   | "beginRuntimeActivity"
   | "progressRuntimeActivity"
   | "finishRuntimeActivity"
+  | "settleRuntimeActivityWake"
   | "runtimeActivityCensus";
 
 export function createNativeBridgeRuntimeActivityMethods(
@@ -23,6 +24,10 @@ export function createNativeBridgeRuntimeActivityMethods(
       JSON.parse(
         binding.finishRuntimeActivityJson(JSON.stringify(input)),
       ) as Awaited<ReturnType<NativeBridgeModule["finishRuntimeActivity"]>>,
+    settleRuntimeActivityWake: async (input) =>
+      JSON.parse(
+        binding.settleRuntimeActivityWakeJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["settleRuntimeActivityWake"]>>,
     runtimeActivityCensus: async (query = {}) =>
       JSON.parse(
         binding.runtimeActivityCensusJson(JSON.stringify(query)),

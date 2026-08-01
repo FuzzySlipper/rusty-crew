@@ -26,6 +26,13 @@ impl NativeBridge {
         self.engine()?.finish_runtime_activity(input)
     }
 
+    pub(crate) fn settle_runtime_activity_wake(
+        &self,
+        input: RuntimeActivityWakeSettlement,
+    ) -> CoreResult<Vec<RuntimeActivityRecord>> {
+        self.engine()?.settle_runtime_activity_wake(input)
+    }
+
     pub(crate) fn runtime_activity_census(
         &self,
         mut query: RuntimeActivityCensusQuery,
@@ -128,6 +135,25 @@ impl NativeBridgeBinding {
             "runtime activity finish",
             bridge
                 .finish_runtime_activity(input)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
+    pub fn settle_runtime_activity_wake_json(&self, input_json: String) -> napi::Result<String> {
+        let input = serde_json::from_str::<RuntimeActivityWakeSettlement>(&input_json).map_err(
+            |error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid runtime activity wake settlement JSON: {error}"),
+                )
+            },
+        )?;
+        let bridge = self.bridge()?;
+        serialize_runtime_activity_result(
+            "runtime activity wake settlement",
+            bridge
+                .settle_runtime_activity_wake(input)
                 .map_err(to_napi_error)?,
         )
     }

@@ -116,6 +116,7 @@ import {
 } from "./service-model-provider-routes.js";
 import { handleServiceCredentialAdminRequest } from "./service-credential-admin-routes.js";
 import type { OpenAiOauthPendingLogin } from "./service-openai-oauth-routes.js";
+import { DeferredRuntimeActivitySettlementQueue } from "./runtime-activity-settlement.js";
 import {
   handleProfileRegistryWriteRequest,
   isProfileRegistryWriteRoute,
@@ -465,6 +466,7 @@ interface ServiceState {
   readonly timers: Set<NodeJS.Timeout>;
   readonly inFlightWakes: Set<SessionId>;
   readonly deferredWakeSessions: Set<SessionId>;
+  readonly deferredRuntimeActivitySettlements: DeferredRuntimeActivitySettlementQueue;
   readonly runtimePauses: Map<string, RuntimePauseRecord>;
   readonly claimedDeliveryIntentIds: Set<number>;
   readonly unmatchedDeliveryIntentIds: Set<number>;
@@ -847,6 +849,8 @@ function schedulerBackgroundContext(
     isStopping: () => state.stopping,
     curatorSkillsDir,
     scheduledHostExecutorContext: () => scheduledHostExecutorContext(state),
+    reconcileDeferredRuntimeActivitySettlements: () =>
+      reconcileDeferredRuntimeActivitySettlements(state),
     recordEvent: (event) => recordServiceEvent(state, event),
   };
 }
@@ -1062,6 +1066,8 @@ export async function createRustyCrewServiceApp(
       timers: new Set(),
       inFlightWakes: new Set(),
       deferredWakeSessions: new Set(),
+      deferredRuntimeActivitySettlements:
+        new DeferredRuntimeActivitySettlementQueue(),
       runtimePauses: new Map(),
       claimedDeliveryIntentIds: new Set(),
       unmatchedDeliveryIntentIds: new Set(),
@@ -5899,8 +5905,39 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
     persistSessionActivityDigest: (input) =>
       persistSessionActivityDigest({ state, ...input }),
     runtimePauseForSession: (session) => runtimePauseForSession(state, session),
+    deferRuntimeActivitySettlement: (settlement) => {
+      state.deferredRuntimeActivitySettlements.defer(settlement);
+    },
     recordEvent: (event) => recordServiceEvent(state, event),
   };
+}
+
+async function reconcileDeferredRuntimeActivitySettlements(
+  state: ServiceState,
+): Promise<number> {
+  const report = await state.deferredRuntimeActivitySettlements.reconcile(
+    state.bridge,
+  );
+  for (const wakeId of report.reconciledWakeIds) {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "runtime_activity_wake_settlement_reconciled",
+      severity: "warning",
+      summary: `Reconciled deferred runtime activity settlement for wake ${wakeId}.`,
+    });
+  }
+  if (report.failure !== undefined) {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "runtime_activity_wake_settlement_retry_failed",
+      severity: "warning",
+      summary: errorMessage(
+        report.failure.error,
+        `deferred runtime activity settlement retry failed for wake ${report.failure.wakeId}`,
+      ),
+    });
+  }
+  return report.reconciledWakeIds.length;
 }
 
 function wakeMaintenanceContext(

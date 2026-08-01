@@ -246,6 +246,7 @@ export interface NativeBridgeBinding {
   beginRuntimeActivityJson(inputJson: string): string
   progressRuntimeActivityJson(inputJson: string): string
   finishRuntimeActivityJson(inputJson: string): string
+  settleRuntimeActivityWakeJson(inputJson: string): string
   runtimeActivityCensusJson(inputJson: string): string
   registerScheduledWakeJobJson(jobId: string, targetSessionId: string, intervalMs: number | undefined | null, firstDueAt: string): string
   registerScheduledHostJobJson(jobId: string, jobKind: string, intervalMs: number | undefined | null, firstDueAt: string, payloadJson: string): string
@@ -832,7 +833,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 284,
+  "manifestOperationCount": 285,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2769,6 +2770,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "finish_runtime_activity"
+    },
+    {
+      "name": "settleRuntimeActivityWakeJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "settle_runtime_activity_wake"
     },
     {
       "name": "runtimeActivityCensusJson",

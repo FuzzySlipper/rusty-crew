@@ -135,6 +135,15 @@ pub struct RuntimeActivityFinish {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeActivityWakeSettlement {
+    pub wake_id: String,
+    pub status: RuntimeActivityStatus,
+    pub reason_code: Option<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeActivityLiveEvidence {
     pub activity_id: RuntimeActivityId,
     pub parent_activity_id: Option<RuntimeActivityId>,

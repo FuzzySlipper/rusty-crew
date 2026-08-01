@@ -62,12 +62,6 @@ import type {
   RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
-  RuntimeActivityBegin,
-  RuntimeActivityCensus,
-  RuntimeActivityCensusQuery,
-  RuntimeActivityFinish,
-  RuntimeActivityProgress,
-  RuntimeActivityRecord,
   SessionExecutionState,
   ScheduledHostJobManualRunRequest,
   ScheduledHostJobRegistrationInput,
@@ -93,6 +87,7 @@ import type {
 } from "@rusty-crew/contracts";
 
 import type { NativeAgentCoordinationBridgeMethods } from "./agent-coordination-public-api.js";
+import type { NativeRuntimeActivityBridgeMethods } from "./runtime-activity-public-api.js";
 import type {
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
@@ -1953,7 +1948,8 @@ export interface NativeBridgeModule
   extends
     NativeExternalRuntimeBridgeMethods,
     NativeAgentCoordinationBridgeMethods,
-    NativeCrewSessionBridgeMethods {
+    NativeCrewSessionBridgeMethods,
+    NativeRuntimeActivityBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;
@@ -2161,18 +2157,6 @@ export interface NativeBridgeModule
   diagnosticCountRows(table: string): Promise<number>;
   databaseSize(): Promise<NativeRuntimeDatabaseSize>;
   storageDiagnostics(): Promise<NativeRuntimeStorageDiagnostics>;
-  beginRuntimeActivity(
-    input: RuntimeActivityBegin,
-  ): Promise<RuntimeActivityRecord>;
-  progressRuntimeActivity(
-    input: RuntimeActivityProgress,
-  ): Promise<RuntimeActivityRecord>;
-  finishRuntimeActivity(
-    input: RuntimeActivityFinish,
-  ): Promise<RuntimeActivityRecord>;
-  runtimeActivityCensus(
-    query?: RuntimeActivityCensusQuery,
-  ): Promise<RuntimeActivityCensus>;
   bufferedBrainRunDiagnostics(): Promise<NativeBufferedBrainRunDiagnostics>;
   cleanupBufferedBrainRuns(input: {
     reasonCode: string;

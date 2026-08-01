@@ -7302,6 +7302,31 @@
       ],
       "type": "object"
     },
+    "RuntimeActivityWakeSettlement": {
+      "properties": {
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeActivityStatus"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "wakeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wakeId",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
     "SessionActivityDigest": {
       "description": "Bounded per-wake activity digest used by the post-wake capture producer.\n\nThe digest is intentionally not a raw transcript. TypeScript builds it from\nthe warm post-wake event stream, then Rust persists it for scheduled\nbackground review. Capture Phase 1 validates `profile_dense` proposals first;\n`session_memory` and `roleplay_lore` remain gated expansion targets.",
       "properties": {
@@ -8280,6 +8305,9 @@
     "runtime_activity_record": {
       "$ref": "#/$defs/RuntimeActivityRecord"
     },
+    "runtime_activity_wake_settlement": {
+      "$ref": "#/$defs/RuntimeActivityWakeSettlement"
+    },
     "runtime_buffer_handle": {
       "format": "uint64",
       "minimum": 0,
@@ -8372,6 +8400,7 @@
     "runtime_activity_begin",
     "runtime_activity_progress",
     "runtime_activity_finish",
+    "runtime_activity_wake_settlement",
     "runtime_activity_record",
     "runtime_activity_live_evidence",
     "runtime_activity_census_query",

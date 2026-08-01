@@ -1727,6 +1727,13 @@ export type RuntimeActivityView = {
   sinceProgressMs: number;
 };
 
+export type RuntimeActivityWakeSettlement = {
+  reasonCode?: string | null;
+  status: RuntimeActivityStatus;
+  summary: string;
+  wakeId: string;
+};
+
 export type SessionActivityDigest = {
   allowed_capture_spaces: Array<MemorySpaceId>;
   completion_summary?: string | null;

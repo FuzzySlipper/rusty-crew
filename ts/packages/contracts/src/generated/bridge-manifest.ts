@@ -282,6 +282,7 @@ export const bridgeOperations = [
   {"name":"begin_runtime_activity","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeActivityBegin","output":"core_protocol::RuntimeActivityRecord","errors":"core_protocol::CoreError","summary":"Register a bounded runtime activity transition in the Rust-owned activity ledger."},
   {"name":"progress_runtime_activity","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeActivityProgress","output":"core_protocol::RuntimeActivityRecord","errors":"core_protocol::CoreError","summary":"Update bounded phase and diagnostic metadata for an active runtime activity."},
   {"name":"finish_runtime_activity","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeActivityFinish","output":"core_protocol::RuntimeActivityRecord","errors":"core_protocol::CoreError","summary":"Terminalize a runtime activity without introducing timeout-based cancellation."},
+  {"name":"settle_runtime_activity_wake","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeActivityWakeSettlement","output":"Vec<core_protocol::RuntimeActivityRecord>","errors":"core_protocol::CoreError","summary":"Idempotently terminalize the Rust-owned runtime activity tree for one wake after host-side settlement or recovery."},
   {"name":"runtime_activity_census","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeActivityCensusQuery","output":"core_protocol::RuntimeActivityCensus","errors":"core_protocol::CoreError","summary":"Reconcile durable activity, live runtime evidence, sessions, external turns, and service descendants."},
   {"name":"subscribe_events","surface":"stable","direction":"ts_to_rust","input":"core_protocol::EventSubscription","output":"core_protocol::SubscriptionHandle","errors":"core_protocol::CoreError","summary":"Subscribe a bridge/adaptor projection to internal coordination events."},
   {"name":"unsubscribe_events","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SubscriptionHandle","output":"core_protocol::Unit","errors":"core_protocol::CoreError","summary":"Cancel an event subscription."},
@@ -296,4 +297,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "9af324efd71cc48daf1522733fa31ddf8d110ce1193b1481f4f598b4b269a615" as const;
+export const bridgeWireShapeFingerprint = "79e143429d26242e910a01146d26497a23afd35194922a997df7cd2683b4a1a4" as const;

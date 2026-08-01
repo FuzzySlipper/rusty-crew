@@ -50,6 +50,7 @@ export interface SchedulerBackgroundContext {
     typeof runScheduledHostExecutors
   >[0];
   recordEvent(event: SchedulerServiceEvent): void;
+  reconcileDeferredRuntimeActivitySettlements(): Promise<number>;
 }
 
 export async function runSchedulerHeartbeat(
@@ -75,6 +76,8 @@ export async function runSchedulerHeartbeat(
   context.schedulerHeartbeat.lastStartedAt = startedAt;
   context.schedulerHeartbeat.lastSkipReason = undefined;
   try {
+    const runtimeActivitySettlements =
+      await context.reconcileDeferredRuntimeActivitySettlements();
     const tick = await context.bridge.runSchedulerTick();
     const hostRuns = await runScheduledHostExecutors({
       ...context.scheduledHostExecutorContext(),
@@ -89,7 +92,7 @@ export async function runSchedulerHeartbeat(
     const maintenance = await context.bridge.runMaintenance({
       expireQueuedMessagesAt: context.now(),
     });
-    const summary = `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`;
+    const summary = `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${runtimeActivitySettlements} deferred runtime activity settlements reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`;
     context.schedulerHeartbeat.lastCompletedAt = context.now();
     context.schedulerHeartbeat.lastDurationMs = Date.now() - startedMonotonic;
     context.schedulerHeartbeat.lastSummary = summary;
@@ -100,6 +103,7 @@ export async function runSchedulerHeartbeat(
       tick.runsFailed > 0 ||
       hostRuns.claimed > 0 ||
       scheduledJobs.registered > 0 ||
+      runtimeActivitySettlements > 0 ||
       curatorLifecycle.transitions.length > 0 ||
       maintenance.expiredQueueMessages > 0
     ) {

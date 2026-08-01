@@ -469,6 +469,21 @@ impl CoreEngine {
             })
             .collect()
     }
+
+    pub fn settle_runtime_activity_wake(
+        &self,
+        input: RuntimeActivityWakeSettlement,
+    ) -> CoreResult<Vec<RuntimeActivityRecord>> {
+        validate_activity_text("wakeId", &input.wake_id, MAX_ACTIVITY_TEXT_BYTES)?;
+        validate_optional_activity_text("reasonCode", input.reason_code.as_deref())?;
+        validate_activity_text("summary", &input.summary, MAX_ACTIVITY_TEXT_BYTES)?;
+        self.finish_runtime_activity_tree(
+            &input.wake_id,
+            input.status,
+            input.reason_code.as_deref(),
+            &input.summary,
+        )
+    }
 }
 
 fn activity_requires_active_session_projection(kind: RuntimeActivityKind) -> bool {

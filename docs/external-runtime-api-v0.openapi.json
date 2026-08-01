@@ -5834,6 +5834,16 @@
         "required": ["activity", "elapsedMs", "sinceProgressMs"],
         "type": "object"
       },
+      "RuntimeActivityWakeSettlement": {
+        "properties": {
+          "reasonCode": { "type": ["string", "null"] },
+          "status": { "$ref": "#/components/schemas/RuntimeActivityStatus" },
+          "summary": { "type": "string" },
+          "wakeId": { "type": "string" }
+        },
+        "required": ["wakeId", "status", "summary"],
+        "type": "object"
+      },
       "SessionActivityDigest": {
         "description": "Bounded per-wake activity digest used by the post-wake capture producer.\n\nThe digest is intentionally not a raw transcript. TypeScript builds it from\nthe warm post-wake event stream, then Rust persists it for scheduled\nbackground review. Capture Phase 1 validates `profile_dense` proposals first;\n`session_memory` and `roleplay_lore` remain gated expansion targets.",
         "properties": {

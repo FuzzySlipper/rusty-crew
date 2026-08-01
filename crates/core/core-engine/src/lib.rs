@@ -171,11 +171,12 @@ use rusty_crew_core_protocol::{
     RuntimeActivityCensusSummary, RuntimeActivityFinding, RuntimeActivityFindingCode,
     RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind, RuntimeActivityOwner,
     RuntimeActivityProgress, RuntimeActivityRecord, RuntimeActivityStatus, RuntimeActivityView,
-    ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
-    ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery, SessionConfig,
-    SessionExecutionOutcome, SessionExecutionPhase, SessionExecutionSource, SessionExecutionState,
-    SessionId, SessionKind, SessionLifecycleStatus, SessionState, SessionStatus, ShutdownSummary,
-    ToolProfile, TurnProjectionId, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
+    RuntimeActivityWakeSettlement, ServiceCredentialDelete, ServiceCredentialQuery,
+    ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
+    SessionActivityDigestQuery, SessionConfig, SessionExecutionOutcome, SessionExecutionPhase,
+    SessionExecutionSource, SessionExecutionState, SessionId, SessionKind, SessionLifecycleStatus,
+    SessionState, SessionStatus, ShutdownSummary, ToolProfile, TurnProjectionId,
+    WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use serde_json::json;

@@ -5,6 +5,7 @@ import type {
   CoreEvent,
   ProfileId,
   RuntimeActivityFinish,
+  RuntimeActivityWakeSettlement,
   SessionExecutionState,
   SessionId,
   SessionState,
@@ -74,6 +75,7 @@ export interface ServiceWakeDispatchContext {
     | "planRoleplayMechanicProfile"
     | "beginRuntimeActivity"
     | "finishRuntimeActivity"
+    | "settleRuntimeActivityWake"
     | "readChatSession"
     | "subscribeEvents"
     | "unsubscribeEvents"
@@ -132,6 +134,10 @@ export interface ServiceWakeDispatchContext {
   runtimePauseForSession(
     session: Pick<SessionState, "sessionId" | "agentId" | "profileId">,
   ): WakeRuntimePauseRecord | undefined;
+  deferRuntimeActivitySettlement(input: {
+    wake: RuntimeActivityWakeSettlement;
+    dispatch: RuntimeActivityFinish;
+  }): void;
   recordEvent(event: {
     source: string;
     eventType: string;
@@ -409,6 +415,7 @@ export async function dispatchWake(
       dispatchFinish = runtimeDispatchFinish(report);
       return report;
     }
+    const failure = classifyWakeDispatchFailure(error, sessionId);
     const report: ServiceWakeDispatchReport = {
       sessionId,
       wakeId: activeWake?.wakeId,
@@ -417,9 +424,9 @@ export async function dispatchWake(
         context,
         activeWake?.session,
         activeWake?.wakeId,
-        errorMessage(error, `wake for ${sessionId} failed`),
+        failure.message,
       ),
-      reasonCode: "wake_dispatch_failed",
+      reasonCode: failure.reasonCode,
     };
     if (appendChatEvents && activeWake !== undefined) {
       await ensureChatWakeTerminalEventsFromChatLog(
@@ -430,7 +437,7 @@ export async function dispatchWake(
           status: "failed",
           summary: report.summary,
           reasonCode: report.reasonCode,
-          source: "wake_dispatch_failed",
+          source: failure.reasonCode,
           allowWithoutAssistantTurn: true,
         },
       );
@@ -445,14 +452,37 @@ export async function dispatchWake(
     return report;
   } finally {
     if (dispatchActivityStarted && dispatchFinish !== undefined) {
+      const wakeSettlement = runtimeWakeSettlement(dispatchFinish);
+      let settlementDeferred = false;
+      try {
+        await context.bridge.settleRuntimeActivityWake(wakeSettlement);
+      } catch (error: unknown) {
+        settlementDeferred = true;
+        context.recordEvent({
+          source: "service-host",
+          eventType: "runtime_activity_wake_settlement_deferred",
+          severity: "warning",
+          summary: errorMessage(
+            error,
+            "wake runtime activity settlement failed",
+          ),
+        });
+      }
       try {
         await context.bridge.finishRuntimeActivity(dispatchFinish);
       } catch (error: unknown) {
+        settlementDeferred = true;
         context.recordEvent({
           source: "service-host",
           eventType: "runtime_activity_record_failed",
           severity: "warning",
           summary: errorMessage(error, "wake dispatch activity finish failed"),
+        });
+      }
+      if (settlementDeferred) {
+        context.deferRuntimeActivitySettlement({
+          wake: wakeSettlement,
+          dispatch: dispatchFinish,
         });
       }
       if (appendChatEvents && activeWake !== undefined) {
@@ -539,6 +569,29 @@ function runtimeDispatchFinish(
     phase: report.status,
     reasonCode: report.reasonCode,
     summary: `wake dispatch ${report.status}`,
+  };
+}
+
+function runtimeWakeSettlement(
+  dispatch: RuntimeActivityFinish,
+): RuntimeActivityWakeSettlement {
+  return {
+    wakeId: dispatch.activityId.replace(/^dispatch:/, ""),
+    status: dispatch.status,
+    reasonCode: dispatch.reasonCode,
+    summary: dispatch.summary ?? `wake activity ${dispatch.status}`,
+  };
+}
+
+export function classifyWakeDispatchFailure(
+  error: unknown,
+  sessionId: SessionId,
+): { message: string; reasonCode: string } {
+  const message = errorMessage(error, `wake for ${sessionId} failed`);
+  const classified = message.match(/\[(postgres_[a-z_]+)\]/)?.[1];
+  return {
+    message,
+    reasonCode: classified ?? "wake_dispatch_failed",
   };
 }
 

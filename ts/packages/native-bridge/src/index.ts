@@ -950,6 +950,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     beginRuntimeActivity: unavailable("begin_runtime_activity"),
     progressRuntimeActivity: unavailable("progress_runtime_activity"),
     finishRuntimeActivity: unavailable("finish_runtime_activity"),
+    settleRuntimeActivityWake: unavailable("settle_runtime_activity_wake"),
     runtimeActivityCensus: unavailable("runtime_activity_census"),
     bufferedBrainRunDiagnostics: unavailable("buffered_brain_run_diagnostics"),
     cleanupBufferedBrainRuns: unavailable("cleanup_buffered_brain_runs"),

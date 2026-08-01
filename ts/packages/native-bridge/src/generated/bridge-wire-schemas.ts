@@ -5077,6 +5077,157 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_NormalizedExternalRuntimeEvent",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord>": {
+      "items": {
+        "properties": {
+          "activityId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "debugDetailId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "dispatch",
+              "wake",
+              "provider_request",
+              "tool_call",
+              "subprocess",
+              "browser",
+              "external_turn"
+            ],
+            "type": "string"
+          },
+          "lastProgressAt": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner": {
+            "enum": [
+              "rust_coordination",
+              "rust_brain",
+              "type_script_host",
+              "external_runtime"
+            ],
+            "type": "string"
+          },
+          "parentActivityId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "type": "string"
+          },
+          "processId": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "profileId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "providerAlias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "serviceInstanceId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terminalAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "toolName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wakeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "activityId",
+          "serviceInstanceId",
+          "kind",
+          "owner",
+          "status",
+          "phase",
+          "startedAt",
+          "lastProgressAt",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_RuntimeActivityRecord",
+      "type": "array"
+    },
     "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>": {
       "properties": {
         "claim_deadline_at": {
@@ -25849,6 +26000,7 @@ export const bridgeWireSchemaArtifact = {
     "select_active_conversation_branch": "rusty_crew_core_persistence::contracts::SelectActiveBranchResult",
     "select_active_message_variant": "rusty_crew_core_persistence::contracts::SelectActiveVariantResult",
     "set_lore_layer_config": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerConfigRecord",
+    "settle_runtime_activity_wake": "alloc::vec::Vec<rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord>",
     "start_roleplay_narrator_turn": "rusty_crew_roleplay_core::RoleplayNarratorTurnReceipt",
     "submit_external_control": "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt",
     "supersede_lore_entry": "(rusty_crew_core_persistence::contracts::RoleplayLoreRecord, rusty_crew_core_persistence::contracts::RoleplayLoreRecord)",

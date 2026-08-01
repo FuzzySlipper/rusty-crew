@@ -9272,14 +9272,92 @@ fn quote_postgres_identifier(identifier: &str) -> String {
     format!("\"{identifier}\"")
 }
 
+const MAX_POSTGRES_ERROR_FIELD_CHARS: usize = 512;
+
+#[derive(Debug)]
+struct PostgresServerDiagnostic<'a> {
+    sqlstate: &'a str,
+    message: &'a str,
+    table: Option<&'a str>,
+    column: Option<&'a str>,
+    constraint: Option<&'a str>,
+}
+
 fn postgres_error(context: &str, error: postgres::Error) -> CoreError {
-    let raw = error.to_string();
+    if let Some(database_error) = error.as_db_error() {
+        return postgres_server_error(
+            context,
+            PostgresServerDiagnostic {
+                sqlstate: database_error.code().code(),
+                message: database_error.message(),
+                table: database_error.table(),
+                column: database_error.column(),
+                constraint: database_error.constraint(),
+            },
+        );
+    }
+    let raw = bounded_postgres_error_field(&error.to_string());
     let message = if error.is_closed() || raw.contains("error communicating with the server") {
-        format!("transient PostgreSQL connection failure during {context}: {raw}")
+        format!("[postgres_connection_failure] transient PostgreSQL connection failure during {context}: {raw}")
     } else {
-        format!("{context}: {raw}")
+        format!("[postgres_client_failure] {context}: {raw}")
     };
     CoreError::new(CoreErrorKind::PersistenceFailure, message)
+}
+
+fn postgres_server_error(context: &str, diagnostic: PostgresServerDiagnostic<'_>) -> CoreError {
+    let reason_code = match diagnostic.sqlstate {
+        "53100" => "postgres_storage_exhausted",
+        "53200" => "postgres_memory_exhausted",
+        "53300" => "postgres_connection_capacity_exhausted",
+        "53400" => "postgres_configuration_limit_exceeded",
+        "57014" => "postgres_statement_cancelled",
+        sqlstate if sqlstate.starts_with("08") => "postgres_connection_exception",
+        sqlstate if sqlstate.starts_with("23") => "postgres_integrity_constraint_violation",
+        _ => "postgres_server_error",
+    };
+    let mut metadata = Vec::new();
+    if let Some(table) = diagnostic.table {
+        metadata.push(format!("table={}", bounded_postgres_error_field(table)));
+    }
+    if let Some(column) = diagnostic.column {
+        metadata.push(format!("column={}", bounded_postgres_error_field(column)));
+    }
+    if let Some(constraint) = diagnostic.constraint {
+        metadata.push(format!(
+            "constraint={}",
+            bounded_postgres_error_field(constraint)
+        ));
+    }
+    let metadata = if metadata.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", metadata.join(", "))
+    };
+    CoreError::new(
+        CoreErrorKind::PersistenceFailure,
+        format!(
+            "[{reason_code}] {context}: PostgreSQL SQLSTATE {}: {}{metadata}",
+            bounded_postgres_error_field(diagnostic.sqlstate),
+            bounded_postgres_error_field(diagnostic.message),
+        ),
+    )
+}
+
+fn bounded_postgres_error_field(value: &str) -> String {
+    value
+        .chars()
+        .take(MAX_POSTGRES_ERROR_FIELD_CHARS)
+        .map(|character| {
+            if character == '\n' || character == '\r' || character == '\t' {
+                ' '
+            } else if character.is_control() {
+                '?'
+            } else {
+                character
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -9303,6 +9381,73 @@ mod tests {
         SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
         MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
     };
+
+    #[test]
+    fn postgres_server_errors_preserve_bounded_storage_exhaustion_diagnostics() {
+        let error = postgres_server_error(
+            "insert PostgreSQL event index value",
+            PostgresServerDiagnostic {
+                sqlstate: "53100",
+                message: "could not extend file\nNo space left on device",
+                table: Some("external_runtime_events"),
+                column: None,
+                constraint: None,
+            },
+        );
+
+        assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
+        assert_eq!(
+            error.message,
+            "[postgres_storage_exhausted] insert PostgreSQL event index value: PostgreSQL SQLSTATE 53100: could not extend file No space left on device (table=external_runtime_events)"
+        );
+        assert!(!error.message.contains('\n'));
+    }
+
+    #[test]
+    fn postgres_server_error_fields_are_bounded() {
+        let oversized = "x".repeat(MAX_POSTGRES_ERROR_FIELD_CHARS + 100);
+        let error = postgres_server_error(
+            "query PostgreSQL data",
+            PostgresServerDiagnostic {
+                sqlstate: "XX000",
+                message: &oversized,
+                table: None,
+                column: None,
+                constraint: None,
+            },
+        );
+        let captured = error
+            .message
+            .strip_prefix(
+                "[postgres_server_error] query PostgreSQL data: PostgreSQL SQLSTATE XX000: ",
+            )
+            .unwrap();
+        assert_eq!(captured.chars().count(), MAX_POSTGRES_ERROR_FIELD_CHARS);
+    }
+
+    #[test]
+    fn postgres_server_errors_classify_connection_and_constraint_sqlstate_classes() {
+        for (sqlstate, expected_reason) in [
+            ("08006", "postgres_connection_exception"),
+            ("23505", "postgres_integrity_constraint_violation"),
+        ] {
+            let error = postgres_server_error(
+                "write PostgreSQL record",
+                PostgresServerDiagnostic {
+                    sqlstate,
+                    message: "bounded server error",
+                    table: None,
+                    column: None,
+                    constraint: None,
+                },
+            );
+            assert!(
+                error.message.starts_with(&format!("[{expected_reason}]")),
+                "unexpected diagnostic: {}",
+                error.message
+            );
+        }
+    }
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -16504,6 +16649,26 @@ mod tests {
             Some(delivery)
         );
         reopened.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_real_server_error_preserves_sqlstate_and_primary_message() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let mut client = postgres::Client::connect(&database_url, NoTls).unwrap();
+        let raw = client
+            .simple_query("SELECT * FROM rusty_crew_diagnostic_table_that_does_not_exist")
+            .unwrap_err();
+        let error = postgres_error("run PostgreSQL diagnostic query", raw);
+
+        assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
+        assert!(error.message.starts_with(
+            "[postgres_server_error] run PostgreSQL diagnostic query: PostgreSQL SQLSTATE 42P01:"
+        ));
+        assert!(error.message.contains("does not exist"));
+        assert!(!error.message.contains("SELECT *"));
     }
 
     fn postgres_test_database_url() -> Option<String> {

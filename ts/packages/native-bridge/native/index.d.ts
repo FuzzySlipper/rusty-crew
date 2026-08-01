@@ -246,6 +246,7 @@ export declare class NativeBridgeBinding {
   beginRuntimeActivityJson(inputJson: string): string
   progressRuntimeActivityJson(inputJson: string): string
   finishRuntimeActivityJson(inputJson: string): string
+  settleRuntimeActivityWakeJson(inputJson: string): string
   runtimeActivityCensusJson(inputJson: string): string
   registerScheduledWakeJobJson(jobId: string, targetSessionId: string, intervalMs: number | undefined | null, firstDueAt: string): string
   registerScheduledHostJobJson(jobId: string, jobKind: string, intervalMs: number | undefined | null, firstDueAt: string, payloadJson: string): string
