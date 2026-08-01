@@ -1905,41 +1905,35 @@ pub(super) fn compact_terminal_external_runtime_events_in_tx(
         let session_id = candidate.get::<_, String>(3);
         let phase = candidate.get::<_, String>(4);
         let terminal_at = candidate.get::<_, String>(5);
-        let aggregates = tx
+        let compacted_events = tx
             .query(
                 &format!(
-                    "SELECT kind, COUNT(*), MIN(sequence_id), MAX(sequence_id),
-                            COALESCE(SUM(LENGTH(record_json)), 0)
-                       FROM {schema}.external_runtime_events
+                    "DELETE FROM {schema}.external_runtime_events
                       WHERE runtime_id = $1 AND native_turn_id = $2
                         AND kind IN (
                             'assistant_text_delta', 'reasoning_delta', 'plan_delta',
                             'item_lifecycle', 'command_activity', 'file_activity',
                             'mcp_activity', 'dynamic_tool_activity'
                         )
-                      GROUP BY kind"
+                      RETURNING kind, sequence_id, LENGTH(record_json)::BIGINT"
                 ),
                 &[&runtime_id, &native_turn_id],
             )
-            .map_err(|error| {
-                postgres_error("summarize PostgreSQL external event compaction", error)
-            })?;
+            .map_err(|error| postgres_error("compact PostgreSQL external runtime events", error))?;
         let mut kind_counts = BTreeMap::<String, u64>::new();
         let mut first_sequence = None::<u64>;
         let mut last_sequence = None::<u64>;
         let mut event_count = 0_u64;
         let mut estimated_bytes = 0_u64;
-        for aggregate in aggregates {
-            let kind = aggregate.get::<_, String>(0);
-            let count = aggregate.get::<_, i64>(1) as u64;
-            let first = aggregate.get::<_, i64>(2) as u64;
-            let last = aggregate.get::<_, i64>(3) as u64;
-            let bytes = aggregate.get::<_, i64>(4) as u64;
-            kind_counts.insert(kind, count);
-            event_count += count;
+        for compacted in &compacted_events {
+            let kind = compacted.get::<_, String>(0);
+            let sequence = compacted.get::<_, i64>(1) as u64;
+            let bytes = compacted.get::<_, i64>(2) as u64;
+            *kind_counts.entry(kind).or_default() += 1;
+            event_count += 1;
             estimated_bytes += bytes;
-            first_sequence = Some(first_sequence.map_or(first, |current| current.min(first)));
-            last_sequence = Some(last_sequence.map_or(last, |current| current.max(last)));
+            first_sequence = Some(first_sequence.map_or(sequence, |current| current.min(sequence)));
+            last_sequence = Some(last_sequence.map_or(sequence, |current| current.max(sequence)));
         }
         let (Some(first_sequence), Some(last_sequence)) = (first_sequence, last_sequence) else {
             continue;
@@ -2013,25 +2007,11 @@ pub(super) fn compact_terminal_external_runtime_events_in_tx(
             ],
         )
         .map_err(|error| postgres_error("save PostgreSQL external event checkpoint", error))?;
-        let deleted = tx
-            .execute(
-                &format!(
-                    "DELETE FROM {schema}.external_runtime_events
-                      WHERE runtime_id = $1 AND native_turn_id = $2
-                        AND kind IN (
-                            'assistant_text_delta', 'reasoning_delta', 'plan_delta',
-                            'item_lifecycle', 'command_activity', 'file_activity',
-                            'mcp_activity', 'dynamic_tool_activity'
-                        )"
-                ),
-                &[&runtime_id, &native_turn_id],
-            )
-            .map_err(|error| postgres_error("compact PostgreSQL external runtime events", error))?;
         report.terminal_turns_compacted += 1;
         if checkpoint_created {
             report.checkpoints_created += 1;
         }
-        report.events_deleted += deleted;
+        report.events_deleted += compacted_events.len() as u64;
         report.estimated_reclaimed_bytes += deleted_estimated_bytes;
     }
     if let Some(oldest) = tx

@@ -16556,6 +16556,305 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_external_runtime_retention_checkpoints_exact_concurrent_delete_set() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_external_runtime_retention_race");
+        let store = std::sync::Arc::new(
+            PostgresBackendStore::connect_with_pool_options(&database_url, &schema, Some(4))
+                .unwrap(),
+        );
+        store
+            .create_profile_registry_record(&ProfileRegistryWrite {
+                profile_id: ProfileId::new("retention-profile"),
+                lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+                display_name: Some("Retention profile".into()),
+                summary: None,
+                default_session_kind: Some(SessionKind::Full),
+                agent_id: Some(AgentId::new("retention-agent")),
+                owner_id: None,
+                prompt_soul_markdown: None,
+                prompt_memory_markdown: None,
+                active_runtime_settings_json: json!({}),
+                source_asset_refs: Vec::new(),
+                derived_runtime_refs: Vec::new(),
+                import_export: ProfileRegistryImportExportMetadata {
+                    imported_from: None,
+                    imported_at: None,
+                    exported_to: None,
+                    exported_at: None,
+                    metadata_json: json!({}),
+                },
+                now: "2026-07-10T00:00:00Z".into(),
+            })
+            .unwrap();
+        let session = SessionState {
+            handle: SessionHandle::new(1),
+            session_id: SessionId::new("retention-session"),
+            agent_id: AgentId::new("retention-agent"),
+            profile_id: ProfileId::new("retention-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile { tools: Vec::new() },
+            history_window: None,
+            inference_overrides: Default::default(),
+            status: SessionStatus::Idle,
+            brain_turn_count: 0,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            last_active_at: "2026-07-10T00:00:00Z".into(),
+        };
+        store.save_session(&session).unwrap();
+        let runtime = rusty_crew_core_protocol::ExternalRuntimeRegistration {
+            runtime_id: rusty_crew_core_protocol::ExternalRuntimeId::new("retention-runtime"),
+            kind: rusty_crew_core_protocol::ExternalRuntimeKind::CodexAppServer,
+            endpoint: rusty_crew_core_protocol::ExternalEndpoint {
+                transport: rusty_crew_core_protocol::ExternalEndpointTransport::UnixWebSocket,
+                address: "/tmp/retention-runtime.sock".into(),
+            },
+            process_ownership: rusty_crew_core_protocol::ExternalProcessOwnership::Attached,
+            codex_home_ref: None,
+            observed_cli_version: None,
+            consumed_contract_revision: None,
+            compatibility_state:
+                rusty_crew_core_protocol::ExternalRuntimeCompatibilityState::Unassessed,
+            last_compatibility_probe: None,
+            desired_state: rusty_crew_core_protocol::ExternalRuntimeDesiredState::Enabled,
+            observed_state: rusty_crew_core_protocol::ExternalRuntimeObservedState::Disconnected,
+            observed_reason_code: None,
+            revision: 0,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            updated_at: "2026-07-10T00:00:00Z".into(),
+        };
+        store
+            .put_external_runtime_registration(&runtime, None)
+            .unwrap();
+        let binding = store
+            .put_external_agent_binding(
+                &rusty_crew_core_protocol::ExternalAgentBinding {
+                    binding_id: rusty_crew_core_protocol::ExternalBindingId::new(
+                        "retention-binding",
+                    ),
+                    runtime_id: runtime.runtime_id.clone(),
+                    session_id: Some(session.session_id.clone()),
+                    agent_id: Some(session.agent_id.clone()),
+                    profile_id: Some(session.profile_id.clone()),
+                    profile_revision: Some(1),
+                    profile_prompt_hash: Some("retention-profile-prompt-hash".into()),
+                    profile_prompt_snapshot: Some("retention profile prompt".into()),
+                    message_delivery_policy:
+                        rusty_crew_core_protocol::ExternalMessageDeliveryPolicy::ImmediateSteer,
+                    purpose: rusty_crew_core_protocol::ExternalBindingPurpose::CrewAgent,
+                    native_thread_id: Some("retention-thread".into()),
+                    cwd: None,
+                    label: None,
+                    task_ref: None,
+                    effective_config_fingerprint: "retention-config".into(),
+                    status: rusty_crew_core_protocol::ExternalBindingStatus::Active,
+                    revision: 0,
+                    created_at: "2026-07-10T00:00:00Z".into(),
+                    updated_at: "2026-07-10T00:00:00Z".into(),
+                },
+                None,
+            )
+            .unwrap();
+        let turn = rusty_crew_core_protocol::ExternalTurnCorrelation {
+            request: rusty_crew_core_protocol::SessionTurnRequested {
+                request_id: rusty_crew_core_protocol::ExternalTurnRequestId::new(
+                    "retention-request",
+                ),
+                idempotency_key: "retention-turn-key".into(),
+                session_id: session.session_id.clone(),
+                run_id: None,
+                binding_id: binding.binding_id,
+                input: vec![rusty_crew_core_protocol::ExternalTurnInputPart::Text {
+                    text: "retention race".into(),
+                }],
+                collaboration_mode: None,
+                provenance: rusty_crew_core_protocol::TurnInputProvenance {
+                    kind: rusty_crew_core_protocol::TurnInputProvenanceKind::Operator,
+                    source_id: None,
+                    correlation_id: None,
+                },
+                created_at: "2026-07-10T00:00:00Z".into(),
+                expires_at: None,
+            },
+            runtime_id: runtime.runtime_id.clone(),
+            native_thread_id: "retention-thread".into(),
+            native_turn_id: Some("retention-turn".into()),
+            task_ref: None,
+            phase: rusty_crew_core_protocol::ExternalTurnPhase::Completed,
+            capacity_lease_id: None,
+            terminal_reason_code: None,
+            terminal_error: None,
+            revision: 1,
+            updated_at: "2026-07-10T00:00:01Z".into(),
+        };
+        store.create_external_turn(&turn).unwrap();
+        let event = |event_id: &str| rusty_crew_core_protocol::ExternalRuntimeEventInput {
+            event_id: event_id.into(),
+            session_id: Some(session.session_id.clone()),
+            created_at: "2026-07-10T00:00:02Z".into(),
+            kind: "assistant_text_delta".into(),
+            runtime_id: runtime.runtime_id.clone(),
+            native_thread_id: Some("retention-thread".into()),
+            native_turn_id: Some("retention-turn".into()),
+            item_id: None,
+            request_id: Some(turn.request.request_id.0.clone()),
+            payload: json!({"text": event_id}),
+            raw_detail_ref: None,
+        };
+        let policy = RuntimeMaintenancePolicy {
+            compact_terminal_external_runtime_events_before: Some("2026-07-11T00:00:00Z".into()),
+            external_runtime_event_retention_at: Some("2026-07-12T00:00:00Z".into()),
+            external_runtime_event_terminal_turn_batch_size: Some(10),
+            ..RuntimeMaintenancePolicy::default()
+        };
+
+        store
+            .append_external_runtime_event_allocated(&event("retention-initial"))
+            .unwrap();
+        assert_eq!(
+            store
+                .run_maintenance(&policy)
+                .unwrap()
+                .external_runtime_event_retention
+                .events_deleted,
+            1
+        );
+        store
+            .append_external_runtime_event_allocated(&event("retention-before-lock"))
+            .unwrap();
+
+        let mut lock_client = Client::connect(&database_url, NoTls).unwrap();
+        let mut lock_tx = lock_client.transaction().unwrap();
+        lock_tx
+            .query_one(
+                &format!(
+                    "SELECT runtime_id FROM \"{schema}\".external_runtime_event_checkpoints
+                     WHERE runtime_id = $1 AND native_turn_id = $2 FOR UPDATE"
+                ),
+                &[&runtime.runtime_id.0, &"retention-turn"],
+            )
+            .unwrap();
+        let maintenance_store = store.clone();
+        let maintenance_policy = policy.clone();
+        let maintenance =
+            std::thread::spawn(move || maintenance_store.run_maintenance(&maintenance_policy));
+        let mut observer = Client::connect(&database_url, NoTls).unwrap();
+        let wait_pattern = format!("%{schema}%external_runtime_event_checkpoints%");
+        let maintenance_blocked = (0..250).any(|_| {
+            let blocked = observer
+                .query_one(
+                    "SELECT EXISTS (
+                        SELECT 1 FROM pg_stat_activity
+                         WHERE datname = current_database()
+                           AND pid != pg_backend_pid()
+                           AND wait_event_type = 'Lock'
+                           AND query LIKE $1
+                     )",
+                    &[&wait_pattern],
+                )
+                .unwrap()
+                .get::<_, bool>(0);
+            if !blocked {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            blocked
+        });
+        assert!(
+            maintenance_blocked,
+            "maintenance did not reach checkpoint lock"
+        );
+
+        let late = store
+            .append_external_runtime_event_allocated(&event("retention-late"))
+            .unwrap();
+        lock_tx.commit().unwrap();
+        let concurrent_report = maintenance.join().unwrap().unwrap();
+        assert_eq!(
+            concurrent_report
+                .external_runtime_event_retention
+                .events_deleted,
+            1
+        );
+        assert_eq!(
+            store
+                .query_external_runtime_events(&runtime.runtime_id, 0, 10)
+                .unwrap()
+                .into_iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            vec![late.event_id.clone()]
+        );
+        let checkpoint = observer
+            .query_one(
+                &format!(
+                    "SELECT compacted_event_count, first_sequence_id, last_sequence_id
+                       FROM \"{schema}\".external_runtime_event_checkpoints
+                      WHERE runtime_id = $1 AND native_turn_id = $2"
+                ),
+                &[&runtime.runtime_id.0, &"retention-turn"],
+            )
+            .unwrap();
+        assert_eq!(checkpoint.get::<_, i64>(0), 2);
+        assert_eq!(checkpoint.get::<_, i64>(1), 1);
+        assert_eq!(checkpoint.get::<_, i64>(2), 2);
+
+        assert_eq!(
+            store
+                .run_maintenance(&policy)
+                .unwrap()
+                .external_runtime_event_retention
+                .events_deleted,
+            1
+        );
+        assert!(store
+            .query_external_runtime_events(&runtime.runtime_id, 0, 10)
+            .unwrap()
+            .is_empty());
+        let checkpoint = observer
+            .query_one(
+                &format!(
+                    "SELECT compacted_event_count, last_sequence_id
+                       FROM \"{schema}\".external_runtime_event_checkpoints
+                      WHERE runtime_id = $1 AND native_turn_id = $2"
+                ),
+                &[&runtime.runtime_id.0, &"retention-turn"],
+            )
+            .unwrap();
+        assert_eq!(checkpoint.get::<_, i64>(0), 3);
+        assert_eq!(checkpoint.get::<_, i64>(1), late.sequence_id as i64);
+        assert_eq!(
+            store
+                .append_external_runtime_event_allocated(
+                    &rusty_crew_core_protocol::ExternalRuntimeEventInput {
+                        native_turn_id: None,
+                        kind: "runtime_status".into(),
+                        ..event("retention-after-compaction")
+                    },
+                )
+                .unwrap()
+                .sequence_id,
+            late.sequence_id + 1
+        );
+
+        drop(observer);
+        drop(lock_client);
+        let store = match std::sync::Arc::try_unwrap(store) {
+            Ok(store) => store,
+            Err(_) => panic!("test store has no remaining owners"),
+        };
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
     fn postgres_roleplay_mechanic_proposals_persist_review_history() {
         let Some(database_url) = postgres_test_database_url() else {
             return;

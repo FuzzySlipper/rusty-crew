@@ -33,12 +33,16 @@ terminal:
 - `mcp_activity`
 - `dynamic_tool_activity`
 
-Compaction writes or updates one
-`external_runtime_event_checkpoints` row for the native turn before deleting
-compactable events in the same database transaction. The checkpoint records the
-terminal correlation, covered sequence range, event counts by kind, estimated
-payload bytes, cutoff, and checkpoint time. Late compactable events are folded
-into the same accumulating checkpoint on a later maintenance pass.
+Compaction writes or updates one `external_runtime_event_checkpoints` row for
+the native turn in the same database transaction that deletes compactable
+events. PostgreSQL derives the checkpoint summary from the exact rows returned
+by its delete statement; SQLite serializes the summary and delete in its write
+transaction. The checkpoint records the terminal correlation, covered sequence
+range, event counts by kind, estimated payload bytes, cutoff, and checkpoint
+time. A concurrently committed PostgreSQL event is therefore either included
+in both the delete and checkpoint or retained for the next maintenance pass.
+Late compactable events are folded into the same accumulating checkpoint on a
+later pass.
 
 Active and otherwise nonterminal turns are never eligible. Low filesystem
 headroom is diagnostic only; it does not reject, cancel, or interrupt a turn.
