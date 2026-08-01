@@ -858,6 +858,7 @@ function runProcess(
       ).finally(() => reject(error));
     });
     child.on("exit", (exitCode, signal) => {
+      clearTimeout(timeout);
       exitResult = { exitCode, signal };
       outputDrain = setTimeout(
         () => finish(exitCode, signal),

@@ -51,6 +51,37 @@ test(
 );
 
 test(
+  "direct success disarms timeout before draining daemon-held output pipes",
+  { skip: process.platform === "win32" },
+  async () => {
+    const fixture = await createFixture();
+    const activityBegins: RuntimeActivityBegin[] = [];
+    const activityFinishes: RuntimeActivityFinish[] = [];
+    let daemonPid: number | undefined;
+    try {
+      const result = await terminalTool(
+        fixture.context({ activityBegins, activityFinishes }),
+      ).execute("near-deadline-daemon", {
+        command: `sleep 30 & echo $! > ${shellQuote(fixture.pidPath)}; sleep 0.08`,
+        timeoutMs: 100,
+      });
+      daemonPid = Number.parseInt(await readFile(fixture.pidPath, "utf8"), 10);
+      const details = result.details as LocalToolProcessResult;
+
+      assert.equal(details.exitCode, 0);
+      assert.equal(details.timedOut, false);
+      assert.equal(processExists(daemonPid), true);
+      assert.equal(activityBegins.length, 1);
+      assert.equal(activityFinishes.length, 1);
+      assert.equal(activityFinishes[0]?.status, "completed");
+    } finally {
+      if (daemonPid !== undefined) killProcess(daemonPid);
+      await fixture.cleanup();
+    }
+  },
+);
+
+test(
   "terminal timeout terminates background descendants in its process group",
   { skip: process.platform === "win32" },
   async () => {
