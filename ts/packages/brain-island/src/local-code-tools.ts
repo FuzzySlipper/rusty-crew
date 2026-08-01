@@ -174,6 +174,9 @@ export interface LocalToolProcessResult {
   timedOut: boolean;
 }
 
+const processOutputDrainGraceMs = 50;
+const processTerminationGraceMs = 250;
+
 export function createLocalCodeToolResolver(
   input: {
     resourcePolicy?: NativeLocalCodeResourcePolicyPlan;
@@ -676,12 +679,16 @@ function runProcess(
   if (command.includes("\0")) {
     throw new Error("command cannot contain null bytes");
   }
+  if (options.signal?.aborted) {
+    return Promise.reject(processCancellationError(options.signal));
+  }
 
   return new Promise((resolvePromise, reject) => {
+    const ownsProcessGroup = process.platform !== "win32";
     const child = spawn(command, [...args], {
       cwd,
       shell: options.shell ?? false,
-      signal: options.signal,
+      detached: ownsProcessGroup,
     });
     const processId = child.pid;
     const runtimeActivity = options.runtimeActivity;
@@ -715,10 +722,114 @@ function runProcess(
     let stderr = "";
     let settled = false;
     let timedOut = false;
+    let cancelled = false;
+    let terminationStarted = false;
+    let exitResult:
+      | { exitCode: number | null; signal: NodeJS.Signals | null }
+      | undefined;
+    let outputDrain: NodeJS.Timeout | undefined;
+    let terminationEscalation: NodeJS.Timeout | undefined;
+
+    const signalProcessTree = (signal: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (pid === undefined) return;
+      if (ownsProcessGroup) {
+        try {
+          process.kill(-pid, signal);
+          return;
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !("code" in error) ||
+            error.code !== "ESRCH"
+          ) {
+            throw error;
+          }
+        }
+      }
+      child.kill(signal);
+    };
+
+    const beginProcessTreeTermination = (): void => {
+      if (terminationStarted) return;
+      terminationStarted = true;
+      try {
+        signalProcessTree("SIGTERM");
+      } catch {
+        child.kill("SIGTERM");
+      }
+      terminationEscalation = setTimeout(() => {
+        try {
+          signalProcessTree("SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }, processTerminationGraceMs);
+      terminationEscalation.unref();
+    };
+
+    const onAbort = (): void => {
+      cancelled = true;
+      clearTimeout(timeout);
+      beginProcessTreeTermination();
+    };
+
+    const finish = (
+      exitCode: number | null,
+      signal: NodeJS.Signals | null,
+    ): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (!timedOut && !cancelled) {
+        clearTimeout(terminationEscalation);
+      }
+      clearTimeout(outputDrain);
+      options.signal?.removeEventListener("abort", onAbort);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      const result = {
+        command: [command, ...args].join(" "),
+        cwd,
+        exitCode,
+        signal,
+        stdout,
+        stderr,
+        timedOut,
+      };
+      const failed = timedOut || cancelled || exitCode !== 0;
+      void finishProcessActivity(
+        runtimeActivity,
+        activityId,
+        activityStarted,
+        failed ? "failed" : "completed",
+        timedOut
+          ? "command_timeout"
+          : cancelled
+            ? "process_cancelled"
+            : failed
+              ? "command_failed"
+              : undefined,
+        failed
+          ? cancelled
+            ? "tool child process was cancelled"
+            : "tool child process exited unsuccessfully"
+          : "tool child process completed",
+      ).finally(() => {
+        if (cancelled) {
+          reject(processCancellationError(options.signal));
+          return;
+        }
+        resolvePromise(result);
+      });
+    };
+
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      beginProcessTreeTermination();
     }, options.timeoutMs);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -734,6 +845,9 @@ function runProcess(
       }
       settled = true;
       clearTimeout(timeout);
+      clearTimeout(outputDrain);
+      clearTimeout(terminationEscalation);
+      options.signal?.removeEventListener("abort", onAbort);
       void finishProcessActivity(
         runtimeActivity,
         activityId,
@@ -743,34 +857,23 @@ function runProcess(
         "tool child process failed to start",
       ).finally(() => reject(error));
     });
+    child.on("exit", (exitCode, signal) => {
+      exitResult = { exitCode, signal };
+      outputDrain = setTimeout(
+        () => finish(exitCode, signal),
+        processOutputDrainGraceMs,
+      );
+    });
     child.on("close", (exitCode, signal) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      const result = {
-        command: [command, ...args].join(" "),
-        cwd,
-        exitCode,
-        signal,
-        stdout,
-        stderr,
-        timedOut,
-      };
-      const failed = timedOut || exitCode !== 0;
-      void finishProcessActivity(
-        runtimeActivity,
-        activityId,
-        activityStarted,
-        failed ? "failed" : "completed",
-        timedOut ? "command_timeout" : failed ? "command_failed" : undefined,
-        failed
-          ? "tool child process exited unsuccessfully"
-          : "tool child process completed",
-      ).finally(() => resolvePromise(result));
+      finish(exitResult?.exitCode ?? exitCode, exitResult?.signal ?? signal);
     });
   });
+}
+
+function processCancellationError(signal: AbortSignal | undefined): Error {
+  return signal?.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted", "AbortError");
 }
 
 interface ProcessRuntimeActivity {
