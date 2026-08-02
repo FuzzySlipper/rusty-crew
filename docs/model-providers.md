@@ -42,17 +42,26 @@ chat completions or vice versa.
 
 ## Provider Transport Interruptions
 
-The Chat Completions brain retries a request when the provider connection fails
-before any HTTP response arrives. It resends the same frozen request, uses
-cancellation-aware backoff capped at five seconds, and has no finite retry
-count. The session emits degraded and recovered provider-status events so the
-interruption remains visible without terminating a healthy long-running turn.
-No tool is re-executed by this retry path.
+The Chat Completions brain retries the same frozen request when the provider
+connection fails before any semantic provider event arrives. This includes a
+request-send failure, a response-body I/O failure before the first SSE event,
+and explicitly transient HTTP statuses `429`, `502`, `503`, and `504`.
 
-HTTP error responses and failures after response streaming begins remain
-distinct terminal outcomes. Once streaming has begun, Crew cannot assume that
-reissuing the request is side-effect-free or that partial output can be replayed
-without duplication.
+Connection retries use cancellation-aware exponential backoff capped at five
+seconds. Transient HTTP responses honor `Retry-After` seconds or HTTP-date
+headers, bounded to five minutes; otherwise they use the same exponential
+backoff. Neither path has a finite retry count. Distinct degraded and recovered
+provider-status events include attempts, backoff, status, and safe timing
+metadata. Error bodies are bounded and credential-marked bodies are redacted.
+No tool is re-executed by either retry path.
+
+Permanent HTTP statuses, request timeouts, explicit cancellation, malformed
+provider protocol, provider-declared errors, and failures after any semantic
+stream event remain distinct terminal outcomes. Once provider output has begun,
+Crew cannot assume reissuing the request is safe or replay partial output
+without duplication. If an error response body itself fails, Crew retains the
+already-known HTTP status so a transient status does not become an unrelated
+generic transport failure.
 
 Prefer provider/router hot reload or a drained rolling restart when active Crew
 turns may be using the endpoint. If an unavoidable restart drops only

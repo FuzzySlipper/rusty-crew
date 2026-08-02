@@ -6,6 +6,7 @@
 //! and service-host wiring stay outside this crate.
 
 use reqwest::blocking::Client as BlockingHttpClient;
+use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
     decide_context_compaction, is_context_limit_provider_error, BrainContextCompactionArtifact,
@@ -33,6 +34,7 @@ use std::sync::{
     Arc,
 };
 use std::time::{Duration, Instant};
+use time::{format_description::well_known::Rfc2822, OffsetDateTime};
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 pub const MODULE_ID: &str = "chat-completions";
@@ -968,6 +970,16 @@ pub enum ChatCompletionsEvent {
     },
     TransportRecovered {
         attempts: u64,
+    },
+    ProviderOverloadRetry {
+        attempt: u64,
+        backoff_ms: u64,
+        status: u16,
+        retry_after_ms: Option<u64>,
+    },
+    ProviderOverloadRecovered {
+        attempts: u64,
+        last_status: u16,
     },
     ProviderError(String),
 }
@@ -2633,6 +2645,52 @@ impl ChatCompletionsEventMapper {
                     ),
                 },
             )],
+            ChatCompletionsEvent::ProviderOverloadRetry {
+                attempt,
+                backoff_ms,
+                status,
+                retry_after_ms,
+            } => vec![brain_event_item(
+                context,
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Degraded,
+                    message: format!(
+                        "Provider returned retryable HTTP {status}; waiting before retrying the same frozen request."
+                    ),
+                    metadata_json: Some(
+                        json!({
+                            "kind": "provider_overload_retry",
+                            "reason_code": "chat_completions_provider_overload_retry",
+                            "attempt": attempt,
+                            "backoff_ms": backoff_ms,
+                            "status": status,
+                            "retry_after_ms": retry_after_ms,
+                        })
+                        .to_string(),
+                    ),
+                },
+            )],
+            ChatCompletionsEvent::ProviderOverloadRecovered {
+                attempts,
+                last_status,
+            } => vec![brain_event_item(
+                context,
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Info,
+                    message: format!(
+                        "Provider recovered after retryable HTTP {last_status}; continuing the same logical turn."
+                    ),
+                    metadata_json: Some(
+                        json!({
+                            "kind": "provider_overload_recovered",
+                            "reason_code": "chat_completions_provider_overload_recovered",
+                            "attempts": attempts,
+                            "last_status": last_status,
+                        })
+                        .to_string(),
+                    ),
+                },
+            )],
             ChatCompletionsEvent::ToolCallMalformed(call) => vec![brain_event_item(
                 context,
                 BrainEvent::ProviderStatus {
@@ -2954,6 +3012,8 @@ fn record_provider_event(counts: &mut BTreeMap<String, usize>, event: &ChatCompl
         ChatCompletionsEvent::Finished { .. } => &["finished"],
         ChatCompletionsEvent::TransportRetry { .. } => &["transport_retry"],
         ChatCompletionsEvent::TransportRecovered { .. } => &["transport_recovered"],
+        ChatCompletionsEvent::ProviderOverloadRetry { .. } => &["provider_overload_retry"],
+        ChatCompletionsEvent::ProviderOverloadRecovered { .. } => &["provider_overload_recovered"],
         ChatCompletionsEvent::ProviderError(_) => &["provider_error"],
     };
     for key in keys {
@@ -3435,10 +3495,16 @@ pub enum ChatCompletionsStreamError {
     ClosedBeforeFinish,
     #[error("provider returned error: {0}")]
     ProviderError(String),
+    #[error("provider protocol error: {0}")]
+    Protocol(String),
     #[error("provider transport failed before response: {0}")]
     TransportBeforeResponse(String),
     #[error("provider returned HTTP {status}: {body}")]
-    HttpStatus { status: u16, body: String },
+    HttpStatus {
+        status: u16,
+        body: String,
+        retry_after_ms: Option<u64>,
+    },
     #[error("provider transport error: {0}")]
     Transport(String),
 }
@@ -3486,6 +3552,24 @@ pub struct LiveChatCompletionsClient {
     runtime: Runtime,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingProviderRecovery {
+    Transport,
+    Overload { status: u16 },
+}
+
+impl PendingProviderRecovery {
+    fn recovered_event(self, attempts: u64) -> ChatCompletionsEvent {
+        match self {
+            Self::Transport => ChatCompletionsEvent::TransportRecovered { attempts },
+            Self::Overload { status } => ChatCompletionsEvent::ProviderOverloadRecovered {
+                attempts,
+                last_status: status,
+            },
+        }
+    }
+}
+
 impl LiveChatCompletionsClient {
     pub fn new(
         base_url: impl Into<String>,
@@ -3527,6 +3611,7 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
         on_event: &mut dyn FnMut(&ChatCompletionsEvent),
     ) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
         let mut retry_attempt = 0_u64;
+        let mut pending_recovery: Option<PendingProviderRecovery> = None;
         loop {
             let mut provider_request = self.client.post(&self.endpoint).json(&request);
             if let Some(bearer_token) = &self.bearer_token {
@@ -3534,41 +3619,67 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
             }
             let recovered_attempts = retry_attempt;
             let mut recovered_emitted = false;
+            let mut emitted_provider_event = false;
             let result = self.runtime.block_on(stream_chat_completions_response(
                 provider_request,
                 self.provider_request_timeout,
                 &self.cancellation,
                 &mut |event| {
-                    if recovered_attempts > 0 && !recovered_emitted {
+                    if let Some(recovery) = pending_recovery.filter(|_| !recovered_emitted) {
                         recovered_emitted = true;
-                        on_event(&ChatCompletionsEvent::TransportRecovered {
-                            attempts: recovered_attempts,
-                        });
+                        on_event(&recovery.recovered_event(recovered_attempts));
                     }
+                    emitted_provider_event = true;
                     on_event(event);
                 },
             ));
             match result {
                 Ok(events) => {
-                    if recovered_attempts > 0 && !recovered_emitted {
-                        on_event(&ChatCompletionsEvent::TransportRecovered {
-                            attempts: recovered_attempts,
-                        });
+                    if let Some(recovery) = pending_recovery.filter(|_| !recovered_emitted) {
+                        on_event(&recovery.recovered_event(recovered_attempts));
                     }
                     return Ok(events);
                 }
                 Err(ChatCompletionsStreamError::TransportBeforeResponse(message)) => {
                     retry_attempt = retry_attempt.saturating_add(1);
                     let backoff = provider_transport_retry_backoff(retry_attempt);
+                    pending_recovery = Some(PendingProviderRecovery::Transport);
                     on_event(&ChatCompletionsEvent::TransportRetry {
                         attempt: retry_attempt,
                         backoff_ms: backoff.as_millis().try_into().unwrap_or(u64::MAX),
                         message,
                     });
-                    self.runtime.block_on(wait_for_provider_transport_retry(
-                        backoff,
-                        &self.cancellation,
-                    ))?;
+                    self.runtime
+                        .block_on(wait_for_provider_retry(backoff, &self.cancellation))?;
+                }
+                Err(ChatCompletionsStreamError::Transport(message)) if !emitted_provider_event => {
+                    retry_attempt = retry_attempt.saturating_add(1);
+                    let backoff = provider_transport_retry_backoff(retry_attempt);
+                    pending_recovery = Some(PendingProviderRecovery::Transport);
+                    on_event(&ChatCompletionsEvent::TransportRetry {
+                        attempt: retry_attempt,
+                        backoff_ms: duration_millis(backoff),
+                        message,
+                    });
+                    self.runtime
+                        .block_on(wait_for_provider_retry(backoff, &self.cancellation))?;
+                }
+                Err(ChatCompletionsStreamError::HttpStatus {
+                    status,
+                    body: _,
+                    retry_after_ms,
+                }) if retryable_provider_http_status(status) => {
+                    retry_attempt = retry_attempt.saturating_add(1);
+                    let backoff = provider_http_retry_backoff(retry_attempt, retry_after_ms);
+                    pending_recovery = Some(PendingProviderRecovery::Overload { status });
+                    on_event(&ChatCompletionsEvent::ProviderOverloadRetry {
+                        attempt: retry_attempt,
+                        backoff_ms: duration_millis(backoff),
+                        status,
+                        retry_after_ms,
+                    });
+                    self.runtime
+                        .block_on(wait_for_provider_retry(backoff, &self.cancellation))?;
                 }
                 Err(error) => return Err(error),
             }
@@ -3579,6 +3690,7 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
 const PROVIDER_CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const PROVIDER_TRANSPORT_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const PROVIDER_TRANSPORT_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(5);
+const PROVIDER_RETRY_AFTER_MAX_BACKOFF: Duration = Duration::from_secs(5 * 60);
 
 fn provider_transport_retry_backoff(attempt: u64) -> Duration {
     let multiplier = 1_u32 << attempt.saturating_sub(1).min(5);
@@ -3587,7 +3699,22 @@ fn provider_transport_retry_backoff(attempt: u64) -> Duration {
         .min(PROVIDER_TRANSPORT_RETRY_MAX_BACKOFF)
 }
 
-async fn wait_for_provider_transport_retry(
+fn provider_http_retry_backoff(attempt: u64, retry_after_ms: Option<u64>) -> Duration {
+    retry_after_ms
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| provider_transport_retry_backoff(attempt))
+        .min(PROVIDER_RETRY_AFTER_MAX_BACKOFF)
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    duration.as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn retryable_provider_http_status(status: u16) -> bool {
+    matches!(status, 429 | 502 | 503 | 504)
+}
+
+async fn wait_for_provider_retry(
     backoff: Duration,
     cancellation: &ProviderCancellation,
 ) -> Result<(), ChatCompletionsStreamError> {
@@ -3619,10 +3746,22 @@ async fn stream_chat_completions_response(
     };
     let status = response.status();
     if !status.is_success() {
-        let body = read_provider_response_text(&mut response, cancellation, deadline).await?;
+        let retry_after_ms = retry_after_delay_ms(response.headers());
+        let body =
+            match read_provider_error_response_text(&mut response, cancellation, deadline).await {
+                Ok(body) => body,
+                Err(ChatCompletionsStreamError::Cancelled) => {
+                    return Err(ChatCompletionsStreamError::Cancelled)
+                }
+                Err(ChatCompletionsStreamError::RequestTimeout) => {
+                    return Err(ChatCompletionsStreamError::RequestTimeout)
+                }
+                Err(_) => "[provider error body unavailable]".to_string(),
+            };
         return Err(ChatCompletionsStreamError::HttpStatus {
             status: status.as_u16(),
             body,
+            retry_after_ms,
         });
     }
     parse_async_sse_response(&mut response, cancellation, deadline, on_event).await
@@ -3641,16 +3780,63 @@ async fn parse_async_sse_response(
     parser.finish(on_event)
 }
 
-async fn read_provider_response_text(
+const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 4 * 1024;
+
+async fn read_provider_error_response_text(
     response: &mut AsyncHttpResponse,
     cancellation: &ProviderCancellation,
     deadline: Option<Instant>,
 ) -> Result<String, ChatCompletionsStreamError> {
     let mut body = Vec::new();
     while let Some(chunk) = next_provider_chunk(response, cancellation, deadline).await? {
-        body.extend_from_slice(&chunk);
+        let remaining = MAX_PROVIDER_ERROR_BODY_BYTES.saturating_sub(body.len());
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if body.len() == MAX_PROVIDER_ERROR_BODY_BYTES {
+            break;
+        }
     }
-    Ok(String::from_utf8_lossy(&body).into_owned())
+    Ok(sanitize_provider_error_body(&String::from_utf8_lossy(
+        &body,
+    )))
+}
+
+fn retry_after_delay_ms(headers: &HeaderMap) -> Option<u64> {
+    let raw = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
+    let delay = if let Ok(seconds) = raw.parse::<u64>() {
+        Duration::from_secs(seconds)
+    } else {
+        let retry_at = OffsetDateTime::parse(raw, &Rfc2822).ok()?;
+        let now = OffsetDateTime::now_utc();
+        if retry_at <= now {
+            Duration::ZERO
+        } else {
+            (retry_at - now).try_into().ok()?
+        }
+    };
+    Some(duration_millis(delay.min(PROVIDER_RETRY_AFTER_MAX_BACKOFF)))
+}
+
+fn sanitize_provider_error_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "[empty provider error body]".to_string();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if [
+        "authorization",
+        "api_key",
+        "api key",
+        "access_token",
+        "refresh_token",
+        "bearer ",
+        "client_secret",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return "[redacted provider error body]".to_string();
+    }
+    trimmed.to_string()
 }
 
 async fn next_provider_chunk(
@@ -3804,7 +3990,7 @@ impl ChatCompletionsSseParser {
             return Ok(());
         }
         let value: Value = serde_json::from_str(&data).map_err(|error| {
-            ChatCompletionsStreamError::Transport(format!("invalid SSE JSON: {error}"))
+            ChatCompletionsStreamError::Protocol(format!("invalid SSE JSON: {error}"))
         })?;
         self.accumulator.process_value(value, on_event)
     }
@@ -4160,7 +4346,10 @@ mod tests {
     use super::*;
     use std::io::{Cursor, Read, Write};
     use std::net::TcpListener;
+    use std::sync::{atomic::AtomicUsize, Mutex};
     use std::thread;
+
+    type CapturedProviderRequests = Arc<Mutex<Vec<Vec<u8>>>>;
 
     fn parse(input: &str) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
         parse_sse_reader(&mut Cursor::new(input.as_bytes()), &mut |_| {})
@@ -4194,15 +4383,15 @@ mod tests {
         format!("http://{address}/v1")
     }
 
-    fn http_error_chat_completions_server() -> String {
+    fn permanent_http_error_chat_completions_server() -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind error provider");
         let address = listener.local_addr().expect("error provider address");
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept provider request");
             read_request_headers(&mut stream);
-            let body = "provider overloaded";
+            let body = "invalid request";
             let response = format!(
-                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -4213,10 +4402,101 @@ mod tests {
         format!("http://{address}/v1")
     }
 
+    fn overload_then_success_chat_completions_server(
+        failures: usize,
+        status: u16,
+        retry_after: Option<&str>,
+        truncate_first_error_body: bool,
+    ) -> (String, Arc<AtomicUsize>, CapturedProviderRequests) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind overload provider");
+        let address = listener.local_addr().expect("overload provider address");
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let thread_request_count = Arc::clone(&request_count);
+        let request_bodies = Arc::new(Mutex::new(Vec::new()));
+        let thread_request_bodies = Arc::clone(&request_bodies);
+        let retry_after = retry_after.map(str::to_string);
+        thread::spawn(move || {
+            for attempt in 0..=failures {
+                let (mut stream, _) = listener.accept().expect("accept provider request");
+                thread_request_bodies
+                    .lock()
+                    .expect("lock provider requests")
+                    .push(read_request_body(&mut stream));
+                thread_request_count.fetch_add(1, Ordering::SeqCst);
+                if attempt < failures {
+                    let reason = match status {
+                        429 => "Too Many Requests",
+                        502 => "Bad Gateway",
+                        503 => "Service Unavailable",
+                        504 => "Gateway Timeout",
+                        _ => "Provider Error",
+                    };
+                    let body = r#"{"error":{"message":"engine overloaded","type":"engine_overloaded_error"}}"#;
+                    let retry_header = retry_after
+                        .as_ref()
+                        .map(|value| format!("Retry-After: {value}\r\n"))
+                        .unwrap_or_default();
+                    if truncate_first_error_body && attempt == 0 {
+                        let response = format!(
+                            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\n{retry_header}Connection: close\r\n\r\n{{",
+                            body.len() + 100,
+                        );
+                        stream
+                            .write_all(response.as_bytes())
+                            .expect("write truncated provider overload");
+                    } else {
+                        let response = format!(
+                            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\n{retry_header}Connection: close\r\n\r\n{body}",
+                            body.len(),
+                        );
+                        stream
+                            .write_all(response.as_bytes())
+                            .expect("write provider overload");
+                    }
+                    continue;
+                }
+                write_chat_completions_success(&mut stream);
+            }
+        });
+        (
+            format!("http://{address}/v1"),
+            request_count,
+            request_bodies,
+        )
+    }
+
+    fn interrupted_stream_then_success_chat_completions_server() -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind interrupted provider");
+        let address = listener.local_addr().expect("interrupted provider address");
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let thread_request_count = Arc::clone(&request_count);
+        thread::spawn(move || {
+            let (mut interrupted, _) = listener.accept().expect("accept interrupted request");
+            read_request_headers(&mut interrupted);
+            thread_request_count.fetch_add(1, Ordering::SeqCst);
+            interrupted
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 128\r\nConnection: close\r\n\r\n",
+                )
+                .expect("write interrupted response headers");
+            drop(interrupted);
+
+            let (mut recovered, _) = listener.accept().expect("accept recovered request");
+            read_request_headers(&mut recovered);
+            thread_request_count.fetch_add(1, Ordering::SeqCst);
+            write_chat_completions_success(&mut recovered);
+        });
+        (format!("http://{address}/v1"), request_count)
+    }
+
     fn serve_chat_completions_response(listener: TcpListener, delay: Duration) {
         let (mut stream, _) = listener.accept().expect("accept provider request");
         read_request_headers(&mut stream);
         thread::sleep(delay);
+        write_chat_completions_success(&mut stream);
+    }
+
+    fn write_chat_completions_success(stream: &mut impl Write) {
         let body = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
@@ -4233,6 +4513,10 @@ mod tests {
     }
 
     fn read_request_headers(stream: &mut impl Read) {
+        let _ = read_request_body(stream);
+    }
+
+    fn read_request_body(stream: &mut impl Read) -> Vec<u8> {
         let mut request = Vec::new();
         let mut buffer = [0_u8; 1024];
         while !request.windows(4).any(|window| window == b"\r\n\r\n") {
@@ -4242,6 +4526,30 @@ mod tests {
             }
             request.extend_from_slice(&buffer[..read]);
         }
+        let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+            return Vec::new();
+        };
+        let body_start = header_end + 4;
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or(0);
+        while request.len() < body_start.saturating_add(content_length) {
+            let read = stream
+                .read(&mut buffer)
+                .expect("read provider request body");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        request[body_start..request.len().min(body_start + content_length)].to_vec()
     }
 
     fn live_chat_request() -> ChatCompletionsRequest {
@@ -4401,8 +4709,8 @@ mod tests {
     }
 
     #[test]
-    fn http_status_errors_are_not_retried_as_transport_interruptions() {
-        let base_url = http_error_chat_completions_server();
+    fn permanent_http_status_errors_are_not_retried() {
+        let base_url = permanent_http_error_chat_completions_server();
         let mut client =
             LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
                 .expect("create live client");
@@ -4412,13 +4720,212 @@ mod tests {
             client.stream_observed(live_chat_request(), &mut |event| observed
                 .push(event.clone())),
             Err(ChatCompletionsStreamError::HttpStatus {
-                status: 503,
-                body: "provider overloaded".to_string(),
+                status: 400,
+                body: "invalid request".to_string(),
+                retry_after_ms: None,
             })
         );
         assert!(!observed
             .iter()
+            .any(|event| matches!(event, ChatCompletionsEvent::ProviderOverloadRetry { .. })));
+    }
+
+    #[test]
+    fn retries_provider_overload_until_same_request_succeeds_once() {
+        let (base_url, request_count, request_bodies) =
+            overload_then_success_chat_completions_server(1, 429, Some("0"), false);
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+        let mut observed = Vec::new();
+
+        let events = client
+            .stream_observed(live_chat_request(), &mut |event| {
+                observed.push(event.clone())
+            })
+            .expect("provider overload should recover");
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+        let request_bodies = request_bodies.lock().expect("lock provider requests");
+        assert_eq!(request_bodies.len(), 2);
+        assert_eq!(request_bodies[0], request_bodies[1]);
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|event| matches!(event, ChatCompletionsEvent::ContentDelta(_)))
+                .count(),
+            1,
+            "retry must not duplicate provider output"
+        );
+        assert!(observed.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::ProviderOverloadRetry {
+                attempt: 1,
+                backoff_ms: 0,
+                status: 429,
+                retry_after_ms: Some(0),
+            }
+        )));
+        let recovered_index = observed
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    ChatCompletionsEvent::ProviderOverloadRecovered {
+                        attempts: 1,
+                        last_status: 429,
+                    }
+                )
+            })
+            .expect("overload recovery event");
+        let content_index = observed
+            .iter()
+            .position(
+                |event| matches!(event, ChatCompletionsEvent::ContentDelta(text) if text == "ok"),
+            )
+            .expect("provider output");
+        assert!(recovered_index < content_index);
+        assert!(events.iter().any(
+            |event| matches!(event, ChatCompletionsEvent::ContentDelta(text) if text == "ok")
+        ));
+    }
+
+    #[test]
+    fn cancellation_interrupts_repeated_provider_overload_backoff() {
+        let (base_url, request_count, _) =
+            overload_then_success_chat_completions_server(1_024, 503, Some("5"), false);
+        let cancellation = ProviderCancellation::default();
+        let cancel_from_thread = cancellation.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(75));
+            cancel_from_thread.cancel();
+        });
+        let mut client = LiveChatCompletionsClient::new(base_url, None, None, cancellation)
+            .expect("create live client");
+        let mut observed = Vec::new();
+        let started_at = Instant::now();
+
+        assert_eq!(
+            client.stream_observed(live_chat_request(), &mut |event| observed
+                .push(event.clone())),
+            Err(ChatCompletionsStreamError::Cancelled)
+        );
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert!(observed.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::ProviderOverloadRetry {
+                status: 503,
+                retry_after_ms: Some(5_000),
+                ..
+            }
+        )));
+        assert!(started_at.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn known_overload_status_survives_truncated_error_body() {
+        let (base_url, request_count, _) =
+            overload_then_success_chat_completions_server(1, 429, Some("0"), true);
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+        let mut observed = Vec::new();
+
+        client
+            .stream_observed(live_chat_request(), &mut |event| {
+                observed.push(event.clone())
+            })
+            .expect("known status should remain retryable when its body truncates");
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+        assert!(observed.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::ProviderOverloadRetry { status: 429, .. }
+        )));
+    }
+
+    #[test]
+    fn zero_event_response_stream_interruption_retries_without_duplicate_output() {
+        let (base_url, request_count) = interrupted_stream_then_success_chat_completions_server();
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+        let mut observed = Vec::new();
+
+        client
+            .stream_observed(live_chat_request(), &mut |event| {
+                observed.push(event.clone())
+            })
+            .expect("zero-event stream interruption should recover");
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+        assert!(observed
+            .iter()
             .any(|event| matches!(event, ChatCompletionsEvent::TransportRetry { .. })));
+        assert!(observed.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::TransportRecovered { attempts: 1 }
+        )));
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|event| matches!(event, ChatCompletionsEvent::ContentDelta(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn retry_after_supports_seconds_dates_and_bounded_delays() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, "2".parse().expect("seconds header"));
+        assert_eq!(retry_after_delay_ms(&headers), Some(2_000));
+
+        headers.insert(
+            RETRY_AFTER,
+            (OffsetDateTime::now_utc() + time::Duration::seconds(2))
+                .format(&Rfc2822)
+                .expect("format retry date")
+                .parse()
+                .expect("date header"),
+        );
+        assert!(matches!(retry_after_delay_ms(&headers), Some(0..=2_000)));
+
+        headers.insert(
+            RETRY_AFTER,
+            "Sun, 06 Nov 1994 08:49:37 GMT"
+                .parse()
+                .expect("HTTP-date header"),
+        );
+        assert_eq!(retry_after_delay_ms(&headers), Some(0));
+
+        headers.insert(RETRY_AFTER, "999999".parse().expect("bounded header"));
+        assert_eq!(
+            retry_after_delay_ms(&headers),
+            Some(duration_millis(PROVIDER_RETRY_AFTER_MAX_BACKOFF))
+        );
+    }
+
+    #[test]
+    fn retryable_http_status_policy_is_explicit() {
+        for status in [429, 502, 503, 504] {
+            assert!(retryable_provider_http_status(status));
+        }
+        for status in [400, 401, 403, 404, 408, 425, 500, 501] {
+            assert!(!retryable_provider_http_status(status));
+        }
+    }
+
+    #[test]
+    fn provider_error_body_is_bounded_and_redacts_credential_markers() {
+        assert_eq!(
+            sanitize_provider_error_body("invalid api_key sk-secret"),
+            "[redacted provider error body]"
+        );
+        assert_eq!(
+            sanitize_provider_error_body(&"x".repeat(MAX_PROVIDER_ERROR_BODY_BYTES)),
+            "x".repeat(MAX_PROVIDER_ERROR_BODY_BYTES)
+        );
     }
 
     #[test]
@@ -4859,7 +5366,7 @@ mod tests {
         let error = parse("data: {nope}\n\n").expect_err("malformed json");
         assert!(matches!(
             error,
-            ChatCompletionsStreamError::Transport(message)
+            ChatCompletionsStreamError::Protocol(message)
                 if message.contains("invalid SSE JSON")
         ));
     }
@@ -7353,6 +7860,71 @@ mod tests {
                 "kind": "provider_transport_recovered",
                 "reason_code": "chat_completions_provider_transport_recovered",
                 "attempts": 2,
+            })
+        );
+    }
+
+    #[test]
+    fn mapper_projects_provider_overload_retry_and_recovery_status() {
+        let context = context();
+        let mut mapper = ChatCompletionsEventMapper::new();
+
+        let retry = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ProviderOverloadRetry {
+                attempt: 3,
+                backoff_ms: 2_000,
+                status: 429,
+                retry_after_ms: Some(2_000),
+            },
+        );
+        let recovered = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ProviderOverloadRecovered {
+                attempts: 3,
+                last_status: 429,
+            },
+        );
+
+        let retry_events = events(&retry);
+        let [BrainEvent::ProviderStatus {
+            level: retry_level,
+            metadata_json: Some(retry_metadata),
+            ..
+        }] = retry_events.as_slice()
+        else {
+            panic!("overload retry must project one provider status event");
+        };
+        assert_eq!(*retry_level, BrainProviderStatusLevel::Degraded);
+        assert_eq!(
+            serde_json::from_str::<Value>(retry_metadata).expect("retry metadata"),
+            json!({
+                "kind": "provider_overload_retry",
+                "reason_code": "chat_completions_provider_overload_retry",
+                "attempt": 3,
+                "backoff_ms": 2_000,
+                "status": 429,
+                "retry_after_ms": 2_000,
+            })
+        );
+
+        let recovered_events = events(&recovered);
+        let [BrainEvent::ProviderStatus {
+            level: recovered_level,
+            metadata_json: Some(recovered_metadata),
+            ..
+        }] = recovered_events.as_slice()
+        else {
+            panic!("overload recovery must project one provider status event");
+        };
+        assert_eq!(*recovered_level, BrainProviderStatusLevel::Info);
+        assert_eq!(
+            serde_json::from_str::<Value>(recovered_metadata).expect("recovery metadata"),
+            json!({
+                "kind": "provider_overload_recovered",
+                "reason_code": "chat_completions_provider_overload_recovered",
+                "attempts": 3,
+                "last_status": 429,
             })
         );
     }

@@ -62,3 +62,8 @@ Only request-send failures before an HTTP response are retried indefinitely.
 Backoff is cancellation-aware and capped at five seconds. HTTP errors and
 failures after response streaming starts remain terminal because replaying an
 ambiguous partial response could duplicate provider output or side effects.
+
+This was the boundary certified by task 6537. Task 6545 later expanded it to
+retry HTTP 429, 502, 503, and 504 responses before semantic provider output;
+see `docs/evidence/task-6545-chat-completions-overload-recovery-live.md` for the
+current policy and live proof.
