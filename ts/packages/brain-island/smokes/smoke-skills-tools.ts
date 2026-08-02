@@ -151,6 +151,16 @@ broken
     builtInView.details.skill?.bodyMarkdown ?? "",
     /managed Codex app-server session/,
   );
+  assert.match(builtInView.details.skill?.bodyMarkdown ?? "", /`\/new`/);
+
+  const unboundedBuiltInHelp = await rustyCrewHelpTool({}).execute(
+    "unbounded-help",
+    {},
+  );
+  assert.match(
+    unboundedBuiltInHelp.details.skill?.bodyMarkdown ?? "",
+    /explicit new-session creation with `\/new`/,
+  );
 
   const viewed = await skillViewTool(context).execute("view", {
     slug: "repo-orientation",

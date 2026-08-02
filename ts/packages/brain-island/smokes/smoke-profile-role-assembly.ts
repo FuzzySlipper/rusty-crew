@@ -145,6 +145,7 @@ Look for concrete regressions and cite evidence.
   assert.match(instructions, /careful reviewer/);
   assert.match(instructions, /concrete evidence/);
   assert.match(instructions, /call rusty_crew_help/);
+  assert.doesNotMatch(instructions, /`\/new`/);
   assert.doesNotMatch(
     instructions,
     /https:\/\/github\.com\/FuzzySlipper\/rusty-crew/,
@@ -218,6 +219,7 @@ Look for concrete regressions and cite evidence.
   assert.match(capturedSystemPrompt, /Profile system prompt wins by default/);
   assert.match(capturedSystemPrompt, /Review Rubric/);
   assert.match(capturedSystemPrompt, /call rusty_crew_help/);
+  assert.doesNotMatch(capturedSystemPrompt, /`\/new`/);
 
   console.log(
     JSON.stringify(

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const RUSTY_CREW_BUILT_IN_SKILL_SLUG = "rusty-crew";
-export const RUSTY_CREW_BUILT_IN_SKILL_VERSION = "1.0.0";
+export const RUSTY_CREW_BUILT_IN_SKILL_VERSION = "1.0.1";
 export const RUSTY_CREW_BUILT_IN_SKILL_SOURCE =
   "builtin://rusty-crew/skills/rusty-crew";
 
@@ -80,8 +80,9 @@ destroying the session.
 
 Use the running service's command registry for the current command list and
 descriptions. Common concepts include status/model inspection, effort override,
-explicit new-session creation, cancellation, and archival. Do not assume a
-command exists only because another harness supports the same spelling.
+explicit new-session creation with \`/new\`, cancellation, and archival. Treat
+the registry as authoritative for current spelling and availability; do not
+assume a command exists only because another harness supports it.
 
 ## Tools, MCP, And Skills
 

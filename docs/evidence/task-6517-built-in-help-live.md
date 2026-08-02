@@ -100,3 +100,37 @@ That credential-state failure is separate from built-in skill selection and
 execution. The successful live Responses proxy run certifies the same
 production `openai-responses` brain and neutral Crew tool bridge without using a
 fake provider.
+
+## Rereview Correction: Literal `/new` Grounding
+
+The immutable body is now version `1.0.1`. Its Sessions section contains the
+literal, registry-qualified sentence:
+
+> Common concepts include status/model inspection, effort override, explicit
+> new-session creation with `/new`, cancellation, and archival.
+
+The next sentence still tells the agent to treat the live command registry as
+authoritative for current spelling and availability. This keeps `/new`
+grounded without turning the built-in skill into a duplicate command catalog.
+
+After restarting only the SQLite debug service, both native brain lanes ran a
+fresh real-provider turn that called `rusty_crew_help` and quoted that exact
+sentence:
+
+| Lane | Initial request | Post-tool request | Result |
+| --- | --- | --- | --- |
+| Chat Completions (`kimi-k2.7`) | `providerdbg_4326f49ca735fa6d1ee8be4f` | `providerdbg_9efd15ee75be64bbeba00915` | completed, exact grounded quote |
+| Responses (`responses-proxy-cert-5389`) | `providerdbg_e7cfbd359f721bebab5c77a9` | `providerdbg_ac6a0d9b3aafd539fd134d39` | completed, exact grounded quote |
+
+For Chat Completions, the initial request's system message did not contain
+`/new`; the post-tool request's tool message did. For Responses, the initial
+`instructions` did not contain `/new`; the post-tool request's
+`function_call_output` did. The user test prompt named `/new`, so these checks
+deliberately inspect only the system/instructions and tool-result fields rather
+than making an invalid whole-request absence claim.
+
+Focused regression coverage now also asserts that:
+
+- `skill_view` and unbounded `rusty_crew_help` results contain literal `/new`
+- initial role assembly and provider system prompt omit `/new`
+- the built-in content version changes when its immutable body changes
