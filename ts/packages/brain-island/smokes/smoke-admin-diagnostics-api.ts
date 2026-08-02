@@ -559,12 +559,22 @@ const redacted = handleAdminDiagnosticsRequest(
         eventType: "admin_command_started",
         summary: "admin command started",
         token: "secret-token",
+        numericToken: 123456,
+        cachedPromptTokens: 2048,
       } as unknown as AdminRecentEvent,
     ],
   },
 );
-const eventPage = okData<AdminPage<{ token: string }>>(redacted);
+const eventPage = okData<
+  AdminPage<{
+    token: string;
+    numericToken: string;
+    cachedPromptTokens: number;
+  }>
+>(redacted);
 assert.equal(eventPage.items[0]?.token, "[redacted]");
+assert.equal(eventPage.items[0]?.numericToken, "[redacted]");
+assert.equal(eventPage.items[0]?.cachedPromptTokens, 2048);
 
 const metrics = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics/metrics?limit=500" },

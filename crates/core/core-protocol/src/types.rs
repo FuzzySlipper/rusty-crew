@@ -1298,6 +1298,17 @@ pub enum ChatCompletionsReasoningHistory {
     ToolCallsOnly,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatCompletionsPromptCachingPolicy {
+    #[default]
+    Disabled,
+    #[serde(rename = "automatic_5m")]
+    Automatic5m,
+    #[serde(rename = "automatic_1h")]
+    Automatic1h,
+}
+
 pub const MODEL_PROVIDER_SECRET_ENVELOPE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1590,6 +1601,8 @@ pub struct ModelProviderRecord {
     pub reasoning_history: ChatCompletionsReasoningHistory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_budget_tokens: Option<u32>,
+    #[serde(default)]
+    pub prompt_caching: ChatCompletionsPromptCachingPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<String>,
     pub credential: ModelProviderCredential,
@@ -1622,6 +1635,8 @@ pub struct ModelProviderWrite {
     pub reasoning_history: ChatCompletionsReasoningHistory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_budget_tokens: Option<u32>,
+    #[serde(default)]
+    pub prompt_caching: ChatCompletionsPromptCachingPolicy,
     pub secret: Option<String>,
     pub clear_secret: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6,14 +6,10 @@ import type {
   NativeProfileRegistryRecord,
   NativeProfileRegistryQuery,
   NativeProfilePurgeReport,
-  NativeModelProviderStatus,
-  NativeModelProviderProtocol,
-  NativeModelProviderCredentialKind,
   NativeModelProviderRecord,
   NativeModelProviderWrite,
   NativeModelProviderQuery,
   NativeModelProviderRefreshImpact,
-  NativeModelProviderRefreshMode,
   NativeModelProviderRefreshPlan,
   NativeRuntimeConfigDiagnostic,
   NativeProfileRegistryWrite,
@@ -21,6 +17,24 @@ import type {
   NativeProfileRegistryMutationRequest,
   NativeProfileRegistryMutationPlan,
 } from "./public-api.js";
+import type {
+  RawModelProviderQuery,
+  RawModelProviderRecord,
+  RawModelProviderRefreshImpact,
+  RawModelProviderRefreshPlan,
+  RawModelProviderWrite,
+} from "./model-provider-wire-types.js";
+
+export type {
+  RawModelProviderAffectedProfile,
+  RawModelProviderCredential,
+  RawModelProviderQuery,
+  RawModelProviderRecord,
+  RawModelProviderRefreshImpact,
+  RawModelProviderRefreshPlan,
+  RawModelProviderRefreshProfileAction,
+  RawModelProviderWrite,
+} from "./model-provider-wire-types.js";
 
 export function toNativeProfileRegistryWrite(
   write: RawProfileRegistryWrite,
@@ -229,6 +243,7 @@ export function toRawModelProviderWrite(
     thinking_mode: write.thinkingMode ?? "provider_default",
     reasoning_history: write.reasoningHistory ?? "provider_default",
     reasoning_budget_tokens: write.reasoningBudgetTokens,
+    prompt_caching: write.promptCaching ?? "disabled",
     secret: write.secret,
     clear_secret: write.clearSecret ?? false,
     expected_credential_revision: write.expectedCredentialRevision,
@@ -311,6 +326,7 @@ export function toNativeModelProviderRecord(
     thinkingMode: record.thinking_mode,
     reasoningHistory: record.reasoning_history,
     reasoningBudgetTokens: record.reasoning_budget_tokens ?? undefined,
+    promptCaching: record.prompt_caching,
     credentialId: record.credential_id ?? undefined,
     credential: {
       hasSecret: record.credential.has_secret,
@@ -347,6 +363,7 @@ export function toRawModelProviderRecord(
     thinking_mode: record.thinkingMode,
     reasoning_history: record.reasoningHistory,
     reasoning_budget_tokens: record.reasoningBudgetTokens,
+    prompt_caching: record.promptCaching,
     credential_id: record.credentialId,
     credential: {
       has_secret: record.credential.hasSecret,
@@ -547,102 +564,4 @@ export interface RawProfilePurgeReport {
 export interface RawProfilePurgeTableCount {
   table: string;
   rows_deleted: number;
-}
-
-export interface RawModelProviderCredential {
-  has_secret: boolean;
-  secret_ref?: string | null;
-  updated_at?: string | null;
-  kind?: NativeModelProviderCredentialKind | null;
-  revision?: number | null;
-}
-
-export interface RawModelProviderRecord {
-  alias: string;
-  status: NativeModelProviderStatus;
-  protocol: NativeModelProviderProtocol;
-  provider_kind: string;
-  display_name?: string | null;
-  description?: string | null;
-  base_url?: string | null;
-  model_id: string;
-  context_window_tokens?: number | null;
-  max_output_tokens?: number | null;
-  temperature_milli?: number | null;
-  reasoning_effort?: string | null;
-  reasoning_format?: string | null;
-  chat_completions_dialect: NativeModelProviderRecord["chatCompletionsDialect"];
-  thinking_mode: NativeModelProviderRecord["thinkingMode"];
-  reasoning_history: NativeModelProviderRecord["reasoningHistory"];
-  reasoning_budget_tokens?: number | null;
-  credential_id?: string | null;
-  credential: RawModelProviderCredential;
-  metadata_json: unknown;
-  revision: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RawModelProviderWrite {
-  alias: string;
-  status: NativeModelProviderStatus;
-  protocol: NativeModelProviderProtocol;
-  provider_kind: string;
-  display_name?: string;
-  description?: string;
-  base_url?: string;
-  model_id: string;
-  context_window_tokens?: number;
-  max_output_tokens?: number;
-  temperature_milli?: number;
-  reasoning_effort?: string;
-  reasoning_format?: string;
-  chat_completions_dialect: NonNullable<
-    NativeModelProviderWrite["chatCompletionsDialect"]
-  >;
-  thinking_mode: NonNullable<NativeModelProviderWrite["thinkingMode"]>;
-  reasoning_history: NonNullable<NativeModelProviderWrite["reasoningHistory"]>;
-  reasoning_budget_tokens?: number;
-  secret?: string;
-  clear_secret: boolean;
-  expected_credential_revision?: number;
-  metadata_json: unknown;
-  expected_revision?: number;
-  now: string;
-}
-
-export interface RawModelProviderQuery {
-  status?: NativeModelProviderStatus;
-  alias_prefix?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface RawModelProviderAffectedProfile {
-  profile_id: string;
-  session_ids: string[];
-  configured_session_ids: string[];
-  active_session_ids: string[];
-}
-
-export interface RawModelProviderRefreshImpact {
-  provider_alias: string;
-  affected_profiles: RawModelProviderAffectedProfile[];
-}
-
-export interface RawModelProviderRefreshProfileAction {
-  profile_id: string;
-  command_name: string;
-  reason: string;
-  planned_summary: string;
-  applied_summary: string;
-  blocked_summary: string;
-  failure_reason_code: string;
-}
-
-export interface RawModelProviderRefreshPlan {
-  provider_alias: string;
-  mode: NativeModelProviderRefreshMode;
-  affected_profiles: RawModelProviderAffectedProfile[];
-  actions: RawModelProviderRefreshProfileAction[];
 }

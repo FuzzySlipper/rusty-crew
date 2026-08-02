@@ -4,7 +4,7 @@ use super::logical_turns::apply_postgres_logical_turns;
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 42;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 43;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -226,6 +226,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 42,
         description: "add bounded external runtime event retention checkpoints",
         apply: Some(apply_postgres_external_runtime_event_retention),
+    },
+    PostgresSchemaMigration {
+        version: 43,
+        description: "record typed chat completions prompt caching policy in provider JSON",
+        apply: None,
     },
 ];
 

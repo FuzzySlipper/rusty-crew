@@ -15,10 +15,11 @@ use rusty_crew_chat_completions_brain::{
     DEFAULT_WORK_QUANTUM_TOOL_ROUNDS,
 };
 use rusty_crew_core_protocol::{
-    BrainWakeAttention, BrainWakeProviderStateInput, ChatCompletionsReasoningHistory,
-    ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
+    BrainWakeAttention, BrainWakeProviderStateInput, ChatCompletionsPromptCachingPolicy,
+    ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
 };
 use serde::Serialize;
+use sha2::Digest;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +68,8 @@ struct JsChatCompletionsBrainConfig {
     reasoning_history: ChatCompletionsReasoningHistory,
     #[serde(default)]
     reasoning_budget_tokens: Option<u32>,
+    #[serde(default)]
+    prompt_caching: ChatCompletionsPromptCachingPolicy,
     #[serde(default = "default_chat_completions_strategy_id")]
     provider_state_strategy_id: String,
     #[serde(default)]
@@ -129,6 +132,11 @@ pub(crate) struct ChatCompletionsTransportMetrics {
     tool_round_count: usize,
     provider_event_counts: std::collections::BTreeMap<String, usize>,
     provider_request_debug_samples: Vec<Value>,
+    prompt_caching_policy: ChatCompletionsPromptCachingPolicy,
+    openrouter_session_id: Option<String>,
+    prompt_tokens: usize,
+    cached_prompt_tokens: usize,
+    cache_write_prompt_tokens: usize,
 }
 
 fn default_chat_completions_strategy_id() -> String {
@@ -338,6 +346,7 @@ fn run_chat_completions_brain_buffered(
     wake_id: String,
     input_json: String,
 ) {
+    let metrics_input = serde_json::from_str::<JsChatCompletionsBrainRunInput>(&input_json).ok();
     let sink_wake_id = wake_id.clone();
     let sink_buffered_runs = Arc::clone(&buffered_runs);
     let mut sink = move |item: BrainWakeStreamItem| loop {
@@ -380,9 +389,26 @@ fn run_chat_completions_brain_buffered(
         if !run.coordinator.is_cancelled() {
             match result {
                 Ok(output) => {
+                    let metric =
+                        |key: &str| output.provider_event_counts.get(key).copied().unwrap_or(0);
                     run.payload.transport_metrics = Some(ChatCompletionsTransportMetrics {
                         provider_request_count: output.provider_request_count,
                         tool_round_count: output.tool_round_count,
+                        prompt_caching_policy: metrics_input
+                            .as_ref()
+                            .map(|input| input.config.prompt_caching)
+                            .unwrap_or_default(),
+                        openrouter_session_id: metrics_input.as_ref().and_then(|input| {
+                            (input.config.prompt_caching
+                                != ChatCompletionsPromptCachingPolicy::Disabled)
+                                .then(|| {
+                                    let digest = sha2::Sha256::digest(input.session_id.as_bytes());
+                                    format!("rusty-crew-{digest:x}")
+                                })
+                        }),
+                        prompt_tokens: metric("usage_prompt_tokens"),
+                        cached_prompt_tokens: metric("usage_cached_prompt_tokens"),
+                        cache_write_prompt_tokens: metric("usage_cache_write_prompt_tokens"),
                         provider_event_counts: output.provider_event_counts,
                         provider_request_debug_samples: output.provider_request_debug_samples,
                     });
@@ -619,6 +645,7 @@ fn chat_completions_chat_config(
         thinking_mode: config.thinking_mode,
         reasoning_history: config.reasoning_history,
         reasoning_budget_tokens: config.reasoning_budget_tokens,
+        prompt_caching: config.prompt_caching,
         provider_state_strategy_id: config.provider_state_strategy_id.clone(),
         max_output_tokens: config.max_output_tokens,
         provider_request_timeout_ms: config.provider_request_timeout_ms,

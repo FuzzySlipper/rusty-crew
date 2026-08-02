@@ -220,7 +220,11 @@ const executor: AdminControlExecutor = {
       status: "completed",
       summary: `Cancelled ${command.target.sessionId}.`,
       affectedIds: { delegatedSessionId: command.target.sessionId ?? "" },
-      result: { bearerToken: "must-not-leak" },
+      result: {
+        bearerToken: "must-not-leak",
+        numericToken: 123456,
+        cachedPromptTokens: 2048,
+      },
     };
   },
   reloadMcp() {
@@ -460,6 +464,15 @@ assert.equal(cancelData.command.actor.operatorId, "operator-beta");
 assert.equal(
   (cancelData.outcome.result as { bearerToken?: string }).bearerToken,
   "[redacted]",
+);
+assert.equal(
+  (cancelData.outcome.result as { numericToken?: string }).numericToken,
+  "[redacted]",
+);
+assert.equal(
+  (cancelData.outcome.result as { cachedPromptTokens?: number })
+    .cachedPromptTokens,
+  2048,
 );
 
 const invalidCheckpoint = await handleAdminControlRequest(

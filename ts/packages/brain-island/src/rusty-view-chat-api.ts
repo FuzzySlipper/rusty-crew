@@ -418,6 +418,7 @@ export interface SessionContextUsageResult {
     thinking_mode?: ChatCompletionsThinkingMode;
     reasoning_history?: ChatCompletionsReasoningHistory;
     reasoning_budget_tokens?: number;
+    prompt_caching?: "disabled" | "automatic_5m" | "automatic_1h";
     thinking_settings_applied?: boolean;
     thinking_mode_applied?: boolean;
     reasoning_history_applied?: boolean;

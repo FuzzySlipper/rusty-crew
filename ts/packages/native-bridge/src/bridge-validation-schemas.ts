@@ -702,6 +702,12 @@ const modelProviderProtocolSchema = Type.Union([
   Type.Literal("chat_completions"),
 ]);
 
+const chatCompletionsPromptCachingPolicySchema = Type.Union([
+  Type.Literal("disabled"),
+  Type.Literal("automatic_5m"),
+  Type.Literal("automatic_1h"),
+]);
+
 const modelProviderCredentialKindSchema = Type.Union([
   Type.Literal("api_key"),
   Type.Literal("openai_oauth"),
@@ -755,6 +761,7 @@ export const rawModelProviderRecordSchema = Type.Object(
       Type.Literal("tool_calls_only"),
     ]),
     reasoning_budget_tokens: Type.Optional(nullableNumber),
+    prompt_caching: chatCompletionsPromptCachingPolicySchema,
     credential_id: Type.Optional(nullableString),
     credential: rawModelProviderCredentialSchema,
     metadata_json: Type.Unknown(),
@@ -1292,6 +1299,13 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
           ]),
         ),
         reasoningBudgetTokens: Type.Optional(Type.Number({ minimum: 1 })),
+        promptCaching: Type.Optional(
+          Type.Union([
+            Type.Literal("disabled"),
+            Type.Literal("automatic_5m"),
+            Type.Literal("automatic_1h"),
+          ]),
+        ),
         providerStateStrategyId: Type.Optional(Type.String()),
         maxOutputTokens: Type.Optional(Type.Number()),
         workQuantumToolRounds: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -1541,6 +1555,13 @@ const chatCompletionsTransportMetricsSchema = Type.Object(
     tool_round_count: Type.Number(),
     provider_event_counts: Type.Record(Type.String(), Type.Number()),
     provider_request_debug_samples: Type.Array(Type.Unknown()),
+    prompt_caching_policy: chatCompletionsPromptCachingPolicySchema,
+    openrouter_session_id: Type.Optional(
+      Type.Union([Type.String(), Type.Null()]),
+    ),
+    prompt_tokens: Type.Number(),
+    cached_prompt_tokens: Type.Number(),
+    cache_write_prompt_tokens: Type.Number(),
   },
   { additionalProperties: true },
 );

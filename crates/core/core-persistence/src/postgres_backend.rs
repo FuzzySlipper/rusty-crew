@@ -9462,11 +9462,11 @@ mod tests {
     };
     use postgres::NoTls;
     use rusty_crew_core_protocol::{
-        AgentMessage, BrainEvent, ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode,
-        ChatCompletionsWireDialect, MemoryEvidenceRef, MemoryProposalSource,
-        ModelProviderCredentialKind, ProfileRegistryImportExportMetadata, ResourceLimits,
-        SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
-        MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+        AgentMessage, BrainEvent, ChatCompletionsPromptCachingPolicy,
+        ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
+        MemoryEvidenceRef, MemoryProposalSource, ModelProviderCredentialKind,
+        ProfileRegistryImportExportMetadata, ResourceLimits, SessionHandle, ToolCallMetadata,
+        ToolCallSource, ToolDescriptor, ToolProfile, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
     };
 
     #[test]
@@ -15172,6 +15172,26 @@ mod tests {
             unchanged.reasoning_history,
             ChatCompletionsReasoningHistory::ToolCallsOnly
         );
+        let mut cache_write = model_provider_write(
+            "haiku-cache",
+            ModelProviderProtocol::ChatCompletions,
+            "openrouter",
+            "anthropic/claude-haiku-4.5",
+            None,
+        );
+        cache_write.prompt_caching = ChatCompletionsPromptCachingPolicy::Automatic1h;
+        let cache_provider = store.upsert_model_provider(&cache_write).unwrap();
+        assert_eq!(
+            cache_provider.prompt_caching,
+            ChatCompletionsPromptCachingPolicy::Automatic1h
+        );
+        let mut invalid_cache_write = cache_write.clone();
+        invalid_cache_write.alias = "haiku-cache-invalid".to_string();
+        invalid_cache_write.model_id = "openai/gpt-4.1-mini".to_string();
+        let cache_error = store
+            .upsert_model_provider(&invalid_cache_write)
+            .expect_err("non-Anthropic OpenRouter cache policy must be rejected");
+        assert_eq!(cache_error.kind, CoreErrorKind::InvalidInput);
         assert_eq!(
             api_key.credential.kind,
             Some(ModelProviderCredentialKind::ApiKey)
@@ -15858,6 +15878,7 @@ mod tests {
             thinking_mode: Default::default(),
             reasoning_history: Default::default(),
             reasoning_budget_tokens: None,
+            prompt_caching: Default::default(),
             secret: secret.map(ToString::to_string),
             clear_secret: false,
             expected_credential_revision: None,

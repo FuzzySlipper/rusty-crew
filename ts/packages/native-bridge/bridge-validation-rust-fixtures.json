@@ -247,6 +247,7 @@
           "fixture": true
         },
         "model_id": "gpt-fixture",
+        "prompt_caching": "disabled",
         "protocol": "chat_completions",
         "provider_kind": "openai-compatible",
         "reasoning_effort": "medium",

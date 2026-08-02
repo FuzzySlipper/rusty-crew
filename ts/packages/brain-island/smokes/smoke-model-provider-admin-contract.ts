@@ -18,6 +18,7 @@ import {
   MODEL_PROVIDER_CREDENTIAL_KIND_VALUES,
   CHAT_COMPLETIONS_DIALECT_VALUES,
   CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
+  CHAT_COMPLETIONS_PROMPT_CACHING_VALUES,
   MODEL_PROVIDER_PROTOCOL_VALUES,
   MODEL_PROVIDER_REFRESH_MODE_VALUES,
   MODEL_PROVIDER_REVISION_CONFLICT_DATA_FIELDS,
@@ -56,6 +57,9 @@ assert.deepEqual(schema("ChatCompletionsDialect").enum, [
 ]);
 assert.deepEqual(schema("ChatCompletionsReasoningHistory").enum, [
   ...CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
+]);
+assert.deepEqual(schema("ChatCompletionsPromptCaching").enum, [
+  ...CHAT_COMPLETIONS_PROMPT_CACHING_VALUES,
 ]);
 assert.deepEqual(schema("ModelProviderRefreshMode").enum, [
   ...MODEL_PROVIDER_REFRESH_MODE_VALUES,
@@ -276,6 +280,7 @@ function modelProviderRouteContext(
         providerKind: write.providerKind,
         modelId: write.modelId,
         temperatureMilli: write.temperatureMilli,
+        promptCaching: write.promptCaching,
         revision: (existing?.revision ?? 0) + 1,
       });
       providers.set(write.alias, record);
@@ -341,6 +346,11 @@ function modelProviderRecord(
     temperatureMilli: overrides.temperatureMilli,
     reasoningEffort: overrides.reasoningEffort,
     reasoningFormat: overrides.reasoningFormat,
+    chatCompletionsDialect: overrides.chatCompletionsDialect ?? "standard",
+    thinkingMode: overrides.thinkingMode ?? "provider_default",
+    reasoningHistory: overrides.reasoningHistory ?? "provider_default",
+    reasoningBudgetTokens: overrides.reasoningBudgetTokens,
+    promptCaching: overrides.promptCaching ?? "disabled",
     credentialId: overrides.credentialId,
     credential: overrides.credential ?? { hasSecret: false },
     metadataJson: overrides.metadataJson ?? {},

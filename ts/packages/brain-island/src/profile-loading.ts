@@ -1207,6 +1207,9 @@ function modelConfigFromProfileObject(
     reasoningHistory: optionalString(
       modelConfig.reasoningHistory,
     ) as BrainModelConfig["reasoningHistory"],
+    promptCaching: optionalString(
+      modelConfig.promptCaching,
+    ) as BrainModelConfig["promptCaching"],
     reasoningBudgetTokens: optionalNumber(modelConfig.reasoningBudgetTokens),
     maxOutputTokens:
       optionalNumber(modelConfig.maxOutputTokens) ??

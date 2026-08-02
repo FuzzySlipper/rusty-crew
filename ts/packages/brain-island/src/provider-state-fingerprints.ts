@@ -78,6 +78,7 @@ export function providerStateFingerprintMaterial(
         thinkingMode: profile.modelConfig.thinkingMode,
         reasoningHistory: profile.modelConfig.reasoningHistory,
         reasoningBudgetTokens: profile.modelConfig.reasoningBudgetTokens,
+        promptCaching: profile.modelConfig.promptCaching,
       },
       moduleOptions: moduleFingerprints?.providerOptions,
     },

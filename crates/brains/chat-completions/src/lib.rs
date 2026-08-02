@@ -17,9 +17,10 @@ use rusty_crew_core_protocol::{
     BrainNoProgressPolicy, BrainNoProgressState, BrainProgressDisposition,
     BrainProgressResultClass, BrainProgressSample, BrainProviderStatusLevel, BrainWakeAttention,
     BrainWakeFailure, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
-    BrainWakeProviderStateUpdate, BrainWakeStreamItem, ChatCompletionsReasoningHistory,
-    ChatCompletionsThinkingMode, ChatCompletionsWireDialect, CoreErrorKind,
-    LogicalTurnAttentionReason, LogicalTurnResolutionAction, ModelProviderRecord, SessionId,
+    BrainWakeProviderStateUpdate, BrainWakeStreamItem, ChatCompletionsPromptCachingPolicy,
+    ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
+    CoreErrorKind, LogicalTurnAttentionReason, LogicalTurnResolutionAction, ModelProviderRecord,
+    SessionId,
 };
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -319,6 +320,7 @@ pub struct ChatCompletionsChatConfig {
     pub thinking_mode: ChatCompletionsThinkingMode,
     pub reasoning_history: ChatCompletionsReasoningHistory,
     pub reasoning_budget_tokens: Option<u32>,
+    pub prompt_caching: ChatCompletionsPromptCachingPolicy,
     pub provider_state_strategy_id: String,
     pub max_output_tokens: Option<u32>,
     pub provider_request_timeout_ms: Option<u64>,
@@ -334,6 +336,7 @@ impl ChatCompletionsChatConfig {
             thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
             reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
             reasoning_budget_tokens: None,
+            prompt_caching: ChatCompletionsPromptCachingPolicy::Disabled,
             provider_state_strategy_id: "default".to_string(),
             max_output_tokens: Some(128),
             provider_request_timeout_ms: None,
@@ -349,6 +352,7 @@ impl ChatCompletionsChatConfig {
             thinking_mode: provider.thinking_mode,
             reasoning_history: provider.reasoning_history,
             reasoning_budget_tokens: provider.reasoning_budget_tokens,
+            prompt_caching: provider.prompt_caching,
             provider_state_strategy_id: "default".to_string(),
             max_output_tokens: provider.max_output_tokens,
             provider_request_timeout_ms: None,
@@ -569,6 +573,8 @@ impl ChatToolChoice {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatCompletionsRequest {
     pub model: String,
+    pub session_id: Option<String>,
+    pub cache_control: Option<ChatCompletionsCacheControl>,
     pub messages: Vec<ChatCompletionsRequestMessage>,
     pub tools: Vec<ChatToolDescriptor>,
     pub tool_choice: Value,
@@ -589,6 +595,8 @@ impl Serialize for ChatCompletionsRequest {
         S: Serializer,
     {
         let mut fields = 4;
+        fields += self.session_id.is_some() as usize;
+        fields += self.cache_control.is_some() as usize;
         fields += (!self.tools.is_empty()) as usize;
         fields += self.stream_options.is_some() as usize;
         fields += self.temperature.is_some() as usize;
@@ -601,6 +609,12 @@ impl Serialize for ChatCompletionsRequest {
 
         let mut map = serializer.serialize_struct("ChatCompletionsRequest", fields)?;
         map.serialize_field("model", &self.model)?;
+        if let Some(session_id) = &self.session_id {
+            map.serialize_field("session_id", session_id)?;
+        }
+        if let Some(cache_control) = &self.cache_control {
+            map.serialize_field("cache_control", cache_control)?;
+        }
         map.serialize_field("messages", &self.messages)?;
         if !self.tools.is_empty() {
             map.serialize_field("tools", &self.tools)?;
@@ -633,6 +647,14 @@ impl Serialize for ChatCompletionsRequest {
         }
         map.end()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatCompletionsCacheControl {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -681,6 +703,15 @@ impl ChatCompletionsRequestBuilder {
         messages: Vec<ChatCompletionMessage>,
         input_images: &[ChatCompletionsInputImage],
     ) -> ChatCompletionsRequest {
+        self.build_for_session_with_images(messages, input_images, None)
+    }
+
+    pub fn build_for_session_with_images(
+        &self,
+        messages: Vec<ChatCompletionMessage>,
+        input_images: &[ChatCompletionsInputImage],
+        session_id: Option<&SessionId>,
+    ) -> ChatCompletionsRequest {
         let extensions = chat_completions_dialect_extensions(&self.config);
         let mut request_messages = messages
             .into_iter()
@@ -714,6 +745,11 @@ impl ChatCompletionsRequestBuilder {
         }
         ChatCompletionsRequest {
             model: self.config.model.clone(),
+            session_id: session_id.and_then(|session_id| {
+                (self.config.prompt_caching != ChatCompletionsPromptCachingPolicy::Disabled)
+                    .then(|| openrouter_sticky_session_id(session_id))
+            }),
+            cache_control: chat_completions_cache_control(self.config.prompt_caching),
             messages: request_messages,
             tools: self.tools.iter().map(adapt_neutral_tool).collect(),
             tool_choice: self.tool_choice.as_value(),
@@ -733,6 +769,27 @@ impl ChatCompletionsRequestBuilder {
             max_tokens: self.config.max_output_tokens,
         }
     }
+}
+
+fn chat_completions_cache_control(
+    policy: ChatCompletionsPromptCachingPolicy,
+) -> Option<ChatCompletionsCacheControl> {
+    match policy {
+        ChatCompletionsPromptCachingPolicy::Disabled => None,
+        ChatCompletionsPromptCachingPolicy::Automatic5m => Some(ChatCompletionsCacheControl {
+            kind: "ephemeral".to_string(),
+            ttl: None,
+        }),
+        ChatCompletionsPromptCachingPolicy::Automatic1h => Some(ChatCompletionsCacheControl {
+            kind: "ephemeral".to_string(),
+            ttl: Some("1h".to_string()),
+        }),
+    }
+}
+
+fn openrouter_sticky_session_id(session_id: &SessionId) -> String {
+    let digest = Sha256::digest(session_id.0.as_bytes());
+    format!("rusty-crew-{digest:x}")
 }
 
 fn chat_completions_request_message(
@@ -864,6 +921,7 @@ pub struct ChatTokenUsage {
     pub completion_tokens: u64,
     pub total_tokens: u64,
     pub cached_prompt_tokens: u64,
+    pub cache_write_prompt_tokens: u64,
     pub reasoning_completion_tokens: u64,
 }
 
@@ -1418,9 +1476,11 @@ where
                 }
             }
             provider_request_count += 1;
-            let request = self
-                .request_builder
-                .build_with_images(messages.clone(), &input_images);
+            let request = self.request_builder.build_for_session_with_images(
+                messages.clone(),
+                &input_images,
+                Some(&input.context.session_id),
+            );
             provider_request_debug_samples
                 .push(chat_completions_debug_request(&request, &input_images));
             let mut assistant_text = String::new();
@@ -1448,6 +1508,7 @@ where
                 }
                 if let ChatCompletionsEvent::Usage(usage) = event {
                     context_compaction.last_provider_input_tokens = Some(usage.prompt_tokens);
+                    record_provider_usage_totals(&mut provider_event_counts, usage);
                 }
                 if let ChatCompletionsEvent::Finished {
                     finish_reason: provider_finish_reason,
@@ -3941,12 +4002,38 @@ fn token_usage_from_provider_value(value: &Value) -> Option<ChatTokenUsage> {
             .and_then(|details| details.get("cached_tokens"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
+        cache_write_prompt_tokens: value
+            .get("prompt_tokens_details")
+            .and_then(|details| details.get("cache_write_tokens"))
+            .or_else(|| value.get("cache_write_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
         reasoning_completion_tokens: value
             .get("completion_tokens_details")
             .and_then(|details| details.get("reasoning_tokens"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
     })
+}
+
+fn record_provider_usage_totals(counts: &mut BTreeMap<String, usize>, usage: &ChatTokenUsage) {
+    for (key, value) in [
+        ("usage_prompt_tokens", usage.prompt_tokens),
+        ("usage_cached_prompt_tokens", usage.cached_prompt_tokens),
+        (
+            "usage_cache_write_prompt_tokens",
+            usage.cache_write_prompt_tokens,
+        ),
+        ("usage_completion_tokens", usage.completion_tokens),
+        (
+            "usage_reasoning_completion_tokens",
+            usage.reasoning_completion_tokens,
+        ),
+    ] {
+        let value = usize::try_from(value).unwrap_or(usize::MAX);
+        let total = counts.entry(key.to_string()).or_default();
+        *total = total.saturating_add(value);
+    }
 }
 
 #[cfg(test)]
@@ -4127,6 +4214,50 @@ mod tests {
     }
 
     #[test]
+    fn serializes_openrouter_cache_policy_and_stable_session_stickiness() {
+        let builder = ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig {
+            prompt_caching: ChatCompletionsPromptCachingPolicy::Automatic5m,
+            ..ChatCompletionsChatConfig::new("anthropic/claude-haiku-4.5")
+        });
+        let messages = vec![
+            ChatCompletionMessage::system("stable prefix"),
+            ChatCompletionMessage::user("hello"),
+        ];
+        let session = SessionId::new("profile-session-1");
+        let first = builder.build_for_session_with_images(messages.clone(), &[], Some(&session));
+        let second = builder.build_for_session_with_images(messages, &[], Some(&session));
+        let other = builder.build_for_session_with_images(
+            vec![ChatCompletionMessage::user("hello")],
+            &[],
+            Some(&SessionId::new("profile-session-2")),
+        );
+
+        let first_json = serde_json::to_string(&first).expect("request json");
+        let second_json = serde_json::to_string(&second).expect("request json");
+        assert_eq!(first.session_id, second.session_id);
+        assert_ne!(first.session_id, other.session_id);
+        assert_eq!(first_json, second_json);
+        assert!(first_json
+            .starts_with(r#"{"model":"anthropic/claude-haiku-4.5","session_id":"rusty-crew-"#));
+        assert!(first_json.contains(r#""cache_control":{"type":"ephemeral"}"#));
+        assert!(!first_json.contains(r#""ttl""#));
+
+        let one_hour = ChatCompletionsRequestBuilder::new(ChatCompletionsChatConfig {
+            prompt_caching: ChatCompletionsPromptCachingPolicy::Automatic1h,
+            ..ChatCompletionsChatConfig::new("anthropic/claude-haiku-4.5")
+        })
+        .build_for_session_with_images(
+            vec![ChatCompletionMessage::user("hello")],
+            &[],
+            Some(&session),
+        );
+        assert_eq!(
+            serde_json::to_value(one_hour).expect("one-hour request")["cache_control"],
+            json!({"type": "ephemeral", "ttl": "1h"})
+        );
+    }
+
+    #[test]
     fn maps_typed_chat_completions_reasoning_dialects() {
         let request_value = |config: ChatCompletionsChatConfig| {
             serde_json::to_value(
@@ -4261,7 +4392,7 @@ mod tests {
     fn parses_content_reasoning_usage_and_finish() {
         let input = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"hello \",\"reasoning_content\":\"thinking\"},\"finish_reason\":null}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14,\"prompt_tokens_details\":{\"cached_tokens\":2},\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14,\"prompt_tokens_details\":{\"cached_tokens\":2,\"cache_write_tokens\":8},\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n",
             "data: [DONE]\n\n",
         );
 
@@ -4278,6 +4409,7 @@ mod tests {
                 completion_tokens: 4,
                 total_tokens: 14,
                 cached_prompt_tokens: 2,
+                cache_write_prompt_tokens: 8,
                 reasoning_completion_tokens: 1,
             }))
         );
@@ -6395,6 +6527,7 @@ mod tests {
                         completion_tokens: 10,
                         total_tokens: if round >= 5 { 20_010 } else { 110 },
                         cached_prompt_tokens: 0,
+                        cache_write_prompt_tokens: 0,
                         reasoning_completion_tokens: 0,
                     }),
                     ChatCompletionsEvent::Finished {

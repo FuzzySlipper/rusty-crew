@@ -1629,6 +1629,7 @@ fn upsert_model_provider_in_tx(
         thinking_mode: write.thinking_mode,
         reasoning_history: write.reasoning_history,
         reasoning_budget_tokens: write.reasoning_budget_tokens,
+        prompt_caching: write.prompt_caching,
         credential_id: credential_id.clone(),
         credential: credential
             .as_ref()

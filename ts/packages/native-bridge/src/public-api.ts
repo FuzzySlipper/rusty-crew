@@ -362,6 +362,7 @@ export interface ChatCompletionsBrainRunInput {
       | "preserve_all"
       | "tool_calls_only";
     reasoningBudgetTokens?: number;
+    promptCaching?: "disabled" | "automatic_5m" | "automatic_1h";
     providerStateStrategyId?: string;
     maxOutputTokens?: number;
     workQuantumToolRounds?: number;
@@ -397,6 +398,11 @@ export interface ChatCompletionsToolRequest {
 
 export interface ChatCompletionsTransportMetrics extends OpenAiResponsesTransportMetrics {
   toolRoundCount: number;
+  promptCachingPolicy: "disabled" | "automatic_5m" | "automatic_1h";
+  openrouterSessionId?: string;
+  promptTokens: number;
+  cachedPromptTokens: number;
+  cacheWritePromptTokens: number;
 }
 
 export interface OpenAiResponsesBufferedCancellation {

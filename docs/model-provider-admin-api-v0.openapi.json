@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew Model Provider Admin API",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "description": "Admin contract for model-provider aliases, shared service credentials, revision-aware writes, and credential-scoped OpenAI OAuth."
   },
   "servers": [
@@ -1280,6 +1280,15 @@
           "tool_calls_only"
         ]
       },
+      "ChatCompletionsPromptCaching": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "automatic_5m",
+          "automatic_1h"
+        ],
+        "description": "Rust-owned Anthropic prompt caching policy. Enabled policies require chat_completions, providerKind openrouter, and an anthropic/* model."
+      },
       "ModelProviderRefreshMode": {
         "type": "string",
         "enum": [
@@ -1355,6 +1364,7 @@
           "chatCompletionsDialect",
           "thinkingMode",
           "reasoningHistory",
+          "promptCaching",
           "credential",
           "metadataJson",
           "revision",
@@ -1416,6 +1426,9 @@
           },
           "reasoningBudgetTokens": {
             "type": "number"
+          },
+          "promptCaching": {
+            "$ref": "#/components/schemas/ChatCompletionsPromptCaching"
           },
           "credential": {
             "$ref": "#/components/schemas/ModelProviderCredential"
@@ -1534,6 +1547,10 @@
           },
           "reasoningBudgetTokens": {
             "type": "number"
+          },
+          "promptCaching": {
+            "$ref": "#/components/schemas/ChatCompletionsPromptCaching",
+            "default": "disabled"
           },
           "secret": {
             "type": "string"

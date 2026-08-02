@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 58;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 59;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -309,7 +309,22 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add bounded external runtime event retention checkpoints",
         apply: repos::external_runtime::migrate_v58_add_external_runtime_event_retention,
     },
+    SchemaMigration {
+        version: 59,
+        description: "add typed chat completions prompt caching policy",
+        apply: migrate_v59_add_chat_completions_prompt_caching,
+    },
 ];
+
+fn migrate_v59_add_chat_completions_prompt_caching(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "ALTER TABLE model_providers
+            ADD COLUMN prompt_caching TEXT NOT NULL DEFAULT 'disabled';",
+    )
+    .map_err(|error| persistence_error("add chat completions prompt caching policy", error))
+}
 
 fn migrate_v53_add_chat_completions_dialect_policy(
     tx: &rusqlite::Transaction<'_>,

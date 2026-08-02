@@ -600,6 +600,7 @@ export interface BrainModelConfig {
     | "preserve_all"
     | "tool_calls_only";
   reasoningBudgetTokens?: number;
+  promptCaching?: "disabled" | "automatic_5m" | "automatic_1h";
   narratorImageInput?: {
     supported: boolean;
     maxImages: number;

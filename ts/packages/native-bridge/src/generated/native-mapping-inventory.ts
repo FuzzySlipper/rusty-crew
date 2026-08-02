@@ -1054,6 +1054,7 @@ export const nativeMappingInventory = {
           "max_output_tokens",
           "metadata_json",
           "model_id",
+          "prompt_caching",
           "protocol",
           "provider_kind",
           "reasoning_effort",

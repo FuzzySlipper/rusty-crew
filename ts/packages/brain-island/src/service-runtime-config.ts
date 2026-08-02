@@ -1063,6 +1063,7 @@ function modelProviderToBrainModelConfig(
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
     reasoningBudgetTokens: provider.reasoningBudgetTokens,
+    promptCaching: provider.promptCaching,
     narratorImageInput: narratorImageInputCapability(provider.metadataJson),
   };
 }
@@ -1437,6 +1438,8 @@ function brainModuleDiagnostics(input: {
       ...chatCompletionsContinuationDiagnostics(input.selection.moduleId),
       ...responsesContinuationDiagnostics(input.selection.moduleId),
       modelId: input.profile.profile.modelConfig.modelName,
+      promptCaching:
+        input.profile.profile.modelConfig.promptCaching ?? "disabled",
       ...(input.profile.profile.modelConfig.baseUrl === undefined
         ? {}
         : { baseUrl: input.profile.profile.modelConfig.baseUrl }),

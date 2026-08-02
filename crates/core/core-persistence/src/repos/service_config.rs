@@ -1,4 +1,5 @@
 use super::super::*;
+use rusty_crew_core_protocol::ChatCompletionsPromptCachingPolicy;
 
 impl CoordinationStore {
     pub fn create_profile_registry_record(
@@ -1449,7 +1450,8 @@ fn query_model_providers(
                 mp.context_window_tokens, mp.max_output_tokens, mp.temperature_milli,
                 mp.reasoning_effort, mp.reasoning_format,
                 mp.chat_completions_dialect, mp.thinking_mode,
-                mp.reasoning_history, mp.reasoning_budget_tokens, mp.credential_id,
+                mp.reasoning_history, mp.reasoning_budget_tokens, mp.prompt_caching,
+                mp.credential_id,
                 sc.secret_ciphertext, sc.secret_updated_at, sc.credential_kind, sc.revision,
                 mp.metadata_json, mp.revision, mp.created_at, mp.updated_at
              FROM model_providers mp
@@ -1478,7 +1480,8 @@ fn get_model_provider(conn: &Connection, alias: &str) -> CoreResult<Option<Model
             mp.context_window_tokens, mp.max_output_tokens, mp.temperature_milli,
             mp.reasoning_effort, mp.reasoning_format,
             mp.chat_completions_dialect, mp.thinking_mode,
-            mp.reasoning_history, mp.reasoning_budget_tokens, mp.credential_id,
+            mp.reasoning_history, mp.reasoning_budget_tokens, mp.prompt_caching,
+            mp.credential_id,
             sc.secret_ciphertext, sc.secret_updated_at, sc.credential_kind, sc.revision,
             mp.metadata_json, mp.revision, mp.created_at, mp.updated_at
          FROM model_providers mp
@@ -1593,6 +1596,7 @@ fn upsert_model_provider_in_tx(
             thinking_mode,
             reasoning_history,
             reasoning_budget_tokens,
+            prompt_caching,
             secret_ciphertext,
             secret_updated_at,
             metadata_json,
@@ -1600,7 +1604,7 @@ fn upsert_model_provider_in_tx(
             created_at,
             updated_at,
             credential_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, NULL, NULL, ?18, ?19, ?20, ?21, ?22)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, NULL, ?19, ?20, ?21, ?22, ?23)
         ON CONFLICT(alias) DO UPDATE SET
             status = excluded.status,
             protocol = excluded.protocol,
@@ -1618,6 +1622,7 @@ fn upsert_model_provider_in_tx(
             thinking_mode = excluded.thinking_mode,
             reasoning_history = excluded.reasoning_history,
             reasoning_budget_tokens = excluded.reasoning_budget_tokens,
+            prompt_caching = excluded.prompt_caching,
             secret_ciphertext = NULL,
             secret_updated_at = NULL,
             metadata_json = excluded.metadata_json,
@@ -1642,6 +1647,7 @@ fn upsert_model_provider_in_tx(
             chat_completions_thinking_mode_as_str(write.thinking_mode),
             chat_completions_reasoning_history_as_str(write.reasoning_history),
             write.reasoning_budget_tokens.map(|value| value as i64),
+            chat_completions_prompt_caching_as_str(write.prompt_caching),
             to_json_text(&write.metadata_json)?,
             revision as i64,
             created_at.as_str(),
@@ -1659,10 +1665,11 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
     let dialect: String = row.get(13)?;
     let thinking_mode: String = row.get(14)?;
     let reasoning_history: String = row.get(15)?;
-    let credential_id: Option<String> = row.get(17)?;
-    let secret_ciphertext: Option<String> = row.get(18)?;
-    let credential_kind: Option<String> = row.get(20)?;
-    let metadata_json: String = row.get(22)?;
+    let prompt_caching: String = row.get(17)?;
+    let credential_id: Option<String> = row.get(18)?;
+    let secret_ciphertext: Option<String> = row.get(19)?;
+    let credential_kind: Option<String> = row.get(21)?;
+    let metadata_json: String = row.get(23)?;
     Ok(ModelProviderRecord {
         alias: row.get(0)?,
         status: model_provider_status_from_str(&status)?,
@@ -1681,6 +1688,7 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
         thinking_mode: chat_completions_thinking_mode_from_str(&thinking_mode)?,
         reasoning_history: chat_completions_reasoning_history_from_str(&reasoning_history)?,
         reasoning_budget_tokens: row.get::<_, Option<i64>>(16)?.map(|value| value as u32),
+        prompt_caching: chat_completions_prompt_caching_from_str(&prompt_caching)?,
         credential_id: credential_id.clone(),
         credential: ModelProviderCredential {
             has_secret: secret_ciphertext.is_some(),
@@ -1688,17 +1696,17 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
                 .as_ref()
                 .and(credential_id.as_ref())
                 .map(|id| format!("db://service_credentials/{id}/secret")),
-            updated_at: row.get(19)?,
+            updated_at: row.get(20)?,
             kind: credential_kind
                 .as_deref()
                 .map(model_provider_credential_kind_from_str)
                 .transpose()?,
-            revision: row.get::<_, Option<i64>>(21)?.map(|value| value as u64),
+            revision: row.get::<_, Option<i64>>(22)?.map(|value| value as u64),
         },
         metadata_json: from_json_text(&metadata_json).map_err(to_sql_error)?,
-        revision: row.get::<_, i64>(23)? as u64,
-        created_at: row.get(24)?,
-        updated_at: row.get(25)?,
+        revision: row.get::<_, i64>(24)? as u64,
+        created_at: row.get(25)?,
+        updated_at: row.get(26)?,
     })
 }
 
@@ -2474,6 +2482,30 @@ fn chat_completions_reasoning_history_from_str(
     }
 }
 
+fn chat_completions_prompt_caching_as_str(
+    policy: ChatCompletionsPromptCachingPolicy,
+) -> &'static str {
+    match policy {
+        ChatCompletionsPromptCachingPolicy::Disabled => "disabled",
+        ChatCompletionsPromptCachingPolicy::Automatic5m => "automatic_5m",
+        ChatCompletionsPromptCachingPolicy::Automatic1h => "automatic_1h",
+    }
+}
+
+fn chat_completions_prompt_caching_from_str(
+    raw: &str,
+) -> rusqlite::Result<ChatCompletionsPromptCachingPolicy> {
+    match raw {
+        "disabled" => Ok(ChatCompletionsPromptCachingPolicy::Disabled),
+        "automatic_5m" => Ok(ChatCompletionsPromptCachingPolicy::Automatic5m),
+        "automatic_1h" => Ok(ChatCompletionsPromptCachingPolicy::Automatic1h),
+        other => Err(model_provider_text_conversion_error(
+            17,
+            format!("unknown chat completions prompt caching policy {other}"),
+        )),
+    }
+}
+
 fn model_provider_text_conversion_error(column: usize, message: String) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         column,
@@ -2617,10 +2649,36 @@ pub(crate) fn validate_model_provider_write(write: &ModelProviderWrite) -> CoreR
         collect_required_text("model provider base_url", base_url)?;
     }
     validate_chat_completions_dialect_policy(write)?;
+    validate_chat_completions_prompt_caching_policy(write)?;
     if write.clear_secret && write.secret.is_some() {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "model provider write cannot set and clear secret in one request",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_chat_completions_prompt_caching_policy(write: &ModelProviderWrite) -> CoreResult<()> {
+    if write.prompt_caching == ChatCompletionsPromptCachingPolicy::Disabled {
+        return Ok(());
+    }
+    if write.protocol != ModelProviderProtocol::ChatCompletions {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "prompt caching policy requires protocol chat_completions",
+        ));
+    }
+    if write.provider_kind != "openrouter" {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "automatic prompt caching requires provider_kind openrouter",
+        ));
+    }
+    if !write.model_id.starts_with("anthropic/") {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "automatic OpenRouter prompt caching requires an anthropic/ model id",
         ));
     }
     Ok(())
@@ -3088,6 +3146,7 @@ mod tests {
             thinking_mode: Default::default(),
             reasoning_history: Default::default(),
             reasoning_budget_tokens: None,
+            prompt_caching: Default::default(),
             secret,
             clear_secret: false,
             expected_credential_revision: None,

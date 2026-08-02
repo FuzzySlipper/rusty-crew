@@ -8,12 +8,13 @@
 use super::*;
 use crate::repos::runtime_counters::COUNTER_MESSAGES;
 use rusty_crew_core_protocol::{
-    AgentMessage, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
-    MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryIndexingPolicy,
-    MemoryOperationPolicy, MemoryPromptPolicy, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
-    MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
-    MemoryRetrievalStrategy, MemoryScope, MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel,
-    MemoryWritePolicy, ModelProviderCredentialKind, ProfileRegistryDerivedRuntimeRef,
+    AgentMessage, ChatCompletionsPromptCachingPolicy, MemoryConflictPolicy,
+    MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryEvidenceRef, MemoryExportImportPolicy,
+    MemoryFieldType, MemoryIndexingPolicy, MemoryOperationPolicy, MemoryPromptPolicy,
+    MemoryProvenancePolicy, MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor,
+    MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy,
+    MemoryScope, MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
+    ModelProviderCredentialKind, ProfileRegistryDerivedRuntimeRef,
     ProfileRegistryImportExportMetadata, ProfileRegistrySourceAssetRef, ToolDescriptor,
     MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
 };
@@ -169,6 +170,7 @@ mod repository_conformance {
         conversation_branch_message_contract(backend);
         provider_wire_state_expiry_contract(backend);
         model_provider_secret_envelope_contract(backend);
+        model_provider_prompt_caching_contract(backend);
     }
 
     fn page() -> QueryPage {
@@ -937,6 +939,38 @@ mod repository_conformance {
             assert!(!serde_json::to_string(&oauth.credential)
                 .unwrap()
                 .contains("refresh-token"));
+        });
+    }
+
+    fn model_provider_prompt_caching_contract<B: RepositoryConformanceBackend>(backend: &B) {
+        backend.with_store("model-provider-prompt-caching", |store| {
+            let mut write = model_provider_write(
+                "haiku-cache",
+                ModelProviderProtocol::ChatCompletions,
+                "openrouter",
+                "anthropic/claude-haiku-4.5",
+                None,
+            );
+            write.prompt_caching = ChatCompletionsPromptCachingPolicy::Automatic5m;
+            let stored = store.upsert_model_provider(&write).unwrap();
+            assert_eq!(
+                stored.prompt_caching,
+                ChatCompletionsPromptCachingPolicy::Automatic5m
+            );
+
+            write.alias = "wrong-provider".to_string();
+            write.provider_kind = "anthropic".to_string();
+            assert!(store.upsert_model_provider(&write).is_err());
+
+            write.alias = "wrong-model".to_string();
+            write.provider_kind = "openrouter".to_string();
+            write.model_id = "openai/gpt-4.1-mini".to_string();
+            assert!(store.upsert_model_provider(&write).is_err());
+
+            write.alias = "wrong-protocol".to_string();
+            write.model_id = "anthropic/claude-haiku-4.5".to_string();
+            write.protocol = ModelProviderProtocol::Responses;
+            assert!(store.upsert_model_provider(&write).is_err());
         });
     }
 }
@@ -7171,6 +7205,7 @@ fn model_provider_write(
         thinking_mode: Default::default(),
         reasoning_history: Default::default(),
         reasoning_budget_tokens: None,
+        prompt_caching: Default::default(),
         secret: secret.map(ToString::to_string),
         clear_secret: false,
         expected_credential_revision: None,

@@ -5330,6 +5330,7 @@ fn sample_model_provider_record() -> ModelProviderRecord {
         thinking_mode: Default::default(),
         reasoning_history: Default::default(),
         reasoning_budget_tokens: None,
+        prompt_caching: Default::default(),
         credential_id: Some("provider:validation-provider".to_owned()),
         credential: ModelProviderCredential {
             has_secret: true,

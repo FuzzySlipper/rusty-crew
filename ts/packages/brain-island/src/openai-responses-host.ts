@@ -131,6 +131,7 @@ function modelProviderWriteFromRecord(provider: NativeModelProviderRecord) {
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
     reasoningBudgetTokens: provider.reasoningBudgetTokens,
+    promptCaching: provider.promptCaching,
     clearSecret: false,
     expectedCredentialRevision: provider.credential.revision,
     metadataJson: provider.metadataJson,

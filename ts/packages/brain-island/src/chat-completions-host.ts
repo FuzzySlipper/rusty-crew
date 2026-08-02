@@ -211,6 +211,8 @@ function createRustChatCompletionsBrainHostExecutor(
           reasoningHistory:
             context.profile.profile.modelConfig.reasoningHistory ??
             "provider_default",
+          promptCaching:
+            context.profile.profile.modelConfig.promptCaching ?? "disabled",
           reasoningBudgetTokens:
             context.profile.profile.modelConfig.reasoningBudgetTokens,
           providerStateStrategyId:

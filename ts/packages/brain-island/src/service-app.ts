@@ -2713,6 +2713,7 @@ function recordResponsesWakeMetrics(
   const brainStreamItemCounts =
     observation.result.brainStreamItemCounts ??
     countBrainStreamItems(observation.result);
+  const chatMetrics = "promptCachingPolicy" in metrics ? metrics : undefined;
   state.responsesWakeMetrics.unshift({
     profileId: observation.profileId,
     sessionId: observation.sessionId,
@@ -2726,6 +2727,21 @@ function recordResponsesWakeMetrics(
     continuationRoundCount: metrics.continuationRoundCount,
     providerRequestPayloadBytes: metrics.providerRequestPayloadBytes,
     providerEventCounts: metrics.providerEventCounts,
+    ...(chatMetrics?.promptCachingPolicy === undefined
+      ? {}
+      : { promptCachingPolicy: chatMetrics.promptCachingPolicy }),
+    ...(chatMetrics?.openrouterSessionId === undefined
+      ? {}
+      : { openrouterSessionId: chatMetrics.openrouterSessionId }),
+    ...(chatMetrics?.promptTokens === undefined
+      ? {}
+      : { promptTokens: chatMetrics.promptTokens }),
+    ...(chatMetrics?.cachedPromptTokens === undefined
+      ? {}
+      : { cachedPromptTokens: chatMetrics.cachedPromptTokens }),
+    ...(chatMetrics?.cacheWritePromptTokens === undefined
+      ? {}
+      : { cacheWritePromptTokens: chatMetrics.cacheWritePromptTokens }),
     brainEventCounts,
     brainStreamItemCounts,
     streamRetentionMetrics: observation.result.streamRetentionMetrics,
@@ -6157,6 +6173,7 @@ function modelProviderToBrainModelConfig(
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
     reasoningBudgetTokens: provider.reasoningBudgetTokens,
+    promptCaching: provider.promptCaching,
   };
 }
 

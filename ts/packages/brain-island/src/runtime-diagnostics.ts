@@ -239,6 +239,7 @@ export interface RuntimeBrainModuleDiagnostics {
     temperatureMilli?: number;
     reasoningEffort?: string;
     reasoningFormat?: string;
+    promptCaching?: "disabled" | "automatic_5m" | "automatic_1h";
     credential?: {
       hasSecret: boolean;
       secretRef?: string;
@@ -279,6 +280,11 @@ export interface RuntimeResponsesWakeMetrics {
   continuationRoundCount: number;
   providerRequestPayloadBytes: number;
   providerEventCounts: Record<string, number>;
+  promptCachingPolicy?: "disabled" | "automatic_5m" | "automatic_1h";
+  openrouterSessionId?: string;
+  promptTokens?: number;
+  cachedPromptTokens?: number;
+  cacheWritePromptTokens?: number;
   brainEventCounts: Record<string, number>;
   brainStreamItemCounts: Record<string, number>;
   streamRetentionMetrics?: import("@rusty-crew/native-bridge").NativeBufferedBrainStreamRetentionMetrics;

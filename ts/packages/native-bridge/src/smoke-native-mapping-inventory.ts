@@ -8,7 +8,7 @@ const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const source = readFileSync(sourcePath, "utf8");
 const sourceDirectory = fileURLToPath(new URL("./", import.meta.url));
 const familySourceNames = readdirSync(sourceDirectory)
-  .filter((name) => /(?:-wrappers|-wire|public-api)\.ts$/.test(name))
+  .filter((name) => /(?:-wrappers|-wire(?:-types)?|public-api)\.ts$/.test(name))
   .sort();
 const bridgeSources = [
   source,

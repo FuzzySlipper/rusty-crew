@@ -84,6 +84,7 @@ export interface NativeModelProviderRecord {
   thinkingMode: NativeChatCompletionsThinkingMode;
   reasoningHistory: NativeChatCompletionsReasoningHistory;
   reasoningBudgetTokens?: number;
+  promptCaching: NativeChatCompletionsPromptCachingPolicy;
   credentialId?: string;
   credential: NativeModelProviderCredential;
   metadataJson: unknown;
@@ -110,6 +111,7 @@ export interface NativeModelProviderWrite {
   thinkingMode?: NativeChatCompletionsThinkingMode;
   reasoningHistory?: NativeChatCompletionsReasoningHistory;
   reasoningBudgetTokens?: number;
+  promptCaching?: NativeChatCompletionsPromptCachingPolicy;
   secret?: string;
   clearSecret?: boolean;
   expectedCredentialRevision?: number;
@@ -133,5 +135,9 @@ export type NativeChatCompletionsReasoningHistory =
   | "discard"
   | "preserve_all"
   | "tool_calls_only";
+export type NativeChatCompletionsPromptCachingPolicy =
+  | "disabled"
+  | "automatic_5m"
+  | "automatic_1h";
 
 export * from "./model-provider-refresh-public-api.js";

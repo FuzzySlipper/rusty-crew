@@ -522,6 +522,7 @@ function modelProviderWriteFromBody(
     thinkingMode: chatCompletionsThinkingMode(body.thinkingMode),
     reasoningHistory: chatCompletionsReasoningHistory(body.reasoningHistory),
     reasoningBudgetTokens: optionalNumber(body.reasoningBudgetTokens),
+    promptCaching: chatCompletionsPromptCaching(body.promptCaching),
     secret: modelProviderSecretFromBody(body),
     clearSecret: optionalBoolean(body.clearSecret),
     expectedCredentialRevision: optionalNumber(
@@ -581,6 +582,22 @@ function chatCompletionsReasoningHistory(
   }
   throw new Error(
     "model provider reasoningHistory must be provider_default, discard, preserve_all, or tool_calls_only",
+  );
+}
+
+function chatCompletionsPromptCaching(
+  value: unknown,
+): NonNullable<NativeModelProviderWrite["promptCaching"]> {
+  const policy = optionalString(value) ?? "disabled";
+  if (
+    policy === "disabled" ||
+    policy === "automatic_5m" ||
+    policy === "automatic_1h"
+  ) {
+    return policy;
+  }
+  throw new Error(
+    "model provider promptCaching must be disabled, automatic_5m, or automatic_1h",
   );
 }
 

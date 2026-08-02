@@ -1,4 +1,4 @@
-export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.5.0";
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.6.0";
 
 export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
   "docs/model-provider-admin-api-v0.openapi.json";
@@ -45,6 +45,15 @@ export const CHAT_COMPLETIONS_REASONING_HISTORY_VALUES = [
 
 export type ChatCompletionsReasoningHistory =
   (typeof CHAT_COMPLETIONS_REASONING_HISTORY_VALUES)[number];
+
+export const CHAT_COMPLETIONS_PROMPT_CACHING_VALUES = [
+  "disabled",
+  "automatic_5m",
+  "automatic_1h",
+] as const;
+
+export type ChatCompletionsPromptCaching =
+  (typeof CHAT_COMPLETIONS_PROMPT_CACHING_VALUES)[number];
 
 export const MODEL_PROVIDER_REFRESH_MODE_VALUES = [
   "none",
@@ -117,6 +126,7 @@ export const MODEL_PROVIDER_API_RECORD_REQUIRED_FIELDS = [
   "chatCompletionsDialect",
   "thinkingMode",
   "reasoningHistory",
+  "promptCaching",
   "credential",
   "metadataJson",
   "revision",

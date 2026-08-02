@@ -706,6 +706,7 @@ export async function rustyViewSessionContextUsage(
       thinking_mode: provider?.thinkingMode,
       reasoning_history: provider?.reasoningHistory,
       reasoning_budget_tokens: provider?.reasoningBudgetTokens,
+      prompt_caching: provider?.promptCaching,
       thinking_settings_applied:
         provider?.protocol === "chat_completions" &&
         provider.chatCompletionsDialect !== "standard" &&

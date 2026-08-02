@@ -61,6 +61,7 @@ chat completions or vice versa.
 | `thinkingMode` | `provider_default`, `enabled`, or `disabled` |
 | `reasoningHistory` | `provider_default`, `discard`, `preserve_all`, or `tool_calls_only` |
 | `reasoningBudgetTokens` | Optional Qwen-only thinking budget |
+| `promptCaching` | `disabled`, `automatic_5m`, or `automatic_1h` for typed Anthropic/OpenRouter cache control |
 | `credentialSecret` | Typed secret envelope for API key or OAuth material |
 | `metadataJson` | Non-secret provider-specific metadata |
 | `expectedRevision` | Optimistic concurrency revision for updates |
@@ -122,6 +123,25 @@ always preserves thinking, so configure `reasoningHistory: "preserve_all"` and
 retain every assistant `reasoning_content` value exactly. These constraints
 follow Moonshot's tool-loop guidance and are enforced at provider-write and
 Rust brain boundaries.
+
+### Anthropic Prompt Caching Through OpenRouter
+
+Prompt caching is disabled unless the provider record selects `promptCaching`.
+The enabled policies are accepted only for `chat_completions` records with
+`providerKind: "openrouter"` and an `anthropic/*` model ID. Unsupported
+combinations fail during the provider write rather than silently omitting the
+directive.
+
+`automatic_5m` sends top-level `cache_control: {"type":"ephemeral"}`.
+`automatic_1h` additionally sends `"ttl":"1h"`. Both policies send a stable,
+non-secret OpenRouter `session_id` derived from the Crew session identity so
+sticky routing survives later wakes and Crew restarts. Diagnostics report the
+effective policy, sticky identifier, prompt tokens, cached prompt tokens, and
+cache-write prompt tokens.
+
+The message/tool prefix remains in normal deterministic request order; Crew
+does not insert cache markers into individual content blocks. The disabled
+policy emits neither `cache_control` nor `session_id`.
 
 ## Admin API
 

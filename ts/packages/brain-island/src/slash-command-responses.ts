@@ -99,6 +99,7 @@ function modelResponse(
       thinkingMode: model.provider.thinking_mode ?? "provider default",
       reasoningHistory: model.provider.reasoning_history ?? "provider default",
       reasoningBudgetTokens: model.provider.reasoning_budget_tokens ?? 0,
+      promptCaching: model.provider.prompt_caching ?? "disabled",
       thinkingSettingsApplied:
         model.provider.thinking_settings_applied ?? false,
       thinkingModeApplied: model.provider.thinking_mode_applied ?? false,

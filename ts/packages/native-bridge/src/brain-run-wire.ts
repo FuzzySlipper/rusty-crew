@@ -460,6 +460,11 @@ export function toRawBufferedBrainRunDrainResult(
             provider_request_count: chatMetrics.providerRequestCount,
             tool_round_count: chatMetrics.toolRoundCount,
             provider_event_counts: chatMetrics.providerEventCounts,
+            prompt_caching_policy: chatMetrics.promptCachingPolicy,
+            openrouter_session_id: chatMetrics.openrouterSessionId,
+            prompt_tokens: chatMetrics.promptTokens,
+            cached_prompt_tokens: chatMetrics.cachedPromptTokens,
+            cache_write_prompt_tokens: chatMetrics.cacheWritePromptTokens,
           }
         : (result.transportMetrics as OpenAiResponsesTransportMetrics);
   return {

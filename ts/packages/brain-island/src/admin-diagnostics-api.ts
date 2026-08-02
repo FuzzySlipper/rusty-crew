@@ -514,7 +514,10 @@ function redactValue(value: unknown, key?: string): unknown {
 
   const output: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
-    if (isSecretLikeKey(key)) {
+    if (
+      isSecretLikeKey(key) &&
+      !(typeof nested === "number" && /tokens$/i.test(key))
+    ) {
       output[key] = "[redacted]";
     } else {
       output[key] = redactValue(nested, key);
