@@ -961,6 +961,14 @@ pub enum ChatCompletionsEvent {
     Finished {
         finish_reason: Option<String>,
     },
+    TransportRetry {
+        attempt: u64,
+        backoff_ms: u64,
+        message: String,
+    },
+    TransportRecovered {
+        attempts: u64,
+    },
     ProviderError(String),
 }
 
@@ -2585,6 +2593,46 @@ impl ChatCompletionsEventMapper {
                     metadata_json: None,
                 },
             )],
+            ChatCompletionsEvent::TransportRetry {
+                attempt,
+                backoff_ms,
+                message,
+            } => vec![brain_event_item(
+                context,
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Degraded,
+                    message:
+                        "Provider transport was unavailable before a response; retrying the same frozen request."
+                            .to_string(),
+                    metadata_json: Some(
+                        json!({
+                            "kind": "provider_transport_retry",
+                            "reason_code": "chat_completions_provider_transport_retry",
+                            "attempt": attempt,
+                            "backoff_ms": backoff_ms,
+                            "error": message,
+                        })
+                        .to_string(),
+                    ),
+                },
+            )],
+            ChatCompletionsEvent::TransportRecovered { attempts } => vec![brain_event_item(
+                context,
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Info,
+                    message:
+                        "Provider transport recovered; continuing the same logical turn."
+                            .to_string(),
+                    metadata_json: Some(
+                        json!({
+                            "kind": "provider_transport_recovered",
+                            "reason_code": "chat_completions_provider_transport_recovered",
+                            "attempts": attempts,
+                        })
+                        .to_string(),
+                    ),
+                },
+            )],
             ChatCompletionsEvent::ToolCallMalformed(call) => vec![brain_event_item(
                 context,
                 BrainEvent::ProviderStatus {
@@ -2904,6 +2952,8 @@ fn record_provider_event(counts: &mut BTreeMap<String, usize>, event: &ChatCompl
         ChatCompletionsEvent::ToolCallMalformed(_) => &["tool_call_malformed"],
         ChatCompletionsEvent::Usage(_) => &["usage"],
         ChatCompletionsEvent::Finished { .. } => &["finished"],
+        ChatCompletionsEvent::TransportRetry { .. } => &["transport_retry"],
+        ChatCompletionsEvent::TransportRecovered { .. } => &["transport_recovered"],
         ChatCompletionsEvent::ProviderError(_) => &["provider_error"],
     };
     for key in keys {
@@ -3385,6 +3435,10 @@ pub enum ChatCompletionsStreamError {
     ClosedBeforeFinish,
     #[error("provider returned error: {0}")]
     ProviderError(String),
+    #[error("provider transport failed before response: {0}")]
+    TransportBeforeResponse(String),
+    #[error("provider returned HTTP {status}: {body}")]
+    HttpStatus { status: u16, body: String },
     #[error("provider transport error: {0}")]
     Transport(String),
 }
@@ -3472,20 +3526,80 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
         request: ChatCompletionsRequest,
         on_event: &mut dyn FnMut(&ChatCompletionsEvent),
     ) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
-        let mut request = self.client.post(&self.endpoint).json(&request);
-        if let Some(bearer_token) = &self.bearer_token {
-            request = request.bearer_auth(bearer_token);
+        let mut retry_attempt = 0_u64;
+        loop {
+            let mut provider_request = self.client.post(&self.endpoint).json(&request);
+            if let Some(bearer_token) = &self.bearer_token {
+                provider_request = provider_request.bearer_auth(bearer_token);
+            }
+            let recovered_attempts = retry_attempt;
+            let mut recovered_emitted = false;
+            let result = self.runtime.block_on(stream_chat_completions_response(
+                provider_request,
+                self.provider_request_timeout,
+                &self.cancellation,
+                &mut |event| {
+                    if recovered_attempts > 0 && !recovered_emitted {
+                        recovered_emitted = true;
+                        on_event(&ChatCompletionsEvent::TransportRecovered {
+                            attempts: recovered_attempts,
+                        });
+                    }
+                    on_event(event);
+                },
+            ));
+            match result {
+                Ok(events) => {
+                    if recovered_attempts > 0 && !recovered_emitted {
+                        on_event(&ChatCompletionsEvent::TransportRecovered {
+                            attempts: recovered_attempts,
+                        });
+                    }
+                    return Ok(events);
+                }
+                Err(ChatCompletionsStreamError::TransportBeforeResponse(message)) => {
+                    retry_attempt = retry_attempt.saturating_add(1);
+                    let backoff = provider_transport_retry_backoff(retry_attempt);
+                    on_event(&ChatCompletionsEvent::TransportRetry {
+                        attempt: retry_attempt,
+                        backoff_ms: backoff.as_millis().try_into().unwrap_or(u64::MAX),
+                        message,
+                    });
+                    self.runtime.block_on(wait_for_provider_transport_retry(
+                        backoff,
+                        &self.cancellation,
+                    ))?;
+                }
+                Err(error) => return Err(error),
+            }
         }
-        self.runtime.block_on(stream_chat_completions_response(
-            request,
-            self.provider_request_timeout,
-            &self.cancellation,
-            on_event,
-        ))
     }
 }
 
 const PROVIDER_CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const PROVIDER_TRANSPORT_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
+const PROVIDER_TRANSPORT_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(5);
+
+fn provider_transport_retry_backoff(attempt: u64) -> Duration {
+    let multiplier = 1_u32 << attempt.saturating_sub(1).min(5);
+    PROVIDER_TRANSPORT_RETRY_INITIAL_BACKOFF
+        .saturating_mul(multiplier)
+        .min(PROVIDER_TRANSPORT_RETRY_MAX_BACKOFF)
+}
+
+async fn wait_for_provider_transport_retry(
+    backoff: Duration,
+    cancellation: &ProviderCancellation,
+) -> Result<(), ChatCompletionsStreamError> {
+    let deadline = Instant::now() + backoff;
+    loop {
+        ensure_provider_request_active(cancellation, None)?;
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Ok(());
+        };
+        tokio::time::sleep(remaining.min(PROVIDER_CANCELLATION_POLL_INTERVAL)).await;
+    }
+}
 
 async fn stream_chat_completions_response(
     request: reqwest::RequestBuilder,
@@ -3499,16 +3613,17 @@ async fn stream_chat_completions_response(
         ensure_provider_request_active(cancellation, deadline)?;
         let poll_for = provider_poll_duration(deadline)?;
         match tokio::time::timeout(poll_for, &mut send).await {
-            Ok(result) => break result.map_err(transport_error)?,
+            Ok(result) => break result.map_err(pre_response_transport_error)?,
             Err(_) => continue,
         }
     };
     let status = response.status();
     if !status.is_success() {
         let body = read_provider_response_text(&mut response, cancellation, deadline).await?;
-        return Err(ChatCompletionsStreamError::Transport(format!(
-            "HTTP {status}: {body}"
-        )));
+        return Err(ChatCompletionsStreamError::HttpStatus {
+            status: status.as_u16(),
+            body,
+        });
     }
     parse_async_sse_response(&mut response, cancellation, deadline, on_event).await
 }
@@ -3594,6 +3709,10 @@ fn chat_completions_endpoint(base_url: &str) -> String {
 
 fn transport_error(error: reqwest::Error) -> ChatCompletionsStreamError {
     ChatCompletionsStreamError::Transport(error.to_string())
+}
+
+fn pre_response_transport_error(error: reqwest::Error) -> ChatCompletionsStreamError {
+    ChatCompletionsStreamError::TransportBeforeResponse(error.to_string())
 }
 
 pub fn parse_sse_reader<R: Read>(
@@ -4051,30 +4170,78 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test provider");
         let address = listener.local_addr().expect("test provider address");
         thread::spawn(move || {
+            serve_chat_completions_response(listener, delay);
+        });
+        format!("http://{address}/v1")
+    }
+
+    fn recovering_chat_completions_server(start_delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve test provider port");
+        let address = listener.local_addr().expect("test provider address");
+        drop(listener);
+        thread::spawn(move || {
+            thread::sleep(start_delay);
+            let listener = TcpListener::bind(address).expect("restart test provider");
+            serve_chat_completions_response(listener, Duration::ZERO);
+        });
+        format!("http://{address}/v1")
+    }
+
+    fn unavailable_chat_completions_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve unavailable port");
+        let address = listener.local_addr().expect("unavailable provider address");
+        drop(listener);
+        format!("http://{address}/v1")
+    }
+
+    fn http_error_chat_completions_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind error provider");
+        let address = listener.local_addr().expect("error provider address");
+        thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept provider request");
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                let read = stream.read(&mut buffer).expect("read provider request");
-                if read == 0 {
-                    break;
-                }
-                request.extend_from_slice(&buffer[..read]);
-            }
-            thread::sleep(delay);
-            let body = concat!(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
-                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
-                "data: [DONE]\n\n"
-            );
+            read_request_headers(&mut stream);
+            let body = "provider overloaded";
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
-            let _ = stream.write_all(response.as_bytes());
+            stream
+                .write_all(response.as_bytes())
+                .expect("write provider error");
         });
         format!("http://{address}/v1")
+    }
+
+    fn serve_chat_completions_response(listener: TcpListener, delay: Duration) {
+        let (mut stream, _) = listener.accept().expect("accept provider request");
+        read_request_headers(&mut stream);
+        thread::sleep(delay);
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write provider response");
+    }
+
+    fn read_request_headers(stream: &mut impl Read) {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).expect("read provider request");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
     }
 
     fn live_chat_request() -> ChatCompletionsRequest {
@@ -4164,6 +4331,94 @@ mod tests {
             started_at.elapsed() < Duration::from_millis(500),
             "cancellation should interrupt the active HTTP future promptly"
         );
+    }
+
+    #[test]
+    fn retries_pre_response_transport_until_provider_recovers() {
+        let base_url = recovering_chat_completions_server(Duration::from_millis(400));
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+        let mut observed = Vec::new();
+
+        let events = client
+            .stream_observed(live_chat_request(), &mut |event| {
+                observed.push(event.clone())
+            })
+            .expect("provider restart should preserve the request");
+
+        let retry_index = observed
+            .iter()
+            .position(|event| matches!(event, ChatCompletionsEvent::TransportRetry { .. }))
+            .expect("degraded retry event");
+        let recovered_index = observed
+            .iter()
+            .position(|event| matches!(event, ChatCompletionsEvent::TransportRecovered { .. }))
+            .expect("recovered event");
+        let content_indexes = observed
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| {
+                matches!(event, ChatCompletionsEvent::ContentDelta(text) if text == "ok")
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        assert!(retry_index < recovered_index);
+        assert_eq!(
+            content_indexes.len(),
+            1,
+            "provider output must not duplicate"
+        );
+        assert!(recovered_index < content_indexes[0]);
+        assert!(events.iter().any(
+            |event| matches!(event, ChatCompletionsEvent::ContentDelta(text) if text == "ok")
+        ));
+    }
+
+    #[test]
+    fn cancellation_interrupts_pre_response_transport_retry_backoff() {
+        let base_url = unavailable_chat_completions_server();
+        let cancellation = ProviderCancellation::default();
+        let cancel_from_thread = cancellation.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(75));
+            cancel_from_thread.cancel();
+        });
+        let mut client = LiveChatCompletionsClient::new(base_url, None, None, cancellation)
+            .expect("create live client");
+        let mut observed = Vec::new();
+        let started_at = Instant::now();
+
+        assert_eq!(
+            client.stream_observed(live_chat_request(), &mut |event| observed
+                .push(event.clone())),
+            Err(ChatCompletionsStreamError::Cancelled)
+        );
+        assert!(observed
+            .iter()
+            .any(|event| matches!(event, ChatCompletionsEvent::TransportRetry { .. })));
+        assert!(started_at.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn http_status_errors_are_not_retried_as_transport_interruptions() {
+        let base_url = http_error_chat_completions_server();
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+        let mut observed = Vec::new();
+
+        assert_eq!(
+            client.stream_observed(live_chat_request(), &mut |event| observed
+                .push(event.clone())),
+            Err(ChatCompletionsStreamError::HttpStatus {
+                status: 503,
+                body: "provider overloaded".to_string(),
+            })
+        );
+        assert!(!observed
+            .iter()
+            .any(|event| matches!(event, ChatCompletionsEvent::TransportRetry { .. })));
     }
 
     #[test]
@@ -7040,6 +7295,65 @@ mod tests {
                 },
                 BrainEvent::Finished,
             ]
+        );
+    }
+
+    #[test]
+    fn mapper_projects_transport_retry_and_recovery_status() {
+        let context = context();
+        let mut mapper = ChatCompletionsEventMapper::new();
+
+        let retry = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::TransportRetry {
+                attempt: 2,
+                backoff_ms: 500,
+                message: "connection refused".to_string(),
+            },
+        );
+        let recovered = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::TransportRecovered { attempts: 2 },
+        );
+
+        let retry_events = events(&retry);
+        let [BrainEvent::ProviderStatus {
+            level: retry_level,
+            metadata_json: Some(retry_metadata),
+            ..
+        }] = retry_events.as_slice()
+        else {
+            panic!("retry must project one provider status event");
+        };
+        assert_eq!(*retry_level, BrainProviderStatusLevel::Degraded);
+        assert_eq!(
+            serde_json::from_str::<Value>(retry_metadata).expect("retry metadata"),
+            json!({
+                "kind": "provider_transport_retry",
+                "reason_code": "chat_completions_provider_transport_retry",
+                "attempt": 2,
+                "backoff_ms": 500,
+                "error": "connection refused",
+            })
+        );
+
+        let recovered_events = events(&recovered);
+        let [BrainEvent::ProviderStatus {
+            level: recovered_level,
+            metadata_json: Some(recovered_metadata),
+            ..
+        }] = recovered_events.as_slice()
+        else {
+            panic!("recovery must project one provider status event");
+        };
+        assert_eq!(*recovered_level, BrainProviderStatusLevel::Info);
+        assert_eq!(
+            serde_json::from_str::<Value>(recovered_metadata).expect("recovery metadata"),
+            json!({
+                "kind": "provider_transport_recovered",
+                "reason_code": "chat_completions_provider_transport_recovered",
+                "attempts": 2,
+            })
         );
     }
 

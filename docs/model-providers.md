@@ -40,6 +40,25 @@ Provider compatibility still depends on the remote endpoint implementing the
 selected wire protocol. Rusty Crew does not translate Responses semantics into
 chat completions or vice versa.
 
+## Provider Transport Interruptions
+
+The Chat Completions brain retries a request when the provider connection fails
+before any HTTP response arrives. It resends the same frozen request, uses
+cancellation-aware backoff capped at five seconds, and has no finite retry
+count. The session emits degraded and recovered provider-status events so the
+interruption remains visible without terminating a healthy long-running turn.
+No tool is re-executed by this retry path.
+
+HTTP error responses and failures after response streaming begins remain
+distinct terminal outcomes. Once streaming has begun, Crew cannot assume that
+reissuing the request is side-effect-free or that partial output can be replayed
+without duplication.
+
+Prefer provider/router hot reload or a drained rolling restart when active Crew
+turns may be using the endpoint. If an unavoidable restart drops only
+not-yet-answered connections, Crew waits for the endpoint to return. Operators
+can cancel the turn explicitly if the outage should not be waited out.
+
 ## Provider Fields
 
 | Field | Meaning |
