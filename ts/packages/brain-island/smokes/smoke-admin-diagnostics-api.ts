@@ -10,6 +10,7 @@ import type {
 import {
   buildAdapterDiagnosticsProjection,
   buildBackgroundServiceDiagnosticsProjection,
+  builtInSkillCatalogDiagnostics,
   buildMemorySurfaceCatalog,
   buildRuntimeDiagnosticsProjection,
   buildToolRegistryDiagnostics,
@@ -1014,9 +1015,42 @@ assert.deepEqual(
     "runtime_search",
     "external_memory",
     "den_planning",
+    "built_in_skills",
     "skills",
     "session_todo",
   ],
+);
+const builtInSkillSurface = memorySurfaceData.items.find(
+  (item) => item.surfaceId === "built_in_skills",
+);
+assert.equal(builtInSkillSurface?.availability, "available");
+assert.equal(builtInSkillSurface?.owner, "crew");
+assert.deepEqual(builtInSkillSurface?.modelFacingToolNames, [
+  "rusty_crew_help",
+  "skills_list",
+  "skill_view",
+]);
+assert.match(
+  builtInSkillSurface?.notes.join("\n") ?? "",
+  /sha256:[a-f0-9]{64}/,
+);
+const builtInSkills = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/built-in-skills" },
+  {
+    diagnostics,
+    builtInSkills: builtInSkillCatalogDiagnostics(),
+  },
+);
+assert.equal(builtInSkills.status, 200);
+const builtInSkillData =
+  okData<ReturnType<typeof builtInSkillCatalogDiagnostics>>(builtInSkills);
+assert.equal(builtInSkillData.ok, true);
+assert.equal(builtInSkillData.registeredSkillCount, 1);
+assert.equal(builtInSkillData.promptPointer.available, true);
+assert.equal(builtInSkillData.promptPointer.bodyEmbedded, false);
+assert.match(
+  builtInSkillData.promptPointer.fingerprint,
+  /^sha256:[a-f0-9]{64}$/,
 );
 const externalMemorySurface = memorySurfaceData.items.find(
   (item) => item.surfaceId === "external_memory",

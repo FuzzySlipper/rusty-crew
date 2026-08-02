@@ -518,6 +518,11 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:scene-state-tool",
   },
   {
+    name: "rusty_crew_help",
+    implementationModule: "./skills-tools.js#rustyCrewHelpTool",
+    inventoryTest: "smoke:skills-tools",
+  },
+  {
     name: "skills_list",
     implementationModule: "./skills-tools.js#skillsListTool",
     inventoryTest: "smoke:tool-registry",

@@ -72,6 +72,7 @@ import {
   type MemorySpaceDiagnosticsProjection,
 } from "./admin-diagnostics-api.js";
 import { buildMemorySurfaceCatalog } from "./memory-surface-diagnostics.js";
+import { builtInSkillCatalogDiagnostics } from "./built-in-skills.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
 import { handleAdminBrainCatalogRequest } from "./service-brain-catalog-routes.js";
 import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
@@ -2110,6 +2111,7 @@ async function buildDiagnosticsContext(
     storage,
     memorySpaces,
     memorySurfaces,
+    builtInSkills: builtInSkillCatalogDiagnostics(),
     profileRegistry,
     curatorCandidates: curatorReadback?.candidates,
     curatorMutations: curatorReadback?.mutations,

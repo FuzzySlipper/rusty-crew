@@ -4,6 +4,7 @@ import type {
   NativeSessionMemoryRecord,
 } from "@rusty-crew/native-bridge";
 import type { LoadedProfileContext } from "./profile-loading.js";
+import { RUSTY_CREW_HARNESS_PROMPT_POINTER } from "./built-in-skills.js";
 
 export type ExternalMemoryPromptMode =
   | "off"
@@ -69,6 +70,7 @@ export function buildProfileRoleAssembly(
     markdownSection("Profile Soul", context.profile.prompt?.soulMarkdown),
     markdownSection("Profile Memory", context.profile.prompt?.memoryMarkdown),
     instructionSection(context.profile.prompt?.instructions ?? []),
+    RUSTY_CREW_HARNESS_PROMPT_POINTER,
     options.externalMemoryContext,
     options.denseProfileMemoryContext,
     options.sessionMemoryContext,

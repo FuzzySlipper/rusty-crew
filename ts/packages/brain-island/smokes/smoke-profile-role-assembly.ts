@@ -132,6 +132,7 @@ Look for concrete regressions and cite evidence.
     "# Profile Soul",
     "# Profile Memory",
     "# Profile Instructions",
+    "# Rusty Crew Harness",
     "# External Memory",
     "# Dense Profile Memory",
     "# Selected Skills",
@@ -143,6 +144,11 @@ Look for concrete regressions and cite evidence.
   assert.match(instructions, /Review Rubric/);
   assert.match(instructions, /careful reviewer/);
   assert.match(instructions, /concrete evidence/);
+  assert.match(instructions, /call rusty_crew_help/);
+  assert.doesNotMatch(
+    instructions,
+    /https:\/\/github\.com\/FuzzySlipper\/rusty-crew/,
+  );
   assert.match(instructions, /configured external memory/i);
   assert.match(instructions, /configured Den MCP planning tools/i);
   assert.match(instructions, /review-style/);
@@ -157,6 +163,14 @@ Look for concrete regressions and cite evidence.
     includeSkillBodies: false,
   });
   assert.equal(overridden.systemPrompt, "Explicit system override.");
+  assert.match(
+    overridden.roleAssembly.instructions ?? "",
+    /call rusty_crew_help/,
+  );
+  assert.doesNotMatch(
+    overridden.roleAssembly.instructions ?? "",
+    /https:\/\/github\.com\/FuzzySlipper\/rusty-crew/,
+  );
   assert.doesNotMatch(
     overridden.roleAssembly.instructions ?? "",
     /concrete regressions/,
@@ -203,6 +217,7 @@ Look for concrete regressions and cite evidence.
 
   assert.match(capturedSystemPrompt, /Profile system prompt wins by default/);
   assert.match(capturedSystemPrompt, /Review Rubric/);
+  assert.match(capturedSystemPrompt, /call rusty_crew_help/);
 
   console.log(
     JSON.stringify(

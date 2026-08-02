@@ -871,6 +871,11 @@ fn local_code_tool_policy(tool_name: &str) -> Option<LocalCodeToolPolicy> {
 
 fn skills_tool_policy(tool_name: &str) -> Option<SkillsToolPolicy> {
     match tool_name {
+        "rusty_crew_help" => Some(SkillsToolPolicy {
+            output_shape: "skills.help_result.v1",
+            required_toolsets: &["crew_help"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+        }),
         "skills_list" => Some(SkillsToolPolicy {
             output_shape: "skills.list_result.v1",
             required_toolsets: &["skills_read"],
@@ -1803,7 +1808,7 @@ mod tests {
 
         assert_eq!(artifact.schema_version, 1);
         assert_eq!(artifact.catalog_id, "default-local-tools");
-        assert_eq!(artifact.tools.len(), 67);
+        assert_eq!(artifact.tools.len(), 68);
 
         let result = validate_tool_metadata_list(&artifact.tools);
 

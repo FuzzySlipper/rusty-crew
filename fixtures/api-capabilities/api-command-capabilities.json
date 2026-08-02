@@ -1787,6 +1787,17 @@
         "public": true
       },
       {
+        "id": "admin.diagnostics.built_in_skills",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/built-in-skills",
+        "description": "Read immutable built-in skill registration and prompt-pointer health.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["diagnostics", "tool"],
+        "public": true
+      },
+      {
         "id": "admin.diagnostics.profiles",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/profiles",
@@ -3713,6 +3724,13 @@
         "capability_id": "admin.diagnostics.memory_surfaces",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/memory-surfaces",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.diagnostics.built_in_skills",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/built-in-skills",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

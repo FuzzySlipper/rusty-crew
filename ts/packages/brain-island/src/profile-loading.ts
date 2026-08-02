@@ -17,6 +17,7 @@ import {
   contextStrategyPolicyFromUnknownWithDiagnostics,
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
+import { isReservedBuiltInSkillSlug } from "./built-in-skills.js";
 
 export type ProfileLoadErrorCode =
   | "profile_not_found"
@@ -390,7 +391,9 @@ export async function loadProfileCuratorDiscoveryContext(input: {
   const slugs =
     profile.skillsMode === "all"
       ? await listSkillSlugsAcrossRoots(roots)
-      : (profile.skills ?? []);
+      : (profile.skills ?? []).filter(
+          (slug) => !isReservedBuiltInSkillSlug(slug),
+        );
   const skills: LoadedSkill[] = [];
   const missingSkillSlugs: string[] = [];
   for (const slug of slugs) {
@@ -559,7 +562,9 @@ async function loadProfileSkills(
   const slugs =
     profile.skillsMode === "all"
       ? await listSkillSlugsAcrossRoots(roots)
-      : (profile.skills ?? []);
+      : (profile.skills ?? []).filter(
+          (slug) => !isReservedBuiltInSkillSlug(slug),
+        );
   return Promise.all(slugs.map((slug) => loadSkillFromRoots(roots, slug)));
 }
 
@@ -600,7 +605,9 @@ async function listSkillSlugsAcrossRoots(
   const slugs = new Set<string>();
   for (const skillsDir of skillsDirs) {
     for (const slug of await listAvailableSkillSlugs(skillsDir)) {
-      slugs.add(slug);
+      if (!isReservedBuiltInSkillSlug(slug)) {
+        slugs.add(slug);
+      }
     }
   }
   return [...slugs].sort();

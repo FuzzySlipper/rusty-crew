@@ -10,6 +10,7 @@ import type {
 } from "./runtime-diagnostics.js";
 import type { BackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
 import type { MemorySurfaceCatalogProjection } from "./memory-surface-diagnostics.js";
+import type { BuiltInSkillCatalogDiagnostics } from "./built-in-skills.js";
 import { apiCapabilityRegistry } from "./api-command-registry.js";
 import type { RuntimeConfigValidationPreflightReport } from "./service-runtime-config.js";
 import {
@@ -85,6 +86,7 @@ export interface AdminDiagnosticsContext {
   storage?: StorageDiagnosticsProjection;
   memorySpaces?: MemorySpaceDiagnosticsProjection;
   memorySurfaces?: MemorySurfaceCatalogProjection;
+  builtInSkills?: BuiltInSkillCatalogDiagnostics;
   profileRegistry?: AdminProfileRegistryDiagnostics;
   curatorCandidates?: unknown;
   curatorMutations?: unknown;
@@ -222,6 +224,8 @@ export function handleAdminDiagnosticsRequest(
       return success(requestId, context.memorySpaces ?? null);
     case "/v1/admin/diagnostics/memory-surfaces":
       return success(requestId, context.memorySurfaces ?? null);
+    case "/v1/admin/diagnostics/built-in-skills":
+      return success(requestId, context.builtInSkills ?? null);
     case "/v1/admin/diagnostics/profiles":
       return success(requestId, context.profileRegistry ?? null);
     case "/v1/admin/profiles/registry":

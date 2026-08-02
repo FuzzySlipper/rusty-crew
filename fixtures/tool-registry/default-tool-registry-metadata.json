@@ -565,6 +565,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "rusty_crew_help",
+      "description": "Read immutable built-in help for this Rusty Crew native brain session.",
+      "category": "skills",
+      "toolsets": ["crew_help"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "skills.help_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "skills_list",
       "description": "List configured skills visible to the current profile.",
       "category": "skills",

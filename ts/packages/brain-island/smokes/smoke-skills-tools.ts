@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -11,6 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   resolveSkillsTools,
+  RUSTY_CREW_BUILT_IN_SKILL_SOURCE,
+  rustyCrewHelpTool,
   skillManageTool,
   skillsListTool,
   skillViewTool,
@@ -69,6 +72,10 @@ broken
 `,
   );
   writeFileSync(join(skillsDir, "unsafe.name.md"), "ignored");
+  writeFileSync(
+    join(skillsDir, "rusty-crew.md"),
+    "---\ninvalid collision frontmatter\n---\nshadow attempt",
+  );
 
   const context = {
     skillsDir,
@@ -77,13 +84,13 @@ broken
   const tools = resolveSkillsTools(context);
   assert.deepEqual(
     tools.map((tool) => tool.name),
-    ["skills_list", "skill_view"],
+    ["rusty_crew_help", "skills_list", "skill_view"],
   );
   assert.deepEqual(
     resolveSkillsTools({ ...context, manageMode: "profile" }).map(
       (tool) => tool.name,
     ),
-    ["skills_list", "skill_view", "skill_manage"],
+    ["rusty_crew_help", "skills_list", "skill_view", "skill_manage"],
   );
 
   const listed = await skillsListTool(context).execute("list", {
@@ -97,13 +104,52 @@ broken
       ["codex", "available"],
       ["large-skill", "available"],
       ["repo-orientation", "available"],
+      ["rusty-crew", "available"],
     ],
+  );
+  assert.equal(
+    listed.details.skills?.find((skill) => skill.slug === "rusty-crew")
+      ?.sourcePath,
+    RUSTY_CREW_BUILT_IN_SKILL_SOURCE,
+  );
+  assert.equal(
+    listed.details.skills?.find((skill) => skill.slug === "rusty-crew")
+      ?.immutable,
+    true,
+  );
+  assert.match(
+    listed.details.skills?.find((skill) => skill.slug === "rusty-crew")
+      ?.contentFingerprint ?? "",
+    /^sha256:[a-f0-9]{64}$/,
+  );
+  assert.equal(
+    listed.details.diagnostics?.some(
+      (diagnostic) => diagnostic.reasonCode === "reserved_skill_slug_collision",
+    ),
+    true,
   );
 
   const hiddenInvalid = await skillsListTool(context).execute("list", {});
   assert.deepEqual(
     hiddenInvalid.details.skills?.map((skill) => skill.slug),
-    ["codex", "large-skill", "repo-orientation"],
+    ["codex", "large-skill", "repo-orientation", "rusty-crew"],
+  );
+
+  const builtInHelp = await rustyCrewHelpTool(context).execute("help", {});
+  assert.equal(builtInHelp.details.ok, true);
+  assert.equal(builtInHelp.details.operation, "help");
+  assert.equal(builtInHelp.details.skill?.source, "built_in");
+  assert.equal(builtInHelp.details.skill?.immutable, true);
+  assert.equal(builtInHelp.details.skill?.truncated, true);
+  assert.equal(builtInHelp.details.skill?.bodyMarkdown?.length, 20);
+
+  const builtInView = await skillViewTool({}).execute("built-in-view", {
+    slug: "rusty-crew",
+  });
+  assert.equal(builtInView.details.ok, true);
+  assert.match(
+    builtInView.details.skill?.bodyMarkdown ?? "",
+    /managed Codex app-server session/,
   );
 
   const viewed = await skillViewTool(context).execute("view", {
@@ -144,9 +190,55 @@ broken
   assert.equal(denied.details.ok, false);
   assert.equal(denied.details.reasonCode, "skill_not_allowed");
 
+  const allowedList = await skillsListTool({
+    skillsDir,
+    allowedSkills: ["repo-orientation"],
+  }).execute("allowed-list", {});
+  assert.deepEqual(
+    allowedList.details.skills?.map((skill) => skill.slug),
+    ["repo-orientation", "rusty-crew"],
+  );
+
   const missingRoot = await skillsListTool({}).execute("missing-root", {});
-  assert.equal(missingRoot.details.ok, false);
-  assert.equal(missingRoot.details.reasonCode, "skills_root_missing");
+  assert.equal(missingRoot.details.ok, true);
+  assert.deepEqual(
+    missingRoot.details.skills?.map((skill) => skill.slug),
+    ["rusty-crew"],
+  );
+  assert.equal(
+    missingRoot.details.diagnostics?.[0]?.reasonCode,
+    "skills_root_missing",
+  );
+
+  const emptySkillsDir = join(root, "empty-skills");
+  mkdirSync(emptySkillsDir);
+  const emptyRoot = await skillsListTool({
+    skillsDir: emptySkillsDir,
+  }).execute("empty-root", {});
+  assert.deepEqual(
+    emptyRoot.details.skills?.map((skill) => skill.slug),
+    ["rusty-crew"],
+  );
+  assert.equal(emptyRoot.details.diagnostics, undefined);
+
+  const unreadableSkillsDir = join(root, "unreadable-skills");
+  mkdirSync(unreadableSkillsDir);
+  chmodSync(unreadableSkillsDir, 0o000);
+  try {
+    const unreadableRoot = await skillsListTool({
+      skillsDir: unreadableSkillsDir,
+    }).execute("unreadable-root", {});
+    assert.deepEqual(
+      unreadableRoot.details.skills?.map((skill) => skill.slug),
+      ["rusty-crew"],
+    );
+    assert.equal(
+      unreadableRoot.details.diagnostics?.[0]?.reasonCode,
+      "skills_root_unreadable",
+    );
+  } finally {
+    chmodSync(unreadableSkillsDir, 0o700);
+  }
 
   const disabledManage = await skillManageTool({ skillsDir }).execute(
     "manage-disabled",
@@ -165,6 +257,13 @@ broken
     now: () => new Date("2026-06-20T12:00:00.000Z"),
   };
   const managedTool = skillManageTool(managedContext);
+  const immutable = await managedTool.execute("immutable", {
+    action: "patch",
+    slug: "rusty-crew",
+    content: "replacement",
+  });
+  assert.equal(immutable.details.ok, false);
+  assert.equal(immutable.details.reasonCode, "built_in_skill_immutable");
   const created = await managedTool.execute("create", {
     action: "create",
     slug: "managed",

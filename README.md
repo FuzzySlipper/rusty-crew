@@ -38,6 +38,9 @@ changes when that produces a cleaner long-term path.
   boundary used to diagnose detached or apparently idle agent work.
 - [Review-agent inbox guidance](docs/review-agent-inbox-and-prompt-guidance.md)
   provides copy-ready prompts and the durable serial review contract.
+- [Built-in Rusty Crew help skill](docs/skills-list-view-tools.md) documents the
+  immutable help surface available to every native Crew brain, its compact
+  prompt pointer, and its queryable diagnostics.
 
 ## Current Architecture
 
@@ -195,6 +198,9 @@ When a static frontend is copied to `<runtime-root>/site`, Crew serves it at
   boundaries; do not route around Rust authority.
 - Tool availability is profile-based. Do not restore `WorkerPolicy` as the main
   tool gate.
+- Every native Crew brain receives the immutable `rusty_crew_help` tool. The
+  full help body is loaded on demand and cannot be shadowed by filesystem
+  skills or removed by profile policy.
 - MCP servers are explicit profile bindings and may include any number of
   independent servers.
 - Queued instructions and messages require explicit, aggressive TTL. Expired

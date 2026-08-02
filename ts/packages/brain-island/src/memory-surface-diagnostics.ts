@@ -4,6 +4,7 @@ import type {
   McpSurfaceDiagnostics,
   MemorySpaceDescriptor,
 } from "@rusty-crew/contracts";
+import { rustyCrewBuiltInSkill } from "./built-in-skills.js";
 
 export type MemorySurfaceOwner = "crew" | "den" | "filesystem";
 export type MemorySurfaceAvailability =
@@ -212,6 +213,23 @@ export function buildMemorySurfaceCatalog(
         ...denPlanning,
         notes: [
           "Availability is profile-scoped rather than a service-wide implicit Den binding.",
+        ],
+      }),
+      surface({
+        surfaceId: "built_in_skills",
+        displayName: "Built-in Rusty Crew help",
+        owner: "crew",
+        storageHome: "builtin://rusty-crew/skills",
+        promptPolicy:
+          "A small harness pointer is injected into native Crew role assembly; the full immutable skill body is loaded only through rusty_crew_help or skill_view.",
+        modelFacingToolNames: ["rusty_crew_help", "skills_list", "skill_view"],
+        backendProvenance: "rusty-crew/built-in-skill-catalog",
+        ...availability("available", "built_in_skill_available"),
+        notes: [
+          `Reserved slug: ${rustyCrewBuiltInSkill.slug}.`,
+          `Content version: ${rustyCrewBuiltInSkill.contentVersion}.`,
+          `Content fingerprint: ${rustyCrewBuiltInSkill.contentFingerprint}.`,
+          "Filesystem roots and profile skill filters cannot remove or shadow this skill.",
         ],
       }),
       surface({

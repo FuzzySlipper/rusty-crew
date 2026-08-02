@@ -1804,6 +1804,14 @@ export const API_CAPABILITIES = [
     ["diagnostics", "memory"],
   ),
   readCapability(
+    "admin.diagnostics.built_in_skills",
+    "GET",
+    "/v1/admin/diagnostics/built-in-skills",
+    "Read immutable built-in skill registration and prompt-pointer health.",
+    "admin",
+    ["diagnostics", "tool"],
+  ),
+  readCapability(
     "admin.diagnostics.profiles",
     "GET",
     "/v1/admin/diagnostics/profiles",

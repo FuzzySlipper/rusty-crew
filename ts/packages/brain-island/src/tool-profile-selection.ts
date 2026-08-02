@@ -45,6 +45,8 @@ export interface ToolProfileSelection {
 
 const DELEGATION_DEPTH_EXHAUSTED_REASON =
   "delegation_depth_exhausted: session max delegation depth is zero";
+export const MANDATORY_NATIVE_HELP_TOOL = "rusty_crew_help";
+export const MANDATORY_NATIVE_HELP_TOOLSET = "crew_help";
 
 export function resourceDeniedToolsForLimits(
   limits: { maxDelegationDepth?: number | null } | undefined,
@@ -112,6 +114,7 @@ export function selectToolProfile(
   input: ToolProfileSelectionInput,
 ): ToolProfileSelection {
   const registry = input.registry ?? defaultToolRegistry;
+  const hasNativeHelp = registry.get(MANDATORY_NATIVE_HELP_TOOL) !== undefined;
   const resourceDeniedTools = new Set(input.session?.resourceDeniedTools ?? []);
   for (const entry of registry.entries) {
     if (input.session?.readOnly && !entry.safety.includes("read_only")) {
@@ -125,12 +128,28 @@ export function selectToolProfile(
       resourceDeniedTools.add(entry.name);
     }
   }
+  if (hasNativeHelp) {
+    resourceDeniedTools.delete(MANDATORY_NATIVE_HELP_TOOL);
+  }
+
+  const withoutMandatoryHelp = (names: readonly string[] | undefined) =>
+    hasNativeHelp
+      ? names?.filter((name) => name !== MANDATORY_NATIVE_HELP_TOOL)
+      : names;
+  const requestedToolsets = hasNativeHelp
+    ? [
+        ...new Set([
+          ...(input.policy.requestedToolsets ?? []),
+          MANDATORY_NATIVE_HELP_TOOLSET,
+        ]),
+      ]
+    : input.policy.requestedToolsets;
 
   const inventory = registry.buildInventory({
-    requestedToolsets: input.policy.requestedToolsets,
+    requestedToolsets,
     requestedTools: input.policy.requestedTools,
-    profileDeniedTools: input.policy.deniedTools,
-    sessionDeniedTools: input.session?.deniedTools,
+    profileDeniedTools: withoutMandatoryHelp(input.policy.deniedTools),
+    sessionDeniedTools: withoutMandatoryHelp(input.session?.deniedTools),
     resourceDeniedTools: [...resourceDeniedTools],
     resourceDeniedReasons: input.session?.resourceDeniedReasons,
     includeDeprecated: input.policy.includeDeprecated,

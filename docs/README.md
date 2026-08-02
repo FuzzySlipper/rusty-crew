@@ -56,6 +56,8 @@ Operator setup references:
   durable continuation campaign, with browser closure tracked separately.
 - `review-agent-inbox-and-prompt-guidance.md` — copy-ready reviewer and
   requester prompts plus the durable serial inbox contract.
+- `skills-list-view-tools.md` — immutable built-in Rusty Crew help, filesystem
+  skill catalog behavior, mandatory native tool selection, and diagnostics.
 
 0. **Den document `rusty-crew-unified-architecture`** — authoritative design.
    It supersedes recommendations in every local companion doc where they

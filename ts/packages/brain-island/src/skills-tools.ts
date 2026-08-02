@@ -6,6 +6,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve, sep } from "node:path";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import { Type, type Static } from "typebox";
@@ -16,6 +17,13 @@ import {
   type LoadedSkill,
 } from "./profile-loading.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
+import {
+  getBuiltInSkill,
+  isReservedBuiltInSkillSlug,
+  listBuiltInSkills,
+  rustyCrewBuiltInSkill,
+  type BuiltInSkill,
+} from "./built-in-skills.js";
 
 const skillSlugPattern = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
 const writableSkillSubdirs = [
@@ -31,6 +39,10 @@ const listParameters = Type.Object({
 
 const viewParameters = Type.Object({
   slug: Type.String({ pattern: skillSlugPattern }),
+  includeBody: Type.Optional(Type.Boolean()),
+});
+
+const helpParameters = Type.Object({
   includeBody: Type.Optional(Type.Boolean()),
 });
 
@@ -54,6 +66,7 @@ const manageParameters = Type.Object({
 
 type ListParams = Static<typeof listParameters>;
 type ViewParams = Static<typeof viewParameters>;
+type HelpParams = Static<typeof helpParameters>;
 type ManageParams = Static<typeof manageParameters>;
 
 export type SkillManageMode = "off" | "profile" | "curator";
@@ -74,14 +87,23 @@ export interface SkillListItem {
   summary?: string;
   tags: readonly string[];
   sourcePath: string;
+  source: "built_in" | "filesystem";
+  immutable: boolean;
+  contentVersion: string;
+  contentFingerprint: string;
   status: "available" | "invalid";
   error?: string;
 }
 
 export interface SkillsToolDetails {
   ok: boolean;
-  operation: "list" | "view" | "manage";
+  operation: "help" | "list" | "view" | "manage";
   reasonCode?: string;
+  diagnostics?: readonly {
+    reasonCode: string;
+    message: string;
+    slug?: string;
+  }[];
   skills?: readonly SkillListItem[];
   skill?: SkillListItem & {
     bodyMarkdown?: string;
@@ -113,11 +135,37 @@ export function createSkillsToolResolver(
 }
 
 export function resolveSkillsTools(context: SkillsToolContext): BrainTool[] {
-  const tools: BrainTool[] = [skillsListTool(context), skillViewTool(context)];
+  const tools: BrainTool[] = [
+    rustyCrewHelpTool(context),
+    skillsListTool(context),
+    skillViewTool(context),
+  ];
   if (context.manageMode && context.manageMode !== "off") {
     tools.push(skillManageTool(context));
   }
   return tools;
+}
+
+export function rustyCrewHelpTool(
+  context: SkillsToolContext,
+): BrainTool<typeof helpParameters, SkillsToolDetails> {
+  return {
+    name: "rusty_crew_help",
+    label: "Rusty Crew help",
+    description:
+      "Read immutable built-in help for this Rusty Crew native brain session.",
+    parameters: helpParameters,
+    execute: async (_toolCallId, params: HelpParams) =>
+      result({
+        ok: true,
+        operation: "help",
+        skill: renderBuiltInSkill(
+          rustyCrewBuiltInSkill,
+          params.includeBody ?? true,
+          context.maxBodyChars,
+        ),
+      }),
+  };
 }
 
 export function skillsListTool(
@@ -130,11 +178,47 @@ export function skillsListTool(
     parameters: listParameters,
     execute: async (_toolCallId, params: ListParams) => {
       const root = await validateSkillsRoot(context, "list");
-      if (!root.ok) return root.result;
-      const slugs = await listSkillSlugs(root.skillsDir, context.allowedSkills);
-      const skills = await Promise.all(
-        slugs.map((slug) => loadSkillListItem(root.skillsDir, slug)),
-      );
+      const diagnostics: NonNullable<
+        SkillsToolDetails["diagnostics"]
+      >[number][] = [];
+      let skills: SkillListItem[] = listBuiltInSkills().map(builtInSkillItem);
+      if (!root.ok) {
+        diagnostics.push({
+          reasonCode: root.reasonCode,
+          message: root.message,
+        });
+      } else {
+        try {
+          const slugs = await listSkillSlugs(
+            root.skillsDir,
+            context.allowedSkills,
+          );
+          if (slugs.some(isReservedBuiltInSkillSlug)) {
+            diagnostics.push({
+              reasonCode: "reserved_skill_slug_collision",
+              message:
+                "A filesystem skill used the reserved rusty-crew slug and was ignored.",
+              slug: rustyCrewBuiltInSkill.slug,
+            });
+          }
+          const filesystemSkills = await Promise.all(
+            slugs
+              .filter((slug) => !isReservedBuiltInSkillSlug(slug))
+              .map((slug) => loadSkillListItem(root.skillsDir, slug)),
+          );
+          skills = [...skills, ...filesystemSkills].sort((a, b) =>
+            a.slug.localeCompare(b.slug),
+          );
+        } catch (error) {
+          diagnostics.push({
+            reasonCode: "skills_root_unreadable",
+            message:
+              error instanceof Error
+                ? error.message
+                : "configured skills root could not be read",
+          });
+        }
+      }
       const visible = params.includeInvalid
         ? skills
         : skills.filter((skill) => skill.status === "available");
@@ -142,6 +226,7 @@ export function skillsListTool(
         ok: true,
         operation: "list",
         skills: visible,
+        diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
       });
     },
   };
@@ -157,6 +242,18 @@ export function skillViewTool(
       "View one configured skill by safe slug without exposing unrelated files.",
     parameters: viewParameters,
     execute: async (_toolCallId, params: ViewParams) => {
+      const builtIn = getBuiltInSkill(params.slug);
+      if (builtIn !== undefined) {
+        return result({
+          ok: true,
+          operation: "view",
+          skill: renderBuiltInSkill(
+            builtIn,
+            params.includeBody ?? true,
+            context.maxBodyChars,
+          ),
+        });
+      }
       const root = await validateSkillsRoot(context, "view");
       if (!root.ok) return root.result;
       if (!isAllowedSkill(params.slug, context.allowedSkills)) {
@@ -208,6 +305,12 @@ export function skillManageTool(
       "Create, patch, write sidecar files for, or archive configured skills with profile governance.",
     parameters: manageParameters,
     execute: async (_toolCallId, params: ManageParams) => {
+      if (isReservedBuiltInSkillSlug(params.slug)) {
+        return manageResult(params, {
+          ok: false,
+          reasonCode: "built_in_skill_immutable",
+        });
+      }
       const root = await validateSkillsRoot(context, "manage");
       if (!root.ok) return root.result;
       const policy = validateManagePolicy(context);
@@ -253,37 +356,51 @@ async function validateSkillsRoot(
   operation: SkillsToolDetails["operation"],
 ): Promise<
   | { ok: true; skillsDir: string }
-  | { ok: false; result: BrainToolResult<SkillsToolDetails> }
+  | {
+      ok: false;
+      reasonCode: string;
+      message: string;
+      result: BrainToolResult<SkillsToolDetails>;
+    }
 > {
   if (!context.skillsDir) {
+    const reasonCode = "skills_root_missing";
     return {
       ok: false,
+      reasonCode,
+      message: "No filesystem skills root is configured.",
       result: result({
         ok: false,
         operation,
-        reasonCode: "skills_root_missing",
+        reasonCode,
       }),
     };
   }
   try {
     const rootStat = await stat(context.skillsDir);
     if (!rootStat.isDirectory()) {
+      const reasonCode = "skills_root_not_directory";
       return {
         ok: false,
+        reasonCode,
+        message: `Configured filesystem skills root is not a directory: ${context.skillsDir}`,
         result: result({
           ok: false,
           operation,
-          reasonCode: "skills_root_not_directory",
+          reasonCode,
         }),
       };
     }
   } catch {
+    const reasonCode = "skills_root_missing";
     return {
       ok: false,
+      reasonCode,
+      message: `Configured filesystem skills root is missing or unreadable: ${context.skillsDir}`,
       result: result({
         ok: false,
         operation,
-        reasonCode: "skills_root_missing",
+        reasonCode,
       }),
     };
   }
@@ -311,6 +428,10 @@ async function loadSkillListItem(
       slug,
       tags: [],
       sourcePath: join(skillsDir, `${slug}.md`),
+      source: "filesystem",
+      immutable: false,
+      contentVersion: "filesystem",
+      contentFingerprint: "unavailable",
       status: "invalid",
       error:
         error instanceof Error ? error.message : "skill metadata is invalid",
@@ -325,8 +446,47 @@ function skillItem(skill: LoadedSkill): SkillListItem {
     summary: skill.summary,
     tags: skill.tags,
     sourcePath: skill.sourcePath,
+    source: "filesystem",
+    immutable: false,
+    contentVersion: "filesystem",
+    contentFingerprint: contentFingerprint(skill.bodyMarkdown),
     status: "available",
   };
+}
+
+function builtInSkillItem(skill: BuiltInSkill): SkillListItem {
+  return {
+    slug: skill.slug,
+    title: skill.title,
+    summary: skill.summary,
+    tags: skill.tags,
+    sourcePath: skill.sourcePath,
+    source: skill.source,
+    immutable: skill.immutable,
+    contentVersion: skill.contentVersion,
+    contentFingerprint: skill.contentFingerprint,
+    status: "available",
+  };
+}
+
+function renderBuiltInSkill(
+  skill: BuiltInSkill,
+  includeBody: boolean,
+  configuredMaxBodyChars: number | undefined,
+): NonNullable<SkillsToolDetails["skill"]> {
+  const maxBodyChars = configuredMaxBodyChars ?? 64 * 1024;
+  return {
+    ...builtInSkillItem(skill),
+    bodyMarkdown: includeBody
+      ? skill.bodyMarkdown.slice(0, maxBodyChars)
+      : undefined,
+    bodyChars: skill.bodyMarkdown.length,
+    truncated: includeBody && skill.bodyMarkdown.length > maxBodyChars,
+  };
+}
+
+function contentFingerprint(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 function isAllowedSkill(

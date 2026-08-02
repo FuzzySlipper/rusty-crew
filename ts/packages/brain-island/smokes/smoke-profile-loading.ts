@@ -79,7 +79,7 @@ try {
             "Use selected local-code tools only.",
           ],
         },
-        skills: ["repo-orientation"],
+        skills: ["repo-orientation", "rusty-crew"],
       },
       null,
       2,
@@ -97,6 +97,10 @@ tags:
 
 Start with the Rusty Crew README and tool registry note.
 `,
+  );
+  writeFileSync(
+    join(skillsDir, "rusty-crew.md"),
+    "This filesystem collision must never enter profile prompt assembly.",
   );
   mkdirSync(join(skillsDir, "autonomous-ai-agents", "codex"), {
     recursive: true,
@@ -175,7 +179,11 @@ Use Codex for bounded coding delegation when context isolation helps.
   );
   assert.deepEqual(
     context.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    ["read_file", "search_files", "git_status", "git_diff"],
+    ["read_file", "search_files", "git_status", "git_diff", "rusty_crew_help"],
+  );
+  assert.deepEqual(
+    context.skills.map((skill) => skill.slug),
+    ["repo-orientation"],
   );
   assert.equal(context.skills[0]?.title, "Repo Orientation");
   assert.deepEqual(context.skills[0]?.tags, ["repo", "architecture"]);
@@ -195,7 +203,7 @@ Use Codex for bounded coding delegation when context isolation helps.
   });
   assert.deepEqual(
     missingMemory.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    [],
+    ["rusty_crew_help"],
   );
   assert.equal(
     missingMemory.toolSelection.inventory.items.find(
@@ -223,7 +231,7 @@ Use Codex for bounded coding delegation when context isolation helps.
   });
   assert.deepEqual(
     metadataMemory.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    ["memory_recall", "memory_read", "memory_search"],
+    ["memory_recall", "memory_read", "memory_search", "rusty_crew_help"],
   );
   assert.equal(
     metadataMemory.toolSelection.inventory.items.find(
@@ -422,6 +430,7 @@ backgroundReview:
       "list_lore_layers",
       "promote_lore_entry",
       "recall_lore",
+      "rusty_crew_help",
       "search_lore",
       "update_scene_state",
     ],

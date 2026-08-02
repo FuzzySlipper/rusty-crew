@@ -79,10 +79,27 @@ export type {
 export {
   createSkillsToolResolver,
   resolveSkillsTools,
+  rustyCrewHelpTool,
   skillManageTool,
   skillsListTool,
   skillViewTool,
 } from "../skills-tools.js";
+export {
+  builtInSkillCatalogDiagnostics,
+  getBuiltInSkill,
+  isReservedBuiltInSkillSlug,
+  listBuiltInSkills,
+  rustyCrewBuiltInSkill,
+  RUSTY_CREW_BUILT_IN_SKILL_SLUG,
+  RUSTY_CREW_BUILT_IN_SKILL_SOURCE,
+  RUSTY_CREW_BUILT_IN_SKILL_VERSION,
+  RUSTY_CREW_HARNESS_PROMPT_POINTER,
+  RUSTY_CREW_HARNESS_PROMPT_POINTER_FINGERPRINT,
+} from "../built-in-skills.js";
+export type {
+  BuiltInSkill,
+  BuiltInSkillCatalogDiagnostics,
+} from "../built-in-skills.js";
 export type {
   SkillManageAction,
   SkillManagementResult,
