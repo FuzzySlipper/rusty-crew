@@ -231,6 +231,7 @@ struct ActiveLogicalWake {
     brain: BrainImplementationHandle,
     session_id: SessionId,
     claim: rusty_crew_core_protocol::LogicalTurnContinuationClaim,
+    next_provider_operation: Arc<AtomicU64>,
     next_host_tool_operation: Arc<AtomicU64>,
     host_tool_operations: Arc<Mutex<HashMap<String, BrainOperationId>>>,
     provider_operation_id: Arc<Mutex<Option<BrainOperationId>>>,

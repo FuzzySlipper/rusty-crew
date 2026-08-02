@@ -122,6 +122,7 @@ impl NativeBridge {
                 brain,
                 session_id,
                 claim: prepared.claim,
+                next_provider_operation: Arc::new(AtomicU64::new(0)),
                 next_host_tool_operation: Arc::new(AtomicU64::new(0)),
                 host_tool_operations: Arc::new(Mutex::new(HashMap::new())),
                 provider_operation_id: Arc::new(Mutex::new(None)),

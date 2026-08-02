@@ -453,12 +453,20 @@ fn lease_provider_operation(
             "active logical wake has no execution epoch",
         )
     })?;
-    let operation_id = BrainOperationId::new(format!(
+    let base_operation_id = format!(
         "operation:{}:{}:provider:{}",
         active.claim.record.logical_turn_id.0,
         active.claim.record.current_continuation_id.0,
         sha256_text(&epoch_id.0)
-    ));
+    );
+    let sequence = active
+        .next_provider_operation
+        .fetch_add(1, Ordering::SeqCst);
+    let operation_id = BrainOperationId::new(if sequence == 0 {
+        base_operation_id
+    } else {
+        format!("{base_operation_id}:request:{sequence}")
+    });
     let now = now_iso();
     let operation = LogicalTurnOperationRecord {
         operation_id: operation_id.clone(),
@@ -898,6 +906,117 @@ mod tests {
             Some(42)
         );
         assert_eq!(host_tool_operation_attempt(base, "operation:other"), None);
+    }
+
+    #[test]
+    fn multiple_provider_requests_in_one_logical_wake_receive_distinct_durable_operations() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "rusty-crew-provider-operation-ledger-{}",
+            OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+        let mut bridge = NativeBridge::new();
+        let brain = bridge
+            .register_brain_implementation(BrainImplementationRegistration {
+                implementation_id: rusty_crew_core_bridge_api::BrainImplementationId::new(
+                    "provider-operation-brain",
+                ),
+                profile_id: ProfileId::new("provider-operation-profile"),
+                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+                model_config: rusty_crew_core_bridge_api::BrainModelConfig {
+                    provider: "fake".into(),
+                    model_name: "fake".into(),
+                    temperature_milli: None,
+                    max_output_tokens: None,
+                },
+                strategy: Some(rusty_crew_core_bridge_api::BrainStrategyMetadata::unused(
+                    CHAT_COMPLETIONS_MODULE_ID,
+                    "default",
+                )),
+                provider_state_scope: None,
+            })
+            .expect("register brain");
+        bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: data_dir.to_string_lossy().into_owned(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::System,
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1_000,
+                storage: None,
+            })
+            .expect("initialize engine");
+        bridge
+            .create_session(rusty_crew_core_bridge_api::SessionConfig {
+                session_id: SessionId::new("provider-operation-session"),
+                agent_id: rusty_crew_core_bridge_api::AgentId::new("provider-operation-agent"),
+                profile_id: ProfileId::new("provider-operation-profile"),
+                kind: rusty_crew_core_bridge_api::SessionKind::Full,
+                delegation: None,
+                resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: None,
+                },
+                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+                history_window: None,
+            })
+            .expect("create session");
+        bridge
+            .build_brain_wake_request_for_session(
+                brain,
+                SessionId::new("provider-operation-session"),
+                "system".into(),
+                br#"{"messages":[]}"#.to_vec(),
+                "provider-operation-wake".into(),
+            )
+            .expect("prepare logical wake");
+
+        lease_provider_operation(
+            &bridge,
+            "provider-operation-wake",
+            r#"{"phase":"explore","messages":["find lore"]}"#,
+        )
+        .expect("lease explore provider request");
+        complete_provider_operation(
+            &bridge,
+            "provider-operation-wake",
+            serde_json::json!({"status": "completed", "phase": "explore"}),
+        )
+        .expect("complete explore provider request");
+        lease_provider_operation(
+            &bridge,
+            "provider-operation-wake",
+            r#"{"phase":"compose","messages":["write response"]}"#,
+        )
+        .expect("lease compose provider request");
+        complete_provider_operation(
+            &bridge,
+            "provider-operation-wake",
+            serde_json::json!({"status": "completed", "phase": "compose"}),
+        )
+        .expect("complete compose provider request");
+
+        let active = bridge
+            .active_logical_wakes
+            .get("provider-operation-wake")
+            .unwrap();
+        let operations = bridge
+            .engine()
+            .unwrap()
+            .list_logical_turn_operations(&active.claim.record.logical_turn_id)
+            .unwrap();
+        assert_eq!(operations.len(), 2);
+        assert!(operations
+            .iter()
+            .all(|operation| operation.phase == LogicalTurnOperationPhase::Completed));
+        assert_ne!(operations[0].operation_id, operations[1].operation_id);
+        assert_ne!(
+            operations[0].request_fingerprint,
+            operations[1].request_fingerprint
+        );
+        assert!(operations
+            .iter()
+            .any(|operation| operation.operation_id.0.ends_with(":request:1")));
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     #[test]
