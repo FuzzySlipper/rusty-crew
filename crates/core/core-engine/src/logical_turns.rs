@@ -79,7 +79,10 @@ impl CoreEngine {
                     now: self.now(),
                 })?;
                 let frozen = claim.checkpoint.frozen_input.clone();
-                let body_state_json = self.required_logical_turn_content(&frozen.body_state_ref)?;
+                let frozen_body_state =
+                    self.required_logical_turn_content(&frozen.body_state_ref)?;
+                let body_state_json =
+                    self.refresh_logical_turn_delegation_projection(session_id, frozen_body_state)?;
                 let frozen_system_prompt = String::from_utf8(
                     self.required_logical_turn_content(&frozen.system_prompt_ref)?,
                 )
@@ -165,6 +168,29 @@ impl CoreEngine {
         result: LogicalTurnEpochResult,
     ) -> CoreResult<LogicalTurnEpochSettlement> {
         self.settle_logical_turn_epoch_with_progress(claim, result, None)
+    }
+
+    fn refresh_logical_turn_delegation_projection(
+        &self,
+        session_id: &SessionId,
+        frozen_body_state: Vec<u8>,
+    ) -> CoreResult<Vec<u8>> {
+        let mut body_state: BodyState =
+            serde_json::from_slice(&frozen_body_state).map_err(|error| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    format!("decode frozen logical turn body state: {error}"),
+                )
+            })?;
+        let current = self.project_body_state(session_id)?;
+        body_state.child_completions = current.child_completions;
+        body_state.fan_out_groups = current.fan_out_groups;
+        serde_json::to_vec(&body_state).map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                format!("encode refreshed logical turn body state: {error}"),
+            )
+        })
     }
 
     pub fn settle_logical_turn_epoch_with_progress(

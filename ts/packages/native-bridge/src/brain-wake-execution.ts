@@ -18,6 +18,15 @@ import {
 } from "./public-api.js";
 import { brainWakeStreamItemsFromExecutionResult } from "./brain-wake-stream.js";
 
+class BrainActionAdmissionError extends Error {
+  readonly reasonCode = "brain_action_rejected";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "BrainActionAdmissionError";
+  }
+}
+
 export interface NativeBrainWakeExecutionContext {
   binding: NativeBridgeBinding;
   module: NativeBridgeModule;
@@ -65,9 +74,46 @@ export async function executeNativeBrainWake(
         case "event":
           await context.module.submitBrainEvent(item.event);
           break;
-        case "actions":
-          await context.module.submitBrainActions(item.batch);
+        case "actions": {
+          if (item.batch.actions.length === 0) break;
+          const receipt = await context.module.submitBrainActions(item.batch);
+          if (receipt.rejectedActions.length > 0) {
+            const rejectionSummary = receipt.rejectedActions
+              .map(
+                (rejection) =>
+                  `action ${rejection.index}: ${rejection.kind}: ${rejection.message}`,
+              )
+              .join("; ");
+            await context.module
+              .submitBrainEvent({
+                wakeId: validatedRequest.wakeId,
+                sessionId: validatedRequest.sessionId,
+                event: {
+                  type: "provider_status",
+                  level: "error",
+                  message: `Rust rejected ${receipt.rejectedActions.length} brain action(s): ${rejectionSummary}`,
+                  metadataJson: JSON.stringify({
+                    source: "brain_action_admission",
+                    reason_code: "brain_action_rejected",
+                    accepted_action_count: receipt.acceptedActions,
+                    rejected_actions: receipt.rejectedActions,
+                  }),
+                },
+              })
+              .catch(() => {
+                // The rejected receipt remains authoritative if diagnostics degrade.
+              });
+            throw new BrainActionAdmissionError(
+              `wake ${validatedRequest.wakeId} brain action admission rejected: ${rejectionSummary}`,
+            );
+          }
+          if (receipt.acceptedActions !== item.batch.actions.length) {
+            throw new BrainActionAdmissionError(
+              `wake ${validatedRequest.wakeId} brain action admission count mismatch: expected ${item.batch.actions.length}, accepted ${receipt.acceptedActions}`,
+            );
+          }
           break;
+        }
         case "wake_failed":
           throw new Error(
             `brain wake ${item.failure.wakeId} failed: ${item.failure.message}`,
@@ -142,7 +188,10 @@ export async function executeNativeBrainWake(
           JSON.stringify({
             wake_id: validatedRequest.wakeId,
             outcome: "failed",
-            reason_code: "brain_wake_failed",
+            reason_code:
+              error instanceof BrainActionAdmissionError
+                ? error.reasonCode
+                : "brain_wake_failed",
             summary: errorMessage(error),
           }),
         ),

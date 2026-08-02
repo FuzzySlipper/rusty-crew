@@ -149,7 +149,8 @@ export interface DelegationToolDetails {
     | "summarize_files"
     | "find_relevant_paths";
   reasonCode?: string;
-  queuedActions: number;
+  preparedActions: number;
+  admissionStatus: "pending_rust_admission" | "not_prepared";
   actions: BrainAction[];
   groupId?: string;
   failurePolicy?: FanOutFailurePolicy;
@@ -449,7 +450,8 @@ function queueDelegationActions(
       ok: false,
       operation,
       reasonCode: "delegation_action_collector_unavailable",
-      queuedActions: 0,
+      preparedActions: 0,
+      admissionStatus: "not_prepared",
       actions: [],
       ...metadata,
     });
@@ -460,7 +462,8 @@ function queueDelegationActions(
       ok: false,
       operation,
       reasonCode: "delegation_depth_exhausted",
-      queuedActions: 0,
+      preparedActions: 0,
+      admissionStatus: "not_prepared",
       actions: [],
       ...metadata,
     });
@@ -469,7 +472,8 @@ function queueDelegationActions(
   return result({
     ok: true,
     operation,
-    queuedActions: actions.length,
+    preparedActions: actions.length,
+    admissionStatus: "pending_rust_admission",
     actions,
     ...metadata,
   });
@@ -909,7 +913,8 @@ function rejected(
     ok: false,
     operation,
     reasonCode,
-    queuedActions: 0,
+    preparedActions: 0,
+    admissionStatus: "not_prepared",
     actions: [],
   });
 }

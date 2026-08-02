@@ -95,7 +95,7 @@ try {
       actions: [],
       outcome: "yielded",
     }).map((item) => item.type),
-    ["event"],
+    ["event", "actions"],
   );
 
   await native.createSession({

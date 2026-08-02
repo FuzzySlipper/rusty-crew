@@ -16,6 +16,7 @@ import {
   runBufferedBrainHost,
 } from "../src/buffered-brain-host.js";
 import { resolveCompletionTools } from "../src/completion-tools.js";
+import { resolveDelegationTools } from "../src/delegation-tools.js";
 
 const sessionId = "turn-disposition-session" as SessionId;
 const wakeId = "turn-disposition-wake";
@@ -190,6 +191,120 @@ test("a genuine native terminal error remains a buffered wake failure", async ()
   );
 });
 
+test("delegation actions survive many later tool calls before a yielded boundary", async () => {
+  let drains = 0;
+  const submittedToolNames: string[] = [];
+  const bridge = {
+    startBrainRun: async () => ({
+      moduleId: "chat-completions" as const,
+      wakeId,
+    }),
+    drainBrainRun: async () => {
+      drains += 1;
+      if (drains === 1) {
+        return {
+          items: [],
+          toolRequests: [
+            {
+              wakeId,
+              callId: "fan-out-call",
+              name: "fan_out_subagents_md",
+              argumentsJson: JSON.stringify({
+                markdown: [
+                  "---",
+                  "group_id: yielded-action-proof",
+                  "failure_policy: fail_soft",
+                  "---",
+                  "",
+                  "## child-profile-a",
+                  "",
+                  "Inspect the first slice.",
+                  "",
+                  "## child-profile-b",
+                  "",
+                  "Inspect the second slice.",
+                ].join("\n"),
+              }),
+            },
+          ],
+          terminal: false,
+        };
+      }
+      if (drains <= 6) {
+        return {
+          items: [],
+          toolRequests: [
+            {
+              wakeId,
+              callId: `ordinary-call-${drains}`,
+              name: "ordinary_tool",
+              argumentsJson: "{}",
+            },
+          ],
+          terminal: false,
+        };
+      }
+      return {
+        items: [],
+        toolRequests: [],
+        terminal: true,
+        yielded: true,
+        continuationState: {
+          moduleId: "chat-completions",
+          payloadVersion: "test-v1",
+          payload: { round: 1 },
+          payloadFingerprint: "test-fingerprint",
+        },
+      };
+    },
+    submitBrainHostResult: async (input: { callId: string }) => {
+      submittedToolNames.push(input.callId);
+      return {};
+    },
+    cancelBrainRun: async () => ({}),
+  } as unknown as NativeBridgeModule;
+
+  const result = await runBufferedBrainHost({
+    bridge,
+    moduleLabel: "Chat Completions",
+    run: chatCompletionsRun(),
+    wake: {
+      ...wake(),
+      state: {
+        ...wake().state,
+        session: {
+          ...wake().state.session,
+          resourceLimits: { maxDelegationDepth: 1 },
+        },
+      },
+    },
+    toolProfile: {
+      tools: [
+        { name: "fan_out_subagents_md", description: "Fan out" },
+        { name: "ordinary_tool", description: "Continue work" },
+      ],
+    },
+    toolResolver: (context) => [
+      ...resolveDelegationTools(context),
+      ordinaryNamedTool(),
+    ],
+  });
+
+  assert.equal(result.outcome, "yielded");
+  assert.equal(result.actions.length, 2);
+  assert.ok(
+    result.actions.every((action) => action.type === "request_delegation"),
+  );
+  assert.deepEqual(submittedToolNames, [
+    "fan-out-call",
+    "ordinary-call-2",
+    "ordinary-call-3",
+    "ordinary-call-4",
+    "ordinary-call-5",
+    "ordinary-call-6",
+  ]);
+});
+
 function dispositionBridge(terminal?: {
   terminalReasonCode: string;
   error: string;
@@ -280,6 +395,19 @@ function ordinaryTool(): BrainTool {
     parameters: Type.Object({ markdown: Type.Optional(Type.String()) }),
     execute: async () => ({
       content: [{ type: "text", text: "continue" }],
+      details: {},
+    }),
+  };
+}
+
+function ordinaryNamedTool(): BrainTool {
+  return {
+    name: "ordinary_tool",
+    label: "Ordinary tool",
+    description: "Continue provider work after delegation",
+    parameters: Type.Object({}),
+    execute: async () => ({
+      content: [{ type: "text", text: "continued" }],
       details: {},
     }),
   };

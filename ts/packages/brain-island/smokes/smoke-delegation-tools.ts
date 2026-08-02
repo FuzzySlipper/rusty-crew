@@ -257,7 +257,8 @@ console.log(
   JSON.stringify(
     {
       selectedTools: selection.toolProfile.tools.map((tool) => tool.name),
-      queuedActions: result.actions.length,
+      preparedActions: result.actions.length,
+      admissionStatus: "pending_rust_admission",
       fanOutGroupId: fanOutFirst?.fanOutGroupId,
       childDepths: result.actions.map((action) =>
         action.type === "request_delegation"

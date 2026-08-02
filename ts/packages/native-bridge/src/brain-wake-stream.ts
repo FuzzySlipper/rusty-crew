@@ -16,12 +16,6 @@ export function brainWakeStreamItemsFromExecutionResult(
     return result.stream;
   }
 
-  if (result.outcome === "yielded") {
-    return result.events.map(
-      (event): BrainWakeStreamItem => ({ type: "event", event }),
-    );
-  }
-
   return [
     ...result.events.map(
       (event): BrainWakeStreamItem => ({ type: "event", event }),
