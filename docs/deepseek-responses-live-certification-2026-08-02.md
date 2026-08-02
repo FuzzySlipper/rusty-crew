@@ -50,10 +50,14 @@ function output.
 Normal provider certificate:
 
 - evidence root:
-  `/home/system/rusty-crew-debug/evidence/task-6530/msbq59mz`
+  `/home/system/rusty-crew-debug/evidence/task-6530/msbt59jr`
 - six completed provider-backed wakes
-- long wake usage: `159607` input, `140928` cached input, `1364` output,
-  `485` reasoning-output tokens
+- long wake usage: `118634` input, `98432` cached input, `1633` output,
+  `804` reasoning-output tokens
+- streamed `response.function_call_arguments.delta` and
+  `response.function_call_arguments.done` events were assembled into canonical
+  calls before execution; the run completed three sequential calls, two
+  parallel calls, recovery, and an eight-tool long turn
 
 Restart-safe certificate:
 

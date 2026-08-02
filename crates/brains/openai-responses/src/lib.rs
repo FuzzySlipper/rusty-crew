@@ -1070,6 +1070,8 @@ pub struct ResponsesRawStreamEvent {
     #[serde(default)]
     pub delta: Option<String>,
     #[serde(default)]
+    pub arguments: Option<String>,
+    #[serde(default)]
     pub message: Option<String>,
     #[serde(default)]
     pub usage: Option<ResponsesTokenUsage>,
@@ -1119,6 +1121,14 @@ pub enum ResponsesEvent {
     TextDelta(String),
     ReasoningDelta(String),
     ReasoningTextDelta(String),
+    FunctionCallArgumentsDelta {
+        item_id: String,
+        delta: String,
+    },
+    FunctionCallArgumentsDone {
+        item_id: String,
+        arguments: String,
+    },
     OutputItemAdded(ResponsesOutputItem),
     OutputItemDone(ResponsesOutputItem),
     Completed {
@@ -1147,6 +1157,24 @@ pub fn process_responses_event(
                     .ok_or(ResponsesStreamError::MissingField("delta"))?,
             ))
         }
+        "response.function_call_arguments.delta" => {
+            Ok(ResponsesEvent::FunctionCallArgumentsDelta {
+                item_id: raw
+                    .item_id
+                    .ok_or(ResponsesStreamError::MissingField("item_id"))?,
+                delta: raw
+                    .delta
+                    .ok_or(ResponsesStreamError::MissingField("delta"))?,
+            })
+        }
+        "response.function_call_arguments.done" => Ok(ResponsesEvent::FunctionCallArgumentsDone {
+            item_id: raw
+                .item_id
+                .ok_or(ResponsesStreamError::MissingField("item_id"))?,
+            arguments: raw
+                .arguments
+                .ok_or(ResponsesStreamError::MissingField("arguments"))?,
+        }),
         "response.output_item.added" => Ok(ResponsesEvent::OutputItemAdded(
             raw.item.ok_or(ResponsesStreamError::MissingField("item"))?,
         )),
@@ -1189,6 +1217,8 @@ pub enum ResponsesStreamError {
     ResponseIncomplete(String),
     #[error("function call output call_id mismatch: expected {expected}, got {actual}")]
     FunctionCallOutputMismatch { expected: String, actual: String },
+    #[error("provider function call stream is invalid: {0}")]
+    FunctionCallStreamInvalid(String),
     #[error("Responses continuation state is invalid: {0}")]
     ContinuationStateInvalid(String),
     #[error("Responses continuation checkpoint failed: {0}")]
@@ -1208,6 +1238,7 @@ impl ResponsesStreamError {
             Self::ContinuationCheckpointFailed(_) => "responses_continuation_checkpoint_failed",
             Self::ClosedBeforeComplete => "provider_stream_closed_before_complete",
             Self::MissingField(_) | Self::UnknownEvent(_) => "provider_protocol_error",
+            Self::FunctionCallStreamInvalid(_) => "provider_protocol_error",
             Self::FunctionCallOutputMismatch { .. } => "responses_function_call_output_mismatch",
             Self::Transport(_) => "provider_transport_error",
         }
@@ -1220,9 +1251,10 @@ impl ResponsesStreamError {
             Self::ContinuationStateInvalid(_)
             | Self::ContinuationCheckpointFailed(_)
             | Self::FunctionCallOutputMismatch { .. } => "responses_loop",
-            Self::ClosedBeforeComplete | Self::MissingField(_) | Self::UnknownEvent(_) => {
-                "provider_protocol"
-            }
+            Self::ClosedBeforeComplete
+            | Self::MissingField(_)
+            | Self::UnknownEvent(_)
+            | Self::FunctionCallStreamInvalid(_) => "provider_protocol",
         }
     }
 }
@@ -1233,6 +1265,214 @@ pub struct PendingResponsesFunctionCall {
     pub call_id: String,
     pub name: String,
     pub arguments_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AssembledResponsesFunctionCall {
+    provider_item_id: Option<String>,
+    call_id: String,
+    name: String,
+    arguments_json: String,
+    received_argument_delta: bool,
+    done: bool,
+}
+
+#[derive(Debug, Default)]
+struct ResponsesFunctionCallAssembler {
+    calls: Vec<AssembledResponsesFunctionCall>,
+}
+
+impl ResponsesFunctionCallAssembler {
+    fn observe_added(
+        &mut self,
+        provider_item_id: Option<String>,
+        call_id: String,
+        name: String,
+        arguments_json: String,
+    ) -> Result<(), ResponsesStreamError> {
+        if let Some(index) = self.find_index(provider_item_id.as_deref(), &call_id) {
+            return self.merge_metadata(
+                index,
+                provider_item_id,
+                call_id,
+                name,
+                arguments_json,
+                false,
+            );
+        }
+        self.calls.push(AssembledResponsesFunctionCall {
+            provider_item_id,
+            call_id,
+            name,
+            arguments_json,
+            received_argument_delta: false,
+            done: false,
+        });
+        Ok(())
+    }
+
+    fn observe_arguments_delta(
+        &mut self,
+        item_id: &str,
+        delta: &str,
+    ) -> Result<(), ResponsesStreamError> {
+        let index = self.find_item_index(item_id)?;
+        let call = &mut self.calls[index];
+        if call.done {
+            return Err(function_call_stream_error(format!(
+                "received arguments delta after done for item {item_id}"
+            )));
+        }
+        if !call.received_argument_delta && !call.arguments_json.is_empty() {
+            return Err(function_call_stream_error(format!(
+                "item {item_id} supplied both initial and streamed arguments"
+            )));
+        }
+        call.received_argument_delta = true;
+        call.arguments_json.push_str(delta);
+        Ok(())
+    }
+
+    fn observe_arguments_done(
+        &mut self,
+        item_id: &str,
+        arguments: String,
+    ) -> Result<(), ResponsesStreamError> {
+        let index = self.find_item_index(item_id)?;
+        let call = &mut self.calls[index];
+        if call.received_argument_delta && call.arguments_json != arguments {
+            return Err(function_call_stream_error(format!(
+                "assembled arguments do not match done payload for item {item_id}"
+            )));
+        }
+        if !call.received_argument_delta {
+            call.arguments_json = arguments;
+        }
+        call.done = true;
+        Ok(())
+    }
+
+    fn observe_output_done(
+        &mut self,
+        provider_item_id: Option<String>,
+        call_id: String,
+        name: String,
+        arguments_json: String,
+    ) -> Result<(), ResponsesStreamError> {
+        if let Some(index) = self.find_index(provider_item_id.as_deref(), &call_id) {
+            return self.merge_metadata(
+                index,
+                provider_item_id,
+                call_id,
+                name,
+                arguments_json,
+                true,
+            );
+        }
+        self.calls.push(AssembledResponsesFunctionCall {
+            provider_item_id,
+            call_id,
+            name,
+            arguments_json,
+            received_argument_delta: false,
+            done: true,
+        });
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Vec<PendingResponsesFunctionCall>, ResponsesStreamError> {
+        self.calls
+            .into_iter()
+            .map(|call| {
+                if !call.done {
+                    return Err(function_call_stream_error(format!(
+                        "response ended before function call {} completed",
+                        call.call_id
+                    )));
+                }
+                let arguments: Value =
+                    serde_json::from_str(&call.arguments_json).map_err(|error| {
+                        function_call_stream_error(format!(
+                            "function call {} arguments are invalid JSON: {error}",
+                            call.call_id
+                        ))
+                    })?;
+                if !arguments.is_object() {
+                    return Err(function_call_stream_error(format!(
+                        "function call {} arguments must be a JSON object",
+                        call.call_id
+                    )));
+                }
+                Ok(PendingResponsesFunctionCall {
+                    provider_item_id: call.provider_item_id,
+                    call_id: call.call_id,
+                    name: call.name,
+                    arguments_json: call.arguments_json,
+                })
+            })
+            .collect()
+    }
+
+    fn find_index(&self, provider_item_id: Option<&str>, call_id: &str) -> Option<usize> {
+        self.calls.iter().position(|call| {
+            (provider_item_id.is_some() && call.provider_item_id.as_deref() == provider_item_id)
+                || call.call_id == call_id
+        })
+    }
+
+    fn find_item_index(&self, item_id: &str) -> Result<usize, ResponsesStreamError> {
+        self.calls
+            .iter()
+            .position(|call| call.provider_item_id.as_deref() == Some(item_id))
+            .ok_or_else(|| {
+                function_call_stream_error(format!(
+                    "arguments event referenced unknown function item {item_id}"
+                ))
+            })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn merge_metadata(
+        &mut self,
+        index: usize,
+        provider_item_id: Option<String>,
+        call_id: String,
+        name: String,
+        arguments_json: String,
+        done: bool,
+    ) -> Result<(), ResponsesStreamError> {
+        let call = &mut self.calls[index];
+        if (call.provider_item_id.is_some()
+            && provider_item_id.is_some()
+            && call.provider_item_id != provider_item_id)
+            || call.call_id != call_id
+            || call.name != name
+        {
+            return Err(function_call_stream_error(format!(
+                "conflicting metadata for function call {}",
+                call.call_id
+            )));
+        }
+        if call.received_argument_delta && !arguments_json.is_empty() {
+            if call.arguments_json != arguments_json {
+                return Err(function_call_stream_error(format!(
+                    "assembled arguments do not match output item for call {}",
+                    call.call_id
+                )));
+            }
+        } else if !arguments_json.is_empty() {
+            call.arguments_json = arguments_json;
+        }
+        if call.provider_item_id.is_none() {
+            call.provider_item_id = provider_item_id;
+        }
+        call.done |= done;
+        Ok(())
+    }
+}
+
+fn function_call_stream_error(message: String) -> ResponsesStreamError {
+    ResponsesStreamError::FunctionCallStreamInvalid(message)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1689,6 +1929,10 @@ fn responses_event_kind(event: &ResponsesEvent) -> &'static str {
         ResponsesEvent::TextDelta(_) => "response.output_text.delta",
         ResponsesEvent::ReasoningDelta(_) => "response.reasoning.delta",
         ResponsesEvent::ReasoningTextDelta(_) => "response.reasoning_text.delta",
+        ResponsesEvent::FunctionCallArgumentsDelta { .. } => {
+            "response.function_call_arguments.delta"
+        }
+        ResponsesEvent::FunctionCallArgumentsDone { .. } => "response.function_call_arguments.done",
         ResponsesEvent::OutputItemAdded(_) => "response.output_item.added",
         ResponsesEvent::OutputItemDone(_) => "response.output_item.done",
         ResponsesEvent::Completed { .. } => "response.completed",
@@ -1990,6 +2234,34 @@ fn event_from_provider_value(value: Value) -> Result<Option<ResponsesEvent>, Res
                     .unwrap_or_default()
                     .to_string(),
             )))
+        }
+        "response.function_call_arguments.delta" => {
+            Ok(Some(ResponsesEvent::FunctionCallArgumentsDelta {
+                item_id: value
+                    .get("item_id")
+                    .and_then(Value::as_str)
+                    .ok_or(ResponsesStreamError::MissingField("item_id"))?
+                    .to_string(),
+                delta: value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .ok_or(ResponsesStreamError::MissingField("delta"))?
+                    .to_string(),
+            }))
+        }
+        "response.function_call_arguments.done" => {
+            Ok(Some(ResponsesEvent::FunctionCallArgumentsDone {
+                item_id: value
+                    .get("item_id")
+                    .and_then(Value::as_str)
+                    .ok_or(ResponsesStreamError::MissingField("item_id"))?
+                    .to_string(),
+                arguments: value
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .ok_or(ResponsesStreamError::MissingField("arguments"))?
+                    .to_string(),
+            }))
         }
         "response.output_item.added" => {
             let item = output_item_from_provider_value(
@@ -2906,7 +3178,7 @@ where
     ) -> Result<ResponsesProviderDisposition, ResponsesStreamError> {
         let mut completed = false;
         let mut incomplete = None;
-        let mut pending_calls = Vec::new();
+        let mut function_calls = ResponsesFunctionCallAssembler::default();
         let mut observed_delta_index = 0;
         let mut assistant_progress = Sha256::new();
         let mut raw_text = String::new();
@@ -2954,7 +3226,27 @@ where
                     }
                     observed_delta_index += 1;
                 }
+                ResponsesEvent::FunctionCallArgumentsDelta { item_id, delta } => {
+                    function_calls.observe_arguments_delta(&item_id, &delta)?;
+                }
+                ResponsesEvent::FunctionCallArgumentsDone { item_id, arguments } => {
+                    function_calls.observe_arguments_done(&item_id, arguments)?;
+                }
                 ResponsesEvent::OutputItemAdded(output) => {
+                    if let ResponsesOutputItem::FunctionCall {
+                        id,
+                        call_id,
+                        name,
+                        arguments,
+                    } = &output
+                    {
+                        function_calls.observe_added(
+                            id.clone(),
+                            call_id.clone(),
+                            name.clone(),
+                            arguments.clone(),
+                        )?;
+                    }
                     committed_output_items.push(output);
                 }
                 ResponsesEvent::OutputItemDone(output) => match output {
@@ -2983,18 +3275,7 @@ where
                         name,
                         arguments,
                     } => {
-                        committed_output_items.push(ResponsesOutputItem::FunctionCall {
-                            id: id.clone(),
-                            call_id: call_id.clone(),
-                            name: name.clone(),
-                            arguments: arguments.clone(),
-                        });
-                        pending_calls.push(PendingResponsesFunctionCall {
-                            provider_item_id: id,
-                            call_id,
-                            name,
-                            arguments_json: arguments,
-                        });
+                        function_calls.observe_output_done(id, call_id, name, arguments)?;
                     }
                     other => committed_output_items.push(other),
                 },
@@ -3010,6 +3291,10 @@ where
                     incomplete = Some(message);
                 }
             }
+        }
+        let pending_calls = function_calls.finish()?;
+        for call in &pending_calls {
+            upsert_committed_function_call(committed_output_items, call);
         }
         if !completed && incomplete.is_none() {
             return Err(ResponsesStreamError::ClosedBeforeComplete);
@@ -3263,6 +3548,30 @@ where
             None if incomplete.is_some() => ResponsesProviderDisposition::Yield,
             None => ResponsesProviderDisposition::Continue,
         })
+    }
+}
+
+fn upsert_committed_function_call(
+    committed_output_items: &mut Vec<ResponsesOutputItem>,
+    call: &PendingResponsesFunctionCall,
+) {
+    let replacement = ResponsesOutputItem::FunctionCall {
+        id: call.provider_item_id.clone(),
+        call_id: call.call_id.clone(),
+        name: call.name.clone(),
+        arguments: call.arguments_json.clone(),
+    };
+    if let Some(index) = committed_output_items.iter().position(|item| {
+        matches!(
+            item,
+            ResponsesOutputItem::FunctionCall { id, call_id, .. }
+                if call.provider_item_id.is_some() && id == &call.provider_item_id
+                    || call_id == &call.call_id
+        )
+    }) {
+        committed_output_items[index] = replacement;
+    } else {
+        committed_output_items.push(replacement);
     }
 }
 
@@ -4734,7 +5043,10 @@ mod tests {
                 "delta": "{\"path\":"
             }))
             .unwrap(),
-            None
+            Some(ResponsesEvent::FunctionCallArgumentsDelta {
+                item_id: "fc-1".to_string(),
+                delta: "{\"path\":".to_string(),
+            })
         );
         assert_eq!(
             event_from_provider_value(json!({
@@ -4783,6 +5095,185 @@ mod tests {
                 })
             })
         );
+    }
+
+    #[test]
+    fn deepseek_fragmented_parallel_function_calls_execute_and_replay_without_output_item_done() {
+        let provider_events = [
+            json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "call_id": "call-1",
+                    "name": "lookup",
+                    "arguments": ""
+                }
+            }),
+            json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": "fc-2",
+                    "call_id": "call-2",
+                    "name": "lookup",
+                    "arguments": ""
+                }
+            }),
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc-1",
+                "delta": "{\"q\":\"READ"
+            }),
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc-2",
+                "delta": "{\"q\":\"Cargo"
+            }),
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc-1",
+                "delta": "ME.md\"}"
+            }),
+            json!({
+                "type": "response.function_call_arguments.done",
+                "item_id": "fc-1",
+                "arguments": "{\"q\":\"README.md\"}"
+            }),
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc-2",
+                "delta": ".toml\"}"
+            }),
+            json!({
+                "type": "response.function_call_arguments.done",
+                "item_id": "fc-2",
+                "arguments": "{\"q\":\"Cargo.toml\"}"
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {"id": "resp-1"}
+            }),
+        ]
+        .into_iter()
+        .map(|value| {
+            event_from_provider_value(value)
+                .expect("DeepSeek event should parse")
+                .expect("function stream event should be retained")
+        })
+        .collect::<Vec<_>>();
+        let client = FakeResponsesClient::new(vec![
+            Ok(provider_events),
+            Ok(vec![
+                ResponsesEvent::TextDelta("both files inspected".to_string()),
+                ResponsesEvent::Completed {
+                    response_id: "resp-2".to_string(),
+                    usage: None,
+                },
+            ]),
+        ])
+        .expect_function_output("call-1");
+        let tools = MapToolExecutor::new([(
+            "lookup".to_string(),
+            NeutralToolOutput {
+                output: "file content".to_string(),
+                is_error: false,
+                state_fingerprint: String::new(),
+                turn_disposition: None,
+            },
+        )]);
+        let mut config = ResponsesBrainConfig::replay("deepseek-v4-flash");
+        config.dialect = ResponsesProviderDialect::Deepseek;
+        let mut brain = brain_with_config(client, tools, config);
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        result.stream.drain_until_terminal().unwrap();
+
+        let continuation = &brain.client.requests()[1].input;
+        let calls = continuation
+            .iter()
+            .filter_map(|item| match item {
+                ResponsesInputItem::FunctionCall {
+                    call_id, arguments, ..
+                } => Some((call_id.as_str(), arguments.as_str())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let outputs = continuation
+            .iter()
+            .filter_map(|item| match item {
+                ResponsesInputItem::FunctionCallOutput { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls,
+            vec![
+                ("call-1", "{\"q\":\"README.md\"}"),
+                ("call-2", "{\"q\":\"Cargo.toml\"}"),
+            ]
+        );
+        assert_eq!(outputs, vec!["call-1", "call-2"]);
+        let last_call = continuation
+            .iter()
+            .rposition(|item| matches!(item, ResponsesInputItem::FunctionCall { .. }))
+            .unwrap();
+        let first_output = continuation
+            .iter()
+            .position(|item| matches!(item, ResponsesInputItem::FunctionCallOutput { .. }))
+            .unwrap();
+        assert!(last_call < first_output);
+
+        let payload = provider_state_payload_from_output(result.provider_state);
+        let records = payload
+            .last_completed_response
+            .expect("completed response should be durable")
+            .output_items;
+        assert!(records.iter().any(|record| {
+            record.call_id.as_deref() == Some("call-1")
+                && record.raw_json.get("arguments") == Some(&json!("{\"q\":\"README.md\"}"))
+        }));
+        assert!(records.iter().any(|record| {
+            record.call_id.as_deref() == Some("call-2")
+                && record.raw_json.get("arguments") == Some(&json!("{\"q\":\"Cargo.toml\"}"))
+        }));
+    }
+
+    #[test]
+    fn fragmented_function_call_stream_rejects_mismatched_or_incomplete_arguments() {
+        let mut mismatch = ResponsesFunctionCallAssembler::default();
+        mismatch
+            .observe_added(
+                Some("fc-1".to_string()),
+                "call-1".to_string(),
+                "lookup".to_string(),
+                String::new(),
+            )
+            .unwrap();
+        mismatch
+            .observe_arguments_delta("fc-1", "{\"q\":\"README.md\"}")
+            .unwrap();
+        let error = mismatch
+            .observe_arguments_done("fc-1", "{\"q\":\"Cargo.toml\"}".to_string())
+            .expect_err("done payload must match accumulated deltas");
+        assert_eq!(error.reason_code(), "provider_protocol_error");
+
+        let mut incomplete = ResponsesFunctionCallAssembler::default();
+        incomplete
+            .observe_added(
+                Some("fc-2".to_string()),
+                "call-2".to_string(),
+                "lookup".to_string(),
+                String::new(),
+            )
+            .unwrap();
+        incomplete
+            .observe_arguments_delta("fc-2", "{\"q\":")
+            .unwrap();
+        let error = incomplete
+            .finish()
+            .expect_err("unterminated arguments must not execute a tool");
+        assert_eq!(error.reason_code(), "provider_protocol_error");
     }
 
     #[test]
@@ -6596,6 +7087,7 @@ mod tests {
             item_id: None,
             call_id: None,
             delta: None,
+            arguments: None,
             message: None,
             usage: None,
         }
