@@ -976,6 +976,7 @@ pub enum ChatCompletionsEvent {
         backoff_ms: u64,
         status: u16,
         retry_after_ms: Option<u64>,
+        diagnostic: String,
     },
     ProviderOverloadRecovered {
         attempts: u64,
@@ -2650,6 +2651,7 @@ impl ChatCompletionsEventMapper {
                 backoff_ms,
                 status,
                 retry_after_ms,
+                diagnostic,
             } => vec![brain_event_item(
                 context,
                 BrainEvent::ProviderStatus {
@@ -2665,6 +2667,7 @@ impl ChatCompletionsEventMapper {
                             "backoff_ms": backoff_ms,
                             "status": status,
                             "retry_after_ms": retry_after_ms,
+                            "provider_diagnostic": diagnostic,
                         })
                         .to_string(),
                     ),
@@ -3666,7 +3669,7 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
                 }
                 Err(ChatCompletionsStreamError::HttpStatus {
                     status,
-                    body: _,
+                    body,
                     retry_after_ms,
                 }) if retryable_provider_http_status(status) => {
                     retry_attempt = retry_attempt.saturating_add(1);
@@ -3677,6 +3680,7 @@ impl ChatCompletionsClient for LiveChatCompletionsClient {
                         backoff_ms: duration_millis(backoff),
                         status,
                         retry_after_ms,
+                        diagnostic: body,
                     });
                     self.runtime
                         .block_on(wait_for_provider_retry(backoff, &self.cancellation))?;
@@ -4407,6 +4411,7 @@ mod tests {
         status: u16,
         retry_after: Option<&str>,
         truncate_first_error_body: bool,
+        error_body: &str,
     ) -> (String, Arc<AtomicUsize>, CapturedProviderRequests) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind overload provider");
         let address = listener.local_addr().expect("overload provider address");
@@ -4415,6 +4420,7 @@ mod tests {
         let request_bodies = Arc::new(Mutex::new(Vec::new()));
         let thread_request_bodies = Arc::clone(&request_bodies);
         let retry_after = retry_after.map(str::to_string);
+        let error_body = error_body.to_string();
         thread::spawn(move || {
             for attempt in 0..=failures {
                 let (mut stream, _) = listener.accept().expect("accept provider request");
@@ -4431,7 +4437,7 @@ mod tests {
                         504 => "Gateway Timeout",
                         _ => "Provider Error",
                     };
-                    let body = r#"{"error":{"message":"engine overloaded","type":"engine_overloaded_error"}}"#;
+                    let body = error_body.as_str();
                     let retry_header = retry_after
                         .as_ref()
                         .map(|value| format!("Retry-After: {value}\r\n"))
@@ -4733,7 +4739,13 @@ mod tests {
     #[test]
     fn retries_provider_overload_until_same_request_succeeds_once() {
         let (base_url, request_count, request_bodies) =
-            overload_then_success_chat_completions_server(1, 429, Some("0"), false);
+            overload_then_success_chat_completions_server(
+                1,
+                429,
+                Some("0"),
+                false,
+                r#"{"error":{"message":"engine overloaded","type":"engine_overloaded_error"}}"#,
+            );
         let mut client =
             LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
                 .expect("create live client");
@@ -4764,7 +4776,9 @@ mod tests {
                 backoff_ms: 0,
                 status: 429,
                 retry_after_ms: Some(0),
+                diagnostic,
             }
+            if diagnostic == r#"{"error":{"message":"engine overloaded","type":"engine_overloaded_error"}}"#
         )));
         let recovered_index = observed
             .iter()
@@ -4792,8 +4806,13 @@ mod tests {
 
     #[test]
     fn cancellation_interrupts_repeated_provider_overload_backoff() {
-        let (base_url, request_count, _) =
-            overload_then_success_chat_completions_server(1_024, 503, Some("5"), false);
+        let (base_url, request_count, _) = overload_then_success_chat_completions_server(
+            1_024,
+            503,
+            Some("5"),
+            false,
+            r#"{"error":{"message":"engine overloaded","type":"engine_overloaded_error"}}"#,
+        );
         let cancellation = ProviderCancellation::default();
         let cancel_from_thread = cancellation.clone();
         thread::spawn(move || {
@@ -4824,8 +4843,13 @@ mod tests {
 
     #[test]
     fn known_overload_status_survives_truncated_error_body() {
-        let (base_url, request_count, _) =
-            overload_then_success_chat_completions_server(1, 429, Some("0"), true);
+        let (base_url, request_count, _) = overload_then_success_chat_completions_server(
+            1,
+            429,
+            Some("0"),
+            true,
+            r#"{"error":{"message":"engine overloaded","type":"engine_overloaded_error"}}"#,
+        );
         let mut client =
             LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
                 .expect("create live client");
@@ -4840,7 +4864,42 @@ mod tests {
         assert_eq!(request_count.load(Ordering::SeqCst), 2);
         assert!(observed.iter().any(|event| matches!(
             event,
-            ChatCompletionsEvent::ProviderOverloadRetry { status: 429, .. }
+            ChatCompletionsEvent::ProviderOverloadRetry {
+                status: 429,
+                diagnostic,
+                ..
+            } if diagnostic == "[provider error body unavailable]"
+        )));
+    }
+
+    #[test]
+    fn provider_overload_retry_redacts_credential_marked_diagnostic() {
+        let (base_url, request_count, _) = overload_then_success_chat_completions_server(
+            1,
+            503,
+            Some("0"),
+            false,
+            r#"{"error":{"message":"upstream rejected api_key sk-secret"}}"#,
+        );
+        let mut client =
+            LiveChatCompletionsClient::new(base_url, None, None, ProviderCancellation::default())
+                .expect("create live client");
+        let mut observed = Vec::new();
+
+        client
+            .stream_observed(live_chat_request(), &mut |event| {
+                observed.push(event.clone())
+            })
+            .expect("provider overload should recover after redacting its diagnostic");
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+        assert!(observed.iter().any(|event| matches!(
+            event,
+            ChatCompletionsEvent::ProviderOverloadRetry {
+                status: 503,
+                diagnostic,
+                ..
+            } if diagnostic == "[redacted provider error body]"
         )));
     }
 
@@ -7876,6 +7935,7 @@ mod tests {
                 backoff_ms: 2_000,
                 status: 429,
                 retry_after_ms: Some(2_000),
+                diagnostic: r#"{"error":{"type":"engine_overloaded_error"}}"#.to_string(),
             },
         );
         let recovered = mapper.map_provider_event(
@@ -7905,6 +7965,7 @@ mod tests {
                 "backoff_ms": 2_000,
                 "status": 429,
                 "retry_after_ms": 2_000,
+                "provider_diagnostic": r#"{"error":{"type":"engine_overloaded_error"}}"#,
             })
         );
 
