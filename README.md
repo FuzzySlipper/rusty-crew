@@ -18,6 +18,9 @@ changes when that produces a cleaner long-term path.
 
 ## Start Here
 
+- [Rusty View](https://github.com/FuzzySlipper/rusty-view) is the companion web
+  client for chatting with Crew brain and managed Codex sessions and operating
+  a Rusty Crew service from the browser.
 - [Deployment and storage](docs/deployment-and-storage.md) explains service
   roots, systemd setup, SQLite and PostgreSQL configuration, health checks,
   backups, and the live/debug split.
