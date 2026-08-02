@@ -93,6 +93,7 @@ const validBinding = withDirectBridgeOutputValidation(
           },
           tool_profile: { tools: [] },
           history_window: null,
+          inference_overrides: { reasoning_effort: "high" },
           status: "active",
           brain_turn_count: 1,
           created_at: "2026-07-10T00:00:00Z",

@@ -156,6 +156,12 @@ const rawSessionStateSchema = Type.Object(
       ),
       Type.Null(),
     ]),
+    inference_overrides: Type.Optional(
+      Type.Object(
+        { reasoning_effort: optionalString },
+        { additionalProperties: false },
+      ),
+    ),
     status: Type.Union([
       Type.Literal("active"),
       Type.Literal("idle"),

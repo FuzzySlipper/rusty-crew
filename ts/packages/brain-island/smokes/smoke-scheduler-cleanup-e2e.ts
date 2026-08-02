@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AgentId,
+  BrainImplementationId,
   CoreEvent,
   ProfileId,
   SessionId,
@@ -14,8 +15,10 @@ import {
   AgentActivityObservationProducer,
   buildBackgroundServiceDiagnosticsProjection,
   publishBackgroundGovernanceObservation,
+  registerBrainHostRuntime,
   runDelegatedResourceCleanup,
 } from "../src/index.js";
+import { createLocalBrain } from "./support/local-brain-test-support.js";
 import { createMemoryAgentActivityObservationSink } from "../src/test-support.js";
 
 const fixedNow = "2026-06-21T00:00:00Z";
@@ -118,13 +121,24 @@ try {
 
   const plannerSessionId = "cleanup-planner-session" as SessionId;
   const coderProfileId = "cleanup-coder-profile" as ProfileId;
+  await registerBrainHostRuntime(
+    native,
+    {
+      implementationId:
+        "scheduler-cleanup-coder-brain" as BrainImplementationId,
+      profileId: coderProfileId,
+      toolProfile: { tools: [] },
+      modelConfig: { provider: "local", modelName: "deterministic" },
+    },
+    createLocalBrain(() => []),
+  );
   await native.createSession({
     sessionId: plannerSessionId,
     agentId: "cleanup-planner" as AgentId,
     profileId: "cleanup-planner-profile" as ProfileId,
     kind: "full",
   });
-  await native.diagnosticSubmitBrainActionsJson(
+  const delegationReceipt = await native.diagnosticSubmitBrainActionsJson(
     "cleanup-parent-wake",
     plannerSessionId,
     [
@@ -146,6 +160,13 @@ try {
   );
   const delegatedSessionId =
     "cleanup-planner-session:delegated:cleanup-parent-wake:0" as SessionId;
+  assert.equal(delegationReceipt.acceptedActions, 1);
+  assert.deepEqual(delegationReceipt.rejectedActions, []);
+  const requestedStatus =
+    await native.delegatedSessionStatus(delegatedSessionId);
+  assert.equal(requestedStatus.session.profileId, coderProfileId);
+  assert.equal(requestedStatus.session.status, "idle");
+  assert.equal(requestedStatus.runStatus, "wake_requested");
   await native.diagnosticSubmitBrainActionsJson(
     "cleanup-child-wake",
     delegatedSessionId,
