@@ -238,12 +238,13 @@ fn apply_postgres_external_runtime_event_retention(
     tx: &mut Transaction<'_>,
     schema: &str,
 ) -> CoreResult<()> {
+    let record_jsonb = postgres_external_event_record_jsonb_expression();
     tx.batch_execute(&format!(
         "ALTER TABLE {schema}.external_runtime_events ADD COLUMN native_thread_id TEXT;
          ALTER TABLE {schema}.external_runtime_events ADD COLUMN native_turn_id TEXT;
          UPDATE {schema}.external_runtime_events
-            SET native_thread_id = record_json::jsonb ->> 'nativeThreadId',
-                native_turn_id = record_json::jsonb ->> 'nativeTurnId';
+            SET native_thread_id = {record_jsonb} ->> 'nativeThreadId',
+                native_turn_id = {record_jsonb} ->> 'nativeTurnId';
          CREATE INDEX external_runtime_events_turn_cursor_idx
             ON {schema}.external_runtime_events(runtime_id, native_turn_id, sequence_id)
             WHERE native_turn_id IS NOT NULL;
@@ -286,6 +287,13 @@ fn apply_postgres_external_runtime_event_retention(
             error,
         )
     })
+}
+
+fn postgres_external_event_record_jsonb_expression() -> &'static str {
+    // PostgreSQL JSONB cannot represent NUL, while historical JSON text can
+    // validly contain its escaped form. Normalize only the migration read;
+    // the durable event payload remains byte-for-byte unchanged.
+    "replace(record_json, E'\\\\u0000', E'\\\\ufffd')::jsonb"
 }
 
 fn apply_postgres_agent_routes(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
@@ -2086,6 +2094,92 @@ mod tests {
         let error = validate_postgres_migration_catalog(&migrations).unwrap_err();
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
         assert!(error.message.contains("expected version 2"));
+    }
+
+    #[test]
+    fn external_runtime_retention_jsonb_read_normalizes_only_escaped_nul() {
+        assert_eq!(
+            postgres_external_event_record_jsonb_expression(),
+            "replace(record_json, E'\\\\u0000', E'\\\\ufffd')::jsonb"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_external_runtime_retention_migrates_escaped_nul_event_without_rewriting_it() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_event_retention_migration_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut client = Client::connect(&database_url, NoTls).unwrap();
+        client
+            .batch_execute(&format!(
+                "CREATE SCHEMA {schema};
+                 CREATE TABLE {schema}.sessions (session_id TEXT PRIMARY KEY);
+                 CREATE TABLE {schema}.external_runtime_registrations (
+                    runtime_id TEXT PRIMARY KEY
+                 );
+                 CREATE TABLE {schema}.external_runtime_events (
+                    event_id TEXT PRIMARY KEY,
+                    runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
+                    session_id TEXT REFERENCES {schema}.sessions(session_id),
+                    sequence_id BIGINT NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    UNIQUE(runtime_id, sequence_id)
+                 );
+                 CREATE TABLE {schema}.external_turns (
+                    runtime_id TEXT NOT NULL,
+                    native_turn_id TEXT,
+                    phase TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 INSERT INTO {schema}.sessions(session_id) VALUES ('session-1');
+                 INSERT INTO {schema}.external_runtime_registrations(runtime_id) VALUES ('runtime-1');"
+            ))
+            .unwrap();
+        let original = r#"{"nativeThreadId":"thread-1","nativeTurnId":"turn-1","diagnostic":"before\u0000after"}"#;
+        client
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.external_runtime_events(
+                        event_id, runtime_id, session_id, sequence_id, kind, created_at, record_json
+                     ) VALUES ('event-1', 'runtime-1', 'session-1', 1, 'item', '2026-08-02T00:00:00Z', $1)"
+                ),
+                &[&original],
+            )
+            .unwrap();
+
+        let mut tx = client.transaction().unwrap();
+        apply_postgres_external_runtime_event_retention(&mut tx, &schema).unwrap();
+        tx.commit().unwrap();
+
+        let row = client
+            .query_one(
+                &format!(
+                    "SELECT native_thread_id, native_turn_id, record_json
+                       FROM {schema}.external_runtime_events
+                      WHERE event_id = 'event-1'"
+                ),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(row.get::<_, Option<String>>(0).as_deref(), Some("thread-1"));
+        assert_eq!(row.get::<_, Option<String>>(1).as_deref(), Some("turn-1"));
+        assert_eq!(row.get::<_, String>(2), original);
+
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
     }
 
     #[test]

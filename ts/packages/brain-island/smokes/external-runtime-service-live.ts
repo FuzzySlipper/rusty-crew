@@ -143,7 +143,7 @@ try {
     resourceLimits: { workdir: dataDir },
     toolProfile: { tools: [] },
   });
-  const binding = await bridge.bindExternalAgent({
+  await bridge.bindExternalAgent({
     binding: {
       bindingId,
       runtimeId,
@@ -152,6 +152,7 @@ try {
       profileId,
       profileRevision: 1,
       profilePromptHash: emptyProfilePromptHash,
+      profilePromptSnapshot: "",
       messageDeliveryPolicy: "immediate_steer",
       purpose: "crew_agent",
       cwd: dataDir,
@@ -162,7 +163,7 @@ try {
       updatedAt: now(),
     },
   });
-  const peerBinding = await bridge.bindExternalAgent({
+  await bridge.bindExternalAgent({
     binding: {
       bindingId: peerBindingId,
       runtimeId,
@@ -171,6 +172,7 @@ try {
       profileId: peerProfileId,
       profileRevision: 1,
       profilePromptHash: emptyProfilePromptHash,
+      profilePromptSnapshot: "",
       messageDeliveryPolicy: "immediate_steer",
       purpose: "crew_agent",
       cwd: dataDir,
@@ -182,11 +184,15 @@ try {
     },
   });
   await controller.start();
+  const startedBinding = await bridge.getExternalBinding(bindingId);
+  const startedPeerBinding = await bridge.getExternalBinding(peerBindingId);
+  assert.ok(startedBinding, "primary binding must survive controller startup");
+  assert.ok(startedPeerBinding, "peer binding must survive controller startup");
   const threadControl = await controller.executeControl({
     controlId: "external-service-live-thread",
     idempotencyKey: "external-service-live-thread",
     bindingId,
-    expectedBindingRevision: binding.revision,
+    expectedBindingRevision: startedBinding.revision,
     kind: "start_or_resume_thread",
     payload: {
       baseInstructions:
@@ -199,7 +205,7 @@ try {
     controlId: "external-service-live-peer-thread",
     idempotencyKey: "external-service-live-peer-thread",
     bindingId: peerBindingId,
-    expectedBindingRevision: peerBinding.revision,
+    expectedBindingRevision: startedPeerBinding.revision,
     kind: "start_or_resume_thread",
     payload: {
       baseInstructions:
@@ -734,6 +740,7 @@ try {
       profileId: staleProfileId,
       profileRevision: 1,
       profilePromptHash: emptyProfilePromptHash,
+      profilePromptSnapshot: "",
       messageDeliveryPolicy: "immediate_steer",
       nativeThreadId: staleNativeThreadId,
       purpose: "crew_agent",
