@@ -2078,6 +2078,36 @@
         ],
         "type": "object"
       },
+      "AgentMessageTrafficItem": {
+        "description": "One durable coordination delivery leg for operator traffic inspection.\n\nUnlike `AgentMessageInboxItem`, reply receipts are not folded into their\nroot request. This keeps exact sender/recipient filters truthful.",
+        "properties": {
+          "deliveredModelText": {
+            "description": "Exact text presented to this delivery's recipient brain.",
+            "type": "string"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+          },
+          "externalTurnPhase": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalTurnPhase" },
+              { "type": "null" }
+            ],
+            "description": "Current external turn phase for managed external-runtime activations."
+          },
+          "queuedMessageId": { "type": ["string", "null"] },
+          "terminalReasonCode": { "type": ["string", "null"] },
+          "wakeSettlement": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/RuntimeActivityWakeSettlement" },
+              { "type": "null" }
+            ],
+            "description": "Terminal or active direct-brain wake state when the activation was observed."
+          }
+        },
+        "required": ["delivery", "deliveredModelText"],
+        "type": "object"
+      },
       "AgentRoundCommand": {
         "properties": {
           "body": { "type": "string" },

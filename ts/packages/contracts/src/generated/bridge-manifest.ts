@@ -53,6 +53,7 @@ export const bridgeOperations = [
   {"name":"deliver_agent_message","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageCommand","output":"core_protocol::AgentMessageDeliveryReceipt","errors":"core_protocol::CoreError","summary":"Durably accept an identity-bound internal message and select direct wake, external turn, queue, round resolution, expiry, or rejection in Rust."},
   {"name":"reply_agent_message","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageReplyCommand","output":"core_protocol::AgentMessageDeliveryReceipt","errors":"core_protocol::CoreError","summary":"Resolve an original routed message in Rust and send one idempotent reply without model-supplied recipient or correlation metadata."},
   {"name":"list_agent_message_inbox","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageInboxQuery","output":"vec<core_protocol::AgentMessageInboxItem>","errors":"core_protocol::CoreError","summary":"Project durable routed-message queue, turn, expiry, and reply state for operator inspection."},
+  {"name":"list_agent_message_traffic","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageInboxQuery","output":"vec<core_protocol::AgentMessageTrafficItem>","errors":"core_protocol::CoreError","summary":"List every durable coordination delivery leg, including replies, with exact model-facing provenance."},
   {"name":"begin_agent_round","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentRoundCommand","output":"core_protocol::AgentRoundStartReceipt","errors":"core_protocol::CoreError","summary":"Persist a correlated agent round before routing its message through the runtime-neutral delivery command."},
   {"name":"get_agent_round","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentRoundId","output":"option<core_protocol::AgentCorrelatedRound>","errors":"core_protocol::CoreError","summary":"Read durable correlated-round state without process-memory subscriptions or reply matching."},
   {"name":"get_agent_message_delivery","surface":"stable","direction":"ts_to_rust","input":"core_protocol::AgentMessageDeliveryId","output":"option<core_protocol::AgentMessageDeliveryReceipt>","errors":"core_protocol::CoreError","summary":"Read durable cross-runtime message delivery and activation state."},
@@ -297,4 +298,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "a798862536537add135f5a5d79f9056eda130de23a57356bf8026070a78dc9f3" as const;
+export const bridgeWireShapeFingerprint = "29fa5e69f587467a25d2619303d8c3f15c3548a074a0e56104cb97e34e22ee3c" as const;

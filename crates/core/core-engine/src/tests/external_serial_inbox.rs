@@ -228,6 +228,24 @@ fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
         engine.reply_agent_message(reply_command.clone()).unwrap(),
         reply
     );
+    let reply_traffic = engine
+        .list_agent_message_traffic(&rusty_crew_core_protocol::AgentMessageInboxQuery {
+            to_session_id: Some(sender.session_id.clone()),
+            from_session_id: Some(reviewer.session_id.clone()),
+            correlation_id: Some("serial-correlation-1".into()),
+            message_id: Some("serial-reply-message-1".into()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(reply_traffic.len(), 1);
+    assert_eq!(reply_traffic[0].delivery, reply);
+    assert!(reply_traffic[0]
+        .delivered_model_text
+        .contains("to_session_id: serial-sender-session"));
+    assert!(reply_traffic[0]
+        .delivered_model_text
+        .contains("reply_instruction: none"));
     let conflicting_reply = AgentMessageReplyCommand {
         delivery_id: AgentMessageDeliveryId::new("serial-reply-delivery-conflict"),
         idempotency_key: "serial-reply-delivery-conflict".into(),

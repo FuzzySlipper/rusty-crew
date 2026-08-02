@@ -487,6 +487,15 @@ errors = "core_protocol::CoreError"
 summary = "Project durable routed-message queue, turn, expiry, and reply state for operator inspection."
 
 [[operation]]
+name = "list_agent_message_traffic"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::AgentMessageInboxQuery"
+output = "vec<core_protocol::AgentMessageTrafficItem>"
+errors = "core_protocol::CoreError"
+summary = "List every durable coordination delivery leg, including replies, with exact model-facing provenance."
+
+[[operation]]
 name = "begin_agent_round"
 surface = "stable"
 direction = "ts_to_rust"

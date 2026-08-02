@@ -1778,6 +1778,44 @@ impl PostgresBackendStore {
         )
     }
 
+    pub fn list_agent_message_traffic_deliveries(
+        &self,
+        query: &rusty_crew_core_protocol::AgentMessageInboxQuery,
+        limit: u32,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        let schema = self.quoted_schema();
+        let to_agent = query.to_agent_id.as_ref().map(|value| value.0.as_str());
+        let to_session = query.to_session_id.as_ref().map(|value| value.0.as_str());
+        let from_agent = query.from_agent_id.as_ref().map(|value| value.0.as_str());
+        let from_session = query.from_session_id.as_ref().map(|value| value.0.as_str());
+        let correlation_id = query.correlation_id.as_deref();
+        let message_id = query.message_id.as_deref();
+        let limit = i64::from(limit);
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.agent_message_delivery_receipts
+                 WHERE ($1::TEXT IS NULL OR to_agent_id = $1)
+                   AND ($2::TEXT IS NULL OR to_session_id = $2)
+                   AND ($3::TEXT IS NULL OR from_agent_id = $3)
+                   AND ($4::TEXT IS NULL OR from_session_id = $4)
+                   AND ($5::TEXT IS NULL OR record_json::jsonb #>> '{{request,correlationId}}' = $5)
+                   AND ($6::TEXT IS NULL OR message_id = $6)
+                 ORDER BY created_at, delivery_id LIMIT $7"
+            ),
+            &[
+                &to_agent,
+                &to_session,
+                &from_agent,
+                &from_session,
+                &correlation_id,
+                &message_id,
+                &limit,
+            ],
+            "list PostgreSQL agent message traffic deliveries",
+        )
+    }
+
     pub fn list_pending_agent_message_deliveries(
         &self,
     ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {

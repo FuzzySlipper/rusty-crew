@@ -12,6 +12,7 @@ type AgentCoordinationMethodName =
   | "deliverAgentMessage"
   | "replyAgentMessage"
   | "listAgentMessageInbox"
+  | "listAgentMessageTraffic"
   | "beginAgentRound"
   | "getAgentRound"
   | "getAgentMessageDelivery"
@@ -63,6 +64,10 @@ export function createNativeBridgeAgentCoordinationMethods(
       JSON.parse(
         binding.listAgentMessageInboxJson(JSON.stringify(query)),
       ) as Awaited<ReturnType<NativeBridgeModule["listAgentMessageInbox"]>>,
+    listAgentMessageTraffic: async (query) =>
+      JSON.parse(
+        binding.listAgentMessageTrafficJson(JSON.stringify(query)),
+      ) as Awaited<ReturnType<NativeBridgeModule["listAgentMessageTraffic"]>>,
     beginAgentRound: async (command) =>
       JSON.parse(
         binding.beginAgentRoundJson(JSON.stringify(command)),

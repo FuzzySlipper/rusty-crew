@@ -7,6 +7,7 @@ import type {
   AgentMessageInboxItem,
   AgentMessageInboxQuery,
   AgentMessageReplyCommand,
+  AgentMessageTrafficItem,
   AgentRouteDelete,
   AgentRouteRecord,
   AgentRouteResolution,
@@ -25,6 +26,9 @@ export interface NativeAgentCoordinationBridgeMethods {
   listAgentMessageInbox(
     query: AgentMessageInboxQuery,
   ): Promise<AgentMessageInboxItem[]>;
+  listAgentMessageTraffic(
+    query: AgentMessageInboxQuery,
+  ): Promise<AgentMessageTrafficItem[]>;
   listAgentDirectory(): Promise<AgentDirectoryEntry[]>;
   listAgentRouteResolutions(): Promise<AgentRouteResolution[]>;
   getAgentRouteResolution(

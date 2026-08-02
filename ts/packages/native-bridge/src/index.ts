@@ -687,6 +687,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     deliverAgentMessage: unavailable("deliver_agent_message"),
     replyAgentMessage: unavailable("reply_agent_message"),
     listAgentMessageInbox: unavailable("list_agent_message_inbox"),
+    listAgentMessageTraffic: unavailable("list_agent_message_traffic"),
     beginAgentRound: unavailable("begin_agent_round"),
     getAgentRound: unavailable("get_agent_round"),
     getAgentMessageDelivery: unavailable("get_agent_message_delivery"),

@@ -1074,6 +1074,18 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn list_agent_message_traffic_deliveries(
+        &self,
+        query: &rusty_crew_core_protocol::AgentMessageInboxQuery,
+        limit: u32,
+    ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
+        match self {
+            Self::Sqlite(store) => store.list_agent_message_traffic_deliveries(query, limit),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_agent_message_traffic_deliveries(query, limit),
+        }
+    }
+
     pub fn list_pending_agent_message_deliveries(
         &self,
     ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {

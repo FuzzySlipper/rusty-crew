@@ -49,6 +49,13 @@ impl NativeBridge {
         self.engine()?.list_agent_message_inbox(query)
     }
 
+    pub fn list_agent_message_traffic(
+        &self,
+        query: &AgentMessageInboxQuery,
+    ) -> CoreResult<Vec<AgentMessageTrafficItem>> {
+        self.engine()?.list_agent_message_traffic(query)
+    }
+
     pub fn begin_agent_round(
         &self,
         command: AgentRoundCommand,
@@ -181,6 +188,18 @@ impl NativeBridgeBinding {
         let items = self
             .bridge()?
             .list_agent_message_inbox(&query)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&items)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn list_agent_message_traffic_json(&self, query_json: String) -> napi::Result<String> {
+        let query = serde_json::from_str::<AgentMessageInboxQuery>(&query_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let items = self
+            .bridge()?
+            .list_agent_message_traffic(&query)
             .map_err(to_napi_error)?;
         serde_json::to_string(&items)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))

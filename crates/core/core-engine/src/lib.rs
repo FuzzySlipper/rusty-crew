@@ -2,6 +2,7 @@
 
 mod agent_coordination;
 mod agent_message_format;
+mod agent_message_traffic;
 mod agent_route_activation;
 mod body;
 mod body_queue;

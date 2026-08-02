@@ -265,6 +265,15 @@ export type AgentMessageReplyCommand = {
   messageId: string;
 };
 
+export type AgentMessageTrafficItem = {
+  deliveredModelText: string;
+  delivery: AgentMessageDeliveryReceipt;
+  externalTurnPhase?: ExternalTurnPhase | null;
+  queuedMessageId?: string | null;
+  terminalReasonCode?: string | null;
+  wakeSettlement?: RuntimeActivityWakeSettlement | null;
+};
+
 export type AgentRoundCommand = {
   body: string;
   caller: AgentCoordinationCaller;

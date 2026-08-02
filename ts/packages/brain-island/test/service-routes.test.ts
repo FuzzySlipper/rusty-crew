@@ -89,7 +89,7 @@ test("coordination operator routes are deployment-bound and start system rounds"
       async listAgentDirectory() {
         return [{ agentId: "agent-a", routable: true }];
       },
-      async listAgentMessageInbox(query: Record<string, unknown>) {
+      async listAgentMessageTraffic(query: Record<string, unknown>) {
         return [{ status: "queued", query }];
       },
       async beginAgentRound(command: Record<string, unknown>) {

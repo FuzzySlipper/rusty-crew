@@ -3968,6 +3968,443 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_AgentMessageInboxItem",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageTrafficItem>": {
+      "items": {
+        "description": "One durable coordination delivery leg for operator traffic inspection.\n\nUnlike `AgentMessageInboxItem`, reply receipts are not folded into their\nroot request. This keeps exact sender/recipient filters truthful.",
+        "properties": {
+          "deliveredModelText": {
+            "description": "Exact text presented to this delivery's recipient brain.",
+            "type": "string"
+          },
+          "delivery": {
+            "properties": {
+              "activation": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "direct_brain_wake_requested",
+                            "type": "string"
+                          },
+                          "wakeId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "wakeId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "external_turn_requested",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "requestId",
+                          "bindingId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "bindingId": {
+                            "type": "string"
+                          },
+                          "messageText": {
+                            "type": "string"
+                          },
+                          "nativeThreadId": {
+                            "type": "string"
+                          },
+                          "nativeTurnId": {
+                            "type": "string"
+                          },
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "external_turn_steer_requested",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "requestId",
+                          "bindingId",
+                          "nativeThreadId",
+                          "nativeTurnId",
+                          "messageText"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "queueId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "queued_for_next_turn",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "queueId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "reasonCode": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "const": "rejected",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "reasonCode"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "collaborationMode": {
+                    "enum": [
+                      "plan",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "correlationId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "deliveryId": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "type": "string"
+                  },
+                  "fromAgentId": {
+                    "type": "string"
+                  },
+                  "fromSessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "inputKind": {
+                    "enum": [
+                      "operator",
+                      "routed_agent_message"
+                    ],
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "replyToMessageId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "requestedAddress": {
+                    "type": "string"
+                  },
+                  "requireWake": {
+                    "type": "boolean"
+                  },
+                  "routing": {
+                    "properties": {
+                      "address": {
+                        "type": "string"
+                      },
+                      "resolvedTarget": {
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "bindingId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bindingRevision": {
+                            "format": "uint64",
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "deliveryPolicy": {
+                            "enum": [
+                              "immediate_steer",
+                              "serial_next_turn",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "displayLabel": {
+                            "type": "string"
+                          },
+                          "profileId": {
+                            "type": "string"
+                          },
+                          "runtimeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "runtimeKind": {
+                            "enum": [
+                              "direct_brain",
+                              "codex_app_server"
+                            ],
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "sessionId",
+                          "profileId",
+                          "displayLabel",
+                          "runtimeKind"
+                        ],
+                        "type": "object"
+                      },
+                      "routeKey": {
+                        "type": "string"
+                      },
+                      "routeRevision": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "address",
+                      "routeKey",
+                      "routeRevision",
+                      "resolvedTarget"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "toAgentId": {
+                    "type": "string"
+                  },
+                  "toSessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "deliveryId",
+                  "idempotencyKey",
+                  "messageId",
+                  "fromAgentId",
+                  "requestedAddress",
+                  "toAgentId",
+                  "inputKind",
+                  "body",
+                  "requireWake",
+                  "createdAt",
+                  "expiresAt"
+                ],
+                "type": "object"
+              },
+              "resolvedRoundId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sequence": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected",
+                  "expired"
+                ],
+                "type": "string"
+              },
+              "terminalAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "request",
+              "status",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "externalTurnPhase": {
+            "description": "Current external turn phase for managed external-runtime activations.",
+            "enum": [
+              "accepted",
+              "starting",
+              "active",
+              "waiting_interaction",
+              "completed",
+              "failed",
+              "interrupted",
+              "outcome_unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queuedMessageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terminalReasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wakeSettlement": {
+            "description": "Terminal or active direct-brain wake state when the activation was observed.",
+            "properties": {
+              "reasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "interrupted"
+                ],
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "wakeId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "wakeId",
+              "status",
+              "summary"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "delivery",
+          "deliveredModelText"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_AgentMessageTrafficItem",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>": {
       "items": {
         "properties": {
@@ -25898,6 +26335,7 @@ export const bridgeWireSchemaArtifact = {
     "list_active_external_turns": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
     "list_agent_directory": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentDirectoryEntry>",
     "list_agent_message_inbox": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageInboxItem>",
+    "list_agent_message_traffic": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageTrafficItem>",
     "list_agent_route_resolutions": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentRouteResolution>",
     "list_entries_by_layer": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin>",
     "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",

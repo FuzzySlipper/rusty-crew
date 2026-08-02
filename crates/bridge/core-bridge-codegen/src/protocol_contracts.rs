@@ -94,6 +94,7 @@ struct ProtocolContractRoots {
     agent_message_reply_command: AgentMessageReplyCommand,
     agent_message_inbox_query: AgentMessageInboxQuery,
     agent_message_inbox_item: AgentMessageInboxItem,
+    agent_message_traffic_item: AgentMessageTrafficItem,
     agent_message_delivery_receipt: AgentMessageDeliveryReceipt,
     agent_round_command: AgentRoundCommand,
     agent_round_start_receipt: AgentRoundStartReceipt,

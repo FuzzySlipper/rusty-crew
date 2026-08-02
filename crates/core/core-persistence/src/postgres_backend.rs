@@ -16585,7 +16585,24 @@ mod tests {
         store.create_agent_message_delivery(&reply).unwrap();
         assert_eq!(
             store.get_agent_message_reply("message-a").unwrap(),
-            Some(reply)
+            Some(reply.clone())
+        );
+        assert_eq!(
+            store
+                .list_agent_message_traffic_deliveries(
+                    &rusty_crew_core_protocol::AgentMessageInboxQuery {
+                        to_agent_id: Some(reply.request.to_agent_id.clone()),
+                        to_session_id: reply.request.to_session_id.clone(),
+                        from_agent_id: Some(reply.request.from_agent_id.clone()),
+                        from_session_id: reply.request.from_session_id.clone(),
+                        correlation_id: reply.request.correlation_id.clone(),
+                        message_id: Some(reply.request.message_id.clone()),
+                        limit: Some(10),
+                    },
+                    10,
+                )
+                .unwrap(),
+            vec![reply]
         );
         let round = rusty_crew_core_protocol::AgentCorrelatedRound {
             round_id: rusty_crew_core_protocol::AgentRoundId::new("round-a"),

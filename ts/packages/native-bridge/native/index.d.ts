@@ -10,6 +10,7 @@ export declare class NativeBridgeBinding {
   deliverAgentMessageJson(commandJson: string): string
   replyAgentMessageJson(commandJson: string): string
   listAgentMessageInboxJson(queryJson: string): string
+  listAgentMessageTrafficJson(queryJson: string): string
   beginAgentRoundJson(commandJson: string): string
   getAgentRoundJson(roundId: string): string | null
   getAgentMessageDeliveryJson(deliveryId: string): string | null

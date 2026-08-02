@@ -6,7 +6,7 @@
 
 use crate::{
     AgentId, CoreError, CoreErrorKind, CoreResult, DenRuntimeReference, IsoTimestamp, ProfileId,
-    RunId, SessionId, SessionKind, SessionState, SessionStatus,
+    RunId, RuntimeActivityWakeSettlement, SessionId, SessionKind, SessionState, SessionStatus,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1099,6 +1099,24 @@ pub struct AgentMessageInboxItem {
     pub delivered_model_text: String,
     pub queued_message_id: Option<String>,
     pub external_turn_request_id: Option<ExternalTurnRequestId>,
+    pub terminal_reason_code: Option<String>,
+}
+
+/// One durable coordination delivery leg for operator traffic inspection.
+///
+/// Unlike `AgentMessageInboxItem`, reply receipts are not folded into their
+/// root request. This keeps exact sender/recipient filters truthful.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessageTrafficItem {
+    pub delivery: AgentMessageDeliveryReceipt,
+    /// Exact text presented to this delivery's recipient brain.
+    pub delivered_model_text: String,
+    /// Terminal or active direct-brain wake state when the activation was observed.
+    pub wake_settlement: Option<RuntimeActivityWakeSettlement>,
+    /// Current external turn phase for managed external-runtime activations.
+    pub external_turn_phase: Option<ExternalTurnPhase>,
+    pub queued_message_id: Option<String>,
     pub terminal_reason_code: Option<String>,
 }
 

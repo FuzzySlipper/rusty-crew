@@ -108,9 +108,12 @@ GET /v1/debug/coordination/messages
 
 Both routes accept `toAgentId`, `toSessionId`, `fromAgentId`, `fromSessionId`,
 `correlationId`, `messageId`, and `limit` (1-500). Filters may be combined. The
-response includes the authoritative sender and resolved recipient identities,
-requested address, route-resolution provenance, delivery and wake status,
-reply, terminal reason, original body, and `deliveredModelText`.
+response contains one item per durable delivery receipt, including reply
+receipts. Each item includes the authoritative sender and resolved recipient
+identities, requested address, route-resolution provenance, delivery and wake
+status, reply linkage, terminal reason, original body, and
+`deliveredModelText`. Replies are never hidden behind a root request whose
+recipient differs from the reply recipient.
 
 `deliveredModelText` is the literal Rust-authored input presented to the
 recipient brain. Routed agent input is bounded by explicit

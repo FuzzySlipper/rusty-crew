@@ -208,7 +208,7 @@ export async function handleCoordinationOperatorRequest(
       }
       return successRoute(requestId, {
         deploymentRole: context.deploymentRole,
-        items: await context.bridge.listAgentMessageInbox({
+        items: await context.bridge.listAgentMessageTraffic({
           ...(toAgentId === undefined || toAgentId === ""
             ? {}
             : { toAgentId: toAgentId as AgentId }),
