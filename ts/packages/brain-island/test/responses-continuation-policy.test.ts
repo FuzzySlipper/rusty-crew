@@ -108,6 +108,7 @@ test("Responses host forwards strategy quantum and continuation to Rust", async 
           provider: "test",
           modelName: "test-model",
           api: "responses",
+          responsesDialect: "openai_stateful",
           contextWindowTokens: 32_000,
         },
         contextPolicy: {

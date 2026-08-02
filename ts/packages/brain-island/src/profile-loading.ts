@@ -1205,6 +1205,9 @@ function modelConfigFromProfileObject(
     temperatureMilli,
     reasoningEffort: optionalString(modelConfig.reasoningEffort),
     reasoningFormat: optionalString(modelConfig.reasoningFormat),
+    responsesDialect: optionalString(
+      modelConfig.responsesDialect,
+    ) as BrainModelConfig["responsesDialect"],
     chatCompletionsDialect: optionalString(
       modelConfig.chatCompletionsDialect,
     ) as BrainModelConfig["chatCompletionsDialect"],

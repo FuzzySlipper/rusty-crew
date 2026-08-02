@@ -335,6 +335,7 @@ function writeRuntimeConfig(rootDir: string): void {
           baseUrl: process.env.RUSTY_CREW_OPENAI_RESPONSES_BASE_URL,
           apiKeyEnv: process.env.RUSTY_CREW_OPENAI_RESPONSES_API_KEY_ENV,
           api: "responses",
+          responsesDialect: "openai_stateless",
         },
         brain: {
           module: "openai-responses",

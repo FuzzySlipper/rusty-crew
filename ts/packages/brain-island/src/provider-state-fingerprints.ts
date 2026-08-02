@@ -74,6 +74,7 @@ export function providerStateFingerprintMaterial(
         maxOutputTokens: profile.modelConfig.maxOutputTokens,
         reasoningEffort: profile.modelConfig.reasoningEffort,
         reasoningFormat: profile.modelConfig.reasoningFormat,
+        responsesDialect: profile.modelConfig.responsesDialect,
         chatCompletionsDialect: profile.modelConfig.chatCompletionsDialect,
         thinkingMode: profile.modelConfig.thinkingMode,
         reasoningHistory: profile.modelConfig.reasoningHistory,

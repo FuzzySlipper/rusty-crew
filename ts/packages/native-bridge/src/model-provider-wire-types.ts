@@ -29,6 +29,7 @@ export interface RawModelProviderRecord {
   temperature_milli?: number | null;
   reasoning_effort?: string | null;
   reasoning_format?: string | null;
+  responses_dialect?: NativeModelProviderRecord["responsesDialect"] | null;
   chat_completions_dialect: NativeModelProviderRecord["chatCompletionsDialect"];
   thinking_mode: NativeModelProviderRecord["thinkingMode"];
   reasoning_history: NativeModelProviderRecord["reasoningHistory"];
@@ -56,6 +57,7 @@ export interface RawModelProviderWrite {
   temperature_milli?: number;
   reasoning_effort?: string;
   reasoning_format?: string;
+  responses_dialect?: NativeModelProviderWrite["responsesDialect"];
   chat_completions_dialect: NonNullable<
     NativeModelProviderWrite["chatCompletionsDialect"]
   >;

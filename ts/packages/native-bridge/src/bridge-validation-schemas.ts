@@ -742,6 +742,15 @@ export const rawModelProviderRecordSchema = Type.Object(
     temperature_milli: Type.Optional(nullableNumber),
     reasoning_effort: Type.Optional(nullableString),
     reasoning_format: Type.Optional(nullableString),
+    responses_dialect: Type.Optional(
+      Type.Union([
+        Type.Literal("openai_stateful"),
+        Type.Literal("openai_stateless"),
+        Type.Literal("generic_stateless"),
+        Type.Literal("deepseek"),
+        Type.Null(),
+      ]),
+    ),
     chat_completions_dialect: Type.Union([
       Type.Literal("standard"),
       Type.Literal("kimi"),
@@ -1114,6 +1123,14 @@ const openAiResponsesClientSchema = Type.Union([
 const openAiResponsesTransportMetricsSchema = Type.Object(
   {
     effectiveTransport: Type.String(),
+    providerDialect: Type.Optional(
+      Type.Union([
+        Type.Literal("openai_stateful"),
+        Type.Literal("openai_stateless"),
+        Type.Literal("generic_stateless"),
+        Type.Literal("deepseek"),
+      ]),
+    ),
     selectedStrategyId: Type.String(),
     effectiveStrategyId: Type.String(),
     fallbackReason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -1122,6 +1139,11 @@ const openAiResponsesTransportMetricsSchema = Type.Object(
     providerRequestPayloadBytes: Type.Number(),
     providerRequestDebugSamples: Type.Optional(Type.Array(Type.Unknown())),
     providerEventCounts: Type.Record(Type.String(), Type.Number()),
+    inputTokens: Type.Optional(Type.Number()),
+    cachedInputTokens: Type.Optional(Type.Number()),
+    outputTokens: Type.Optional(Type.Number()),
+    reasoningOutputTokens: Type.Optional(Type.Number()),
+    totalTokens: Type.Optional(Type.Number()),
     firstTextDeltaLatencyMs: Type.Optional(
       Type.Union([Type.Number(), Type.Null()]),
     ),
@@ -1167,6 +1189,12 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
     config: Type.Object(
       {
         model: Type.String(),
+        responsesDialect: Type.Union([
+          Type.Literal("openai_stateful"),
+          Type.Literal("openai_stateless"),
+          Type.Literal("generic_stateless"),
+          Type.Literal("deepseek"),
+        ]),
         strategyId: Type.Optional(
           Type.Union([
             Type.Literal("replay"),

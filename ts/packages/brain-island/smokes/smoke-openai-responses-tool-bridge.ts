@@ -75,6 +75,7 @@ import { MemoryToolCallDebugStore } from "../src/tool-call-debug-store.js";
           provider: "openai",
           modelName: "gpt-5",
           api: "responses",
+          responsesDialect: "openai_stateless",
         },
         brain: {
           module: "openai-responses",
@@ -297,6 +298,7 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
           provider: "openai",
           modelName: "gpt-5",
           api: "responses",
+          responsesDialect: "openai_stateless",
         },
         brain: {
           module: "openai-responses",
@@ -622,6 +624,7 @@ function loadedProfileContext(
         provider: "openai",
         modelName: "gpt-5",
         api: "responses",
+        responsesDialect: "openai_stateless",
       },
       brain: {
         module: "openai-responses",

@@ -1263,6 +1263,16 @@
           "chat_completions"
         ]
       },
+      "ResponsesProviderDialect": {
+        "type": "string",
+        "enum": [
+          "openai_stateful",
+          "openai_stateless",
+          "generic_stateless",
+          "deepseek"
+        ],
+        "description": "Required when protocol is responses. Selects an explicit provider-owned wire dialect; Crew does not infer it from aliases, URLs, model IDs, or providerKind."
+      },
       "ChatCompletionsDialect": {
         "type": "string",
         "enum": ["standard", "kimi", "glm", "qwen", "deepseek"]
@@ -1415,6 +1425,9 @@
           "reasoningFormat": {
             "type": "string"
           },
+          "responsesDialect": {
+            "$ref": "#/components/schemas/ResponsesProviderDialect"
+          },
           "chatCompletionsDialect": {
             "$ref": "#/components/schemas/ChatCompletionsDialect"
           },
@@ -1535,6 +1548,9 @@
           },
           "reasoningFormat": {
             "type": "string"
+          },
+          "responsesDialect": {
+            "$ref": "#/components/schemas/ResponsesProviderDialect"
           },
           "chatCompletionsDialect": {
             "$ref": "#/components/schemas/ChatCompletionsDialect"

@@ -2722,6 +2722,9 @@ function recordResponsesWakeMetrics(
     wakeId: observation.wakeId,
     observedAt: state.now(),
     effectiveTransport: metrics.effectiveTransport,
+    ...(metrics.providerDialect === undefined
+      ? {}
+      : { providerDialect: metrics.providerDialect }),
     selectedStrategyId: metrics.selectedStrategyId,
     effectiveStrategyId: metrics.effectiveStrategyId,
     fallbackReason: metrics.fallbackReason,
@@ -2729,6 +2732,21 @@ function recordResponsesWakeMetrics(
     continuationRoundCount: metrics.continuationRoundCount,
     providerRequestPayloadBytes: metrics.providerRequestPayloadBytes,
     providerEventCounts: metrics.providerEventCounts,
+    ...(metrics.inputTokens === undefined
+      ? {}
+      : { inputTokens: metrics.inputTokens }),
+    ...(metrics.cachedInputTokens === undefined
+      ? {}
+      : { cachedInputTokens: metrics.cachedInputTokens }),
+    ...(metrics.outputTokens === undefined
+      ? {}
+      : { outputTokens: metrics.outputTokens }),
+    ...(metrics.reasoningOutputTokens === undefined
+      ? {}
+      : { reasoningOutputTokens: metrics.reasoningOutputTokens }),
+    ...(metrics.totalTokens === undefined
+      ? {}
+      : { totalTokens: metrics.totalTokens }),
     ...(chatMetrics?.promptCachingPolicy === undefined
       ? {}
       : { promptCachingPolicy: chatMetrics.promptCachingPolicy }),
@@ -6171,6 +6189,7 @@ function modelProviderToBrainModelConfig(
     maxOutputTokens: provider.maxOutputTokens,
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
+    responsesDialect: provider.responsesDialect,
     chatCompletionsDialect: provider.chatCompletionsDialect,
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,

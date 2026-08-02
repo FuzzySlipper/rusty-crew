@@ -1448,7 +1448,7 @@ fn query_model_providers(
                 mp.alias, mp.status, mp.protocol, mp.provider_kind,
                 mp.display_name, mp.description, mp.base_url, mp.model_id,
                 mp.context_window_tokens, mp.max_output_tokens, mp.temperature_milli,
-                mp.reasoning_effort, mp.reasoning_format,
+                mp.reasoning_effort, mp.reasoning_format, mp.responses_dialect,
                 mp.chat_completions_dialect, mp.thinking_mode,
                 mp.reasoning_history, mp.reasoning_budget_tokens, mp.prompt_caching,
                 mp.credential_id,
@@ -1478,7 +1478,7 @@ fn get_model_provider(conn: &Connection, alias: &str) -> CoreResult<Option<Model
             mp.alias, mp.status, mp.protocol, mp.provider_kind,
             mp.display_name, mp.description, mp.base_url, mp.model_id,
             mp.context_window_tokens, mp.max_output_tokens, mp.temperature_milli,
-            mp.reasoning_effort, mp.reasoning_format,
+            mp.reasoning_effort, mp.reasoning_format, mp.responses_dialect,
             mp.chat_completions_dialect, mp.thinking_mode,
             mp.reasoning_history, mp.reasoning_budget_tokens, mp.prompt_caching,
             mp.credential_id,
@@ -1592,6 +1592,7 @@ fn upsert_model_provider_in_tx(
             temperature_milli,
             reasoning_effort,
             reasoning_format,
+            responses_dialect,
             chat_completions_dialect,
             thinking_mode,
             reasoning_history,
@@ -1604,7 +1605,7 @@ fn upsert_model_provider_in_tx(
             created_at,
             updated_at,
             credential_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, NULL, ?19, ?20, ?21, ?22, ?23)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL, NULL, ?20, ?21, ?22, ?23, ?24)
         ON CONFLICT(alias) DO UPDATE SET
             status = excluded.status,
             protocol = excluded.protocol,
@@ -1618,6 +1619,7 @@ fn upsert_model_provider_in_tx(
             temperature_milli = excluded.temperature_milli,
             reasoning_effort = excluded.reasoning_effort,
             reasoning_format = excluded.reasoning_format,
+            responses_dialect = excluded.responses_dialect,
             chat_completions_dialect = excluded.chat_completions_dialect,
             thinking_mode = excluded.thinking_mode,
             reasoning_history = excluded.reasoning_history,
@@ -1643,6 +1645,7 @@ fn upsert_model_provider_in_tx(
             write.temperature_milli.map(|value| value as i64),
             write.reasoning_effort.as_deref(),
             write.reasoning_format.as_deref(),
+            write.responses_dialect.map(responses_provider_dialect_as_str),
             chat_completions_dialect_as_str(write.chat_completions_dialect),
             chat_completions_thinking_mode_as_str(write.thinking_mode),
             chat_completions_reasoning_history_as_str(write.reasoning_history),
@@ -1662,14 +1665,15 @@ fn upsert_model_provider_in_tx(
 fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProviderRecord> {
     let status: String = row.get(1)?;
     let protocol: String = row.get(2)?;
-    let dialect: String = row.get(13)?;
-    let thinking_mode: String = row.get(14)?;
-    let reasoning_history: String = row.get(15)?;
-    let prompt_caching: String = row.get(17)?;
-    let credential_id: Option<String> = row.get(18)?;
-    let secret_ciphertext: Option<String> = row.get(19)?;
-    let credential_kind: Option<String> = row.get(21)?;
-    let metadata_json: String = row.get(23)?;
+    let responses_dialect: Option<String> = row.get(13)?;
+    let dialect: String = row.get(14)?;
+    let thinking_mode: String = row.get(15)?;
+    let reasoning_history: String = row.get(16)?;
+    let prompt_caching: String = row.get(18)?;
+    let credential_id: Option<String> = row.get(19)?;
+    let secret_ciphertext: Option<String> = row.get(20)?;
+    let credential_kind: Option<String> = row.get(22)?;
+    let metadata_json: String = row.get(24)?;
     Ok(ModelProviderRecord {
         alias: row.get(0)?,
         status: model_provider_status_from_str(&status)?,
@@ -1684,10 +1688,14 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
         temperature_milli: row.get::<_, Option<i64>>(10)?.map(|value| value as u32),
         reasoning_effort: row.get(11)?,
         reasoning_format: row.get(12)?,
+        responses_dialect: responses_dialect
+            .as_deref()
+            .map(responses_provider_dialect_from_str)
+            .transpose()?,
         chat_completions_dialect: chat_completions_dialect_from_str(&dialect)?,
         thinking_mode: chat_completions_thinking_mode_from_str(&thinking_mode)?,
         reasoning_history: chat_completions_reasoning_history_from_str(&reasoning_history)?,
-        reasoning_budget_tokens: row.get::<_, Option<i64>>(16)?.map(|value| value as u32),
+        reasoning_budget_tokens: row.get::<_, Option<i64>>(17)?.map(|value| value as u32),
         prompt_caching: chat_completions_prompt_caching_from_str(&prompt_caching)?,
         credential_id: credential_id.clone(),
         credential: ModelProviderCredential {
@@ -1696,17 +1704,17 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
                 .as_ref()
                 .and(credential_id.as_ref())
                 .map(|id| format!("db://service_credentials/{id}/secret")),
-            updated_at: row.get(20)?,
+            updated_at: row.get(21)?,
             kind: credential_kind
                 .as_deref()
                 .map(model_provider_credential_kind_from_str)
                 .transpose()?,
-            revision: row.get::<_, Option<i64>>(22)?.map(|value| value as u64),
+            revision: row.get::<_, Option<i64>>(23)?.map(|value| value as u64),
         },
         metadata_json: from_json_text(&metadata_json).map_err(to_sql_error)?,
-        revision: row.get::<_, i64>(24)? as u64,
-        created_at: row.get(25)?,
-        updated_at: row.get(26)?,
+        revision: row.get::<_, i64>(25)? as u64,
+        created_at: row.get(26)?,
+        updated_at: row.get(27)?,
     })
 }
 
@@ -2410,6 +2418,28 @@ fn model_provider_protocol_from_str(raw: &str) -> rusqlite::Result<ModelProvider
     }
 }
 
+fn responses_provider_dialect_as_str(dialect: ResponsesProviderDialect) -> &'static str {
+    match dialect {
+        ResponsesProviderDialect::OpenaiStateful => "openai_stateful",
+        ResponsesProviderDialect::OpenaiStateless => "openai_stateless",
+        ResponsesProviderDialect::GenericStateless => "generic_stateless",
+        ResponsesProviderDialect::Deepseek => "deepseek",
+    }
+}
+
+fn responses_provider_dialect_from_str(raw: &str) -> rusqlite::Result<ResponsesProviderDialect> {
+    match raw {
+        "openai_stateful" => Ok(ResponsesProviderDialect::OpenaiStateful),
+        "openai_stateless" => Ok(ResponsesProviderDialect::OpenaiStateless),
+        "generic_stateless" => Ok(ResponsesProviderDialect::GenericStateless),
+        "deepseek" => Ok(ResponsesProviderDialect::Deepseek),
+        other => Err(model_provider_text_conversion_error(
+            13,
+            format!("unknown Responses provider dialect {other}"),
+        )),
+    }
+}
+
 fn chat_completions_dialect_as_str(dialect: ChatCompletionsWireDialect) -> &'static str {
     match dialect {
         ChatCompletionsWireDialect::Standard => "standard",
@@ -2650,6 +2680,7 @@ pub(crate) fn validate_model_provider_write(write: &ModelProviderWrite) -> CoreR
     }
     validate_chat_completions_dialect_policy(write)?;
     validate_chat_completions_prompt_caching_policy(write)?;
+    validate_responses_provider_dialect(write)?;
     if write.clear_secret && write.secret.is_some() {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
@@ -2657,6 +2688,21 @@ pub(crate) fn validate_model_provider_write(write: &ModelProviderWrite) -> CoreR
         ));
     }
     Ok(())
+}
+
+fn validate_responses_provider_dialect(write: &ModelProviderWrite) -> CoreResult<()> {
+    match (write.protocol, write.responses_dialect) {
+        (ModelProviderProtocol::Responses, Some(_))
+        | (ModelProviderProtocol::ChatCompletions, None) => Ok(()),
+        (ModelProviderProtocol::Responses, None) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "responses protocol requires an explicit responses_dialect",
+        )),
+        (ModelProviderProtocol::ChatCompletions, Some(_)) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "responses_dialect requires protocol responses",
+        )),
+    }
 }
 
 fn validate_chat_completions_prompt_caching_policy(write: &ModelProviderWrite) -> CoreResult<()> {
@@ -2931,6 +2977,29 @@ mod tests {
     }
 
     #[test]
+    fn responses_provider_dialect_is_required_and_protocol_scoped() {
+        let mut write =
+            model_provider_write("deepseek-responses", None, None, "2026-08-02T00:00:00Z");
+        write.protocol = ModelProviderProtocol::Responses;
+        write.provider_kind = "deepseek".to_string();
+        write.model_id = "deepseek-v4-flash".to_string();
+
+        let missing = validate_model_provider_write(&write)
+            .expect_err("Responses providers require an explicit dialect");
+        assert_eq!(missing.kind, CoreErrorKind::InvalidInput);
+        assert!(missing.message.contains("explicit responses_dialect"));
+
+        write.responses_dialect = Some(ResponsesProviderDialect::Deepseek);
+        validate_model_provider_write(&write).unwrap();
+
+        write.protocol = ModelProviderProtocol::ChatCompletions;
+        let misplaced = validate_model_provider_write(&write)
+            .expect_err("Chat Completions providers reject a Responses dialect");
+        assert_eq!(misplaced.kind, CoreErrorKind::InvalidInput);
+        assert!(misplaced.message.contains("requires protocol responses"));
+    }
+
+    #[test]
     fn service_config_repo_preserves_profile_provider_and_binding_contracts() {
         let db_path = std::env::temp_dir().join(format!(
             "rusty-crew-service-config-repo-{}.sqlite3",
@@ -3142,6 +3211,7 @@ mod tests {
             temperature_milli: Some(500),
             reasoning_effort: None,
             reasoning_format: None,
+            responses_dialect: None,
             chat_completions_dialect: Default::default(),
             thinking_mode: Default::default(),
             reasoning_history: Default::default(),

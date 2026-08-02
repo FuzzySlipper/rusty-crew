@@ -1,5 +1,17 @@
 export type NativeModelProviderStatus = "active" | "disabled" | "archived";
 export type NativeModelProviderProtocol = "responses" | "chat_completions";
+export type NativeResponsesProviderDialect =
+  | "openai_stateful"
+  | "openai_stateless"
+  | "generic_stateless"
+  | "deepseek";
+export interface NativeResponsesTokenUsage {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+}
 export type NativeModelProviderCredentialKind =
   | "api_key"
   | "openai_oauth"
@@ -80,6 +92,7 @@ export interface NativeModelProviderRecord {
   temperatureMilli?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
+  responsesDialect?: NativeResponsesProviderDialect;
   chatCompletionsDialect: NativeChatCompletionsWireDialect;
   thinkingMode: NativeChatCompletionsThinkingMode;
   reasoningHistory: NativeChatCompletionsReasoningHistory;
@@ -107,6 +120,7 @@ export interface NativeModelProviderWrite {
   temperatureMilli?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
+  responsesDialect?: NativeResponsesProviderDialect;
   chatCompletionsDialect?: NativeChatCompletionsWireDialect;
   thinkingMode?: NativeChatCompletionsThinkingMode;
   reasoningHistory?: NativeChatCompletionsReasoningHistory;

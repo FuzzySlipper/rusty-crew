@@ -9465,8 +9465,9 @@ mod tests {
         AgentMessage, BrainEvent, ChatCompletionsPromptCachingPolicy,
         ChatCompletionsReasoningHistory, ChatCompletionsThinkingMode, ChatCompletionsWireDialect,
         MemoryEvidenceRef, MemoryProposalSource, ModelProviderCredentialKind,
-        ProfileRegistryImportExportMetadata, ResourceLimits, SessionHandle, ToolCallMetadata,
-        ToolCallSource, ToolDescriptor, ToolProfile, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+        ProfileRegistryImportExportMetadata, ResourceLimits, ResponsesProviderDialect,
+        SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
+        MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
     };
 
     #[test]
@@ -15192,6 +15193,27 @@ mod tests {
             .upsert_model_provider(&invalid_cache_write)
             .expect_err("non-Anthropic OpenRouter cache policy must be rejected");
         assert_eq!(cache_error.kind, CoreErrorKind::InvalidInput);
+        let deepseek_responses = store
+            .upsert_model_provider(&model_provider_write(
+                "deepseek-responses",
+                ModelProviderProtocol::Responses,
+                "deepseek",
+                "deepseek-v4-flash",
+                None,
+            ))
+            .unwrap();
+        assert_eq!(
+            deepseek_responses.responses_dialect,
+            Some(ResponsesProviderDialect::Deepseek)
+        );
+        assert_eq!(
+            store
+                .get_model_provider("deepseek-responses")
+                .unwrap()
+                .expect("DeepSeek Responses provider readback")
+                .responses_dialect,
+            Some(ResponsesProviderDialect::Deepseek)
+        );
         assert_eq!(
             api_key.credential.kind,
             Some(ModelProviderCredentialKind::ApiKey)
@@ -15874,6 +15896,18 @@ mod tests {
             temperature_milli: Some(500),
             reasoning_effort: None,
             reasoning_format: None,
+            responses_dialect: match (protocol, provider_kind) {
+                (ModelProviderProtocol::Responses, "openai") => {
+                    Some(ResponsesProviderDialect::OpenaiStateful)
+                }
+                (ModelProviderProtocol::Responses, "deepseek") => {
+                    Some(ResponsesProviderDialect::Deepseek)
+                }
+                (ModelProviderProtocol::Responses, _) => {
+                    Some(ResponsesProviderDialect::GenericStateless)
+                }
+                (ModelProviderProtocol::ChatCompletions, _) => None,
+            },
             chat_completions_dialect: Default::default(),
             thinking_mode: Default::default(),
             reasoning_history: Default::default(),

@@ -41,6 +41,7 @@ try {
           provider: "openai",
           modelName: "gpt-5",
           api: "responses",
+          responsesDialect: "openai_stateless",
         },
         brain: {
           module: "openai-responses",

@@ -1268,6 +1268,15 @@ pub enum ModelProviderProtocol {
     ChatCompletions,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesProviderDialect {
+    OpenaiStateful,
+    OpenaiStateless,
+    GenericStateless,
+    Deepseek,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatCompletionsWireDialect {
@@ -1593,6 +1602,8 @@ pub struct ModelProviderRecord {
     pub temperature_milli: Option<u32>,
     pub reasoning_effort: Option<String>,
     pub reasoning_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responses_dialect: Option<ResponsesProviderDialect>,
     #[serde(default)]
     pub chat_completions_dialect: ChatCompletionsWireDialect,
     #[serde(default)]
@@ -1627,6 +1638,8 @@ pub struct ModelProviderWrite {
     pub temperature_milli: Option<u32>,
     pub reasoning_effort: Option<String>,
     pub reasoning_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responses_dialect: Option<ResponsesProviderDialect>,
     #[serde(default)]
     pub chat_completions_dialect: ChatCompletionsWireDialect,
     #[serde(default)]

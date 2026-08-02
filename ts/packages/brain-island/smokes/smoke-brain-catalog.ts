@@ -56,6 +56,7 @@ try {
               provider: "test",
               modelName: "test",
               api: "responses",
+              responsesDialect: "openai_stateless",
             },
           },
           {
@@ -371,6 +372,7 @@ function writeRuntimeConfig(dataDir: string): void {
           baseUrl: "http://127.0.0.1:1",
           apiKeyEnv: "RUSTY_CREW_TEST_OPENAI_API_KEY",
           api: "responses",
+          responsesDialect: "openai_stateless",
         },
         brain: {
           module: "openai-responses",
@@ -392,6 +394,7 @@ function writeRuntimeConfig(dataDir: string): void {
           baseUrl: "http://127.0.0.1:1",
           apiKeyEnv: "RUSTY_CREW_TEST_OPENAI_API_KEY",
           api: "responses",
+          responsesDialect: "openai_stateful",
         },
         brain: {
           module: "openai-responses",

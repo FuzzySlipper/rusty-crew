@@ -1242,6 +1242,7 @@ test("model provider OpenAI OAuth routes expose status and start without leaking
       modelProviderRecord({
         alias: "gpt",
         protocol: "responses",
+        responsesDialect: "openai_stateful",
         providerKind: "openai",
         modelId: "gpt-5",
         credentialId: "openai:primary",
@@ -1316,12 +1317,14 @@ test("shared credential routes complete OAuth once and guard linked clear and de
     modelProviderRecord({
       alias: "gpt-main",
       protocol: "responses",
+      responsesDialect: "openai_stateful",
       providerKind: "openai",
       modelId: "gpt-5",
     }),
     modelProviderRecord({
       alias: "gpt-fast",
       protocol: "responses",
+      responsesDialect: "openai_stateful",
       providerKind: "openai",
       modelId: "gpt-5-mini",
     }),
@@ -2550,6 +2553,9 @@ function modelProviderRecord(
     temperatureMilli: overrides.temperatureMilli,
     reasoningEffort: overrides.reasoningEffort,
     reasoningFormat: overrides.reasoningFormat,
+    responsesDialect:
+      overrides.responsesDialect ??
+      (overrides.protocol === "responses" ? "openai_stateful" : undefined),
     chatCompletionsDialect: overrides.chatCompletionsDialect ?? "standard",
     thinkingMode: overrides.thinkingMode ?? "provider_default",
     reasoningHistory: overrides.reasoningHistory ?? "provider_default",

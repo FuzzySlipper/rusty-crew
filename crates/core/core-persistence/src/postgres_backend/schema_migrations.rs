@@ -4,7 +4,7 @@ use super::logical_turns::apply_postgres_logical_turns;
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 43;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 44;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -232,7 +232,36 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "record typed chat completions prompt caching policy in provider JSON",
         apply: None,
     },
+    PostgresSchemaMigration {
+        version: 44,
+        description: "record explicit Responses provider dialect in provider JSON",
+        apply: Some(apply_postgres_responses_provider_dialect),
+    },
 ];
+
+fn apply_postgres_responses_provider_dialect(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.model_providers
+            SET provider_json = (
+                provider_json::jsonb || jsonb_build_object(
+                    'responses_dialect',
+                    CASE
+                        WHEN provider_json::jsonb ->> 'provider_kind' = 'openai'
+                            THEN 'openai_stateful'
+                        WHEN provider_json::jsonb ->> 'provider_kind' = 'deepseek'
+                            THEN 'deepseek'
+                        ELSE 'generic_stateless'
+                    END
+                )
+            )::text
+          WHERE protocol = 'responses'
+            AND NOT (provider_json::jsonb ? 'responses_dialect');"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL Responses provider dialect", error))
+}
 
 fn apply_postgres_external_runtime_event_retention(
     tx: &mut Transaction<'_>,

@@ -1625,6 +1625,7 @@ fn upsert_model_provider_in_tx(
         temperature_milli: write.temperature_milli,
         reasoning_effort: write.reasoning_effort.clone(),
         reasoning_format: write.reasoning_format.clone(),
+        responses_dialect: write.responses_dialect,
         chat_completions_dialect: write.chat_completions_dialect,
         thinking_mode: write.thinking_mode,
         reasoning_history: write.reasoning_history,

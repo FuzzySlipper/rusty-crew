@@ -77,6 +77,18 @@ assert.deepEqual(
 );
 assert.ok(schema("ModelProviderRecord").properties?.temperature);
 assert.ok(schema("ModelProviderRecord").properties?.temperatureMilli);
+assert.deepEqual(schema("ResponsesProviderDialect").enum, [
+  "openai_stateful",
+  "openai_stateless",
+  "generic_stateless",
+  "deepseek",
+]);
+assert.deepEqual(schema("ModelProviderRecord").properties?.responsesDialect, {
+  $ref: "#/components/schemas/ResponsesProviderDialect",
+});
+assert.deepEqual(schema("ModelProviderWrite").properties?.responsesDialect, {
+  $ref: "#/components/schemas/ResponsesProviderDialect",
+});
 assert.ok(schema("ModelProviderWrite").properties?.temperature);
 assert.ok(schema("ModelProviderWrite").properties?.temperatureMilli);
 assert.deepEqual(schema("ModelProviderWrite").properties?.temperature?.type, [
@@ -114,6 +126,7 @@ const context = modelProviderRouteContext([
     alias: "gpt",
     providerKind: "openai",
     protocol: "responses",
+    responsesDialect: "openai_stateful",
     modelId: "gpt-5",
     credentialId: "provider:gpt",
     credential: { hasSecret: true, kind: "openai_oauth", revision: 1 },
@@ -346,6 +359,9 @@ function modelProviderRecord(
     temperatureMilli: overrides.temperatureMilli,
     reasoningEffort: overrides.reasoningEffort,
     reasoningFormat: overrides.reasoningFormat,
+    responsesDialect:
+      overrides.responsesDialect ??
+      (overrides.protocol === "responses" ? "openai_stateful" : undefined),
     chatCompletionsDialect: overrides.chatCompletionsDialect ?? "standard",
     thinkingMode: overrides.thinkingMode ?? "provider_default",
     reasoningHistory: overrides.reasoningHistory ?? "provider_default",

@@ -312,6 +312,7 @@ function writeRuntimeConfig(rootDir: string, count: number): void {
           provider: "openai",
           modelName: "gpt-5",
           api: "responses",
+          responsesDialect: "openai_stateless",
         },
         brain: {
           module: "openai-responses",

@@ -518,6 +518,7 @@ function modelProviderWriteFromBody(
     temperatureMilli: optionalTemperatureMilli(body),
     reasoningEffort: optionalString(body.reasoningEffort),
     reasoningFormat: optionalString(body.reasoningFormat),
+    responsesDialect: responsesProviderDialect(body.responsesDialect),
     chatCompletionsDialect: chatCompletionsDialect(body.chatCompletionsDialect),
     thinkingMode: chatCompletionsThinkingMode(body.thinkingMode),
     reasoningHistory: chatCompletionsReasoningHistory(body.reasoningHistory),
@@ -532,6 +533,24 @@ function modelProviderWriteFromBody(
     expectedRevision: optionalNumber(body.expectedRevision),
     now,
   };
+}
+
+function responsesProviderDialect(
+  value: unknown,
+): NativeModelProviderWrite["responsesDialect"] {
+  const dialect = optionalString(value);
+  if (dialect === undefined) return undefined;
+  if (
+    dialect === "openai_stateful" ||
+    dialect === "openai_stateless" ||
+    dialect === "generic_stateless" ||
+    dialect === "deepseek"
+  ) {
+    return dialect;
+  }
+  throw new Error(
+    "model provider responsesDialect must be openai_stateful, openai_stateless, generic_stateless, or deepseek",
+  );
 }
 
 function chatCompletionsDialect(

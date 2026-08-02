@@ -1059,6 +1059,7 @@ function modelProviderToBrainModelConfig(
     maxOutputTokens: provider.maxOutputTokens,
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
+    responsesDialect: provider.responsesDialect,
     chatCompletionsDialect: provider.chatCompletionsDialect,
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
@@ -1438,6 +1439,12 @@ function brainModuleDiagnostics(input: {
       ...chatCompletionsContinuationDiagnostics(input.selection.moduleId),
       ...responsesContinuationDiagnostics(input.selection.moduleId),
       modelId: input.profile.profile.modelConfig.modelName,
+      ...(input.profile.profile.modelConfig.responsesDialect === undefined
+        ? {}
+        : {
+            responsesDialect:
+              input.profile.profile.modelConfig.responsesDialect,
+          }),
       promptCaching:
         input.profile.profile.modelConfig.promptCaching ?? "disabled",
       ...(input.profile.profile.modelConfig.baseUrl === undefined

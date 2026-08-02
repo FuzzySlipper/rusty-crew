@@ -414,6 +414,11 @@ export interface SessionContextUsageResult {
     provider_reasoning_effort?: string;
     session_reasoning_effort_override?: string;
     reasoning_format?: string;
+    responses_dialect?:
+      | "openai_stateful"
+      | "openai_stateless"
+      | "generic_stateless"
+      | "deepseek";
     chat_completions_dialect?: ChatCompletionsDialect;
     thinking_mode?: ChatCompletionsThinkingMode;
     reasoning_history?: ChatCompletionsReasoningHistory;

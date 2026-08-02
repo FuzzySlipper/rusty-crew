@@ -95,7 +95,7 @@ fn openai_responses_bridge_uses_oauth_bearer_and_headers_without_secret_update()
         "wakeId": "wake-oauth",
         "sessionId": "responses-session",
         "bodyState": body_state,
-        "config": {"model": "gpt-5", "instructions": "say ok"},
+        "config": {"model": "gpt-5", "responsesDialect": "openai_stateless", "instructions": "say ok"},
         "client": {
             "mode": "live",
             "base_url": server.base_url(),
@@ -1111,6 +1111,7 @@ fn openai_responses_buffered_bridge_yields_and_resumes_without_repeating_tools()
             "bodyState": body_state,
             "config": {
                 "model": "fake-responses-model",
+                "responsesDialect": "openai_stateless",
                 "strategyId": "replay",
                 "workQuantumContinuationRounds": 1
             }
@@ -1186,6 +1187,7 @@ fn openai_responses_buffered_bridge_yields_and_resumes_without_repeating_tools()
             "continuationState": yielded["continuation_state"],
             "config": {
                 "model": "fake-responses-model",
+                "responsesDialect": "openai_stateless",
                 "strategyId": "replay",
                 "workQuantumContinuationRounds": 1
             }

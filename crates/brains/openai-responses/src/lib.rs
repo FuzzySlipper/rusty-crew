@@ -27,7 +27,8 @@ use rusty_crew_core_protocol::{
     BrainWakeProviderStateUpdate, BrainWakeRequest, BrainWakeStreamItem, CompletionPacket,
     CompletionStatus, CoreError, CoreErrorKind, CoreEvent, CoreResult, ExternalEventPayload,
     LogicalTurnAttentionReason, LogicalTurnResolutionAction, ProviderStateAbsenceReason,
-    ProviderStateMode, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
+    ProviderStateMode, ResponsesProviderDialect, ToolCallMetadata, ToolCallPolicyMetadata,
+    ToolCallSource,
 };
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -44,7 +45,7 @@ use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
 pub const PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID: &str = "previous-response-chain";
-pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v1";
+pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v2";
 pub const DEFAULT_NO_PROGRESS_ATTENTION_THRESHOLD: u32 = 3;
 pub const DEFAULT_WORK_QUANTUM_CONTINUATION_ROUNDS: usize = 64;
 pub const CONTINUATION_PAYLOAD_VERSION: &str = "openai-responses-continuation-v2";
@@ -52,6 +53,7 @@ pub const CONTINUATION_PAYLOAD_VERSION: &str = "openai-responses-continuation-v2
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesBrainConfig {
     pub strategy: ResponsesBrainStrategy,
+    pub dialect: ResponsesProviderDialect,
     pub model: String,
     pub instructions: Option<String>,
     pub tool_choice: ResponsesToolChoice,
@@ -72,6 +74,7 @@ impl ResponsesBrainConfig {
     pub fn replay(model: impl Into<String>) -> Self {
         Self {
             strategy: ResponsesBrainStrategy::Replay,
+            dialect: ResponsesProviderDialect::OpenaiStateless,
             model: model.into(),
             instructions: None,
             tool_choice: ResponsesToolChoice::Auto,
@@ -92,8 +95,21 @@ impl ResponsesBrainConfig {
     pub fn previous_response_chain(model: impl Into<String>) -> Self {
         Self {
             strategy: ResponsesBrainStrategy::PreviousResponseChain,
+            dialect: ResponsesProviderDialect::OpenaiStateful,
             ..Self::replay(model)
         }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.strategy == ResponsesBrainStrategy::PreviousResponseChain
+            && self.dialect != ResponsesProviderDialect::OpenaiStateful
+        {
+            return Err(format!(
+                "Responses dialect {:?} does not support previous_response_id chaining",
+                self.dialect
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -158,16 +174,22 @@ pub struct ResponsesRequest {
     pub tools: Vec<ResponsesToolDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<Value>,
-    pub parallel_tool_calls: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<Value>,
-    pub store: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
     pub stream: bool,
-    pub include: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<Value>,
 }
 
@@ -182,6 +204,7 @@ pub enum ResponsesInputItem {
     },
     Reasoning {
         id: Option<String>,
+        content: Option<ResponsesReasoningContent>,
         summary: Option<String>,
         encrypted_content: Option<String>,
     },
@@ -199,6 +222,20 @@ pub enum ResponsesInputItem {
     ReplayHint {
         raw_json: Value,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResponsesReasoningContent {
+    Text(String),
+    Parts(Vec<ResponsesReasoningContentPart>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponsesReasoningContentPart {
+    #[serde(rename = "type")]
+    pub part_type: String,
+    pub text: String,
 }
 
 impl Serialize for ResponsesInputItem {
@@ -223,6 +260,7 @@ impl Serialize for ResponsesInputItem {
             }
             Self::Reasoning {
                 id,
+                content,
                 summary,
                 encrypted_content,
             } => {
@@ -231,11 +269,15 @@ impl Serialize for ResponsesInputItem {
                 if let Some(id) = id {
                     map.serialize_entry("id", id)?;
                 }
-                let summary_value = summary
-                    .as_ref()
-                    .map(|text| json!([{"type": "summary_text", "text": text}]))
-                    .unwrap_or_else(|| json!([]));
-                map.serialize_entry("summary", &summary_value)?;
+                if let Some(content) = content {
+                    map.serialize_entry("content", content)?;
+                }
+                if let Some(summary) = summary {
+                    map.serialize_entry(
+                        "summary",
+                        &json!([{"type": "summary_text", "text": summary}]),
+                    )?;
+                }
                 if let Some(encrypted_content) = encrypted_content {
                     map.serialize_entry("encrypted_content", encrypted_content)?;
                 }
@@ -319,12 +361,18 @@ impl ResponsesRequestBuilder {
             self.config.strategy,
             ResponsesBrainStrategy::PreviousResponseChain
         );
-        let mut input = history.input_items;
-        input.extend(provider_replay_items(
-            provider_state,
-            include_provider_item_ids,
-        ));
-        input.extend(history.replay_hints);
+        let provider_items = provider_replay_items(provider_state, include_provider_item_ids);
+        let mut input = if include_provider_item_ids {
+            let mut items = history.input_items;
+            items.extend(provider_items);
+            items.extend(history.replay_hints);
+            items
+        } else {
+            let mut items = provider_items;
+            items.extend(history.input_items);
+            items.extend(history.replay_hints);
+            items
+        };
         input.extend(continuation_items);
         if input.is_empty() {
             input.push(ResponsesInputItem::UserMessage {
@@ -343,6 +391,29 @@ impl ResponsesRequestBuilder {
                 json!({"type": "function", "name": name})
             }
         });
+        let openai_extensions = matches!(
+            self.config.dialect,
+            ResponsesProviderDialect::OpenaiStateful | ResponsesProviderDialect::OpenaiStateless
+        );
+        let deepseek = self.config.dialect == ResponsesProviderDialect::Deepseek;
+        if deepseek {
+            for item in &mut input {
+                let ResponsesInputItem::Reasoning {
+                    content: Some(content),
+                    ..
+                } = item
+                else {
+                    continue;
+                };
+                if let ResponsesReasoningContent::Text(text) = content {
+                    *content =
+                        ResponsesReasoningContent::Parts(vec![ResponsesReasoningContentPart {
+                            part_type: "reasoning_text".to_string(),
+                            text: text.clone(),
+                        }]);
+                }
+            }
+        }
         ResponsesRequest {
             model: self.config.model.clone(),
             instructions: self.config.instructions.clone(),
@@ -350,26 +421,33 @@ impl ResponsesRequestBuilder {
             input,
             tools,
             tool_choice,
-            parallel_tool_calls: self.config.parallel_tool_calls,
+            parallel_tool_calls: openai_extensions.then_some(self.config.parallel_tool_calls),
             reasoning: self
                 .config
                 .reasoning
                 .as_ref()
-                .and_then(responses_reasoning_value),
-            store: matches!(
+                .and_then(|reasoning| responses_reasoning_value(reasoning, deepseek)),
+            store: openai_extensions.then_some(matches!(
                 self.config.strategy,
                 ResponsesBrainStrategy::PreviousResponseChain
-            ),
+            )),
             stream: true,
-            include: self.config.include.clone(),
-            service_tier: self.config.service_tier.clone(),
-            prompt_cache_key: self.config.prompt_cache_key.clone(),
+            include: openai_extensions.then(|| self.config.include.clone()),
+            service_tier: openai_extensions
+                .then(|| self.config.service_tier.clone())
+                .flatten(),
+            prompt_cache_key: openai_extensions
+                .then(|| self.config.prompt_cache_key.clone())
+                .flatten(),
             max_output_tokens: self.config.max_output_tokens,
-            text: self
-                .config
-                .text
-                .as_ref()
-                .map(|text| json!({"verbosity": text.verbosity})),
+            text: openai_extensions
+                .then(|| {
+                    self.config
+                        .text
+                        .as_ref()
+                        .map(|text| json!({"verbosity": text.verbosity}))
+                })
+                .flatten(),
         }
     }
 
@@ -432,13 +510,18 @@ impl ResponsesRequestBuilder {
     }
 }
 
-fn responses_reasoning_value(reasoning: &ResponsesReasoningConfig) -> Option<Value> {
+fn responses_reasoning_value(
+    reasoning: &ResponsesReasoningConfig,
+    omit_summary: bool,
+) -> Option<Value> {
     let mut value = serde_json::Map::new();
     if let Some(effort) = reasoning.effort.as_ref() {
         value.insert("effort".to_string(), json!(effort));
     }
-    if let Some(summary) = reasoning.summary.as_ref() {
-        value.insert("summary".to_string(), json!(summary));
+    if !omit_summary {
+        if let Some(summary) = reasoning.summary.as_ref() {
+            value.insert("summary".to_string(), json!(summary));
+        }
     }
     (!value.is_empty()).then_some(Value::Object(value))
 }
@@ -550,10 +633,127 @@ pub struct OpenAiResponsesProviderStateV1 {
     pub payload_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_completed_response: Option<OpenAiResponsesCompletedResponseRecord>,
+    #[serde(default)]
+    stateless_replay_context: Vec<StoredResponsesInputItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_response_chain: Option<PreviousResponseChainStateV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_hints: Option<OpenAiResponsesReplayHints>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum StoredResponsesInputItem {
+    UserMessage {
+        content: String,
+    },
+    AssistantMessage {
+        content: String,
+    },
+    Reasoning {
+        id: Option<String>,
+        content: Option<ResponsesReasoningContent>,
+        summary: Option<String>,
+        encrypted_content: Option<String>,
+    },
+    FunctionCall {
+        id: Option<String>,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    FunctionCallOutput {
+        call_id: String,
+        output: String,
+        is_error: bool,
+    },
+    ReplayHint {
+        raw_json: Value,
+    },
+}
+
+impl From<ResponsesInputItem> for StoredResponsesInputItem {
+    fn from(item: ResponsesInputItem) -> Self {
+        match item {
+            ResponsesInputItem::UserMessage { content } => Self::UserMessage { content },
+            ResponsesInputItem::AssistantMessage { content } => Self::AssistantMessage { content },
+            ResponsesInputItem::Reasoning {
+                id,
+                content,
+                summary,
+                encrypted_content,
+            } => Self::Reasoning {
+                id,
+                content,
+                summary,
+                encrypted_content,
+            },
+            ResponsesInputItem::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            } => Self::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            },
+            ResponsesInputItem::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            } => Self::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            },
+            ResponsesInputItem::ReplayHint { raw_json } => Self::ReplayHint { raw_json },
+        }
+    }
+}
+
+impl From<StoredResponsesInputItem> for ResponsesInputItem {
+    fn from(item: StoredResponsesInputItem) -> Self {
+        match item {
+            StoredResponsesInputItem::UserMessage { content } => Self::UserMessage { content },
+            StoredResponsesInputItem::AssistantMessage { content } => {
+                Self::AssistantMessage { content }
+            }
+            StoredResponsesInputItem::Reasoning {
+                id,
+                content,
+                summary,
+                encrypted_content,
+            } => Self::Reasoning {
+                id,
+                content,
+                summary,
+                encrypted_content,
+            },
+            StoredResponsesInputItem::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            } => Self::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            },
+            StoredResponsesInputItem::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            } => Self::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            },
+            StoredResponsesInputItem::ReplayHint { raw_json } => Self::ReplayHint { raw_json },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -731,13 +931,22 @@ fn provider_replay_items(
         }];
     };
 
-    let mut items = Vec::new();
-    if let Some(completed) = payload.last_completed_response {
-        for record in completed.output_items {
-            if let Some(item) = replay_item_from_record(record, include_provider_item_ids) {
-                items.push(item);
-            }
-        }
+    let mut items = if include_provider_item_ids {
+        payload
+            .last_completed_response
+            .into_iter()
+            .flat_map(|completed| completed.output_items)
+            .filter_map(|record| replay_item_from_record(record, true))
+            .collect::<Vec<_>>()
+    } else {
+        payload
+            .stateless_replay_context
+            .into_iter()
+            .map(ResponsesInputItem::from)
+            .collect::<Vec<_>>()
+    };
+    if !include_provider_item_ids {
+        strip_provider_item_ids(&mut items);
     }
     if let Some(hints) = payload.replay_hints {
         for record in hints.reasoning_items {
@@ -757,6 +966,16 @@ fn provider_replay_items(
     items
 }
 
+fn strip_provider_item_ids(items: &mut [ResponsesInputItem]) {
+    for item in items {
+        match item {
+            ResponsesInputItem::Reasoning { id, .. }
+            | ResponsesInputItem::FunctionCall { id, .. } => *id = None,
+            _ => {}
+        }
+    }
+}
+
 fn replay_item_from_record(
     record: OpenAiResponseOutputItemRecord,
     include_provider_item_ids: bool,
@@ -768,10 +987,12 @@ fn replay_item_from_record(
         }
         ResponsesOutputItem::Reasoning {
             id,
+            content,
             summary,
             encrypted_content,
         } => Some(ResponsesInputItem::Reasoning {
             id: include_provider_item_ids.then_some(id).flatten(),
+            content: content.map(ResponsesReasoningContent::Text),
             summary,
             encrypted_content,
         }),
@@ -863,6 +1084,7 @@ pub enum ResponsesOutputItem {
     },
     Reasoning {
         id: Option<String>,
+        content: Option<String>,
         summary: Option<String>,
         encrypted_content: Option<String>,
     },
@@ -896,6 +1118,7 @@ pub struct ResponsesTokenUsage {
 pub enum ResponsesEvent {
     TextDelta(String),
     ReasoningDelta(String),
+    ReasoningTextDelta(String),
     OutputItemAdded(ResponsesOutputItem),
     OutputItemDone(ResponsesOutputItem),
     Completed {
@@ -914,10 +1137,16 @@ pub fn process_responses_event(
             raw.delta
                 .ok_or(ResponsesStreamError::MissingField("delta"))?,
         )),
-        "response.reasoning.delta" => Ok(ResponsesEvent::ReasoningDelta(
+        "response.reasoning_text.delta" => Ok(ResponsesEvent::ReasoningTextDelta(
             raw.delta
                 .ok_or(ResponsesStreamError::MissingField("delta"))?,
         )),
+        "response.reasoning.delta" | "response.reasoning_summary_text.delta" => {
+            Ok(ResponsesEvent::ReasoningDelta(
+                raw.delta
+                    .ok_or(ResponsesStreamError::MissingField("delta"))?,
+            ))
+        }
         "response.output_item.added" => Ok(ResponsesEvent::OutputItemAdded(
             raw.item.ok_or(ResponsesStreamError::MissingField("item"))?,
         )),
@@ -1069,6 +1298,7 @@ enum ResponsesContinuationInputItem {
     },
     Reasoning {
         id: Option<String>,
+        content: Option<ResponsesReasoningContent>,
         summary: Option<String>,
         encrypted_content: Option<String>,
     },
@@ -1091,6 +1321,7 @@ enum ResponsesContinuationInputItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ResponsesContinuationMetrics {
+    provider_dialect: ResponsesProviderDialect,
     selected_strategy_id: String,
     effective_strategy_id: String,
     fallback_reason: Option<PreviousResponseChainFallbackReason>,
@@ -1099,6 +1330,11 @@ struct ResponsesContinuationMetrics {
     provider_request_payload_bytes: u64,
     provider_request_debug_samples: Vec<Value>,
     provider_event_counts: HashMap<String, u64>,
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    output_tokens: u64,
+    reasoning_output_tokens: u64,
+    total_tokens: u64,
     first_text_delta_latency_ms: Option<u64>,
     elapsed_turn_duration_ms: u64,
 }
@@ -1114,10 +1350,12 @@ impl From<&ResponsesInputItem> for ResponsesContinuationInputItem {
             },
             ResponsesInputItem::Reasoning {
                 id,
+                content,
                 summary,
                 encrypted_content,
             } => Self::Reasoning {
                 id: id.clone(),
+                content: content.clone(),
                 summary: summary.clone(),
                 encrypted_content: encrypted_content.clone(),
             },
@@ -1159,10 +1397,12 @@ impl From<ResponsesContinuationInputItem> for ResponsesInputItem {
             }
             ResponsesContinuationInputItem::Reasoning {
                 id,
+                content,
                 summary,
                 encrypted_content,
             } => Self::Reasoning {
                 id,
+                content,
                 summary,
                 encrypted_content,
             },
@@ -1250,6 +1490,7 @@ pub trait ResponsesClient {
 #[serde(rename_all = "camelCase")]
 pub struct ResponsesTransportMetrics {
     pub effective_transport: String,
+    pub provider_dialect: ResponsesProviderDialect,
     pub selected_strategy_id: String,
     pub effective_strategy_id: String,
     pub fallback_reason: Option<String>,
@@ -1258,6 +1499,11 @@ pub struct ResponsesTransportMetrics {
     pub provider_request_payload_bytes: u64,
     pub provider_request_debug_samples: Vec<Value>,
     pub provider_event_counts: HashMap<String, u64>,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub total_tokens: u64,
     pub first_text_delta_latency_ms: Option<u64>,
     pub total_turn_duration_ms: u64,
     pub terminal_failure_reason_code: Option<String>,
@@ -1265,6 +1511,7 @@ pub struct ResponsesTransportMetrics {
 }
 
 struct ResponsesTransportMetricsBuilder {
+    provider_dialect: ResponsesProviderDialect,
     selected_strategy_id: &'static str,
     effective_strategy_id: &'static str,
     fallback_reason: Option<PreviousResponseChainFallbackReason>,
@@ -1273,6 +1520,11 @@ struct ResponsesTransportMetricsBuilder {
     provider_request_payload_bytes: u64,
     provider_request_debug_samples: Vec<Value>,
     provider_event_counts: HashMap<String, u64>,
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    output_tokens: u64,
+    reasoning_output_tokens: u64,
+    total_tokens: u64,
     first_text_delta_latency_ms: Option<u64>,
     prior_turn_duration_ms: u64,
     turn_started_at: Instant,
@@ -1282,6 +1534,7 @@ impl ResponsesTransportMetricsBuilder {
     fn new(config: &ResponsesBrainConfig) -> Self {
         let selected_strategy_id = config.strategy.strategy_id();
         Self {
+            provider_dialect: config.dialect,
             selected_strategy_id,
             effective_strategy_id: selected_strategy_id,
             fallback_reason: None,
@@ -1290,6 +1543,11 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_payload_bytes: 0,
             provider_request_debug_samples: Vec::new(),
             provider_event_counts: HashMap::new(),
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 0,
             first_text_delta_latency_ms: None,
             prior_turn_duration_ms: 0,
             turn_started_at: Instant::now(),
@@ -1298,6 +1556,7 @@ impl ResponsesTransportMetricsBuilder {
 
     fn restore(state: ResponsesContinuationMetrics) -> Self {
         Self {
+            provider_dialect: state.provider_dialect,
             selected_strategy_id: strategy_id_static(&state.selected_strategy_id),
             effective_strategy_id: strategy_id_static(&state.effective_strategy_id),
             fallback_reason: state.fallback_reason,
@@ -1306,6 +1565,11 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_payload_bytes: state.provider_request_payload_bytes,
             provider_request_debug_samples: state.provider_request_debug_samples,
             provider_event_counts: state.provider_event_counts,
+            input_tokens: state.input_tokens,
+            cached_input_tokens: state.cached_input_tokens,
+            output_tokens: state.output_tokens,
+            reasoning_output_tokens: state.reasoning_output_tokens,
+            total_tokens: state.total_tokens,
             first_text_delta_latency_ms: state.first_text_delta_latency_ms,
             prior_turn_duration_ms: state.elapsed_turn_duration_ms,
             turn_started_at: Instant::now(),
@@ -1340,6 +1604,20 @@ impl ResponsesTransportMetricsBuilder {
             {
                 self.first_text_delta_latency_ms = Some(duration_ms(elapsed));
             }
+            if let ResponsesEvent::Completed {
+                usage: Some(usage), ..
+            } = event
+            {
+                self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
+                self.cached_input_tokens = self
+                    .cached_input_tokens
+                    .saturating_add(usage.cached_input_tokens);
+                self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
+                self.reasoning_output_tokens = self
+                    .reasoning_output_tokens
+                    .saturating_add(usage.reasoning_output_tokens);
+                self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+            }
         }
     }
 
@@ -1350,6 +1628,7 @@ impl ResponsesTransportMetricsBuilder {
     fn finish(&self) -> ResponsesTransportMetrics {
         ResponsesTransportMetrics {
             effective_transport: "http-sse".to_string(),
+            provider_dialect: self.provider_dialect,
             selected_strategy_id: self.selected_strategy_id.to_string(),
             effective_strategy_id: self.effective_strategy_id.to_string(),
             fallback_reason: self
@@ -1360,6 +1639,11 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_payload_bytes: self.provider_request_payload_bytes,
             provider_request_debug_samples: self.provider_request_debug_samples.clone(),
             provider_event_counts: self.provider_event_counts.clone(),
+            input_tokens: self.input_tokens,
+            cached_input_tokens: self.cached_input_tokens,
+            output_tokens: self.output_tokens,
+            reasoning_output_tokens: self.reasoning_output_tokens,
+            total_tokens: self.total_tokens,
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
             total_turn_duration_ms: self
                 .prior_turn_duration_ms
@@ -1371,6 +1655,7 @@ impl ResponsesTransportMetricsBuilder {
 
     fn checkpoint(&self) -> ResponsesContinuationMetrics {
         ResponsesContinuationMetrics {
+            provider_dialect: self.provider_dialect,
             selected_strategy_id: self.selected_strategy_id.to_string(),
             effective_strategy_id: self.effective_strategy_id.to_string(),
             fallback_reason: self.fallback_reason,
@@ -1379,6 +1664,11 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_payload_bytes: self.provider_request_payload_bytes,
             provider_request_debug_samples: self.provider_request_debug_samples.clone(),
             provider_event_counts: self.provider_event_counts.clone(),
+            input_tokens: self.input_tokens,
+            cached_input_tokens: self.cached_input_tokens,
+            output_tokens: self.output_tokens,
+            reasoning_output_tokens: self.reasoning_output_tokens,
+            total_tokens: self.total_tokens,
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
             elapsed_turn_duration_ms: self
                 .prior_turn_duration_ms
@@ -1398,6 +1688,7 @@ fn responses_event_kind(event: &ResponsesEvent) -> &'static str {
     match event {
         ResponsesEvent::TextDelta(_) => "response.output_text.delta",
         ResponsesEvent::ReasoningDelta(_) => "response.reasoning.delta",
+        ResponsesEvent::ReasoningTextDelta(_) => "response.reasoning_text.delta",
         ResponsesEvent::OutputItemAdded(_) => "response.output_item.added",
         ResponsesEvent::OutputItemDone(_) => "response.output_item.done",
         ResponsesEvent::Completed { .. } => "response.completed",
@@ -1684,6 +1975,13 @@ fn event_from_provider_value(value: Value) -> Result<Option<ResponsesEvent>, Res
                 .ok_or(ResponsesStreamError::MissingField("delta"))?
                 .to_string(),
         ))),
+        "response.reasoning_text.delta" => Ok(Some(ResponsesEvent::ReasoningTextDelta(
+            value
+                .get("delta")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        ))),
         "response.reasoning.delta" | "response.reasoning_summary_text.delta" => {
             Ok(Some(ResponsesEvent::ReasoningDelta(
                 value
@@ -1752,10 +2050,8 @@ fn output_item_from_provider_value(
         }),
         "reasoning" => Ok(ResponsesOutputItem::Reasoning {
             id: value.get("id").and_then(Value::as_str).map(str::to_string),
-            summary: value
-                .get("summary")
-                .and_then(Value::as_str)
-                .map(str::to_string),
+            content: response_item_text(value.get("content")),
+            summary: response_item_text(value.get("summary")),
             encrypted_content: value
                 .get("encrypted_content")
                 .and_then(Value::as_str)
@@ -1783,6 +2079,25 @@ fn output_item_from_provider_value(
             item_type: item_type.to_string(),
             raw_json: value.clone(),
         }),
+    }
+}
+
+fn response_item_text(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::Array(parts)) => {
+            let text = parts
+                .iter()
+                .filter_map(|part| {
+                    part.get("text")
+                        .or_else(|| part.get("content"))
+                        .and_then(Value::as_str)
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            (!text.is_empty()).then_some(text)
+        }
+        _ => None,
     }
 }
 
@@ -1884,7 +2199,7 @@ fn projected_streaming_item_from_provider_event(
                 Some(event(request, BrainEvent::TextDelta { text: projected }))
             }
         }
-        ResponsesEvent::ReasoningDelta(text) => {
+        ResponsesEvent::ReasoningDelta(text) | ResponsesEvent::ReasoningTextDelta(text) => {
             let projected = suppress_responses_replayed_prefix(pending_reasoning_overlap, text);
             if projected.is_empty() {
                 None
@@ -2292,7 +2607,9 @@ where
                     }
                     if matches!(
                         provider_event,
-                        ResponsesEvent::TextDelta(_) | ResponsesEvent::ReasoningDelta(_)
+                        ResponsesEvent::TextDelta(_)
+                            | ResponsesEvent::ReasoningDelta(_)
+                            | ResponsesEvent::ReasoningTextDelta(_)
                     ) {
                         observed_deltas.push(item);
                     }
@@ -2355,6 +2672,7 @@ where
                                     provider_event,
                                     ResponsesEvent::TextDelta(_)
                                         | ResponsesEvent::ReasoningDelta(_)
+                                        | ResponsesEvent::ReasoningTextDelta(_)
                                 ) {
                                     observed_deltas.push(item);
                                 }
@@ -2612,7 +2930,8 @@ where
                     }
                     observed_delta_index += 1;
                 }
-                ResponsesEvent::ReasoningDelta(delta) => {
+                ResponsesEvent::ReasoningDelta(delta)
+                | ResponsesEvent::ReasoningTextDelta(delta) => {
                     assistant_progress.update(b"reasoning");
                     assistant_progress.update(delta.as_bytes());
                     raw_reasoning.push_str(&delta);
@@ -2639,6 +2958,25 @@ where
                     committed_output_items.push(output);
                 }
                 ResponsesEvent::OutputItemDone(output) => match output {
+                    ResponsesOutputItem::Reasoning {
+                        id,
+                        content,
+                        summary,
+                        encrypted_content,
+                    } => {
+                        committed_output_items.push(ResponsesOutputItem::Reasoning {
+                            id: id.clone(),
+                            content: content.clone(),
+                            summary: summary.clone(),
+                            encrypted_content: encrypted_content.clone(),
+                        });
+                        continuation_items.push(ResponsesInputItem::Reasoning {
+                            id,
+                            content: content.map(ResponsesReasoningContent::Text),
+                            summary,
+                            encrypted_content,
+                        });
+                    }
                     ResponsesOutputItem::FunctionCall {
                         id,
                         call_id,
@@ -2682,6 +3020,43 @@ where
             output_continuation.accumulated_text.clear();
             output_continuation.accumulated_reasoning.clear();
             output_continuation.provider_guidance = None;
+        }
+        if !raw_reasoning.is_empty() {
+            let reasoning_already_committed = committed_output_items.iter().any(|item| {
+                matches!(
+                    item,
+                    ResponsesOutputItem::Reasoning {
+                        content: Some(content),
+                        ..
+                    } if content == &raw_reasoning
+                )
+            });
+            if !reasoning_already_committed {
+                committed_output_items.push(ResponsesOutputItem::Reasoning {
+                    id: None,
+                    content: Some(raw_reasoning.clone()),
+                    summary: None,
+                    encrypted_content: None,
+                });
+            }
+            if !pending_calls.is_empty() {
+                let reasoning_already_queued = continuation_items.iter().any(|item| {
+                    matches!(
+                        item,
+                        ResponsesInputItem::Reasoning { content, .. }
+                            if reasoning_content_text(content.as_ref()).as_deref()
+                                == Some(raw_reasoning.as_str())
+                    )
+                });
+                if !reasoning_already_queued {
+                    continuation_items.push(ResponsesInputItem::Reasoning {
+                        id: None,
+                        content: Some(ResponsesReasoningContent::Text(raw_reasoning.clone())),
+                        summary: None,
+                        encrypted_content: None,
+                    });
+                }
+            }
         }
         if completed && pending_calls.is_empty() {
             return Ok(ResponsesProviderDisposition::Complete);
@@ -2771,6 +3146,14 @@ where
         let assistant_progress_fingerprint = format!("{:x}", assistant_progress.finalize());
         let mut attention = None;
         let mut requested_turn_disposition = None;
+        for call in &pending_calls {
+            continuation_items.push(ResponsesInputItem::FunctionCall {
+                id: call.provider_item_id.clone(),
+                call_id: call.call_id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments_json.clone(),
+            });
+        }
         for call in pending_calls {
             push_stream_item(
                 items,
@@ -2835,12 +3218,6 @@ where
                     sink,
                 );
             }
-            continuation_items.push(ResponsesInputItem::FunctionCall {
-                id: call.provider_item_id.clone(),
-                call_id: call.call_id.clone(),
-                name: call.name.clone(),
-                arguments: call.arguments_json.clone(),
-            });
             continuation_items.push(ResponsesInputItem::FunctionCallOutput {
                 call_id: call.call_id.clone(),
                 output: output.output.clone(),
@@ -3299,7 +3676,10 @@ fn provider_state_output(
     committed_input_items: Vec<ResponsesInputItem>,
     request_fingerprint: String,
 ) -> BrainWakeProviderStateOutput {
-    let output_records: Vec<_> = output_items.iter().map(output_record_from_item).collect();
+    let output_records =
+        deduplicate_output_records(output_items.iter().map(output_record_from_item).collect());
+    let stateless_replay_context =
+        accumulated_stateless_replay_context(committed_input_items.clone(), &output_records);
     let previous_response_chain = (config.strategy
         == ResponsesBrainStrategy::PreviousResponseChain)
         .then(|| PreviousResponseChainStateV1 {
@@ -3323,6 +3703,7 @@ fn provider_state_output(
             output_items: output_records,
             token_usage: usage,
         }),
+        stateless_replay_context,
         previous_response_chain,
         replay_hints: None,
     };
@@ -3345,6 +3726,98 @@ fn provider_state_output(
             ttl_ms: Some(24 * 60 * 60 * 1000),
         },
     }
+}
+
+fn deduplicate_output_records(
+    records: Vec<OpenAiResponseOutputItemRecord>,
+) -> Vec<OpenAiResponseOutputItemRecord> {
+    let mut deduplicated: Vec<OpenAiResponseOutputItemRecord> = Vec::new();
+    for record in records {
+        let key = output_record_identity(&record);
+        if let Some(index) = deduplicated
+            .iter()
+            .position(|candidate| output_record_identity(candidate) == key)
+        {
+            deduplicated[index] = record;
+        } else {
+            deduplicated.push(record);
+        }
+    }
+    deduplicated
+}
+
+fn output_record_identity(record: &OpenAiResponseOutputItemRecord) -> String {
+    if let Some(item_id) = record.item_id.as_deref() {
+        return format!("item:{}:{item_id}", record.item_type);
+    }
+    if let Some(call_id) = record.call_id.as_deref() {
+        return format!("call:{}:{call_id}", record.item_type);
+    }
+    format!("value:{}:{}", record.item_type, record.raw_json)
+}
+
+fn accumulated_stateless_replay_context(
+    mut committed_input_items: Vec<ResponsesInputItem>,
+    output_records: &[OpenAiResponseOutputItemRecord],
+) -> Vec<StoredResponsesInputItem> {
+    strip_provider_item_ids(&mut committed_input_items);
+    let mut matched_input = vec![false; committed_input_items.len()];
+    for record in output_records.iter().cloned() {
+        let Some(mut output_item) = replay_item_from_record(record, false) else {
+            continue;
+        };
+        strip_provider_item_ids(std::slice::from_mut(&mut output_item));
+        if let Some((index, _)) = committed_input_items
+            .iter()
+            .enumerate()
+            .find(|(index, input)| {
+                !matched_input[*index] && replay_items_equivalent(input, &output_item)
+            })
+        {
+            matched_input[index] = true;
+        } else {
+            committed_input_items.push(output_item);
+            matched_input.push(true);
+        }
+    }
+    committed_input_items
+        .into_iter()
+        .map(StoredResponsesInputItem::from)
+        .collect()
+}
+
+fn replay_items_equivalent(left: &ResponsesInputItem, right: &ResponsesInputItem) -> bool {
+    match (left, right) {
+        (
+            ResponsesInputItem::Reasoning {
+                content: left_content,
+                summary: left_summary,
+                encrypted_content: left_encrypted,
+                ..
+            },
+            ResponsesInputItem::Reasoning {
+                content: right_content,
+                summary: right_summary,
+                encrypted_content: right_encrypted,
+                ..
+            },
+        ) => {
+            reasoning_content_text(left_content.as_ref())
+                == reasoning_content_text(right_content.as_ref())
+                && left_summary == right_summary
+                && left_encrypted == right_encrypted
+        }
+        _ => left == right,
+    }
+}
+
+fn reasoning_content_text(content: Option<&ResponsesReasoningContent>) -> Option<String> {
+    content.map(|content| match content {
+        ResponsesReasoningContent::Text(text) => text.clone(),
+        ResponsesReasoningContent::Parts(parts) => {
+            parts.iter().map(|part| part.text.as_str()).collect()
+        }
+    })
 }
 
 fn previous_response_chain_fallback_event(
@@ -3662,11 +4135,11 @@ mod tests {
             input: Vec::new(),
             tools: Vec::new(),
             tool_choice: None,
-            parallel_tool_calls: true,
+            parallel_tool_calls: Some(true),
             reasoning: None,
-            store: false,
+            store: Some(false),
             stream: true,
-            include: Vec::new(),
+            include: Some(Vec::new()),
             service_tier: None,
             prompt_cache_key: None,
             max_output_tokens: None,
@@ -3880,6 +4353,7 @@ mod tests {
             vec![
                 ResponsesOutputItem::Reasoning {
                     id: Some("reasoning-1".to_string()),
+                    content: None,
                     summary: Some("kept as reasoning".to_string()),
                     encrypted_content: Some("opaque".to_string()),
                 },
@@ -3942,6 +4416,376 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_stateless_request_omits_unsupported_stateful_extensions() {
+        let mut config = ResponsesBrainConfig::replay("deepseek-v4-flash");
+        config.dialect = ResponsesProviderDialect::Deepseek;
+        config.include = vec!["reasoning.encrypted_content".to_string()];
+        config.service_tier = Some("priority".to_string());
+        config.prompt_cache_key = Some("unsupported-cache-key".to_string());
+        config.text = Some(ResponsesTextConfig {
+            verbosity: Some("high".to_string()),
+        });
+        config.reasoning = Some(ResponsesReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: Some("detailed".to_string()),
+        });
+        let builder = ResponsesRequestBuilder::new(config);
+        let request = builder.build(
+            &wake_request(None, None),
+            None,
+            ResponsesReplayProjection {
+                input_items: vec![
+                    ResponsesInputItem::UserMessage {
+                        content: "inspect the project".to_string(),
+                    },
+                    ResponsesInputItem::Reasoning {
+                        id: None,
+                        content: Some(ResponsesReasoningContent::Text(
+                            "I should inspect first".to_string(),
+                        )),
+                        summary: None,
+                        encrypted_content: None,
+                    },
+                    ResponsesInputItem::FunctionCall {
+                        id: None,
+                        call_id: "call-1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"README.md\"}".to_string(),
+                    },
+                    ResponsesInputItem::FunctionCallOutput {
+                        call_id: "call-1".to_string(),
+                        output: "project readme".to_string(),
+                        is_error: false,
+                    },
+                ],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+        let wire = serde_json::to_value(&request).unwrap();
+        let object = wire.as_object().unwrap();
+
+        for unsupported in [
+            "previous_response_id",
+            "store",
+            "include",
+            "service_tier",
+            "prompt_cache_key",
+            "parallel_tool_calls",
+            "text",
+        ] {
+            assert!(
+                !object.contains_key(unsupported),
+                "DeepSeek request unexpectedly contained {unsupported}: {wire}"
+            );
+        }
+        assert_eq!(wire["reasoning"], json!({"effort": "high"}));
+        assert!(wire["input"].as_array().unwrap().iter().any(|item| {
+            item.get("type") == Some(&json!("reasoning"))
+                && item.get("content")
+                    == Some(&json!([{
+                        "type": "reasoning_text",
+                        "text": "I should inspect first"
+                    }]))
+                && item.get("summary").is_none()
+                && item.get("encrypted_content").is_none()
+        }));
+    }
+
+    #[test]
+    fn deepseek_stateless_provider_state_accumulates_ordered_multi_wake_context() {
+        let mut config = ResponsesBrainConfig::replay("deepseek-v4-flash");
+        config.dialect = ResponsesProviderDialect::Deepseek;
+        let builder = ResponsesRequestBuilder::new(config.clone());
+        let first_user = ResponsesInputItem::UserMessage {
+            content: "first request".to_string(),
+        };
+        let first_state = provider_state_payload_from_output(Some(provider_state_output(
+            &wake_request(None, None),
+            &config,
+            "resp-1".to_string(),
+            vec![
+                ResponsesOutputItem::Reasoning {
+                    id: Some("reasoning-1".to_string()),
+                    content: Some("inspect first".to_string()),
+                    summary: None,
+                    encrypted_content: None,
+                },
+                ResponsesOutputItem::Message {
+                    id: Some("message-1".to_string()),
+                    text: "first answer".to_string(),
+                },
+            ],
+            None,
+            vec![first_user.clone()],
+            "fingerprint-1".to_string(),
+        )));
+        let first_state = provider_state(serde_json::to_value(first_state).unwrap());
+        let second_user = ResponsesInputItem::UserMessage {
+            content: "second request".to_string(),
+        };
+        let second_request = builder.build(
+            &wake_request(Some(first_state.clone()), None),
+            Some(&first_state),
+            ResponsesReplayProjection {
+                input_items: vec![second_user.clone()],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+
+        assert!(matches!(
+            second_request.input.as_slice(),
+            [
+                ResponsesInputItem::UserMessage { content: first },
+                ResponsesInputItem::Reasoning { .. },
+                ResponsesInputItem::AssistantMessage { content: answer },
+                ResponsesInputItem::UserMessage { content: second },
+            ] if first == "first request"
+                && answer == "first answer"
+                && second == "second request"
+        ));
+
+        let second_state = provider_state_payload_from_output(Some(provider_state_output(
+            &wake_request(Some(first_state), None),
+            &config,
+            "resp-2".to_string(),
+            vec![
+                ResponsesOutputItem::FunctionCall {
+                    id: Some("function-1".to_string()),
+                    call_id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: "{\"path\":\"README.md\"}".to_string(),
+                },
+                ResponsesOutputItem::FunctionCall {
+                    id: Some("function-1".to_string()),
+                    call_id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: "{\"path\":\"README.md\"}".to_string(),
+                },
+                ResponsesOutputItem::FunctionCallOutput {
+                    call_id: "call-1".to_string(),
+                    output: "readme content".to_string(),
+                    is_error: false,
+                },
+                ResponsesOutputItem::FunctionCallOutput {
+                    call_id: "call-1".to_string(),
+                    output: "readme content".to_string(),
+                    is_error: false,
+                },
+            ],
+            None,
+            second_request.input,
+            "fingerprint-2".to_string(),
+        )));
+        let second_state = provider_state(serde_json::to_value(second_state).unwrap());
+        let third_request = builder.build(
+            &wake_request(Some(second_state.clone()), None),
+            Some(&second_state),
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::UserMessage {
+                    content: "third request".to_string(),
+                }],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+
+        assert_eq!(third_request.input.len(), 7);
+        assert!(matches!(
+            third_request.input.last(),
+            Some(ResponsesInputItem::UserMessage { content }) if content == "third request"
+        ));
+        assert!(matches!(
+            &third_request.input[4],
+            ResponsesInputItem::FunctionCall { call_id, .. } if call_id == "call-1"
+        ));
+        assert!(matches!(
+            &third_request.input[5],
+            ResponsesInputItem::FunctionCallOutput { call_id, output, .. }
+                if call_id == "call-1" && output == "readme content"
+        ));
+    }
+
+    #[test]
+    fn deepseek_tool_continuation_replays_reasoning_before_function_output() {
+        let client = FakeResponsesClient::new(vec![
+            Ok(vec![
+                ResponsesEvent::ReasoningTextDelta("I should inspect the file".to_string()),
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: Some("function-1".to_string()),
+                    call_id: "call-1".to_string(),
+                    name: "lookup".to_string(),
+                    arguments: "{\"q\":\"README.md\"}".to_string(),
+                }),
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: Some("function-2".to_string()),
+                    call_id: "call-2".to_string(),
+                    name: "lookup".to_string(),
+                    arguments: "{\"q\":\"Cargo.toml\"}".to_string(),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: "resp-1".to_string(),
+                    usage: None,
+                },
+            ]),
+            Ok(vec![
+                ResponsesEvent::TextDelta("done".to_string()),
+                ResponsesEvent::Completed {
+                    response_id: "resp-2".to_string(),
+                    usage: None,
+                },
+            ]),
+        ])
+        .expect_function_output("call-1");
+        let tools = MapToolExecutor::new([(
+            "lookup".to_string(),
+            NeutralToolOutput {
+                output: "readme content".to_string(),
+                is_error: false,
+                state_fingerprint: String::new(),
+                turn_disposition: None,
+            },
+        )]);
+        let mut config = ResponsesBrainConfig::replay("deepseek-v4-flash");
+        config.dialect = ResponsesProviderDialect::Deepseek;
+        let mut brain = brain_with_config(client, tools, config);
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        result.stream.drain_until_terminal().unwrap();
+        let requests = brain.client.requests();
+        assert_eq!(requests.len(), 2);
+        let continuation = &requests[1].input;
+        let reasoning_index = continuation
+            .iter()
+            .position(|item| matches!(item, ResponsesInputItem::Reasoning { .. }))
+            .expect("reasoning must be replayed");
+        let output_index = continuation
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    ResponsesInputItem::FunctionCallOutput { call_id, .. }
+                        if call_id == "call-1"
+                )
+            })
+            .expect("function output must be replayed");
+        assert!(reasoning_index < output_index);
+        let call_indices = continuation
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                matches!(item, ResponsesInputItem::FunctionCall { .. }).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let output_indices = continuation
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                matches!(item, ResponsesInputItem::FunctionCallOutput { .. }).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(call_indices.len(), 2);
+        assert_eq!(output_indices.len(), 2);
+        assert!(call_indices.iter().max() < output_indices.iter().min());
+        let wire = serde_json::to_value(&requests[1]).unwrap();
+        assert!(wire["input"].as_array().unwrap().iter().any(|item| {
+            item.get("type") == Some(&json!("reasoning"))
+                && item.get("content")
+                    == Some(&json!([{
+                        "type": "reasoning_text",
+                        "text": "I should inspect the file"
+                    }]))
+        }));
+    }
+
+    #[test]
+    fn stateless_dialects_reject_previous_response_chaining() {
+        for dialect in [
+            ResponsesProviderDialect::OpenaiStateless,
+            ResponsesProviderDialect::GenericStateless,
+            ResponsesProviderDialect::Deepseek,
+        ] {
+            let mut config = ResponsesBrainConfig::previous_response_chain("model");
+            config.dialect = dialect;
+            assert!(config.validate().is_err(), "dialect {dialect:?}");
+        }
+        assert!(ResponsesBrainConfig::previous_response_chain("gpt-5")
+            .validate()
+            .is_ok());
+    }
+
+    #[test]
+    fn deepseek_semantic_events_project_reasoning_tools_and_usage_without_done_sentinel() {
+        assert_eq!(
+            event_from_provider_value(json!({
+                "type": "response.reasoning_text.delta",
+                "delta": "inspect first"
+            }))
+            .unwrap(),
+            Some(ResponsesEvent::ReasoningTextDelta(
+                "inspect first".to_string()
+            ))
+        );
+        assert_eq!(
+            event_from_provider_value(json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc-1",
+                "delta": "{\"path\":"
+            }))
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            event_from_provider_value(json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "call_id": "call-1",
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"README.md\"}"
+                }
+            }))
+            .unwrap(),
+            Some(ResponsesEvent::OutputItemDone(
+                ResponsesOutputItem::FunctionCall {
+                    id: Some("fc-1".to_string()),
+                    call_id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: "{\"path\":\"README.md\"}".to_string(),
+                }
+            ))
+        );
+        assert_eq!(
+            event_from_provider_value(json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-1",
+                    "usage": {
+                        "input_tokens": 100,
+                        "input_tokens_details": {"cached_tokens": 80},
+                        "output_tokens": 20,
+                        "output_tokens_details": {"reasoning_tokens": 12},
+                        "total_tokens": 120
+                    }
+                }
+            }))
+            .unwrap(),
+            Some(ResponsesEvent::Completed {
+                response_id: "resp-1".to_string(),
+                usage: Some(ResponsesTokenUsage {
+                    input_tokens: 100,
+                    cached_input_tokens: 80,
+                    output_tokens: 20,
+                    reasoning_output_tokens: 12,
+                    total_tokens: 120,
+                })
+            })
+        );
+    }
+
+    #[test]
     fn stateless_replay_strips_provider_item_ids_from_replayed_items() {
         let builder = ResponsesRequestBuilder::new(ResponsesBrainConfig::replay("gpt-5"));
         let state = provider_state(provider_state_payload(
@@ -3949,6 +4793,7 @@ mod tests {
             vec![
                 ResponsesOutputItem::Reasoning {
                     id: Some("rs_ephemeral".to_string()),
+                    content: None,
                     summary: Some("kept as reasoning".to_string()),
                     encrypted_content: Some("opaque".to_string()),
                 },
@@ -4288,6 +5133,10 @@ mod tests {
         ));
         assert_eq!(result.transport_metrics.effective_transport, "http-sse");
         assert_eq!(
+            result.transport_metrics.provider_dialect,
+            ResponsesProviderDialect::OpenaiStateless
+        );
+        assert_eq!(
             result.transport_metrics.selected_strategy_id,
             REPLAY_STRATEGY_ID
         );
@@ -4328,6 +5177,11 @@ mod tests {
                 .get("response.completed"),
             Some(&1)
         );
+        assert_eq!(result.transport_metrics.input_tokens, 10);
+        assert_eq!(result.transport_metrics.cached_input_tokens, 2);
+        assert_eq!(result.transport_metrics.output_tokens, 5);
+        assert_eq!(result.transport_metrics.reasoning_output_tokens, 1);
+        assert_eq!(result.transport_metrics.total_tokens, 15);
         assert!(result
             .transport_metrics
             .first_text_delta_latency_ms
@@ -5421,11 +6275,11 @@ mod tests {
             }],
             tools: Vec::new(),
             tool_choice: None,
-            parallel_tool_calls: true,
+            parallel_tool_calls: Some(true),
             reasoning: None,
-            store: false,
+            store: Some(false),
             stream: true,
-            include: Vec::new(),
+            include: Some(Vec::new()),
             service_tier: None,
             prompt_cache_key: None,
             max_output_tokens: None,
@@ -5446,6 +6300,14 @@ mod tests {
         assert_eq!(
             process_responses_event(raw_event("response.reasoning.delta").delta("thinking")),
             Ok(ResponsesEvent::ReasoningDelta("thinking".to_string()))
+        );
+        assert_eq!(
+            process_responses_event(
+                raw_event("response.reasoning_text.delta").delta("deep thinking")
+            ),
+            Ok(ResponsesEvent::ReasoningTextDelta(
+                "deep thinking".to_string()
+            ))
         );
         assert_eq!(
             process_responses_event(raw_event("response.output_item.done").item(
@@ -5545,6 +6407,16 @@ mod tests {
                 output_items: vec![completed_record.clone()],
                 token_usage: None,
             }),
+            stateless_replay_context: vec![
+                ResponsesInputItem::UserMessage {
+                    content: "human: first".to_string(),
+                }
+                .into(),
+                ResponsesInputItem::AssistantMessage {
+                    content: "reply one".to_string(),
+                }
+                .into(),
+            ],
             previous_response_chain: Some(PreviousResponseChainStateV1 {
                 previous_response_id: "resp-1".to_string(),
                 request_fingerprint: request_fingerprint(&replay_request),
@@ -5640,6 +6512,12 @@ mod tests {
                 output_items: output_items.iter().map(output_record_from_item).collect(),
                 token_usage: None,
             }),
+            stateless_replay_context: output_items
+                .iter()
+                .map(output_record_from_item)
+                .filter_map(|record| replay_item_from_record(record, false))
+                .map(StoredResponsesInputItem::from)
+                .collect(),
             previous_response_chain: None,
             replay_hints: None,
         })

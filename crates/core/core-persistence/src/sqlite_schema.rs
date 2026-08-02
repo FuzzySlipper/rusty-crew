@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 59;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 60;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -314,7 +314,27 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add typed chat completions prompt caching policy",
         apply: migrate_v59_add_chat_completions_prompt_caching,
     },
+    SchemaMigration {
+        version: 60,
+        description: "add explicit Responses provider dialect",
+        apply: migrate_v60_add_responses_provider_dialect,
+    },
 ];
+
+fn migrate_v60_add_responses_provider_dialect(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "ALTER TABLE model_providers
+            ADD COLUMN responses_dialect TEXT;
+         UPDATE model_providers
+            SET responses_dialect = CASE
+                WHEN provider_kind = 'openai' THEN 'openai_stateful'
+                WHEN provider_kind = 'deepseek' THEN 'deepseek'
+                ELSE 'generic_stateless'
+            END
+          WHERE protocol = 'responses';",
+    )
+    .map_err(|error| persistence_error("add Responses provider dialect", error))
+}
 
 fn migrate_v59_add_chat_completions_prompt_caching(
     tx: &rusqlite::Transaction<'_>,

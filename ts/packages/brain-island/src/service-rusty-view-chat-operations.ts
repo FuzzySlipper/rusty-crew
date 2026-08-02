@@ -702,6 +702,7 @@ export async function rustyViewSessionContextUsage(
       session_reasoning_effort_override:
         input.session.inferenceOverrides?.reasoningEffort ?? undefined,
       reasoning_format: provider?.reasoningFormat,
+      responses_dialect: provider?.responsesDialect,
       chat_completions_dialect: provider?.chatCompletionsDialect,
       thinking_mode: provider?.thinkingMode,
       reasoning_history: provider?.reasoningHistory,

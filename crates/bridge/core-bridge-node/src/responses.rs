@@ -40,6 +40,7 @@ struct JsOpenAiResponsesNeutralTool {
 #[serde(rename_all = "camelCase")]
 struct JsOpenAiResponsesBrainConfig {
     model: String,
+    responses_dialect: rusty_crew_core_protocol::ResponsesProviderDialect,
     #[serde(default)]
     strategy_id: Option<String>,
     #[serde(default)]
@@ -782,6 +783,13 @@ where
         }
     };
     config.instructions = input.config.instructions;
+    config.dialect = input.config.responses_dialect;
+    config.validate().map_err(|message| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("invalid Responses provider configuration: {message}"),
+        )
+    })?;
     config.reasoning = input.config.reasoning_effort.map(|effort| {
         rusty_crew_openai_responses_brain::ResponsesReasoningConfig {
             effort: Some(effort),

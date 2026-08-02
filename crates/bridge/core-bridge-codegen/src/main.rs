@@ -5326,6 +5326,7 @@ fn sample_model_provider_record() -> ModelProviderRecord {
         temperature_milli: Some(500),
         reasoning_effort: Some("medium".to_owned()),
         reasoning_format: Some("summary".to_owned()),
+        responses_dialect: None,
         chat_completions_dialect: Default::default(),
         thinking_mode: Default::default(),
         reasoning_history: Default::default(),

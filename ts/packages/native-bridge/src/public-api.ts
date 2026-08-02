@@ -111,6 +111,8 @@ import type {
   NativeModelProviderRefreshImpactRequest,
   NativeModelProviderRefreshPlan,
   NativeModelProviderRefreshPlanRequest,
+  NativeResponsesProviderDialect,
+  NativeResponsesTokenUsage,
   NativeModelProviderWrite,
   NativeServiceCredentialQuery,
   NativeServiceCredentialRecord,
@@ -134,6 +136,8 @@ export type {
   NativeModelProviderRefreshPlan,
   NativeModelProviderRefreshPlanRequest,
   NativeModelProviderRefreshProfileAction,
+  NativeResponsesProviderDialect,
+  NativeResponsesTokenUsage,
   NativeModelProviderStatus,
   NativeModelProviderWrite,
   NativeServiceCredentialQuery,
@@ -234,8 +238,9 @@ export type NativeBridgeRoundTripFixtureName =
   | "session_activity_digest_v1"
   | "context_compaction_artifact_v1";
 
-export interface OpenAiResponsesTransportMetrics {
+export interface OpenAiResponsesTransportMetrics extends NativeResponsesTokenUsage {
   effectiveTransport: string;
+  providerDialect?: NativeResponsesProviderDialect;
   selectedStrategyId: string;
   effectiveStrategyId: string;
   fallbackReason?: string | null;
@@ -308,6 +313,7 @@ export interface OpenAiResponsesBrainRunInput {
   continuationState?: BrainContinuationPayload;
   config: {
     model: string;
+    responsesDialect: NativeResponsesProviderDialect;
     strategyId?: "replay" | "previous-response-chain";
     instructions?: string;
     reasoningEffort?: string;

@@ -85,6 +85,7 @@ can cancel the turn explicitly if the outage should not be waited out.
 | `temperatureMilli` | Integer storage form, `temperature * 1000` |
 | `reasoningEffort` | Provider-specific reasoning effort string |
 | `reasoningFormat` | Provider-specific reasoning/output format string |
+| `responsesDialect` | Required Responses wire dialect: `openai_stateful`, `openai_stateless`, `generic_stateless`, or `deepseek` |
 | `chatCompletionsDialect` | Typed Chat Completions wire dialect: `standard`, `kimi`, `glm`, `qwen`, or `deepseek` |
 | `thinkingMode` | `provider_default`, `enabled`, or `disabled` |
 | `reasoningHistory` | `provider_default`, `discard`, `preserve_all`, or `tool_calls_only` |
@@ -109,6 +110,39 @@ The native Responses path maps `reasoningEffort` to `reasoning.effort` and
 `reasoningEffort` to `reasoning_effort`. `reasoningFormat` remains diagnostic
 metadata until a protocol-specific mapping is configured; `/model` reports a
 warning instead of claiming it was applied.
+
+### Responses Dialects
+
+Responses wire behavior is explicit provider configuration. Crew does not infer
+it from the provider alias, URL, model ID, or `providerKind`.
+
+| Dialect | Continuation | Provider-specific behavior |
+| --- | --- | --- |
+| `openai_stateful` | May use `previous_response_id` | Emits OpenAI stateful request extensions |
+| `openai_stateless` | Replays complete provider state | Uses the OpenAI request/event shape without server-side chaining |
+| `generic_stateless` | Replays complete provider state | Omits provider-specific state and request extensions |
+| `deepseek` | Replays complete provider state | Preserves plain-text reasoning items and accepts DeepSeek reasoning/tool SSE events |
+
+Only `openai_stateful` may use the `previous-response-chain` brain strategy.
+Stateless dialects retain ordinary messages, reasoning, tool calls, and tool
+outputs in Crew provider state and replay that state on each request. A write
+with `protocol: "responses"` must include `responsesDialect`; a Chat Completions
+provider must not include it.
+
+DeepSeek's Responses implementation is stateless. Crew therefore stores the
+complete ordered replay projection, places prior provider output before the new
+user turn, and strips ephemeral provider item IDs. During tool rounds, Crew
+passes the exact streamed `reasoning_text` back before the adjacent function
+calls, followed by all function outputs. This ordering is required for both
+sequential and parallel calls. DeepSeek's API manages prompt caching
+automatically; Crew sends no OpenAI prompt-cache extensions and reports cached
+input and reasoning-output token counts from provider usage.
+
+The `deepseek` dialect follows DeepSeek's
+[Responses API compatibility guide](https://api-docs.deepseek.com/guides/responses_api/).
+That guide currently lists `deepseek-v4-flash` as the supported Responses model.
+Provider support is explicit configuration and is never inferred from this
+model name or the DeepSeek endpoint.
 
 ### Chat Completions Reasoning Dialects
 
@@ -286,6 +320,7 @@ curl -fsS -X POST "$CREW/v1/admin/model-providers?refresh=apply" \
   "alias": "openai-responses-api",
   "status": "active",
   "protocol": "responses",
+  "responsesDialect": "openai_stateless",
   "providerKind": "openai",
   "baseUrl": "https://api.openai.com/v1",
   "modelId": "your-responses-model",
@@ -305,6 +340,32 @@ Use a model ID actually available to the credential. Model availability is a
 provider/account concern and is not inferred from Rusty Crew's provider
 catalog.
 
+For DeepSeek's direct Responses endpoint, use the dedicated stateless dialect:
+
+```json
+{
+  "alias": "deepseek-flash-responses",
+  "status": "active",
+  "protocol": "responses",
+  "responsesDialect": "deepseek",
+  "providerKind": "deepseek",
+  "baseUrl": "https://api.deepseek.com",
+  "modelId": "deepseek-v4-flash",
+  "reasoningEffort": "medium",
+  "credentialSecret": {
+    "kind": "api_key",
+    "version": 1,
+    "value": "provider-api-key"
+  }
+}
+```
+
+DeepSeek Responses is stateless: Crew does not send `previous_response_id`,
+`conversation`, `store`, or OpenAI-only include/cache/service-tier fields. It
+replays plain-text reasoning content together with visible messages and tool
+history. DeepSeek may report cache-hit input tokens in usage; those metrics are
+observational and do not change Crew's continuation strategy.
+
 ## Direct OpenAI OAuth
 
 Direct OpenAI OAuth is the green path for ChatGPT/Codex-authenticated Responses
@@ -315,6 +376,7 @@ use without den-router. First create an active provider with:
   "alias": "gpt-oauth",
   "status": "active",
   "protocol": "responses",
+  "responsesDialect": "openai_stateful",
   "providerKind": "openai",
   "baseUrl": "https://chatgpt.com/backend-api/codex",
   "modelId": "gpt"

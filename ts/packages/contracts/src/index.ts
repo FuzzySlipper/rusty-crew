@@ -592,6 +592,11 @@ export interface BrainModelConfig {
   maxOutputTokens?: number;
   reasoningEffort?: string;
   reasoningFormat?: string;
+  responsesDialect?:
+    | "openai_stateful"
+    | "openai_stateless"
+    | "generic_stateless"
+    | "deepseek";
   chatCompletionsDialect?: "standard" | "kimi" | "glm" | "qwen" | "deepseek";
   thinkingMode?: "provider_default" | "enabled" | "disabled";
   reasoningHistory?:

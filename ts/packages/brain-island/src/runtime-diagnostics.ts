@@ -239,6 +239,7 @@ export interface RuntimeBrainModuleDiagnostics {
     temperatureMilli?: number;
     reasoningEffort?: string;
     reasoningFormat?: string;
+    responsesDialect?: string;
     promptCaching?: "disabled" | "automatic_5m" | "automatic_1h";
     credential?: {
       hasSecret: boolean;
@@ -273,6 +274,11 @@ export interface RuntimeResponsesWakeMetrics {
   wakeId: string;
   observedAt: string;
   effectiveTransport: string;
+  providerDialect?:
+    | "openai_stateful"
+    | "openai_stateless"
+    | "generic_stateless"
+    | "deepseek";
   selectedStrategyId: string;
   effectiveStrategyId: string;
   fallbackReason?: string | null;
@@ -280,6 +286,11 @@ export interface RuntimeResponsesWakeMetrics {
   continuationRoundCount: number;
   providerRequestPayloadBytes: number;
   providerEventCounts: Record<string, number>;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
   promptCachingPolicy?: "disabled" | "automatic_5m" | "automatic_1h";
   openrouterSessionId?: string;
   promptTokens?: number;

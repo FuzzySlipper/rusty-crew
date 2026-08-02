@@ -70,6 +70,9 @@ async function openAiResponsesClientConfig(
       context.profile.profile.modelConfig.baseUrl ??
       "https://api.openai.com/v1",
     authKind: "api_key",
+    ...(context.profile.profile.providerAlias === undefined
+      ? {}
+      : { providerAlias: context.profile.profile.providerAlias }),
     ...(apiKey ? { apiKey } : {}),
   };
 }
@@ -127,6 +130,7 @@ function modelProviderWriteFromRecord(provider: NativeModelProviderRecord) {
     temperatureMilli: provider.temperatureMilli,
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
+    responsesDialect: provider.responsesDialect,
     chatCompletionsDialect: provider.chatCompletionsDialect,
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
@@ -218,6 +222,20 @@ export async function createOpenAiResponsesBrainHost(
   client?: OpenAiResponsesClientConfig,
   strategyId: "replay" | "previous-response-chain" = "replay",
 ): Promise<BrainHostExecutor> {
+  const responsesDialect = context.profile.profile.modelConfig.responsesDialect;
+  if (responsesDialect === undefined) {
+    throw new Error(
+      "Responses brain requires provider modelConfig.responsesDialect",
+    );
+  }
+  if (
+    strategyId === "previous-response-chain" &&
+    responsesDialect !== "openai_stateful"
+  ) {
+    throw new Error(
+      `Responses dialect ${responsesDialect} does not support previous-response-chain`,
+    );
+  }
   let responsesClientConfig =
     client ?? (await openAiResponsesClientConfig(context));
   return {
@@ -235,6 +253,7 @@ export async function createOpenAiResponsesBrainHost(
         continuationState: wake.continuationState,
         config: {
           model: context.profile.profile.modelConfig.modelName,
+          responsesDialect,
           strategyId,
           instructions: responsesInstructions(wake),
           reasoningEffort:
@@ -278,11 +297,7 @@ export async function createOpenAiResponsesBrainHost(
             : undefined,
         model: input.config.model,
         protocol: "responses",
-        providerKind:
-          "authKind" in responsesClientConfig &&
-          responsesClientConfig.authKind === "openai_oauth"
-            ? "openai_oauth"
-            : undefined,
+        providerKind: context.profile.profile.modelConfig.provider,
         request: {
           boundary: "ts_to_native_openai_responses",
           wakeId: input.wakeId,
@@ -359,12 +374,7 @@ function recordOpenAiResponsesProviderRequestSamples(
         : undefined,
     model,
     protocol: "responses",
-    providerKind:
-      responsesClientConfig &&
-      "authKind" in responsesClientConfig &&
-      responsesClientConfig.authKind === "openai_oauth"
-        ? "openai_oauth"
-        : undefined,
+    providerKind: context.profile.profile.modelConfig.provider,
     request: {
       boundary: "rust_openai_responses_request",
       requestCount: samples.length,

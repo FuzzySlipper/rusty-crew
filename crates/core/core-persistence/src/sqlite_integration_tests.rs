@@ -7201,6 +7201,18 @@ fn model_provider_write(
         temperature_milli: Some(500),
         reasoning_effort: None,
         reasoning_format: None,
+        responses_dialect: match (protocol, provider_kind) {
+            (ModelProviderProtocol::Responses, "openai") => {
+                Some(ResponsesProviderDialect::OpenaiStateful)
+            }
+            (ModelProviderProtocol::Responses, "deepseek") => {
+                Some(ResponsesProviderDialect::Deepseek)
+            }
+            (ModelProviderProtocol::Responses, _) => {
+                Some(ResponsesProviderDialect::GenericStateless)
+            }
+            (ModelProviderProtocol::ChatCompletions, _) => None,
+        },
         chat_completions_dialect: Default::default(),
         thinking_mode: Default::default(),
         reasoning_history: Default::default(),

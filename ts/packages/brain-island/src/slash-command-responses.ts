@@ -94,6 +94,7 @@ function modelResponse(
         model.provider.session_reasoning_effort_override ?? "none",
       resolvedReasoningEffort:
         model.provider.reasoning_effort ?? "provider default",
+      responsesDialect: model.provider.responses_dialect ?? "not applicable",
       chatCompletionsDialect:
         model.provider.chat_completions_dialect ?? "standard",
       thinkingMode: model.provider.thinking_mode ?? "provider default",

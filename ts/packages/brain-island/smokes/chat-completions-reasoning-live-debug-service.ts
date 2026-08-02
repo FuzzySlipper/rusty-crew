@@ -411,6 +411,7 @@ function providerWriteBody(
     temperatureMilli: provider.temperatureMilli,
     reasoningEffort: provider.reasoningEffort,
     reasoningFormat: provider.reasoningFormat,
+    responsesDialect: provider.responsesDialect,
     chatCompletionsDialect: provider.chatCompletionsDialect,
     thinkingMode: provider.thinkingMode,
     reasoningHistory: provider.reasoningHistory,
