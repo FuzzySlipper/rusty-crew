@@ -1981,6 +1981,10 @@
       },
       "AgentMessageInboxItem": {
         "properties": {
+          "deliveredModelText": {
+            "description": "Exact text presented to the recipient brain after Rust-owned provenance framing.",
+            "type": "string"
+          },
           "delivery": {
             "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
           },
@@ -1995,17 +1999,22 @@
           "status": { "$ref": "#/components/schemas/AgentMessageInboxStatus" },
           "terminalReasonCode": { "type": ["string", "null"] }
         },
-        "required": ["delivery", "status"],
+        "required": ["delivery", "status", "deliveredModelText"],
         "type": "object"
       },
       "AgentMessageInboxQuery": {
         "properties": {
+          "correlationId": { "type": ["string", "null"] },
+          "fromAgentId": { "type": ["string", "null"] },
+          "fromSessionId": { "type": ["string", "null"] },
           "limit": {
             "format": "uint32",
             "minimum": 0,
             "type": ["integer", "null"]
           },
-          "toAgentId": { "type": ["string", "null"] }
+          "messageId": { "type": ["string", "null"] },
+          "toAgentId": { "type": ["string", "null"] },
+          "toSessionId": { "type": ["string", "null"] }
         },
         "type": "object"
       },

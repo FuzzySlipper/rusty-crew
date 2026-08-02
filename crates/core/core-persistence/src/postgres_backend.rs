@@ -16537,7 +16537,18 @@ mod tests {
         );
         assert_eq!(
             store
-                .list_agent_message_inbox_deliveries(Some(&accepted.request.to_agent_id), 10)
+                .list_agent_message_inbox_deliveries(
+                    &rusty_crew_core_protocol::AgentMessageInboxQuery {
+                        to_agent_id: Some(accepted.request.to_agent_id.clone()),
+                        to_session_id: accepted.request.to_session_id.clone(),
+                        from_agent_id: Some(accepted.request.from_agent_id.clone()),
+                        from_session_id: accepted.request.from_session_id.clone(),
+                        correlation_id: accepted.request.correlation_id.clone(),
+                        message_id: Some(accepted.request.message_id.clone()),
+                        limit: Some(10),
+                    },
+                    10,
+                )
                 .unwrap(),
             vec![accepted.clone()]
         );

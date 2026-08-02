@@ -269,6 +269,7 @@ fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
         .list_agent_message_inbox(&rusty_crew_core_protocol::AgentMessageInboxQuery {
             to_agent_id: Some(reviewer.agent_id.clone()),
             limit: Some(10),
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(queued_projection.len(), 3);
@@ -284,6 +285,27 @@ fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
         queued_projection[2].status,
         rusty_crew_core_protocol::AgentMessageInboxStatus::Queued
     );
+    let exact_projection = engine
+        .list_agent_message_inbox(&rusty_crew_core_protocol::AgentMessageInboxQuery {
+            to_session_id: Some(reviewer.session_id.clone()),
+            from_session_id: Some(sender.session_id.clone()),
+            correlation_id: Some("serial-correlation-2".into()),
+            message_id: Some("serial-message-2".into()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(exact_projection.len(), 1);
+    assert_eq!(
+        exact_projection[0].delivery.request.to_session_id.as_ref(),
+        Some(&reviewer.session_id)
+    );
+    assert!(exact_projection[0]
+        .delivered_model_text
+        .contains("[Rusty Crew routed payload: begin]\nreview change 2"));
+    assert!(exact_projection[0]
+        .delivered_model_text
+        .contains("to_session_id: serial-reviewer-session"));
     engine
         .transition_external_turn(
             &first_request,
@@ -306,6 +328,7 @@ fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
         .list_agent_message_inbox(&rusty_crew_core_protocol::AgentMessageInboxQuery {
             to_agent_id: Some(reviewer.agent_id.clone()),
             limit: Some(10),
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(
@@ -437,6 +460,7 @@ fn serial_external_inbox_does_not_advance_after_completed_turn_without_reply() {
         .list_agent_message_inbox(&rusty_crew_core_protocol::AgentMessageInboxQuery {
             to_agent_id: Some(reviewer.agent_id),
             limit: Some(10),
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(
@@ -544,6 +568,7 @@ fn serial_external_inbox_cancels_pending_work_when_recipient_session_is_replaced
         .list_agent_message_inbox(&rusty_crew_core_protocol::AgentMessageInboxQuery {
             to_agent_id: Some(reviewer.agent_id),
             limit: Some(10),
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(

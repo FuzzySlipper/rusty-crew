@@ -4230,7 +4230,7 @@
     "/v1/coordination/messages": {
       "get": {
         "operationId": "coordinationProductionMessagesList",
-        "summary": "Inspect durable production routed-message queue, turn, expiry, and reply state.",
+        "summary": "Inspect and filter durable production routed-message provenance, exact model input, queue, wake, expiry, and reply state.",
         "tags": ["session", "delegation", "diagnostics"],
         "security": [{ "AdminBearer": [] }],
         "responses": {
@@ -4504,7 +4504,7 @@
     "/v1/debug/coordination/messages": {
       "get": {
         "operationId": "coordinationDebugMessagesList",
-        "summary": "Inspect durable debug routed-message queue, turn, expiry, and reply state.",
+        "summary": "Inspect and filter durable debug routed-message provenance, exact model input, queue, wake, expiry, and reply state.",
         "tags": ["session", "diagnostics"],
         "security": [{ "AdminBearer": [] }],
         "responses": {

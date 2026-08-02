@@ -3213,6 +3213,10 @@ export const bridgeWireSchemaArtifact = {
     "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::AgentMessageInboxItem>": {
       "items": {
         "properties": {
+          "deliveredModelText": {
+            "description": "Exact text presented to the recipient brain after Rust-owned provenance framing.",
+            "type": "string"
+          },
           "delivery": {
             "properties": {
               "activation": {
@@ -3956,7 +3960,8 @@ export const bridgeWireSchemaArtifact = {
         },
         "required": [
           "delivery",
-          "status"
+          "status",
+          "deliveredModelText"
         ],
         "type": "object"
       },

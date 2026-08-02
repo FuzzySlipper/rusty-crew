@@ -96,3 +96,32 @@ ID, status, and terminal reason. Message and round writes use the `toAddress`
 field. A correlated operator round includes
 a service-authored reply contract so direct and managed Codex recipients can
 return through their native Crew coordination tool.
+
+## Message Traffic And Model Provenance
+
+The durable coordination ledger is available without direct database access:
+
+```text
+GET /v1/coordination/messages
+GET /v1/debug/coordination/messages
+```
+
+Both routes accept `toAgentId`, `toSessionId`, `fromAgentId`, `fromSessionId`,
+`correlationId`, `messageId`, and `limit` (1-500). Filters may be combined. The
+response includes the authoritative sender and resolved recipient identities,
+requested address, route-resolution provenance, delivery and wake status,
+reply, terminal reason, original body, and `deliveredModelText`.
+
+`deliveredModelText` is the literal Rust-authored input presented to the
+recipient brain. Routed agent input is bounded by explicit
+`[Rusty Crew routed message: begin/end]` and
+`[Rusty Crew routed payload: begin/end]` markers. Its header names both source
+and destination agent/session IDs and states that the payload is inter-agent
+input rather than an operator prompt. These fields describe provenance; they
+do not add an authorization or trust gate to same-service messaging.
+
+Use an exact `toSessionId` query when investigating crossed traffic. A body
+that appears in model behavior but has no matching delivery for that session
+did not enter through Crew's durable coordination route. Chat-originated user
+messages remain separately identifiable through their
+`metadata_json.source = rusty_view_chat` message-slot record.

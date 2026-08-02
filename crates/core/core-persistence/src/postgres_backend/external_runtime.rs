@@ -1741,11 +1741,16 @@ impl PostgresBackendStore {
 
     pub fn list_agent_message_inbox_deliveries(
         &self,
-        to_agent_id: Option<&AgentId>,
+        query: &rusty_crew_core_protocol::AgentMessageInboxQuery,
         limit: u32,
     ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
         let schema = self.quoted_schema();
-        let agent = to_agent_id.map(|value| value.0.as_str());
+        let to_agent = query.to_agent_id.as_ref().map(|value| value.0.as_str());
+        let to_session = query.to_session_id.as_ref().map(|value| value.0.as_str());
+        let from_agent = query.from_agent_id.as_ref().map(|value| value.0.as_str());
+        let from_session = query.from_session_id.as_ref().map(|value| value.0.as_str());
+        let correlation_id = query.correlation_id.as_deref();
+        let message_id = query.message_id.as_deref();
         let limit = i64::from(limit);
         load_list(
             &mut *self.client()?,
@@ -1753,9 +1758,22 @@ impl PostgresBackendStore {
                 "SELECT record_json FROM {schema}.agent_message_delivery_receipts
                  WHERE reply_to_message_id IS NULL
                    AND ($1::TEXT IS NULL OR to_agent_id = $1)
-                 ORDER BY created_at, delivery_id LIMIT $2"
+                   AND ($2::TEXT IS NULL OR to_session_id = $2)
+                   AND ($3::TEXT IS NULL OR from_agent_id = $3)
+                   AND ($4::TEXT IS NULL OR from_session_id = $4)
+                   AND ($5::TEXT IS NULL OR record_json::jsonb #>> '{{request,correlationId}}' = $5)
+                   AND ($6::TEXT IS NULL OR message_id = $6)
+                 ORDER BY created_at, delivery_id LIMIT $7"
             ),
-            &[&agent, &limit],
+            &[
+                &to_agent,
+                &to_session,
+                &from_agent,
+                &from_session,
+                &correlation_id,
+                &message_id,
+                &limit,
+            ],
             "list PostgreSQL agent message inbox deliveries",
         )
     }

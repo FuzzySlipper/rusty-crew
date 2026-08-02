@@ -2170,7 +2170,7 @@ impl CoordinationStore {
 
     pub fn list_agent_message_inbox_deliveries(
         &self,
-        to_agent_id: Option<&AgentId>,
+        query: &rusty_crew_core_protocol::AgentMessageInboxQuery,
         limit: u32,
     ) -> CoreResult<Vec<AgentMessageDeliveryReceipt>> {
         let conn = self.conn()?;
@@ -2179,8 +2179,21 @@ impl CoordinationStore {
             "SELECT record_json FROM agent_message_delivery_receipts
              WHERE reply_to_message_id IS NULL
                AND (?1 IS NULL OR to_agent_id = ?1)
-             ORDER BY created_at, delivery_id LIMIT ?2",
-            params![to_agent_id.map(|value| value.0.as_str()), i64::from(limit)],
+               AND (?2 IS NULL OR to_session_id = ?2)
+               AND (?3 IS NULL OR from_agent_id = ?3)
+               AND (?4 IS NULL OR from_session_id = ?4)
+               AND (?5 IS NULL OR json_extract(record_json, '$.request.correlationId') = ?5)
+               AND (?6 IS NULL OR message_id = ?6)
+             ORDER BY created_at, delivery_id LIMIT ?7",
+            params![
+                query.to_agent_id.as_ref().map(|value| value.0.as_str()),
+                query.to_session_id.as_ref().map(|value| value.0.as_str()),
+                query.from_agent_id.as_ref().map(|value| value.0.as_str()),
+                query.from_session_id.as_ref().map(|value| value.0.as_str()),
+                query.correlation_id.as_deref(),
+                query.message_id.as_deref(),
+                i64::from(limit)
+            ],
             "list agent message inbox deliveries",
         )
     }

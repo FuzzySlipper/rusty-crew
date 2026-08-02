@@ -1095,6 +1095,8 @@ pub struct AgentMessageInboxItem {
     pub delivery: AgentMessageDeliveryReceipt,
     pub reply: Option<AgentMessageDeliveryReceipt>,
     pub status: AgentMessageInboxStatus,
+    /// Exact text presented to the recipient brain after Rust-owned provenance framing.
+    pub delivered_model_text: String,
     pub queued_message_id: Option<String>,
     pub external_turn_request_id: Option<ExternalTurnRequestId>,
     pub terminal_reason_code: Option<String>,
@@ -1104,6 +1106,11 @@ pub struct AgentMessageInboxItem {
 #[serde(rename_all = "camelCase")]
 pub struct AgentMessageInboxQuery {
     pub to_agent_id: Option<AgentId>,
+    pub to_session_id: Option<SessionId>,
+    pub from_agent_id: Option<AgentId>,
+    pub from_session_id: Option<SessionId>,
+    pub correlation_id: Option<String>,
+    pub message_id: Option<String>,
     pub limit: Option<u32>,
 }
 

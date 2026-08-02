@@ -224,6 +224,7 @@ export type AgentMessageDeliveryRequest = {
 export type AgentMessageDeliveryStatus = "pending" | "accepted" | "rejected" | "expired";
 
 export type AgentMessageInboxItem = {
+  deliveredModelText: string;
   delivery: AgentMessageDeliveryReceipt;
   externalTurnRequestId?: string | null;
   queuedMessageId?: string | null;
@@ -233,8 +234,13 @@ export type AgentMessageInboxItem = {
 };
 
 export type AgentMessageInboxQuery = {
+  correlationId?: string | null;
+  fromAgentId?: string | null;
+  fromSessionId?: string | null;
   limit?: number | null;
+  messageId?: string | null;
   toAgentId?: string | null;
+  toSessionId?: string | null;
 };
 
 export type AgentMessageInboxStatus = "queued" | "in_progress" | "awaiting_reply" | "replied" | "no_reply" | "failed" | "expired" | "rejected";

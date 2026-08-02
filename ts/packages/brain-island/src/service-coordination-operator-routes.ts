@@ -193,6 +193,11 @@ export async function handleCoordinationOperatorRequest(
   if (parts.length === 1 && parts[0] === "messages") {
     if (method === "GET") {
       const toAgentId = url.searchParams.get("toAgentId")?.trim();
+      const toSessionId = url.searchParams.get("toSessionId")?.trim();
+      const fromAgentId = url.searchParams.get("fromAgentId")?.trim();
+      const fromSessionId = url.searchParams.get("fromSessionId")?.trim();
+      const correlationId = url.searchParams.get("correlationId")?.trim();
+      const messageId = url.searchParams.get("messageId")?.trim();
       const limitText = url.searchParams.get("limit")?.trim();
       const limit = limitText === undefined ? 100 : Number(limitText);
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
@@ -207,6 +212,19 @@ export async function handleCoordinationOperatorRequest(
           ...(toAgentId === undefined || toAgentId === ""
             ? {}
             : { toAgentId: toAgentId as AgentId }),
+          ...(toSessionId === undefined || toSessionId === ""
+            ? {}
+            : { toSessionId: toSessionId as SessionId }),
+          ...(fromAgentId === undefined || fromAgentId === ""
+            ? {}
+            : { fromAgentId: fromAgentId as AgentId }),
+          ...(fromSessionId === undefined || fromSessionId === ""
+            ? {}
+            : { fromSessionId: fromSessionId as SessionId }),
+          ...(correlationId === undefined || correlationId === ""
+            ? {}
+            : { correlationId }),
+          ...(messageId === undefined || messageId === "" ? {} : { messageId }),
           limit,
         }),
       });

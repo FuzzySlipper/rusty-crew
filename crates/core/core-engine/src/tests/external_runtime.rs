@@ -1089,7 +1089,7 @@ fn active_external_recipient_queues_without_brain_wake() {
         .unwrap();
     assert_eq!(queued.len(), 1);
     assert!(queued[0].message.body.contains("message_id: message-busy"));
-    assert!(queued[0].message.body.ends_with("queue for later"));
+    assert!(queued[0].message.body.contains("queue for later"));
     assert_eq!(
         engine.deliver_agent_message(command.clone()).unwrap(),
         receipt
@@ -1380,7 +1380,7 @@ fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
         .message
         .body
         .contains("message_id: message-expiring"));
-    assert!(expired[0].message.body.ends_with("do not resurrect"));
+    assert!(expired[0].message.body.contains("do not resurrect"));
     assert!(store
         .get_external_turn(&ExternalTurnRequestId::new(format!(
             "external-follow-up:{}",

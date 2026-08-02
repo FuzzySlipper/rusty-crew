@@ -1,6 +1,7 @@
 //! Runtime-neutral direct-agent messaging and durable correlated rounds.
 
 use super::*;
+use crate::agent_message_format::agent_message_model_text;
 use rusty_crew_core_protocol::{
     parse_agent_route_address, AgentActivation, AgentCoordinationCaller, AgentCorrelatedRound,
     AgentDirectoryEntry, AgentDirectoryRuntimeKind, AgentMessageCommand,
@@ -843,7 +844,7 @@ impl CoreEngine {
         let limit = query.limit.unwrap_or(100).clamp(1, 500);
         let deliveries = self
             .store
-            .list_agent_message_inbox_deliveries(query.to_agent_id.as_ref(), limit)?;
+            .list_agent_message_inbox_deliveries(query, limit)?;
         deliveries
             .into_iter()
             .map(|delivery| self.project_agent_message_inbox_item(delivery))
@@ -949,10 +950,12 @@ impl CoreEngine {
                     .as_ref()
                     .and_then(|record| record.state_reason.clone())
             });
+        let delivered_model_text = agent_message_model_text(&delivery.request);
         Ok(AgentMessageInboxItem {
             delivery,
             reply,
             status,
+            delivered_model_text,
             queued_message_id: queue.map(|record| record.message_id),
             external_turn_request_id,
             terminal_reason_code,
@@ -1356,41 +1359,6 @@ fn route_target_session_id(route: Option<&AgentRouteRecord>) -> Option<SessionId
     })
 }
 
-fn agent_message_model_text(request: &AgentMessageDeliveryRequest) -> String {
-    match request.input_kind {
-        AgentMessageInputKind::Operator => request.body.clone(),
-        AgentMessageInputKind::RoutedAgentMessage => routed_agent_message_text(request),
-    }
-}
-
-fn routed_agent_message_text(request: &AgentMessageDeliveryRequest) -> String {
-    let from_session_id = request
-        .from_session_id
-        .as_ref()
-        .map(|value| value.0.as_str());
-    let reply_instruction = match (&request.reply_to_message_id, from_session_id) {
-        (Some(_), _) => {
-            "reply_instruction: none (this message is already a reply; do not acknowledge it with coordination tools)".to_string()
-        }
-        (None, Some(_)) => format!(
-            "reply_instruction: call rusty_crew.reply_agent_message with messageId={} and your reply body",
-            request.message_id
-        ),
-        (None, None) => "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)".to_string(),
-    };
-    format!(
-        "[Rusty Crew routed message]\nmessage_id: {}\nfrom_agent_id: {}\nfrom_session_id: {}\ncorrelation_id: {}\ncreated_at: {}\nexpires_at: {}\n{}\n\n{}",
-        request.message_id,
-        request.from_agent_id.0,
-        from_session_id.unwrap_or("none"),
-        request.correlation_id.as_deref().unwrap_or("none"),
-        request.created_at,
-        request.expires_at,
-        reply_instruction,
-        request.body
-    )
-}
-
 fn validate_agent_message_bounds(
     body: &str,
     created_at: &IsoTimestamp,
@@ -1428,6 +1396,13 @@ mod routed_agent_message_text_tests {
         ));
 
         assert!(text.contains("from_session_id: sender-session"));
+        assert!(text.contains("to_agent_id: recipient"));
+        assert!(text.contains("to_session_id: recipient-session"));
+        assert!(text.contains("input_kind: routed_agent_message"));
+        assert!(text.contains(
+            "[Rusty Crew routed payload: begin]\ninspect this\n[Rusty Crew routed payload: end]"
+        ));
+        assert!(text.ends_with("[Rusty Crew routed message: end]"));
         assert!(text.contains(
             "reply_instruction: call rusty_crew.reply_agent_message with messageId=message-1 and your reply body"
         ));

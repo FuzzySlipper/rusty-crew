@@ -169,13 +169,26 @@ test("coordination operator routes are deployment-bound and start system rounds"
   const inbox = await handleCoordinationOperatorRequest(
     { method: "GET" } as IncomingMessage,
     new URL(
-      "http://local/v1/debug/coordination/messages?toAgentId=agent-a&limit=25",
+      "http://local/v1/debug/coordination/messages?toAgentId=agent-a&toSessionId=session-a&fromAgentId=agent-b&fromSessionId=session-b&correlationId=corr-a&messageId=message-a&limit=25",
     ),
     context,
   );
   assert.deepEqual(
     okData<{ items: unknown[] }>(inbox as AdminRouteResult).items,
-    [{ status: "queued", query: { toAgentId: "agent-a", limit: 25 } }],
+    [
+      {
+        status: "queued",
+        query: {
+          toAgentId: "agent-a",
+          toSessionId: "session-a",
+          fromAgentId: "agent-b",
+          fromSessionId: "session-b",
+          correlationId: "corr-a",
+          messageId: "message-a",
+          limit: 25,
+        },
+      },
+    ],
   );
 });
 
