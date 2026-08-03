@@ -123,6 +123,7 @@ use rusty_crew_core_protocol::{
     ModelProviderCredentialUnlink, ModelProviderQuery, ModelProviderRecord,
     ModelProviderRefreshImpactRequest, ModelProviderRefreshPlanRequest, ModelProviderWrite,
     ProfileRegistryLifecycleStatus, ProfileRegistryUpdate, ProfileRegistryWrite,
+    ReviewSubmissionQuery, ReviewSubmissionRequest, ReviewSubmissionTransitionRequest,
     ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
     ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
@@ -566,6 +567,59 @@ impl NativeBridgeBinding {
             .bridge()?
             .github_gate_event_cursor()
             .map_err(to_napi_error)? as f64)
+    }
+
+    #[napi]
+    pub fn begin_review_submission_json(&self, input_json: String) -> napi::Result<String> {
+        let request: ReviewSubmissionRequest =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid review submission JSON: {error}"),
+                )
+            })?;
+        serde_json::to_string(
+            &self
+                .bridge()?
+                .begin_review_submission(request)
+                .map_err(to_napi_error)?,
+        )
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn transition_review_submission_json(&self, input_json: String) -> napi::Result<String> {
+        let request: ReviewSubmissionTransitionRequest = serde_json::from_str(&input_json)
+            .map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid review submission transition JSON: {error}"),
+                )
+            })?;
+        serde_json::to_string(
+            &self
+                .bridge()?
+                .transition_review_submission(request)
+                .map_err(to_napi_error)?,
+        )
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn list_review_submissions_json(&self, input_json: String) -> napi::Result<String> {
+        let query: ReviewSubmissionQuery = serde_json::from_str(&input_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid review submission query JSON: {error}"),
+            )
+        })?;
+        serde_json::to_string(
+            &self
+                .bridge()?
+                .list_review_submissions(&query)
+                .map_err(to_napi_error)?,
+        )
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 
     fn bridge(&self) -> napi::Result<std::sync::MutexGuard<'_, NativeBridge>> {

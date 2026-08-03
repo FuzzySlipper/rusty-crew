@@ -78,6 +78,27 @@ impl NativeBridge {
         self.engine()?.github_gate_event_cursor()
     }
 
+    pub fn begin_review_submission(
+        &self,
+        request: rusty_crew_core_bridge_api::ReviewSubmissionRequest,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ReviewSubmissionRecord> {
+        self.engine()?.begin_review_submission(request)
+    }
+
+    pub fn transition_review_submission(
+        &self,
+        request: rusty_crew_core_bridge_api::ReviewSubmissionTransitionRequest,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ReviewSubmissionRecord> {
+        self.engine()?.transition_review_submission(request)
+    }
+
+    pub fn list_review_submissions(
+        &self,
+        query: &rusty_crew_core_bridge_api::ReviewSubmissionQuery,
+    ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ReviewSubmissionRecord>> {
+        self.engine()?.list_review_submissions(query)
+    }
+
     pub fn register_platform_adapter(
         &mut self,
         registration: PlatformAdapterRegistration,

@@ -5670,6 +5670,253 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_RuntimeActivityRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::types::ReviewSubmissionRecord>": {
+      "items": {
+        "properties": {
+          "baseCommit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "caller": {
+            "oneOf": [
+              {
+                "properties": {
+                  "senderAgentId": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "system",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "senderAgentId"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "toolCallId": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "direct_brain",
+                    "type": "string"
+                  },
+                  "wakeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "sessionId",
+                  "wakeId",
+                  "toolCallId"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "bindingId": {
+                    "type": "string"
+                  },
+                  "controllerGeneration": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "controllerInstanceId": {
+                    "type": "string"
+                  },
+                  "nativeRequestId": {
+                    "type": "string"
+                  },
+                  "nativeThreadId": {
+                    "type": "string"
+                  },
+                  "nativeTurnId": {
+                    "type": "string"
+                  },
+                  "runtimeId": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "external_agent",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "runtimeId",
+                  "bindingId",
+                  "controllerInstanceId",
+                  "controllerGeneration",
+                  "nativeThreadId",
+                  "nativeTurnId",
+                  "nativeRequestId"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "submissionId": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "review_submission",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "submissionId"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "commitSha": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "dispatchDeliveryId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dispatchMessageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gateId": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "gateStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gitRef": {
+            "type": "string"
+          },
+          "lastAdapterError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "submitted",
+              "den_handoff_recorded",
+              "gate_pending",
+              "gate_failed",
+              "reviewer_dispatch_pending",
+              "reviewer_dispatched",
+              "review_terminal",
+              "superseded"
+            ],
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "requiredChecks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reviewRoundId": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reviewSummaryMd": {
+            "type": "string"
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "reviewerSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "submissionId": {
+            "type": "string"
+          },
+          "submitterAgentId": {
+            "type": "string"
+          },
+          "submitterSessionId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "terminalReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "submissionId",
+          "projectId",
+          "taskId",
+          "repository",
+          "commitSha",
+          "gitRef",
+          "requiredChecks",
+          "reviewSummaryMd",
+          "reviewer",
+          "submitterAgentId",
+          "submitterSessionId",
+          "caller",
+          "phase",
+          "createdAt",
+          "updatedAt",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_ReviewSubmissionRecord",
+      "type": "array"
+    },
     "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>": {
       "properties": {
         "claim_deadline_at": {
@@ -23883,6 +24130,250 @@ export const bridgeWireSchemaArtifact = {
       "title": "RuntimeActivityRecord",
       "type": "object"
     },
+    "rusty_crew_core_protocol::types::ReviewSubmissionRecord": {
+      "properties": {
+        "baseCommit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caller": {
+          "oneOf": [
+            {
+              "properties": {
+                "senderAgentId": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "system",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "senderAgentId"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "sessionId": {
+                  "type": "string"
+                },
+                "toolCallId": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "direct_brain",
+                  "type": "string"
+                },
+                "wakeId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "sessionId",
+                "wakeId",
+                "toolCallId"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "bindingId": {
+                  "type": "string"
+                },
+                "controllerGeneration": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "controllerInstanceId": {
+                  "type": "string"
+                },
+                "nativeRequestId": {
+                  "type": "string"
+                },
+                "nativeThreadId": {
+                  "type": "string"
+                },
+                "nativeTurnId": {
+                  "type": "string"
+                },
+                "runtimeId": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "external_agent",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runtimeId",
+                "bindingId",
+                "controllerInstanceId",
+                "controllerGeneration",
+                "nativeThreadId",
+                "nativeTurnId",
+                "nativeRequestId"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "submissionId": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "review_submission",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "submissionId"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "commitSha": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "dispatchDeliveryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dispatchMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gateId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gateStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gitRef": {
+          "type": "string"
+        },
+        "lastAdapterError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "submitted",
+            "den_handoff_recorded",
+            "gate_pending",
+            "gate_failed",
+            "reviewer_dispatch_pending",
+            "reviewer_dispatched",
+            "review_terminal",
+            "superseded"
+          ],
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "requiredChecks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reviewRoundId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewSummaryMd": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "reviewerSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "submissionId": {
+          "type": "string"
+        },
+        "submitterAgentId": {
+          "type": "string"
+        },
+        "submitterSessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "terminalReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "submissionId",
+        "projectId",
+        "taskId",
+        "repository",
+        "commitSha",
+        "gitRef",
+        "requiredChecks",
+        "reviewSummaryMd",
+        "reviewer",
+        "submitterAgentId",
+        "submitterSessionId",
+        "caller",
+        "phase",
+        "createdAt",
+        "updatedAt",
+        "revision"
+      ],
+      "title": "ReviewSubmissionRecord",
+      "type": "object"
+    },
     "rusty_crew_core_tool_registry::LocalCodeResourcePolicyPlan": {
       "properties": {
         "commandTimeoutMs": {
@@ -26280,6 +26771,7 @@ export const bridgeWireSchemaArtifact = {
     "archive_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "authorize_external_runtime_handshake": "rusty_crew_core_protocol::external_runtime::ExternalRuntimeHandshakeDecision",
     "begin_agent_round": "rusty_crew_core_protocol::external_runtime::AgentRoundStartReceipt",
+    "begin_review_submission": "rusty_crew_core_protocol::types::ReviewSubmissionRecord",
     "begin_runtime_activity": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord",
     "bind_external_agent": "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding",
     "brain_catalog": "rusty_crew_brain_runtime::catalog::BrainCatalog",
@@ -26344,6 +26836,7 @@ export const bridgeWireSchemaArtifact = {
     "list_lore_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
     "list_pending_external_interactions": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord>",
     "list_recall_traces": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::LoreRecallTraceRecord>",
+    "list_review_submissions": "alloc::vec::Vec<rusty_crew_core_protocol::types::ReviewSubmissionRecord>",
     "list_roleplay_characters": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayCharacterRecord>",
     "list_roleplay_imports": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayImportRecord>",
     "list_roleplay_mechanic_diagnostics": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord>",
@@ -26450,6 +26943,7 @@ export const bridgeWireSchemaArtifact = {
     "terminalize_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
     "tombstone_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreRecord",
     "transition_external_turn": "rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation",
+    "transition_review_submission": "rusty_crew_core_protocol::types::ReviewSubmissionRecord",
     "update_conversation_branch_head": "rusty_crew_core_persistence::contracts::UpdateBranchHeadResult",
     "update_external_binding_metadata": "rusty_crew_core_protocol::external_runtime::ExternalAgentBinding",
     "update_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",

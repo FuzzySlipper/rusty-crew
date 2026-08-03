@@ -1156,6 +1156,9 @@ pub enum AgentCoordinationCaller {
         native_turn_id: String,
         native_request_id: String,
     },
+    ReviewSubmission {
+        submission_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

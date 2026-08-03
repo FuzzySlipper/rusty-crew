@@ -52,6 +52,7 @@ impl CoreEngine {
             profile_tool_profiles: Arc::new(Mutex::new(HashMap::new())),
             scheduler_tick_lock: Arc::new(Mutex::new(())),
             github_gate_lock: Arc::new(Mutex::new(())),
+            review_submission_lock: Arc::new(Mutex::new(())),
             external_follow_up_lock: Arc::new(Mutex::new(())),
             agent_route_lifecycle_lock: Arc::new(Mutex::new(())),
         };

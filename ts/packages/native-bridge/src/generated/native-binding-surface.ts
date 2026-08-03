@@ -306,6 +306,9 @@ export interface NativeBridgeBinding {
   recoverGithubGateWakes(): number
   githubGateWaitJson(sessionId: string): string
   githubGateEventCursor(): number
+  beginReviewSubmissionJson(inputJson: string): string
+  transitionReviewSubmissionJson(inputJson: string): string
+  listReviewSubmissionsJson(inputJson: string): string
 }
 
 export interface JsActionBatchReceipt {
@@ -877,7 +880,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 286,
+  "manifestOperationCount": 289,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -3294,6 +3297,30 @@ export const nativeBridgeBindingSurface = {
       "returnType": "number",
       "returnKind": "number",
       "operationName": "github_gate_event_cursor"
+    },
+    {
+      "name": "beginReviewSubmissionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "begin_review_submission"
+    },
+    {
+      "name": "transitionReviewSubmissionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "transition_review_submission"
+    },
+    {
+      "name": "listReviewSubmissionsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_review_submissions"
     }
   ],
   "properties": [

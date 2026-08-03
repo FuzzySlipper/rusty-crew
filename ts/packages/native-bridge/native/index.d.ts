@@ -308,6 +308,9 @@ export declare class NativeBridgeBinding {
   recoverGithubGateWakes(): number
   githubGateWaitJson(sessionId: string): string
   githubGateEventCursor(): number
+  beginReviewSubmissionJson(inputJson: string): string
+  transitionReviewSubmissionJson(inputJson: string): string
+  listReviewSubmissionsJson(inputJson: string): string
 }
 
 export interface JsActionBatchReceipt {

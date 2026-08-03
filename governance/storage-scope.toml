@@ -103,6 +103,14 @@ owns = [
 notes = "Rust-owned logical turn lifecycle, immutable continuation checkpoints, resumable tickets, cancellation fences, frozen input blobs, operations, and idempotent projection outbox records."
 
 [[scope]]
+id = "review_submissions"
+label = "Managed Review Submissions"
+owns = [
+  "review_submissions",
+]
+notes = "Rust-owned task-and-SHA review submission state, exact submitter correlation, GitHub gate progression, reviewer dispatch intent, and terminal settlement."
+
+[[scope]]
 id = "external_agent_runtime"
 label = "External Agent Runtime"
 owns = [

@@ -23,6 +23,8 @@ mod external_runtime_compatibility;
 mod github_gate;
 mod github_gate_wait;
 mod logical_turns;
+mod review_submission;
+mod review_submission_store;
 pub use logical_turns::{
     LogicalTurnEpochResult, LogicalTurnEpochSettlement, LogicalTurnWakePreparation,
 };
@@ -74,6 +76,10 @@ use provider_state_store::{
     clear_provider_state as clear_provider_state_store,
     list_provider_state_diagnostics as list_provider_state_store_diagnostics,
     load_provider_state_for_wake, save_provider_state as save_provider_state_store,
+};
+use review_submission_store::{
+    list as list_review_submission_records, load as load_review_submission_record,
+    save as save_review_submission_record,
 };
 use roleplay_lore_store::RoleplayLoreStore;
 use roleplay_records_store::RoleplayRecordsStore;
@@ -221,6 +227,7 @@ pub struct CoreEngine {
     profile_tool_profiles: Arc<Mutex<HashMap<ProfileId, ToolProfile>>>,
     scheduler_tick_lock: Arc<Mutex<()>>,
     github_gate_lock: Arc<Mutex<()>>,
+    review_submission_lock: Arc<Mutex<()>>,
     external_follow_up_lock: Arc<Mutex<()>>,
     agent_route_lifecycle_lock: Arc<Mutex<()>>,
 }

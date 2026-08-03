@@ -335,6 +335,12 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:coordination-tools",
   },
   {
+    name: "submit_task_for_review",
+    implementationModule:
+      "./review-submission-tools.js#submitTaskForReviewTool",
+    inventoryTest: "smoke:review-submission-tools",
+  },
+  {
     name: "web_search",
     implementationModule: "./web-tools.js#webSearchTool",
     inventoryTest: "smoke:tool-registry",

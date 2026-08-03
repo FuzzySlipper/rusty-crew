@@ -234,6 +234,50 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn get_review_submission(
+        &self,
+        submission_id: &str,
+    ) -> CoreResult<Option<ReviewSubmissionRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_review_submission(submission_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_review_submission(submission_id),
+        }
+    }
+
+    pub fn list_review_submissions(&self) -> CoreResult<Vec<ReviewSubmissionRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_review_submissions(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_review_submissions(),
+        }
+    }
+
+    pub fn insert_review_submission(
+        &self,
+        record: &ReviewSubmissionRecord,
+    ) -> CoreResult<ReviewSubmissionRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.insert_review_submission(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.insert_review_submission(record),
+        }
+    }
+
+    pub fn update_review_submission(
+        &self,
+        record: &ReviewSubmissionRecord,
+        expected_revision: u64,
+    ) -> CoreResult<ReviewSubmissionRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.update_review_submission(record, expected_revision),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.update_review_submission(record, expected_revision)
+            }
+        }
+    }
+
     pub fn insert_runtime_activity(
         &self,
         record: &RuntimeActivityRecord,

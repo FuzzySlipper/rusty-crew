@@ -1034,7 +1034,9 @@ impl CoreEngine {
                 "agent_message_reply_already_exists",
             ));
         }
-        self.deliver_agent_message_with_reply(
+        let replied_to = command.in_reply_to_message_id.clone();
+        let replied_at = command.created_at.clone();
+        let receipt = self.deliver_agent_message_with_reply(
             AgentMessageCommand {
                 caller: command.caller,
                 delivery_id: command.delivery_id,
@@ -1054,7 +1056,11 @@ impl CoreEngine {
             },
             Some(command.in_reply_to_message_id),
             None,
-        )
+        )?;
+        if receipt.status == AgentMessageDeliveryStatus::Accepted {
+            self.mark_review_reply_terminal(&replied_to, &replied_at)?;
+        }
+        Ok(receipt)
     }
 
     pub fn complete_agent_message_delivery(
@@ -1110,10 +1116,19 @@ impl CoreEngine {
         self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
             receipt: saved.clone(),
         })?;
+        if saved.status == AgentMessageDeliveryStatus::Accepted {
+            if let Some(replied_to) = saved.request.reply_to_message_id.as_deref() {
+                let terminal_at = saved
+                    .terminal_at
+                    .as_ref()
+                    .unwrap_or(&saved.request.created_at);
+                self.mark_review_reply_terminal(replied_to, terminal_at)?;
+            }
+        }
         Ok(saved)
     }
 
-    fn resolve_coordination_caller(
+    pub(crate) fn resolve_coordination_caller(
         &self,
         caller: &AgentCoordinationCaller,
     ) -> CoreResult<(AgentId, Option<SessionId>, Option<ExternalTurnRequestId>)> {
@@ -1193,6 +1208,11 @@ impl CoreEngine {
                     Some(binding.session_id.expect("routable binding has session id")),
                     Some(turn.request.request_id),
                 ))
+            }
+            AgentCoordinationCaller::ReviewSubmission { submission_id } => {
+                let (agent_id, session_id) =
+                    self.resolve_review_submission_caller(submission_id)?;
+                Ok((agent_id, Some(session_id), None))
             }
         }
     }

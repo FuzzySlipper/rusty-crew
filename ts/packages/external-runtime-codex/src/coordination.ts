@@ -83,6 +83,44 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
           additionalProperties: false,
         },
       },
+      {
+        type: "function",
+        name: "submit_task_for_review",
+        description:
+          "Use this tool for normal Den task review submission. Crew durably runs exact-SHA GitHub gates and dispatches passing work to the reviewer; lower-level Den review and gate tools are infrastructure fallbacks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            taskId: { type: "integer", minimum: 1 },
+            repository: { type: "string", minLength: 3 },
+            commitSha: {
+              type: "string",
+              pattern: "^[0-9a-fA-F]{40}$",
+            },
+            ref: { type: "string", minLength: 1 },
+            requiredChecks: {
+              type: "array",
+              items: { type: "string", minLength: 1 },
+              minItems: 1,
+            },
+            baseCommit: {
+              type: "string",
+              pattern: "^[0-9a-fA-F]{40}$",
+            },
+            reviewSummaryMd: { type: "string", minLength: 1 },
+            reviewer: { type: "string", pattern: "^@[A-Za-z0-9._-]+$" },
+          },
+          required: [
+            "taskId",
+            "repository",
+            "commitSha",
+            "ref",
+            "requiredChecks",
+            "reviewSummaryMd",
+          ],
+          additionalProperties: false,
+        },
+      },
     ],
   },
 ];

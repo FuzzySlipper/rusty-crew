@@ -96,6 +96,9 @@ export const bridgeOperations = [
   {"name":"recover_github_gate_wakes","surface":"stable","direction":"ts_to_rust","input":"unit","output":"u32","errors":"core_protocol::CoreError","summary":"Re-emit durable wake-scheduled gate correlations after a Rusty Crew restart."},
   {"name":"github_gate_wait","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionId","output":"Option<core_protocol::GitHubGateWaitRecord>","errors":"core_protocol::CoreError","summary":"Read the current Rust-owned gate correlation for one session without copying Review lifecycle authority."},
   {"name":"github_gate_event_cursor","surface":"stable","direction":"ts_to_rust","input":"unit","output":"u64","errors":"core_protocol::CoreError","summary":"Read the Rust-owned durable Review terminal-event cursor for adapter reconnect."},
+  {"name":"begin_review_submission","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ReviewSubmissionRequest","output":"core_protocol::ReviewSubmissionRecord","errors":"core_protocol::CoreError","summary":"Persist and idempotently supersede Rust-owned exact-SHA review submission workflows."},
+  {"name":"transition_review_submission","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ReviewSubmissionTransitionRequest","output":"core_protocol::ReviewSubmissionRecord","errors":"core_protocol::CoreError","summary":"Apply one revision-checked adapter or reviewer transition to a Rust-owned review workflow."},
+  {"name":"list_review_submissions","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ReviewSubmissionQuery","output":"Vec<core_protocol::ReviewSubmissionRecord>","errors":"core_protocol::CoreError","summary":"Read durable review workflow diagnostics or pending adapter actions."},
   {"name":"create_crew_agent_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::CrewAgentSessionCreationRequest","output":"core_protocol::CrewAgentSessionCreationRecord","errors":"core_protocol::CoreError","summary":"Idempotently create or recover a Rust-owned Crew brain session from an active profile."},
   {"name":"archive_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionId","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Archive a Rust-owned runtime session without minting a replacement session."},
   {"name":"ensure_configured_session","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SessionConfig","output":"core_protocol::SessionState","errors":"core_protocol::CoreError","summary":"Create, reuse, or safely reactivate a configured durable service session without minting a replacement session ID."},
@@ -298,4 +301,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "29fa5e69f587467a25d2619303d8c3f15c3548a074a0e56104cb97e34e22ee3c" as const;
+export const bridgeWireShapeFingerprint = "68217514aa76f864dbc336628689a63b8107ce2bc74ebcdf46751053f6605fda" as const;

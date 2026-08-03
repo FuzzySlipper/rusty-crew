@@ -982,6 +982,14 @@ export const API_CAPABILITIES = [
     ["session", "delegation"],
   ),
   readCapability(
+    "review.submissions.diagnostics.list",
+    "GET",
+    "/v1/admin/diagnostics/review-submissions",
+    "List Rust-owned durable review submission workflow state and adapter errors.",
+    "admin",
+    ["service", "diagnostics"],
+  ),
+  readCapability(
     "coordination.debug.agents.list",
     "GET",
     "/v1/debug/coordination/agents",

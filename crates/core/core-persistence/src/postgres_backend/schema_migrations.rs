@@ -1,10 +1,11 @@
 //! PostgreSQL schema migration catalog and application logic.
 
 use super::logical_turns::apply_postgres_logical_turns;
+use super::review_submissions::apply_postgres_review_submissions;
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 44;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 45;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -236,6 +237,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 44,
         description: "record explicit Responses provider dialect in provider JSON",
         apply: Some(apply_postgres_responses_provider_dialect),
+    },
+    PostgresSchemaMigration {
+        version: 45,
+        description: "add durable review submission workflows",
+        apply: Some(apply_postgres_review_submissions),
     },
 ];
 

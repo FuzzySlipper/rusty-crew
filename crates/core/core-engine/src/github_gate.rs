@@ -96,6 +96,22 @@ impl CoreEngine {
                 wait: Some(wait),
             });
         }
+        let review_submission = self.apply_review_gate_terminal(&event)?;
+        if review_submission.is_some() && event.status == "passed" {
+            wait.phase = GitHubGateWaitPhase::Consumed;
+            wait.terminal_event_id = Some(event.event_id);
+            wait.updated_at = event.completed_at.clone();
+            save_github_gate_wait(&self.store, &wait)?;
+            save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+            return Ok(GitHubGateTerminalReceipt {
+                event_id: event.event_id,
+                cursor: event.event_id,
+                duplicate: false,
+                wake_scheduled: false,
+                ignored_reason: Some("review_submission_dispatch_pending".to_string()),
+                wait: Some(wait),
+            });
+        }
         let result = GitHubGateWakeResult {
             event_id: event.event_id,
             gate_id: event.gate_id,
@@ -227,6 +243,6 @@ fn validate_github_gate_terminal_event(event: &GitHubGateTerminalEvent) -> CoreR
     Ok(())
 }
 
-fn valid_full_github_sha(value: &str) -> bool {
+pub(crate) fn valid_full_github_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }

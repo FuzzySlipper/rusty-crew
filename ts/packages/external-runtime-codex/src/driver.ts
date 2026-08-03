@@ -854,7 +854,12 @@ function assertDynamicToolReadiness(): void {
     );
   }
   const names = new Set(namespace.tools.map((tool) => tool.name));
-  for (const required of ["list_agents", "send_agent_message", "agent_round"]) {
+  for (const required of [
+    "list_agents",
+    "send_agent_message",
+    "agent_round",
+    "submit_task_for_review",
+  ]) {
     if (!names.has(required)) {
       throw new CodexProtocolError(
         "malformed_response",

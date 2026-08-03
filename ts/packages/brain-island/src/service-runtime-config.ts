@@ -42,6 +42,10 @@ import {
   createCoordinationToolResolver,
   type CoordinationToolRuntime,
 } from "./coordination-tools.js";
+import {
+  createReviewSubmissionToolResolver,
+  type ReviewSubmissionToolRuntime,
+} from "./review-submission-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
 import { createBuiltInBrainHost } from "./built-in-brain-host.js";
 import { providerRequestTimeoutDiagnostics } from "./provider-request-timeout.js";
@@ -821,6 +825,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
+  reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
@@ -935,6 +940,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             adapterFactories: input.adapterFactories,
             externalMemoryReadiness,
             coordinationRuntime: input.coordinationRuntime,
+            reviewSubmissionRuntime: input.reviewSubmissionRuntime,
             toolCallDebugStore: input.toolCallDebugStore,
             providerRequestDebugStore: input.providerRequestDebugStore,
             browserResources,
@@ -1522,6 +1528,7 @@ async function createConfiguredBrain(
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
+    reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
     toolCallDebugStore?: ToolCallDebugStore;
     providerRequestDebugStore?: ProviderRequestDebugStore;
     browserResources: ServiceBrowserResources;
@@ -1585,6 +1592,7 @@ function createServiceToolResolver(
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
+    reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
     browserResources: ServiceBrowserResources;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
@@ -1657,6 +1665,7 @@ function createServiceToolResolver(
     resolveDelegationTools,
     resolveCompletionTools,
     createCoordinationToolResolver(options.coordinationRuntime),
+    createReviewSubmissionToolResolver(options.reviewSubmissionRuntime),
     createPlanningToolResolver({
       bridge: options.bridge,
       runtimeConfig: options.runtimeConfig,

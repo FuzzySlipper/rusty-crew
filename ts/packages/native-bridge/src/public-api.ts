@@ -88,6 +88,7 @@ import type {
 
 import type { NativeAgentCoordinationBridgeMethods } from "./agent-coordination-public-api.js";
 import type { NativeRuntimeActivityBridgeMethods } from "./runtime-activity-public-api.js";
+import type { NativeReviewSubmissionBridgeMethods } from "./review-submission-public-api.js";
 import type {
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
@@ -1965,7 +1966,8 @@ export interface NativeBridgeModule
     NativeExternalRuntimeBridgeMethods,
     NativeAgentCoordinationBridgeMethods,
     NativeCrewSessionBridgeMethods,
-    NativeRuntimeActivityBridgeMethods {
+    NativeRuntimeActivityBridgeMethods,
+    NativeReviewSubmissionBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;

@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::fmt;
 use thiserror::Error;
 
-use crate::{AgentCorrelatedRound, AgentMessageDeliveryReceipt};
+use crate::{AgentCoordinationCaller, AgentCorrelatedRound, AgentMessageDeliveryReceipt};
 
 macro_rules! handle_type {
     ($name:ident) => {
@@ -528,6 +528,113 @@ pub struct GitHubGateTerminalReceipt {
     pub wake_scheduled: bool,
     pub ignored_reason: Option<String>,
     pub wait: Option<GitHubGateWaitRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewSubmissionPhase {
+    Submitted,
+    DenHandoffRecorded,
+    GatePending,
+    GateFailed,
+    ReviewerDispatchPending,
+    ReviewerDispatched,
+    ReviewTerminal,
+    Superseded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSubmissionRequest {
+    pub caller: AgentCoordinationCaller,
+    pub project_id: ProjectId,
+    pub task_id: TaskId,
+    pub repository: String,
+    pub commit_sha: String,
+    pub git_ref: String,
+    pub required_checks: Vec<String>,
+    pub base_commit: Option<String>,
+    pub review_summary_md: String,
+    pub reviewer: String,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSubmissionRecord {
+    pub submission_id: String,
+    pub project_id: ProjectId,
+    pub task_id: TaskId,
+    pub repository: String,
+    pub commit_sha: String,
+    pub git_ref: String,
+    pub required_checks: Vec<String>,
+    pub base_commit: Option<String>,
+    pub review_summary_md: String,
+    pub reviewer: String,
+    pub submitter_agent_id: AgentId,
+    pub submitter_session_id: SessionId,
+    pub caller: AgentCoordinationCaller,
+    pub phase: ReviewSubmissionPhase,
+    pub review_round_id: Option<u64>,
+    pub gate_id: Option<u64>,
+    pub gate_status: Option<String>,
+    pub reviewer_session_id: Option<SessionId>,
+    pub dispatch_message_id: Option<String>,
+    pub dispatch_delivery_id: Option<String>,
+    pub terminal_reason: Option<String>,
+    pub last_adapter_error: Option<String>,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum ReviewSubmissionTransition {
+    DenHandoffRecorded {
+        review_round_id: u64,
+    },
+    GateRegistered {
+        gate_id: u64,
+    },
+    AdapterFailed {
+        reason_code: String,
+        summary: String,
+    },
+    ReviewerDispatched {
+        reviewer_session_id: SessionId,
+        dispatch_message_id: String,
+        dispatch_delivery_id: String,
+    },
+    GateFailureSettled {
+        terminal_reason: String,
+    },
+    ReviewTerminal {
+        terminal_reason: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSubmissionTransitionRequest {
+    pub submission_id: String,
+    pub expected_revision: u64,
+    pub transition: ReviewSubmissionTransition,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSubmissionQuery {
+    pub submission_id: Option<String>,
+    pub task_id: Option<TaskId>,
+    pub submitter_session_id: Option<SessionId>,
+    pub pending_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

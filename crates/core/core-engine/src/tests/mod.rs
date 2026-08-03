@@ -14,15 +14,18 @@ use rusty_crew_core_persistence::{
 };
 use rusty_crew_core_protocol::SessionHistoryWindow;
 use rusty_crew_core_protocol::{
-    AdapterId, AgentDirectoryRuntimeKind, AgentId, AgentMessage, AttachmentLinkId, BrainAction,
-    BrainContinuationPayload, BrainEvent, BrainImplementationId, BrainImplementationRegistration,
-    BrainModelConfig, CompletionPacket, CompletionStatus, ContinuationId, ContinuationYieldReason,
-    ConversationBranchId, ConversationSnapshotId, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
-    DelegationLifecyclePhase, ExecutionEpochId, ExternalEventPayload, LogicalTurnAdmission,
-    LogicalTurnBindingSnapshot, LogicalTurnCancelRequest, LogicalTurnCheckpoint,
-    LogicalTurnClaimRequest, LogicalTurnFrozenInput, LogicalTurnId, LogicalTurnLifecycleEvent,
+    AdapterId, AgentCoordinationCaller, AgentDirectoryRuntimeKind, AgentId, AgentMessage,
+    AttachmentLinkId, BrainAction, BrainContinuationPayload, BrainEvent, BrainImplementationId,
+    BrainImplementationRegistration, BrainModelConfig, CompletionPacket, CompletionStatus,
+    ContinuationId, ContinuationYieldReason, ConversationBranchId, ConversationSnapshotId,
+    CoreErrorKind, CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase, ExecutionEpochId,
+    ExternalEventPayload, LogicalTurnAdmission, LogicalTurnBindingSnapshot,
+    LogicalTurnCancelRequest, LogicalTurnCheckpoint, LogicalTurnClaimRequest,
+    LogicalTurnFrozenInput, LogicalTurnId, LogicalTurnLifecycleEvent,
     LogicalTurnLifecycleEventKind, LogicalTurnPhase, LogicalTurnProgress, LogicalTurnRecord,
-    LogicalTurnYieldRequest, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind, TaskId,
+    LogicalTurnYieldRequest, MessageId, ProfileId, ProjectId, ResourceLimits,
+    ReviewSubmissionPhase, ReviewSubmissionQuery, ReviewSubmissionRequest,
+    ReviewSubmissionTransition, ReviewSubmissionTransitionRequest, SessionKind, TaskId,
     ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
     TurnProjectionId,
 };
@@ -37,6 +40,7 @@ mod delegation_support;
 mod github_gate;
 mod logical_turns;
 mod memory_spaces;
+mod review_submission;
 use chat_support::*;
 use delegation_support::*;
 mod agent_routes;

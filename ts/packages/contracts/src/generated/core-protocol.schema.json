@@ -248,6 +248,22 @@
             "nativeRequestId"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "submissionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "review_submission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "submissionId"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -6836,6 +6852,379 @@
       },
       "type": "object"
     },
+    "ReviewSubmissionPhase": {
+      "enum": [
+        "submitted",
+        "den_handoff_recorded",
+        "gate_pending",
+        "gate_failed",
+        "reviewer_dispatch_pending",
+        "reviewer_dispatched",
+        "review_terminal",
+        "superseded"
+      ],
+      "type": "string"
+    },
+    "ReviewSubmissionQuery": {
+      "properties": {
+        "pendingOnly": {
+          "type": "boolean"
+        },
+        "submissionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submitterSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "pendingOnly"
+      ],
+      "type": "object"
+    },
+    "ReviewSubmissionRecord": {
+      "properties": {
+        "baseCommit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caller": {
+          "$ref": "#/$defs/AgentCoordinationCaller"
+        },
+        "commitSha": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "dispatchDeliveryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dispatchMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gateId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gateStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gitRef": {
+          "type": "string"
+        },
+        "lastAdapterError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "$ref": "#/$defs/ReviewSubmissionPhase"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "requiredChecks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reviewRoundId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewSummaryMd": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "reviewerSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "submissionId": {
+          "type": "string"
+        },
+        "submitterAgentId": {
+          "type": "string"
+        },
+        "submitterSessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "terminalReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "submissionId",
+        "projectId",
+        "taskId",
+        "repository",
+        "commitSha",
+        "gitRef",
+        "requiredChecks",
+        "reviewSummaryMd",
+        "reviewer",
+        "submitterAgentId",
+        "submitterSessionId",
+        "caller",
+        "phase",
+        "createdAt",
+        "updatedAt",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "ReviewSubmissionRequest": {
+      "properties": {
+        "baseCommit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caller": {
+          "$ref": "#/$defs/AgentCoordinationCaller"
+        },
+        "commitSha": {
+          "type": "string"
+        },
+        "gitRef": {
+          "type": "string"
+        },
+        "now": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "requiredChecks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reviewSummaryMd": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "caller",
+        "projectId",
+        "taskId",
+        "repository",
+        "commitSha",
+        "gitRef",
+        "requiredChecks",
+        "reviewSummaryMd",
+        "reviewer",
+        "now"
+      ],
+      "type": "object"
+    },
+    "ReviewSubmissionTransition": {
+      "oneOf": [
+        {
+          "properties": {
+            "reviewRoundId": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "den_handoff_recorded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reviewRoundId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "gateId": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "gate_registered",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "gateId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "type": {
+              "const": "adapter_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reasonCode",
+            "summary"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "dispatchDeliveryId": {
+              "type": "string"
+            },
+            "dispatchMessageId": {
+              "type": "string"
+            },
+            "reviewerSessionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reviewer_dispatched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reviewerSessionId",
+            "dispatchMessageId",
+            "dispatchDeliveryId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "terminalReason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "gate_failure_settled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "terminalReason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "terminalReason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "review_terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "terminalReason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ReviewSubmissionTransitionRequest": {
+      "properties": {
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "now": {
+          "type": "string"
+        },
+        "submissionId": {
+          "type": "string"
+        },
+        "transition": {
+          "$ref": "#/$defs/ReviewSubmissionTransition"
+        }
+      },
+      "required": [
+        "submissionId",
+        "expectedRevision",
+        "transition",
+        "now"
+      ],
+      "type": "object"
+    },
     "RuntimeActivityBegin": {
       "properties": {
         "activityId": {
@@ -8370,6 +8759,18 @@
     "resource_limits": {
       "$ref": "#/$defs/ResourceLimits"
     },
+    "review_submission_query": {
+      "$ref": "#/$defs/ReviewSubmissionQuery"
+    },
+    "review_submission_record": {
+      "$ref": "#/$defs/ReviewSubmissionRecord"
+    },
+    "review_submission_request": {
+      "$ref": "#/$defs/ReviewSubmissionRequest"
+    },
+    "review_submission_transition_request": {
+      "$ref": "#/$defs/ReviewSubmissionTransitionRequest"
+    },
     "run_id": {
       "type": "string"
     },
@@ -8527,6 +8928,10 @@
     "agent_round_command",
     "agent_round_start_receipt",
     "agent_correlated_round",
+    "review_submission_request",
+    "review_submission_record",
+    "review_submission_transition_request",
+    "review_submission_query",
     "crew_agent_session_creation_request",
     "crew_agent_session_creation_record",
     "external_runtime_registration",

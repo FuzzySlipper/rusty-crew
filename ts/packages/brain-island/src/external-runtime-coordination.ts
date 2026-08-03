@@ -17,6 +17,10 @@ import {
   formatDeliveryTarget,
   formatModelAgentDirectory,
 } from "./coordination-addressing.js";
+import type {
+  ReviewSubmissionToolReceipt,
+  SubmitTaskForReviewParameters,
+} from "./review-submission-tools.js";
 
 const COORDINATION_NAMESPACE = "rusty_crew";
 const MAX_ROUND_TIMEOUT_MS = 300_000;
@@ -51,6 +55,11 @@ export async function resolveCodexCoordinationToolCall(input: {
   readonly onDelivery?: (
     receipt: AgentMessageDeliveryReceipt,
   ) => Promise<AgentMessageDeliveryReceipt>;
+  readonly onReviewSubmission?: (
+    input: SubmitTaskForReviewParameters & {
+      caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
+    },
+  ) => Promise<ReviewSubmissionToolReceipt>;
   readonly now?: () => Date;
 }): Promise<DynamicToolCallResponse | undefined> {
   const { params } = input;
@@ -59,7 +68,8 @@ export async function resolveCodexCoordinationToolCall(input: {
     params.tool !== "list_agents" &&
     params.tool !== "send_agent_message" &&
     params.tool !== "reply_agent_message" &&
-    params.tool !== "agent_round"
+    params.tool !== "agent_round" &&
+    params.tool !== "submit_task_for_review"
   ) {
     return failed(`unsupported Rusty Crew coordination tool ${params.tool}`);
   }
@@ -90,6 +100,18 @@ export async function resolveCodexCoordinationToolCall(input: {
     nativeTurnId: params.turnId,
     nativeRequestId: params.callId,
   };
+  if (params.tool === "submit_task_for_review") {
+    if (input.onReviewSubmission === undefined) {
+      return failed("review submission runtime is unavailable");
+    }
+    const reviewArgs = parseReviewSubmissionArguments(params.arguments);
+    if (typeof reviewArgs === "string") return failed(reviewArgs);
+    const receipt = await input.onReviewSubmission({
+      ...reviewArgs,
+      caller,
+    });
+    return receipt.ok ? succeeded(receipt.summary) : failed(receipt.summary);
+  }
   if (params.tool === "reply_agent_message") {
     const replyArgs = parseReplyArguments(params.arguments);
     if (typeof replyArgs === "string") return failed(replyArgs);
@@ -198,6 +220,80 @@ interface ReplyArguments {
   readonly messageId: string;
   readonly body: string;
   readonly ttlSeconds?: number;
+}
+
+function parseReviewSubmissionArguments(
+  value: unknown,
+): SubmitTaskForReviewParameters | string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return "submit_task_for_review arguments must be an object";
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.taskId !== "number" ||
+    !Number.isSafeInteger(record.taskId) ||
+    record.taskId <= 0
+  ) {
+    return "taskId must be a positive integer";
+  }
+  if (
+    typeof record.repository !== "string" ||
+    !/^[^/\s]+\/[^/\s]+$/.test(record.repository)
+  ) {
+    return "repository must be owner/name";
+  }
+  if (
+    typeof record.commitSha !== "string" ||
+    !/^[0-9a-fA-F]{40}$/.test(record.commitSha)
+  ) {
+    return "commitSha must be an exact 40-character SHA";
+  }
+  if (typeof record.ref !== "string" || record.ref.trim() === "") {
+    return "ref must be a non-empty string";
+  }
+  if (
+    !Array.isArray(record.requiredChecks) ||
+    record.requiredChecks.length === 0 ||
+    record.requiredChecks.some(
+      (check) => typeof check !== "string" || check.trim() === "",
+    )
+  ) {
+    return "requiredChecks must be a non-empty string array";
+  }
+  if (
+    record.baseCommit !== undefined &&
+    (typeof record.baseCommit !== "string" ||
+      !/^[0-9a-fA-F]{40}$/.test(record.baseCommit))
+  ) {
+    return "baseCommit must be an exact 40-character SHA when supplied";
+  }
+  if (
+    typeof record.reviewSummaryMd !== "string" ||
+    record.reviewSummaryMd.trim() === ""
+  ) {
+    return "reviewSummaryMd must be non-empty markdown";
+  }
+  if (
+    record.reviewer !== undefined &&
+    (typeof record.reviewer !== "string" ||
+      !/^@[A-Za-z0-9._-]+$/.test(record.reviewer))
+  ) {
+    return "reviewer must be a switchboard @address when supplied";
+  }
+  return {
+    taskId: record.taskId,
+    repository: record.repository,
+    commitSha: record.commitSha,
+    ref: record.ref,
+    requiredChecks: record.requiredChecks as string[],
+    reviewSummaryMd: record.reviewSummaryMd,
+    ...(record.baseCommit === undefined
+      ? {}
+      : { baseCommit: record.baseCommit as string }),
+    ...(record.reviewer === undefined
+      ? {}
+      : { reviewer: record.reviewer as string }),
+  };
 }
 
 function parseArguments(value: unknown): CoordinationArguments | string {

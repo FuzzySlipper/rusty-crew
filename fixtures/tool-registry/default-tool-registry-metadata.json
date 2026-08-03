@@ -215,6 +215,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "submit_task_for_review",
+      "description": "Use this tool for normal Den task review submission; lower-level Den review and GitHub-gate tools are infrastructure and direct/unmanaged-session fallbacks.",
+      "category": "coordination",
+      "toolsets": ["agent_coordination", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action", "network_access", "external_write"],
+      "output_shape": "coordination.review_submission_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "web_search",
       "description": "Search the public web through the configured provider and return bounded results.",
       "category": "web",

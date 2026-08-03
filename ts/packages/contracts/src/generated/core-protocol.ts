@@ -117,6 +117,9 @@ export type AgentCoordinationCaller = {
   nativeTurnId: string;
   runtimeId: string;
   type: "external_agent";
+} | {
+  submissionId: string;
+  type: "review_submission";
 };
 
 export type AgentCorrelatedRound = {
@@ -1621,6 +1624,87 @@ export type ResourceLimits = {
   maxDelegationDepth?: number | null;
   maxDurationMs?: number | null;
   workdir?: string | null;
+};
+
+export type ReviewSubmissionPhase = "submitted" | "den_handoff_recorded" | "gate_pending" | "gate_failed" | "reviewer_dispatch_pending" | "reviewer_dispatched" | "review_terminal" | "superseded";
+
+export type ReviewSubmissionQuery = {
+  pendingOnly: boolean;
+  submissionId?: string | null;
+  submitterSessionId?: string | null;
+  taskId?: string | null;
+};
+
+export type ReviewSubmissionRecord = {
+  baseCommit?: string | null;
+  caller: AgentCoordinationCaller;
+  commitSha: string;
+  createdAt: string;
+  dispatchDeliveryId?: string | null;
+  dispatchMessageId?: string | null;
+  gateId?: number | null;
+  gateStatus?: string | null;
+  gitRef: string;
+  lastAdapterError?: string | null;
+  phase: ReviewSubmissionPhase;
+  projectId: string;
+  repository: string;
+  requiredChecks: Array<string>;
+  reviewRoundId?: number | null;
+  reviewSummaryMd: string;
+  reviewer: string;
+  reviewerSessionId?: string | null;
+  revision: number;
+  submissionId: string;
+  submitterAgentId: string;
+  submitterSessionId: string;
+  taskId: string;
+  terminalReason?: string | null;
+  updatedAt: string;
+};
+
+export type ReviewSubmissionRequest = {
+  baseCommit?: string | null;
+  caller: AgentCoordinationCaller;
+  commitSha: string;
+  gitRef: string;
+  now: string;
+  projectId: string;
+  repository: string;
+  requiredChecks: Array<string>;
+  reviewSummaryMd: string;
+  reviewer: string;
+  taskId: string;
+};
+
+export type ReviewSubmissionTransition = {
+  reviewRoundId: number;
+  type: "den_handoff_recorded";
+} | {
+  gateId: number;
+  type: "gate_registered";
+} | {
+  reasonCode: string;
+  summary: string;
+  type: "adapter_failed";
+} | {
+  dispatchDeliveryId: string;
+  dispatchMessageId: string;
+  reviewerSessionId: string;
+  type: "reviewer_dispatched";
+} | {
+  terminalReason: string;
+  type: "gate_failure_settled";
+} | {
+  terminalReason: string;
+  type: "review_terminal";
+};
+
+export type ReviewSubmissionTransitionRequest = {
+  expectedRevision: number;
+  now: string;
+  submissionId: string;
+  transition: ReviewSubmissionTransition;
 };
 
 export type RuntimeActivityBegin = {

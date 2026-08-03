@@ -97,6 +97,7 @@ import {
 } from "./brain-run-wire.js";
 import { createNativeBridgeRuntimeConfigMethods } from "./runtime-config-wrappers.js";
 import { createNativeBridgeRuntimeActivityMethods } from "./runtime-activity-wrappers.js";
+import { createNativeBridgeReviewSubmissionMethods } from "./review-submission-wrappers.js";
 import { createNativeBridgeProfileProviderMethods } from "./profile-provider-wrappers.js";
 import { createNativeBridgeServiceCredentialMethods } from "./service-credential-wrappers.js";
 import {
@@ -962,6 +963,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     recoverGitHubGateWakes: unavailable("recover_github_gate_wakes"),
     gitHubGateWait: unavailable("github_gate_wait"),
     gitHubGateEventCursor: unavailable("github_gate_event_cursor"),
+    beginReviewSubmission: unavailable("begin_review_submission"),
+    transitionReviewSubmission: unavailable("transition_review_submission"),
+    listReviewSubmissions: unavailable("list_review_submissions"),
     exchangeOpenAiOauthCode: unavailable("wake_brain"),
     startBrainRun: unavailable("start_brain_run"),
     drainBrainRun: unavailable("drain_brain_run"),
@@ -1716,6 +1720,7 @@ function createNativeBridgeModule(
       return raw === null ? undefined : fromRawGitHubGateWaitRecord(raw);
     },
     gitHubGateEventCursor: async () => binding.githubGateEventCursor(),
+    ...createNativeBridgeReviewSubmissionMethods(binding),
     ...createNativeBridgeProfileProviderMethods(binding),
     ...createNativeBridgeServiceCredentialMethods(binding),
     ...createNativeBridgeRoleplayMethods(binding),

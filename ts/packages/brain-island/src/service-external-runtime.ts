@@ -325,6 +325,9 @@ export class ServiceExternalRuntimeController {
   readonly #onCoordinationDelivery?: (
     receipt: AgentMessageDeliveryReceipt,
   ) => Promise<AgentMessageDeliveryReceipt>;
+  readonly #onReviewSubmission?: Parameters<
+    typeof resolveCodexCoordinationToolCall
+  >[0]["onReviewSubmission"];
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -354,6 +357,9 @@ export class ServiceExternalRuntimeController {
     onCoordinationDelivery?: (
       receipt: AgentMessageDeliveryReceipt,
     ) => Promise<AgentMessageDeliveryReceipt>;
+    onReviewSubmission?: Parameters<
+      typeof resolveCodexCoordinationToolCall
+    >[0]["onReviewSubmission"];
     recoveryBaseDelayMs?: number;
     recoveryMaxDelayMs?: number;
   }) {
@@ -361,6 +367,7 @@ export class ServiceExternalRuntimeController {
     this.#now = input.now ?? (() => new Date());
     this.#instanceId = input.instanceId ?? `service-host:${randomUUID()}`;
     this.#onCoordinationDelivery = input.onCoordinationDelivery;
+    this.#onReviewSubmission = input.onReviewSubmission;
     this.#recoveryBaseDelayMs =
       input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
     this.#recoveryMaxDelayMs =
@@ -3362,6 +3369,7 @@ export class ServiceExternalRuntimeController {
         },
         port: this.#bridge,
         onDelivery: this.#onCoordinationDelivery,
+        onReviewSubmission: this.#onReviewSubmission,
         now: this.#now,
       });
       return result === undefined

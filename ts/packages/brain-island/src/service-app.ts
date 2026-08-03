@@ -405,6 +405,11 @@ import {
   publishCuratorActivityObservation,
   type CuratorActivityReceipt,
 } from "./curator-observation.js";
+import {
+  createServiceReviewSubmissionRuntime,
+  reconcileReviewSubmissions,
+  type ServiceReviewSubmissionContext,
+} from "./service-review-submission.js";
 
 export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
@@ -430,6 +435,7 @@ export interface RustyCrewServiceApp {
 
 interface ServiceState {
   readonly config: RustyCrewServiceConfig;
+  readonly reviewProjectId?: string;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
   readonly lock: RustyCrewServiceLock;
@@ -1007,6 +1013,15 @@ export async function createRustyCrewServiceApp(
         );
         return settled;
       },
+      onReviewSubmission: async (input) => {
+        const state = liveState;
+        if (state === undefined) {
+          throw new Error("service review submission runtime is not ready");
+        }
+        return createServiceReviewSubmissionRuntime(() =>
+          reviewSubmissionContext(state),
+        ).submit(input);
+      },
     });
     const externalMemoryReadiness = createServiceExternalMemoryReadiness(
       config,
@@ -1021,6 +1036,11 @@ export async function createRustyCrewServiceApp(
       adapterFactories: options.adapterFactories,
       externalMemoryReadiness,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
+      reviewSubmissionRuntime: createServiceReviewSubmissionRuntime(() =>
+        liveState === undefined
+          ? undefined
+          : reviewSubmissionContext(liveState),
+      ),
       toolCallDebugStore,
       providerRequestDebugStore,
       browserResources,
@@ -1038,6 +1058,7 @@ export async function createRustyCrewServiceApp(
 
     const state: ServiceState = {
       config,
+      reviewProjectId: options.env?.RUSTY_CREW_REVIEW_PROJECT_ID?.trim(),
       bridge,
       engine,
       lock,
@@ -1160,8 +1181,10 @@ export async function createRustyCrewServiceApp(
           drainTelegramOutboundMessagesFromModule(
             adapterLifecycleContext(state),
           ),
-        tickExternalRuntimeController: () =>
-          state.externalRuntimeController.tick(),
+        tickExternalRuntimeController: async () => {
+          await state.externalRuntimeController.tick();
+          await reconcileReviewSubmissions(reviewSubmissionContext(state));
+        },
         recordFailure: (failureRecord) =>
           recordServiceEvent(state, failureRecord),
         errorMessage,
@@ -1297,6 +1320,21 @@ async function handleHttpRequest(
   }
 
   const route = matchServiceApiRoute(url.pathname, "after_auth");
+
+  if (url.pathname === "/v1/admin/diagnostics/review-submissions") {
+    if ((request.method ?? "GET").toUpperCase() !== "GET") {
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "review_submission_method_not_allowed",
+        message: "review submission diagnostics support GET only",
+        retryable: false,
+      });
+    }
+    return successRoute(
+      requestId(request),
+      await state.bridge.listReviewSubmissions({ pendingOnly: false }),
+    );
+  }
 
   if (route?.id === "logical_turns") {
     const result = await handleLogicalTurnRoute(
@@ -3445,6 +3483,9 @@ async function applyServiceRuntimeConfigFromDisk(
     adapterFactories: state.adapterFactories,
     externalMemoryReadiness: state.externalMemoryReadiness,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    reviewSubmissionRuntime: createServiceReviewSubmissionRuntime(() =>
+      reviewSubmissionContext(state),
+    ),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
@@ -5612,6 +5653,20 @@ function createServiceCoordinationRuntime(
     },
   };
   return runtime;
+}
+
+function reviewSubmissionContext(
+  state: ServiceState,
+): ServiceReviewSubmissionContext {
+  return {
+    bridge: state.bridge,
+    projectId: state.reviewProjectId,
+    runtimeConfig: state.runtimeConfig,
+    serviceConfig: state.config,
+    now: state.now,
+    applyCoordinationDelivery: (receipt) =>
+      state.externalRuntimeController.applyCoordinationDelivery(receipt),
+  };
 }
 
 function configuredSessionForDeliveryIntent(

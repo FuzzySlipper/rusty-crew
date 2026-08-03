@@ -742,6 +742,17 @@
         "public": true
       },
       {
+        "id": "review.submissions.diagnostics.list",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/review-submissions",
+        "description": "List Rust-owned durable review submission workflow state and adapter errors.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "coordination.debug.agents.list",
         "method": "GET",
         "path_template": "/v1/debug/coordination/agents",
@@ -3060,6 +3071,13 @@
         "method": "GET",
         "path_template": "/v1/coordination/deliveries/{delivery_id}",
         "route_id": "coordination_operator",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.submissions.diagnostics.list",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/review-submissions",
+        "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },
       {

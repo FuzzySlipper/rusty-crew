@@ -415,10 +415,20 @@ export function createDefaultMcpDiscoveryClient(
 ): McpToolDiscoveryClient | undefined {
   const endpoint = endpointForBinding(binding, config);
   if (!endpoint) return undefined;
-  const client = new DefaultMcpHttpClient(endpoint.url, endpoint.timeoutMs);
+  const discoveryProfile = binding.serverNames.includes("den")
+    ? "managed-runtime"
+    : undefined;
+  const client = new DefaultMcpHttpClient(
+    endpoint.url,
+    endpoint.timeoutMs,
+    discoveryProfile,
+  );
   return {
     async listTools() {
-      const response = await client.request("tools/list", {});
+      const response = await client.request(
+        "tools/list",
+        discoveryProfile === undefined ? {} : { toolProfile: discoveryProfile },
+      );
       const result = jsonRpcResult(response);
       const tools = resultRecord(result).tools;
       return Array.isArray(tools) ? tools : [];
@@ -448,6 +458,24 @@ function createDefaultMcpToolExecutor(
       } satisfies McpToolExecutionResult;
     },
   };
+}
+
+export async function callConfiguredMcpTool(input: {
+  binding: McpBindingRecord;
+  config?: ServiceMcpEndpointConfig;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}): Promise<McpToolExecutionResult> {
+  const executor = createDefaultMcpToolExecutor(input.binding, input.config);
+  if (executor === undefined) {
+    throw new Error(`MCP endpoint unavailable for ${input.binding.bindingId}`);
+  }
+  return executor.callTool({
+    binding: input.binding,
+    toolName: input.toolName,
+    arguments: input.arguments,
+    toolCallId: `review-submission:${input.toolName}`,
+  });
 }
 
 function endpointForBinding(
@@ -534,6 +562,7 @@ class DefaultMcpHttpClient {
   constructor(
     private readonly endpoint: URL,
     private readonly timeoutMs: number | undefined,
+    private readonly discoveryProfile?: string,
   ) {}
 
   async request(
@@ -588,6 +617,9 @@ class DefaultMcpHttpClient {
           name: "rusty-crew",
           version: "0.1.0",
         },
+        ...(this.discoveryProfile === undefined
+          ? {}
+          : { toolProfile: this.discoveryProfile }),
       },
       timeoutMs: this.timeoutMs,
     });

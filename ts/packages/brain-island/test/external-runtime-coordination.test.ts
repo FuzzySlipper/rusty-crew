@@ -53,6 +53,64 @@ test("Codex coordination derives trusted identity outside model arguments", asyn
   });
 });
 
+test("Codex review submission derives external caller and returns without polling", async () => {
+  const port = new RecordingPort();
+  const calls: unknown[] = [];
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-review",
+      turnId: "turn-review",
+      callId: "call-review",
+      namespace: "rusty_crew",
+      tool: "submit_task_for_review",
+      arguments: {
+        taskId: 6574,
+        repository: "earendil-works/rusty-crew",
+        commitSha: "a".repeat(40),
+        ref: "main",
+        requiredChecks: ["Verify Offline"],
+        baseCommit: "b".repeat(40),
+        reviewSummaryMd: "Implemented and verified.",
+      },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-review",
+      controllerInstanceId: "controller-review",
+      controllerGeneration: 11,
+    },
+    port,
+    onReviewSubmission: async (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        submissionId: "review-submission:test",
+        phase: "gate_pending",
+        taskId: input.taskId,
+        commitSha: input.commitSha,
+        summary: "accepted without polling",
+      };
+    },
+  });
+  assert.equal(result?.success, true);
+  const content = result?.contentItems[0];
+  assert.equal(content?.type, "inputText");
+  assert.equal(
+    content?.type === "inputText" ? content.text : undefined,
+    "accepted without polling",
+  );
+  assert.deepEqual((calls[0] as { caller: unknown }).caller, {
+    type: "external_agent",
+    runtimeId: "codex-local",
+    bindingId: "binding-review",
+    controllerInstanceId: "controller-review",
+    controllerGeneration: 11,
+    nativeThreadId: "thread-review",
+    nativeTurnId: "turn-review",
+    nativeRequestId: "call-review",
+  });
+});
+
 test("Codex coordination lists routes separately from raw same-service diagnostics", async () => {
   const port = new RecordingPort();
   const result = await resolveCodexCoordinationToolCall({

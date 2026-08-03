@@ -109,6 +109,7 @@ assert.deepEqual(selectedFullCodingAgentTools, [
   "spawn_subagent_md",
   "storage_query_catalog",
   "storage_query_execute",
+  "submit_task_for_review",
   "summarize_files",
   "terminal",
   "todo",

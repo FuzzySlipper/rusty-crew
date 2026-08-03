@@ -625,6 +625,15 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         Vec<protocol::RuntimeActivityRecord>
     );
     schema!("runtime_activity_census", protocol::RuntimeActivityCensus);
+    schema!("begin_review_submission", protocol::ReviewSubmissionRecord);
+    schema!(
+        "transition_review_submission",
+        protocol::ReviewSubmissionRecord
+    );
+    schema!(
+        "list_review_submissions",
+        Vec<protocol::ReviewSubmissionRecord>
+    );
     schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
     schema!("list_agent_directory", Vec<protocol::AgentDirectoryEntry>);
     schema!(

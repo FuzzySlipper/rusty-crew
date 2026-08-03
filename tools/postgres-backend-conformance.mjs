@@ -206,6 +206,20 @@ function main() {
       ],
       database.url,
     );
+    cargoTest(
+      [
+        "test",
+        "-p",
+        "rusty-crew-core-engine",
+        "--features",
+        "postgres",
+        "postgres_review_submission_matches_restart_and_revision_contract",
+        "--",
+        "--ignored",
+        "--nocapture",
+      ],
+      database.url,
+    );
   } finally {
     database.stop?.();
   }

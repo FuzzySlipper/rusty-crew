@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 60;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 61;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -318,6 +318,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 60,
         description: "add explicit Responses provider dialect",
         apply: migrate_v60_add_responses_provider_dialect,
+    },
+    SchemaMigration {
+        version: 61,
+        description: "add durable review submission workflows",
+        apply: repos::review_submissions::migrate_v61_add_review_submissions,
     },
 ];
 
