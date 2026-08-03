@@ -26,6 +26,7 @@ export class ReviewGitHubGateEventConsumer {
   readonly #projectId: string;
   readonly #bridge: ReviewGitHubGateBridge;
   readonly #fetch: typeof fetch;
+  readonly #bearerToken?: string;
   readonly #waitMs: number;
   readonly #status: ReviewGitHubGateEventConsumerStatus = {
     state: "stopped",
@@ -41,12 +42,15 @@ export class ReviewGitHubGateEventConsumer {
     projectId: string;
     bridge: ReviewGitHubGateBridge;
     fetch?: typeof fetch;
+    bearerToken?: string;
     waitMs?: number;
   }) {
     this.#baseUrl = options.baseUrl;
     this.#projectId = options.projectId.trim();
     this.#bridge = options.bridge;
     this.#fetch = options.fetch ?? fetch;
+    const bearerToken = options.bearerToken?.trim();
+    this.#bearerToken = bearerToken === "" ? undefined : bearerToken;
     this.#waitMs = Math.max(0, Math.min(options.waitMs ?? 45_000, 50_000));
   }
 
@@ -71,7 +75,12 @@ export class ReviewGitHubGateEventConsumer {
     url.searchParams.set("limit", "100");
     url.searchParams.set("wait_ms", String(this.#waitMs));
     try {
-      const response = await this.#fetch(url, { signal });
+      const response = await this.#fetch(url, {
+        signal,
+        ...(this.#bearerToken === undefined
+          ? {}
+          : { headers: { authorization: `Bearer ${this.#bearerToken}` } }),
+      });
       if (!response.ok) {
         throw new Error(
           `Review terminal events returned HTTP ${response.status}`,

@@ -122,6 +122,7 @@ export async function startRustyCrewServiceHost(
         baseUrl: new URL(reviewUrl),
         projectId: reviewProjectId,
         bridge: app.bridge,
+        bearerToken: env.RUSTY_CREW_REVIEW_BEARER_TOKEN,
       });
       void consumer.run(githubGateConsumerAbort.signal).catch((error) => {
         if (!githubGateConsumerAbort?.signal.aborted) {
