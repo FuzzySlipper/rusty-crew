@@ -88,6 +88,9 @@ export interface RuntimeProviderStateSessionDiagnostics {
   sessionId: SessionId | string;
   moduleId: string;
   strategyId: string;
+  recordId?: number;
+  profileFingerprint?: string;
+  providerFingerprint?: string;
   status: RuntimeProviderStateStatus;
   payloadVersion?: string;
   payloadBytes?: number;
@@ -97,6 +100,8 @@ export interface RuntimeProviderStateSessionDiagnostics {
   lastWakeId?: string;
   invalidatedAt?: string;
   invalidationReason?: string;
+  isCurrent?: boolean;
+  source?: "durable" | "runtime_observation";
 }
 
 export interface RuntimeProviderStateDiagnostics {

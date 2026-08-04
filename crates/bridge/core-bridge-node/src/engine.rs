@@ -279,9 +279,12 @@ impl NativeBridge {
                             &now,
                         );
                         JsProviderStateDiagnostic {
+                            record_id: record.row_id as f64,
                             session_id: record.key.session_id.0,
                             module_id: record.key.module_id,
                             strategy_id: record.key.strategy_id,
+                            profile_fingerprint: record.profile_fingerprint,
+                            provider_fingerprint: record.provider_fingerprint,
                             status: status.to_string(),
                             payload_version: Some(record.payload_version),
                             payload_bytes: Some(record.payload_bytes as f64),
@@ -291,6 +294,7 @@ impl NativeBridge {
                             last_wake_id: record.last_wake_id,
                             invalidated_at: record.invalidated_at,
                             invalidation_reason: record.invalidation_reason,
+                            is_current: record.is_current,
                         }
                     })
                     .collect()

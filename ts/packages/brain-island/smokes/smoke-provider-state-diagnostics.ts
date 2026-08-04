@@ -19,8 +19,9 @@ await bridge.initializeEngine({
   defaultIdleTimeoutMs: 1_000,
 });
 
-const unusedHandle = await bridge.registerBrainHostExecutor(
+const unusedHandle = await bridge.registerBrainRuntime(
   registration("unused-brain", "unused-profile", "unused"),
+  { wake: () => ({ events: [], actions: [] }) },
 );
 await bridge.createSession(session("unused-session", "unused-profile"));
 const unusedWake = await bridge.buildBrainWakeRequestForSession({
@@ -73,6 +74,8 @@ assert.equal(valid?.status, "valid");
 assert.equal(valid?.payloadVersion, "module-v0");
 assert.equal(typeof valid?.payloadBytes, "number");
 assert.equal(valid?.lastWakeId, "optional-missing");
+assert.equal(valid?.isCurrent, true);
+assert.equal(valid?.source, "durable");
 
 const versionMismatchWake = await bridge.buildBrainWakeRequestForSession({
   brain: optionalHandle,
@@ -126,13 +129,14 @@ assert.equal(
   "expired",
 );
 
-const changedScopeHandle = await bridge.registerBrainHostExecutor(
+const changedScopeHandle = await bridge.replaceBrainRuntime(
   registration(
     "changed-scope-brain",
-    "changed-scope-profile",
+    "optional-profile",
     "optional",
     "changed-profile-fingerprint",
   ),
+  { wake: () => ({ events: [], actions: [] }) },
 );
 const invalidatedWake = await bridge.buildBrainWakeRequestForSession({
   brain: changedScopeHandle,
@@ -147,7 +151,19 @@ assert.equal(
   (await bridge.providerStateDiagnostics()).find(
     (state) => state.sessionId === "optional-session",
   )?.status,
-  "invalidated",
+  "valid",
+);
+assert.equal(
+  (await bridge.providerStateDiagnostics()).find(
+    (state) => state.sessionId === "optional-session",
+  )?.lastWakeId,
+  "optional-missing",
+);
+assert.equal(
+  (await bridge.providerStateDiagnostics()).find(
+    (state) => state.sessionId === "optional-session",
+  )?.source,
+  "durable",
 );
 
 const clearHandle = await bridge.registerBrainRuntime(
@@ -184,6 +200,7 @@ const cleared = (await bridge.providerStateDiagnostics()).find(
 );
 assert.equal(cleared?.status, "invalidated");
 assert.equal(cleared?.invalidationReason, "brain_requested_clear");
+assert.equal(cleared?.source, "durable");
 
 const badSaveHandle = await bridge.registerBrainRuntime(
   registration("bad-save-brain", "bad-save-profile", "optional"),
@@ -254,6 +271,7 @@ const projection = buildRuntimeDiagnosticsProjection({
       strategyId: "replay",
       status: "valid",
       lastWakeId: "new-wake",
+      isCurrent: true,
     },
   ],
 });

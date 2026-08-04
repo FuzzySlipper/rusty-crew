@@ -187,7 +187,10 @@ mod tests {
 
     fn diagnostic(key: &ProviderWireStateKey) -> ProviderWireStateDiagnostic {
         ProviderWireStateDiagnostic {
+            row_id: 1,
             key: key.clone(),
+            profile_fingerprint: "profile-v1".to_string(),
+            provider_fingerprint: "provider-v1".to_string(),
             payload_version: "v1".to_string(),
             payload_bytes: 42,
             created_at: "2026-07-09T08:44:00Z".to_string(),
@@ -196,6 +199,7 @@ mod tests {
             last_wake_id: Some("wake-1".to_string()),
             invalidated_at: None,
             invalidation_reason: None,
+            is_current: true,
         }
     }
 }

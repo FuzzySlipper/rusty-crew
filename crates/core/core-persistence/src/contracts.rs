@@ -2746,7 +2746,10 @@ impl ProviderWireStateRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderWireStateDiagnostic {
+    pub row_id: i64,
     pub key: ProviderWireStateKey,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
     pub payload_version: String,
     pub payload_bytes: u64,
     pub created_at: IsoTimestamp,
@@ -2755,6 +2758,7 @@ pub struct ProviderWireStateDiagnostic {
     pub last_wake_id: Option<String>,
     pub invalidated_at: Option<IsoTimestamp>,
     pub invalidation_reason: Option<String>,
+    pub is_current: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

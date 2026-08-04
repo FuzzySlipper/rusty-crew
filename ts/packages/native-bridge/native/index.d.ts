@@ -454,9 +454,12 @@ export interface JsProfileMemoryWrite {
 }
 
 export interface JsProviderStateDiagnostic {
+  recordId: number
   sessionId: string
   moduleId: string
   strategyId: string
+  profileFingerprint: string
+  providerFingerprint: string
   status: string
   payloadVersion?: string
   payloadBytes?: number
@@ -466,6 +469,7 @@ export interface JsProviderStateDiagnostic {
   lastWakeId?: string
   invalidatedAt?: string
   invalidationReason?: string
+  isCurrent: boolean
 }
 
 export interface JsQueuedMessageRecord {

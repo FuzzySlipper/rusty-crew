@@ -64,9 +64,12 @@ pub struct JsBrainProviderStateScope {
 
 #[napi_derive::napi(object)]
 pub struct JsProviderStateDiagnostic {
+    pub record_id: f64,
     pub session_id: String,
     pub module_id: String,
     pub strategy_id: String,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
     pub status: String,
     pub payload_version: Option<String>,
     pub payload_bytes: Option<f64>,
@@ -76,6 +79,7 @@ pub struct JsProviderStateDiagnostic {
     pub last_wake_id: Option<String>,
     pub invalidated_at: Option<String>,
     pub invalidation_reason: Option<String>,
+    pub is_current: bool,
 }
 
 #[napi_derive::napi(object)]

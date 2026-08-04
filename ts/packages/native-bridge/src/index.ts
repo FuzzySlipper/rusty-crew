@@ -204,7 +204,6 @@ import type {
   PlatformAdapterRegistration,
   ParentConsumptionPolicy,
   ProfileId,
-  ProviderStateMode,
   ProviderStateAbsenceReason,
   ProjectId,
   ResourceLimits,
@@ -428,7 +427,6 @@ import type {
   NativeCreateProfileDerivedRuntimeAction,
   NativeCreateProfileSeedMetadata,
   NativeQueuedMessageRecord,
-  NativeProviderStateStatus,
   NativeProviderStateDiagnostic,
   NativeChatReadModelEvent,
   NativeChatReadModelPage,
@@ -440,6 +438,11 @@ import type {
   NativeChatSessionReadResult,
   NativeBridgeModule,
 } from "./public-api.js";
+import {
+  mergeProviderStateDiagnostics,
+  observeProviderStateFailure,
+  observeProviderStateWake,
+} from "./provider-state-diagnostics.js";
 
 interface NativeAddon {
   NativeBridgeBinding: new () => NativeBridgeBinding;
@@ -1046,72 +1049,6 @@ function providerStateInputFromNativeJson(
   };
 }
 
-function observeProviderStateWake(
-  observations: Map<string, NativeProviderStateDiagnostic>,
-  request: Pick<
-    BrainWakeRequest,
-    "sessionId" | "wakeId" | "providerState" | "providerStateAbsence"
-  >,
-  registration: BrainImplementationRegistration | undefined,
-): void {
-  const strategy = registration?.strategy;
-  if (!strategy) return;
-  const state = request.providerState;
-  const status =
-    state == null
-      ? providerStateStatusFromAbsence(
-          request.providerStateAbsence,
-          strategy.providerState.mode,
-        )
-      : "valid";
-  const diagnostic: NativeProviderStateDiagnostic = {
-    sessionId: request.sessionId,
-    moduleId: strategy.moduleId,
-    strategyId: strategy.strategyId,
-    status,
-    lastWakeId: request.wakeId,
-    ...(state == null
-      ? {}
-      : {
-          payloadVersion: state.payloadVersion,
-          payloadBytes: Buffer.byteLength(JSON.stringify(state.payload)),
-          expiresAt: state.expiresAt ?? undefined,
-        }),
-  };
-  observations.set(providerStateDiagnosticKey(diagnostic), diagnostic);
-}
-
-function observeProviderStateFailure(
-  observations: Map<string, NativeProviderStateDiagnostic>,
-  request: Pick<BrainWakeRequest, "sessionId" | "wakeId">,
-  registration: BrainImplementationRegistration | undefined,
-  status: Extract<NativeProviderStateStatus, "save_failed" | "load_failed">,
-): void {
-  const strategy = registration?.strategy;
-  if (!strategy) return;
-  const diagnostic: NativeProviderStateDiagnostic = {
-    sessionId: request.sessionId,
-    moduleId: strategy.moduleId,
-    strategyId: strategy.strategyId,
-    status,
-    lastWakeId: request.wakeId,
-  };
-  observations.set(providerStateDiagnosticKey(diagnostic), diagnostic);
-}
-
-function providerStateStatusFromAbsence(
-  absence: BrainWakeRequest["providerStateAbsence"] | undefined,
-  mode: ProviderStateMode,
-): NativeProviderStateStatus {
-  if (mode === "unused" || absence === "module_does_not_use_state") {
-    return "unused";
-  }
-  if (absence === "expired") return "expired";
-  if (absence === "invalidated") return "invalidated";
-  if (absence === "load_failed") return "load_failed";
-  return "missing";
-}
-
 function toNativeProviderStateDiagnostic(
   raw: NativeProviderStateDiagnostic,
 ): NativeProviderStateDiagnostic {
@@ -1119,6 +1056,9 @@ function toNativeProviderStateDiagnostic(
     sessionId: raw.sessionId,
     moduleId: raw.moduleId,
     strategyId: raw.strategyId,
+    recordId: raw.recordId,
+    profileFingerprint: raw.profileFingerprint,
+    providerFingerprint: raw.providerFingerprint,
     status: raw.status,
     payloadVersion: raw.payloadVersion,
     payloadBytes: raw.payloadBytes,
@@ -1128,55 +1068,8 @@ function toNativeProviderStateDiagnostic(
     lastWakeId: raw.lastWakeId,
     invalidatedAt: raw.invalidatedAt,
     invalidationReason: raw.invalidationReason,
+    isCurrent: raw.isCurrent,
   };
-}
-
-function mergeProviderStateDiagnostics(
-  diagnostics: Iterable<NativeProviderStateDiagnostic>,
-): NativeProviderStateDiagnostic[] {
-  const byKey = new Map<string, NativeProviderStateDiagnostic>();
-  for (const diagnostic of diagnostics) {
-    const key = providerStateDiagnosticKey(diagnostic);
-    const existing = byKey.get(key);
-    if (
-      existing === undefined ||
-      providerStateDiagnosticPriority(diagnostic) >
-        providerStateDiagnosticPriority(existing)
-    ) {
-      byKey.set(key, diagnostic);
-    }
-  }
-  return [...byKey.values()];
-}
-
-function providerStateDiagnosticKey(
-  diagnostic: Pick<
-    NativeProviderStateDiagnostic,
-    "sessionId" | "moduleId" | "strategyId"
-  >,
-): string {
-  return `${diagnostic.sessionId}\u0000${diagnostic.moduleId}\u0000${diagnostic.strategyId}`;
-}
-
-function providerStateDiagnosticPriority(
-  diagnostic: NativeProviderStateDiagnostic,
-): number {
-  switch (diagnostic.status) {
-    case "save_failed":
-      return 7;
-    case "load_failed":
-      return 6;
-    case "invalidated":
-      return diagnostic.invalidationReason === "superseded" ? 2 : 5;
-    case "valid":
-      return 4;
-    case "expired":
-      return 3;
-    case "missing":
-      return 2;
-    case "unused":
-      return 1;
-  }
 }
 
 function errorMessage(error: unknown): string {
@@ -1741,10 +1634,10 @@ function createNativeBridgeModule(
         operation: "provider_state_diagnostics",
         direction: "rust_to_ts",
         schema: providerStateDiagnosticArraySchema,
-        value: mergeProviderStateDiagnostics([
-          ...providerStateObservations.values(),
-          ...stored,
-        ]).slice(0, limit),
+        value: mergeProviderStateDiagnostics(
+          stored,
+          providerStateObservations.values(),
+        ).slice(0, limit),
       });
     },
     exchangeOpenAiOauthCode: async (input) => {

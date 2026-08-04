@@ -390,9 +390,12 @@ fn list_provider_wire_state_diagnostics(
     let mut stmt = conn
         .prepare(
             "SELECT
+                row_id,
                 session_id,
                 module_id,
                 strategy_id,
+                profile_fingerprint,
+                provider_fingerprint,
                 payload_version,
                 length(payload_json),
                 created_at,
@@ -402,7 +405,13 @@ fn list_provider_wire_state_diagnostics(
                 invalidated_at,
                 invalidation_reason
              FROM provider_wire_states
-             ORDER BY updated_at DESC, row_id DESC
+             ORDER BY
+                CASE
+                    WHEN invalidated_at IS NULL AND invalidation_reason IS NULL THEN 0
+                    ELSE 1
+                END ASC,
+                updated_at DESC,
+                row_id DESC
              LIMIT ?1",
         )
         .map_err(|error| persistence_error("prepare provider wire state diagnostics", error))?;
@@ -447,18 +456,23 @@ fn row_to_provider_wire_state_diagnostic(
 ) -> rusqlite::Result<ProviderWireStateDiagnostic> {
     Ok(ProviderWireStateDiagnostic {
         key: ProviderWireStateKey {
-            session_id: SessionId(row.get(0)?),
-            module_id: row.get(1)?,
-            strategy_id: row.get(2)?,
+            session_id: SessionId(row.get(1)?),
+            module_id: row.get(2)?,
+            strategy_id: row.get(3)?,
         },
-        payload_version: row.get(3)?,
-        payload_bytes: row.get::<_, u64>(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
-        expires_at: row.get(7)?,
-        last_wake_id: row.get(8)?,
-        invalidated_at: row.get(9)?,
-        invalidation_reason: row.get(10)?,
+        row_id: row.get(0)?,
+        profile_fingerprint: row.get(4)?,
+        provider_fingerprint: row.get(5)?,
+        payload_version: row.get(6)?,
+        payload_bytes: row.get::<_, u64>(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        expires_at: row.get(10)?,
+        last_wake_id: row.get(11)?,
+        invalidated_at: row.get(12)?,
+        invalidation_reason: row.get(13)?,
+        is_current: row.get::<_, Option<String>>(13)?.is_none()
+            && row.get::<_, Option<String>>(12)?.is_none(),
     })
 }
 

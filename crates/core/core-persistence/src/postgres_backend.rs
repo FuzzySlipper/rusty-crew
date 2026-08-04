@@ -2060,9 +2060,12 @@ impl PostgresBackendStore {
             .query(
                 &format!(
                     "SELECT
+                        row_id,
                         session_id,
                         module_id,
                         strategy_id,
+                        profile_fingerprint,
+                        provider_fingerprint,
                         payload_version,
                         octet_length(payload_json)::bigint,
                         created_at,
@@ -2072,7 +2075,13 @@ impl PostgresBackendStore {
                         invalidated_at,
                         invalidation_reason
                      FROM {schema}.provider_wire_states
-                     ORDER BY updated_at DESC, row_id DESC
+                     ORDER BY
+                        CASE
+                            WHEN invalidated_at IS NULL AND invalidation_reason IS NULL THEN 0
+                            ELSE 1
+                        END ASC,
+                        updated_at DESC,
+                        row_id DESC
                      LIMIT $1"
                 ),
                 &[&limit],
@@ -7635,7 +7644,7 @@ fn row_to_provider_wire_state_record(row: &Row) -> CoreResult<ProviderWireStateR
 }
 
 fn row_to_provider_wire_state_diagnostic(row: &Row) -> CoreResult<ProviderWireStateDiagnostic> {
-    let payload_bytes: i64 = row.get(4);
+    let payload_bytes: i64 = row.get(7);
     if payload_bytes < 0 {
         return Err(CoreError::new(
             CoreErrorKind::PersistenceFailure,
@@ -7644,18 +7653,23 @@ fn row_to_provider_wire_state_diagnostic(row: &Row) -> CoreResult<ProviderWireSt
     }
     Ok(ProviderWireStateDiagnostic {
         key: ProviderWireStateKey {
-            session_id: crate::SessionId(row.get(0)),
-            module_id: row.get(1),
-            strategy_id: row.get(2),
+            session_id: crate::SessionId(row.get(1)),
+            module_id: row.get(2),
+            strategy_id: row.get(3),
         },
-        payload_version: row.get(3),
+        row_id: row.get(0),
+        profile_fingerprint: row.get(4),
+        provider_fingerprint: row.get(5),
+        payload_version: row.get(6),
         payload_bytes: payload_bytes as u64,
-        created_at: row.get(5),
-        updated_at: row.get(6),
-        expires_at: row.get(7),
-        last_wake_id: row.get(8),
-        invalidated_at: row.get(9),
-        invalidation_reason: row.get(10),
+        created_at: row.get(8),
+        updated_at: row.get(9),
+        expires_at: row.get(10),
+        last_wake_id: row.get(11),
+        invalidated_at: row.get(12),
+        invalidation_reason: row.get(13),
+        is_current: row.get::<_, Option<String>>(13).is_none()
+            && row.get::<_, Option<String>>(12).is_none(),
     })
 }
 
@@ -15544,8 +15558,14 @@ mod tests {
         let diagnostics = store.list_provider_wire_state_diagnostics(10).unwrap();
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics[0].key, key);
+        assert!(diagnostics[0].is_current);
+        assert_eq!(diagnostics[0].profile_fingerprint, "profile:v1");
+        assert_eq!(diagnostics[0].provider_fingerprint, "provider:v1");
         assert_eq!(diagnostics[0].payload_version, "responses:v2");
         assert!(diagnostics[0].payload_bytes > 128);
+        assert!(!diagnostics[1].is_current);
+        assert_eq!(diagnostics[1].profile_fingerprint, "profile:v1");
+        assert_eq!(diagnostics[1].provider_fingerprint, "provider:v1");
         assert_eq!(
             diagnostics[1].invalidation_reason.as_deref(),
             Some("superseded")

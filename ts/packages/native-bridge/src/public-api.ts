@@ -1885,6 +1885,9 @@ export interface NativeProviderStateDiagnostic {
   sessionId: SessionId | string;
   moduleId: string;
   strategyId: string;
+  recordId?: number;
+  profileFingerprint?: string;
+  providerFingerprint?: string;
   status: NativeProviderStateStatus;
   payloadVersion?: string;
   payloadBytes?: number;
@@ -1894,6 +1897,8 @@ export interface NativeProviderStateDiagnostic {
   lastWakeId?: string;
   invalidatedAt?: string;
   invalidationReason?: string;
+  isCurrent?: boolean;
+  source?: "durable" | "runtime_observation";
 }
 
 export interface NativeChatReadModelEvent {
