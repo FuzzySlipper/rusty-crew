@@ -840,7 +840,7 @@ mod tests {
         let mut actual_ids = cases
             .iter()
             .map(|case| {
-                assert!(case["class"].is_string(), "fixture case class");
+                let class = case["class"].as_str().expect("fixture case class");
                 assert!(case["fixture"].is_object(), "fixture case data");
                 let source_quality = case["sourceQuality"]
                     .as_str()
@@ -852,6 +852,20 @@ mod tests {
                         | "serialized_estimate/approximate"
                         | "unavailable/unavailable"
                 ));
+                if matches!(
+                    class,
+                    "compaction_persistence"
+                        | "compaction_recovery"
+                        | "restart_hydration"
+                        | "stream_ordering"
+                ) {
+                    assert!(
+                        case["productionProbes"]
+                            .as_array()
+                            .is_some_and(|probes| !probes.is_empty()),
+                        "{class} fixture must name a non-empty production probe list"
+                    );
+                }
                 case["id"].as_str().expect("fixture case id").to_string()
             })
             .collect::<Vec<_>>();

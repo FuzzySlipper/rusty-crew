@@ -166,6 +166,12 @@
       "testRefs": [
         "crates/core/core-persistence/src/sqlite_integration_tests.rs::context_compaction_artifacts_preserve_raw_message_history",
         "crates/core/core-persistence/src/postgres_backend.rs::postgres_context_compaction_artifact_persists_and_reloads"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-core-persistence",
+          "filter": "context_compaction_artifacts_preserve_raw_message_history"
+        }
       ]
     },
     {
@@ -174,13 +180,20 @@
       "sourceQuality": "provider/exact",
       "fixture": {
         "kind": "persistence",
-        "backend": "postgres",
+        "backend": "sqlite",
         "replays": 2,
         "expectedRows": 1,
-        "expectedOutcome": "serialized_artifact_write"
+        "expectedOutcome": "concurrent_atomic_last_writer"
       },
       "testRefs": [
+        "crates/core/core-persistence/src/sqlite_integration_tests.rs::context_compaction_artifacts_are_idempotent_under_concurrent_conflicting_writes",
         "crates/core/core-persistence/src/postgres_backend.rs::postgres_context_compaction_artifact_persists_and_reloads"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-core-persistence",
+          "filter": "context_compaction_artifacts_are_idempotent_under_concurrent_conflicting_writes"
+        }
       ]
     },
     {
@@ -196,6 +209,12 @@
       "testRefs": [
         "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_pauses_compaction_turn_for_attention",
         "crates/brains/openai-responses/src/lib.rs::provider_failure_and_closed_stream_do_not_commit_provider_state"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-chat-completions-brain",
+          "filter": "provider_context_rejection_pauses_compaction_turn_for_attention"
+        }
       ]
     },
     {
@@ -210,6 +229,12 @@
       },
       "testRefs": [
         "crates/core/core-persistence/src/sqlite_integration_tests.rs::context_compaction_artifacts_preserve_raw_message_history"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-core-persistence",
+          "filter": "context_compaction_artifacts_preserve_raw_message_history"
+        }
       ]
     },
     {
@@ -226,6 +251,12 @@
       },
       "testRefs": [
         "crates/brains/chat-completions/src/lib.rs::stream_sink_receives_started_deltas_and_tool_lifecycle_before_wake_returns"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-chat-completions-brain",
+          "filter": "stream_sink_receives_started_deltas_and_tool_lifecycle_before_wake_returns"
+        }
       ]
     },
     {
@@ -239,7 +270,13 @@
         "expectedOutcome": "visible_failure"
       },
       "testRefs": [
-        "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_pauses_compaction_turn_for_attention"
+        "crates/brains/chat-completions/src/lib.rs::zero_event_response_stream_interruption_retries_without_duplicate_output"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-chat-completions-brain",
+          "filter": "zero_event_response_stream_interruption_retries_without_duplicate_output"
+        }
       ]
     },
     {

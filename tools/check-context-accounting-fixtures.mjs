@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -26,6 +27,13 @@ const allowedFixtureKinds = new Set([
   "schema",
   "snapshot",
 ]);
+const productionProbePackages = new Set([
+  "rusty-crew-brain-runtime",
+  "rusty-crew-chat-completions-brain",
+  "rusty-crew-core-persistence",
+  "rusty-crew-openai-responses-brain",
+]);
+let productionProbeCount = 0;
 
 for (const fixtureCase of matrix.cases) {
   assert.match(fixtureCase.id, /^[a-z0-9-]+$/);
@@ -61,8 +69,49 @@ for (const fixtureCase of matrix.cases) {
       `${testRef} is not present in the source tree`,
     );
   }
+
+  if (fixtureCase.productionProbes !== undefined) {
+    assert.ok(
+      Array.isArray(fixtureCase.productionProbes) &&
+        fixtureCase.productionProbes.length > 0,
+      `${fixtureCase.id} production probes must be non-empty`,
+    );
+    for (const probe of fixtureCase.productionProbes) {
+      assert.ok(probe && typeof probe === "object");
+      assert.ok(productionProbePackages.has(probe.package));
+      assert.match(probe.filter, /^[A-Za-z0-9_:]+$/);
+      const result = spawnSync(
+        "cargo",
+        [
+          "test",
+          "-p",
+          probe.package,
+          "--lib",
+          probe.filter,
+          "--",
+          "--nocapture",
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+          stdio: "pipe",
+        },
+      );
+      assert.equal(
+        result.status,
+        0,
+        `${fixtureCase.id} production probe failed: cargo test -p ${probe.package} --lib ${probe.filter} -- --nocapture\n${result.stdout}\n${result.stderr}`,
+      );
+      assert.match(
+        result.stdout,
+        /running [1-9][0-9]* test/,
+        `${fixtureCase.id} production probe did not run a test`,
+      );
+      productionProbeCount += 1;
+    }
+  }
 }
 
 console.log(
-  `context accounting fixture catalog passed (${matrix.cases.length} executable cases)`,
+  `context accounting fixture catalog passed (${matrix.cases.length} executable cases; ${productionProbeCount} production probes)`,
 );

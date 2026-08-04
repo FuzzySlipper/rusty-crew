@@ -22,6 +22,8 @@ use serde_json::json;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Barrier},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -5507,6 +5509,75 @@ fn context_compaction_artifacts_preserve_raw_message_history() {
         "raw context compaction source text"
     );
 
+    remove_temp_db(&db_path);
+}
+
+#[test]
+fn context_compaction_artifacts_are_idempotent_under_concurrent_conflicting_writes() {
+    let db_path = temp_db_path("context-compaction-concurrent");
+    let first_store = CoordinationStore::open_file(&db_path).unwrap();
+    let second_store = CoordinationStore::open_file(&db_path).unwrap();
+    let ready = Arc::new(Barrier::new(3));
+    let first_artifact = ContextCompactionArtifact {
+        artifact_id: "artifact_context_concurrent".to_string(),
+        session_id: SessionId::new("session-concurrent"),
+        branch_id: None,
+        strategy_id: "rolling_summary_compaction".to_string(),
+        source_refs_json: json!({"source": "first"}),
+        provider_metadata_json: json!({"provider_alias": "fixture-provider"}),
+        estimate_before_json: json!({"input_tokens": 90_000}),
+        estimate_after_json: Some(json!({"input_tokens": 24_000})),
+        summary_text: "first concurrent candidate".to_string(),
+        enters_future_context: true,
+        context_policy: "summary_context".to_string(),
+        metadata_json: json!({"fixture": "concurrent"}),
+        created_at: "2026-06-30T00:00:00Z".to_string(),
+        updated_at: "2026-06-30T00:00:01Z".to_string(),
+    };
+    let mut second_artifact = first_artifact.clone();
+    second_artifact.source_refs_json = json!({"source": "second"});
+    second_artifact.summary_text = "second concurrent candidate".to_string();
+    second_artifact.updated_at = "2026-06-30T00:00:02Z".to_string();
+
+    let first_ready = Arc::clone(&ready);
+    let first_thread = thread::spawn(move || {
+        first_ready.wait();
+        first_store.save_context_compaction_artifact(&first_artifact)
+    });
+    let second_ready = Arc::clone(&ready);
+    let second_thread = thread::spawn(move || {
+        second_ready.wait();
+        second_store.save_context_compaction_artifact(&second_artifact)
+    });
+    ready.wait();
+
+    assert!(first_thread.join().unwrap().is_ok());
+    assert!(second_thread.join().unwrap().is_ok());
+
+    let reader = CoordinationStore::open_file(&db_path).unwrap();
+    let artifacts = reader
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(SessionId::new("session-concurrent")),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: false,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "concurrent writes must retain one artifact"
+    );
+    assert!(
+        ["first concurrent candidate", "second concurrent candidate"]
+            .contains(&artifacts[0].summary_text.as_str()),
+        "the final artifact must be one complete candidate, not a partial merge"
+    );
+
+    drop(reader);
     remove_temp_db(&db_path);
 }
 
