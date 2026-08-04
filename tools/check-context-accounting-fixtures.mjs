@@ -80,6 +80,13 @@ for (const fixtureCase of matrix.cases) {
       assert.ok(probe && typeof probe === "object");
       assert.ok(productionProbePackages.has(probe.package));
       assert.match(probe.filter, /^[A-Za-z0-9_:]+$/);
+      assert.ok(
+        fixtureCase.testRefs.some(
+          (testRef) =>
+            testRef.slice(testRef.indexOf("::") + 2) === probe.filter,
+        ),
+        `${fixtureCase.id} production probe must match a declared test ref`,
+      );
       const result = spawnSync(
         "cargo",
         [

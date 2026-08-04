@@ -996,6 +996,14 @@ mod tests {
                     assert_eq!(fixture["severity"], "error", "{id} severity");
                     assert!(fixture["code"].is_string(), "{id} diagnostic code");
                     assert_eq!(fixture["expectedOutcome"], "visible_failure");
+                    let events = fixture["events"]
+                        .as_array()
+                        .expect("diagnostic event order");
+                    assert!(events.len() >= 2, "{id} must have a meaningful event order");
+                    assert!(
+                        events.iter().all(serde_json::Value::is_string),
+                        "{id} event order must be textual"
+                    );
                 }
                 "persistence" => {
                     assert!(fixture["backend"].is_string(), "{id} backend");

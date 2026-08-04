@@ -244,18 +244,18 @@
       "fixture": {
         "kind": "event_order",
         "events": [
+          "context_accounting_snapshot",
           "context_compaction_started",
-          "context_compaction_completed",
-          "context_accounting"
+          "context_compaction_completed"
         ]
       },
       "testRefs": [
-        "crates/brains/chat-completions/src/lib.rs::stream_sink_receives_started_deltas_and_tool_lifecycle_before_wake_returns"
+        "crates/brains/chat-completions/src/lib.rs::mid_turn_context_compaction_checkpoints_before_next_provider_request"
       ],
       "productionProbes": [
         {
           "package": "rusty-crew-chat-completions-brain",
-          "filter": "stream_sink_receives_started_deltas_and_tool_lifecycle_before_wake_returns"
+          "filter": "mid_turn_context_compaction_checkpoints_before_next_provider_request"
         }
       ]
     },
@@ -267,15 +267,16 @@
         "kind": "diagnostic",
         "severity": "error",
         "code": "context_compaction_failed",
-        "expectedOutcome": "visible_failure"
+        "expectedOutcome": "visible_failure",
+        "events": ["context_accounting_snapshot", "context_compaction_failed"]
       },
       "testRefs": [
-        "crates/brains/chat-completions/src/lib.rs::zero_event_response_stream_interruption_retries_without_duplicate_output"
+        "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_pauses_compaction_turn_for_attention"
       ],
       "productionProbes": [
         {
           "package": "rusty-crew-chat-completions-brain",
-          "filter": "zero_event_response_stream_interruption_retries_without_duplicate_output"
+          "filter": "provider_context_rejection_pauses_compaction_turn_for_attention"
         }
       ]
     },

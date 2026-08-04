@@ -6101,6 +6101,26 @@ mod tests {
             .collect()
     }
 
+    fn provider_status_kinds(items: &[BrainWakeStreamItem]) -> Vec<String> {
+        events(items)
+            .iter()
+            .filter_map(|event| {
+                let BrainEvent::ProviderStatus {
+                    metadata_json: Some(metadata),
+                    ..
+                } = event
+                else {
+                    return None;
+                };
+                serde_json::from_str::<Value>(metadata)
+                    .ok()?
+                    .get("kind")?
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
     fn terminal_kind(items: &[BrainWakeStreamItem]) -> &'static str {
         match items.last() {
             Some(BrainWakeStreamItem::Actions { .. }) => "actions",
@@ -7877,11 +7897,25 @@ mod tests {
         assert!(first.yielded);
         assert_eq!(first.provider_request_count, 5);
         assert_eq!(first.tool_round_count, 5);
-        assert!(events(&first.stream).iter().any(|event| matches!(
-            event,
-            BrainEvent::ProviderStatus { metadata_json: Some(metadata), .. }
-                if metadata.contains("context_compaction_completed")
-        )));
+        let status_kinds = provider_status_kinds(&first.stream);
+        let compaction_start = status_kinds
+            .iter()
+            .position(|kind| kind == "context_compaction_started")
+            .expect("compaction started status is visible in the stream");
+        assert_eq!(
+            &status_kinds[compaction_start..=compaction_start + 1],
+            [
+                "context_compaction_started".to_string(),
+                "context_compaction_completed".to_string(),
+            ],
+            "compaction completion must follow its started status without reordering"
+        );
+        assert!(
+            status_kinds[..compaction_start]
+                .iter()
+                .any(|kind| kind == "context_accounting_snapshot"),
+            "provider accounting must be streamed before the compaction boundary"
+        );
         let checkpoint = chat_completions_continuation_state(
             first
                 .continuation_state
@@ -8216,11 +8250,28 @@ mod tests {
             Some("chat_completions_provider_context_limit_attention")
         );
         assert!(output.continuation_state.is_some());
-        assert!(events(&output.stream).iter().any(|event| matches!(
-            event,
-            BrainEvent::ProviderStatus { metadata_json: Some(metadata), .. }
-                if metadata.contains("context_compaction_failed")
-        )));
+        let status_kinds = provider_status_kinds(&output.stream);
+        let failed_index = status_kinds
+            .iter()
+            .position(|kind| kind == "context_compaction_failed")
+            .expect("compaction failure status is visible in the stream");
+        let preceding_status = failed_index
+            .checked_sub(1)
+            .and_then(|index| status_kinds.get(index))
+            .map(String::as_str);
+        assert_eq!(
+            preceding_status,
+            Some("context_accounting_snapshot"),
+            "compaction failure must remain ordered after the accounting snapshot"
+        );
+        assert_eq!(
+            status_kinds
+                .iter()
+                .filter(|kind| kind.as_str() == "context_compaction_failed")
+                .count(),
+            1,
+            "one provider rejection must produce one visible compaction failure"
+        );
         assert!(!output
             .stream
             .iter()
