@@ -15,8 +15,14 @@ pub use openai_oauth::{
 
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
-    decide_context_compaction, is_context_limit_provider_error, BrainContextCompactionArtifact,
-    BrainContextCompactionDecision, BrainContextCompactionPolicy, BufferedBrainHostTurnDisposition,
+    decide_context_compaction, is_context_limit_provider_error, validate_compaction_artifacts,
+    BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionPolicy,
+    BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic, ContextAccountingSnapshot,
+    ContextAdmission, ContextAdmissionState, ContextCompactionPhase, ContextCompactionProjection,
+    ContextDiagnosticSeverity, ContextDurableTranscript, ContextMeasurementSource,
+    ContextProjectionSegment, ContextPromptProjection, ContextProviderDescriptor,
+    ContextProviderProtocol, ContextProviderState, ContextProviderUsage, ContextReservedOutput,
+    ContextSizeMeasurement, ContextTokenMeasurement, ContextTokenUsageTotals,
 };
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
@@ -1615,6 +1621,8 @@ struct ResponsesContinuationMetrics {
     output_tokens: u64,
     reasoning_output_tokens: u64,
     total_tokens: u64,
+    #[serde(default)]
+    usage_event_count: u64,
     first_text_delta_latency_ms: Option<u64>,
     elapsed_turn_duration_ms: u64,
 }
@@ -1784,6 +1792,7 @@ pub struct ResponsesTransportMetrics {
     pub output_tokens: u64,
     pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
+    pub usage_event_count: u64,
     pub first_text_delta_latency_ms: Option<u64>,
     pub total_turn_duration_ms: u64,
     pub terminal_failure_reason_code: Option<String>,
@@ -1805,6 +1814,7 @@ struct ResponsesTransportMetricsBuilder {
     output_tokens: u64,
     reasoning_output_tokens: u64,
     total_tokens: u64,
+    usage_event_count: u64,
     first_text_delta_latency_ms: Option<u64>,
     prior_turn_duration_ms: u64,
     turn_started_at: Instant,
@@ -1828,6 +1838,7 @@ impl ResponsesTransportMetricsBuilder {
             output_tokens: 0,
             reasoning_output_tokens: 0,
             total_tokens: 0,
+            usage_event_count: 0,
             first_text_delta_latency_ms: None,
             prior_turn_duration_ms: 0,
             turn_started_at: Instant::now(),
@@ -1850,6 +1861,7 @@ impl ResponsesTransportMetricsBuilder {
             output_tokens: state.output_tokens,
             reasoning_output_tokens: state.reasoning_output_tokens,
             total_tokens: state.total_tokens,
+            usage_event_count: state.usage_event_count,
             first_text_delta_latency_ms: state.first_text_delta_latency_ms,
             prior_turn_duration_ms: state.elapsed_turn_duration_ms,
             turn_started_at: Instant::now(),
@@ -1888,6 +1900,7 @@ impl ResponsesTransportMetricsBuilder {
                 usage: Some(usage), ..
             } = event
             {
+                self.usage_event_count = self.usage_event_count.saturating_add(1);
                 self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
                 self.cached_input_tokens = self
                     .cached_input_tokens
@@ -1924,6 +1937,7 @@ impl ResponsesTransportMetricsBuilder {
             output_tokens: self.output_tokens,
             reasoning_output_tokens: self.reasoning_output_tokens,
             total_tokens: self.total_tokens,
+            usage_event_count: self.usage_event_count,
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
             total_turn_duration_ms: self
                 .prior_turn_duration_ms
@@ -1949,12 +1963,366 @@ impl ResponsesTransportMetricsBuilder {
             output_tokens: self.output_tokens,
             reasoning_output_tokens: self.reasoning_output_tokens,
             total_tokens: self.total_tokens,
+            usage_event_count: self.usage_event_count,
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
             elapsed_turn_duration_ms: self
                 .prior_turn_duration_ms
                 .saturating_add(duration_ms(self.turn_started_at.elapsed())),
         }
     }
+}
+
+fn serialized_context_tokens_from_bytes(bytes: usize) -> ContextTokenMeasurement {
+    ContextTokenMeasurement::estimate(
+        (bytes as u64).saturating_add(2) / 3,
+        ContextMeasurementSource::SerializedEstimate,
+        "json_bytes_per_token_v1".to_string(),
+        None,
+    )
+    .expect("serialized context estimate has a stable estimator id")
+}
+
+fn serialized_context_tokens<T: Serialize>(value: &T) -> ContextTokenMeasurement {
+    let bytes = serde_json::to_vec(value).map_or(0, |value| value.len());
+    serialized_context_tokens_from_bytes(bytes)
+}
+
+fn serialized_context_size<T: Serialize>(value: &T) -> ContextSizeMeasurement {
+    let bytes = serde_json::to_vec(value).map_or(0, |value| value.len());
+    ContextSizeMeasurement::measured(
+        bytes as u64,
+        ContextMeasurementSource::SerializedEstimate,
+        rusty_crew_brain_runtime::ContextMeasurementQuality::Approximate,
+        Some("json_bytes_v1".to_string()),
+        None,
+    )
+}
+
+fn responses_context_usage_totals(usage: &ResponsesTokenUsage) -> ContextTokenUsageTotals {
+    ContextTokenUsageTotals {
+        input_tokens: ContextTokenMeasurement::provider(usage.input_tokens, None),
+        cached_input_tokens: ContextTokenMeasurement::provider(usage.cached_input_tokens, None),
+        cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
+        output_tokens: ContextTokenMeasurement::provider(usage.output_tokens, None),
+        reasoning_tokens: ContextTokenMeasurement::provider(usage.reasoning_output_tokens, None),
+    }
+}
+
+fn responses_aggregate_context_usage(
+    metrics: &ResponsesTransportMetricsBuilder,
+) -> ContextTokenUsageTotals {
+    ContextTokenUsageTotals {
+        input_tokens: ContextTokenMeasurement::provider(metrics.input_tokens, None),
+        cached_input_tokens: ContextTokenMeasurement::provider(metrics.cached_input_tokens, None),
+        cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
+        output_tokens: ContextTokenMeasurement::provider(metrics.output_tokens, None),
+        reasoning_tokens: ContextTokenMeasurement::provider(metrics.reasoning_output_tokens, None),
+    }
+}
+
+fn responses_usage_from_events(events: &[ResponsesEvent]) -> Option<ResponsesTokenUsage> {
+    events.iter().rev().find_map(|event| match event {
+        ResponsesEvent::Completed {
+            usage: Some(usage), ..
+        } => Some(usage.clone()),
+        _ => None,
+    })
+}
+
+fn responses_response_id_from_events(events: &[ResponsesEvent]) -> Option<String> {
+    events.iter().rev().find_map(|event| match event {
+        ResponsesEvent::Completed { response_id, .. } => Some(response_id.clone()),
+        _ => None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn responses_context_accounting_snapshot(
+    request: &BrainWakeRequest,
+    provider_request: &ResponsesRequest,
+    base_history: &ResponsesReplayProjection,
+    continuation_items: &[ResponsesInputItem],
+    committed_output_items: &[ResponsesOutputItem],
+    provider_state: Option<&BrainWakeProviderStateInput>,
+    metrics: &ResponsesTransportMetricsBuilder,
+    compaction_policy: Option<&BrainContextCompactionPolicy>,
+    compaction_state: &ResponsesContextCompactionState,
+    current_usage: Option<&ResponsesTokenUsage>,
+    response_id: Option<&str>,
+) -> ContextAccountingSnapshot {
+    let request_estimate = serialized_context_tokens(provider_request);
+    let input_tokens = current_usage
+        .map(|usage| ContextTokenMeasurement::provider(usage.input_tokens, None))
+        .unwrap_or_else(|| request_estimate.clone());
+    let context_window_tokens = compaction_policy
+        .map(|policy| policy.context_window_tokens)
+        .map(|tokens| {
+            ContextTokenMeasurement::estimate(
+                tokens,
+                ContextMeasurementSource::SerializedEstimate,
+                "configured_context_window_v1".to_string(),
+                None,
+            )
+            .expect("configured context window uses a stable estimator id")
+        })
+        .unwrap_or_else(ContextTokenMeasurement::unavailable);
+    let reserved_response_tokens = provider_request
+        .max_output_tokens
+        .map(u64::from)
+        .map(|tokens| {
+            ContextTokenMeasurement::estimate(
+                tokens,
+                ContextMeasurementSource::SerializedEstimate,
+                "configured_max_output_tokens_v1".to_string(),
+                None,
+            )
+            .expect("configured output budget uses a stable estimator id")
+        })
+        .unwrap_or_else(ContextTokenMeasurement::unavailable);
+
+    let mut segments = Vec::new();
+    let mut push_segment = |name: &str, included: bool, bytes: usize| {
+        segments.push(ContextProjectionSegment {
+            name: name.to_string(),
+            included,
+            tokens: serialized_context_tokens_from_bytes(bytes),
+        });
+    };
+    let instruction_bytes = provider_request
+        .instructions
+        .as_ref()
+        .map_or(0, |instructions| {
+            serde_json::to_vec(instructions).map_or(0, |v| v.len())
+        });
+    push_segment(
+        "instructions",
+        provider_request.instructions.is_some(),
+        instruction_bytes,
+    );
+    let mut input_bytes = HashMap::<&'static str, usize>::new();
+    for item in &provider_request.input {
+        let name = match item {
+            ResponsesInputItem::UserMessage { .. } => "user_messages",
+            ResponsesInputItem::AssistantMessage { .. } => "assistant_messages",
+            ResponsesInputItem::Reasoning { .. } => "reasoning_history",
+            ResponsesInputItem::FunctionCall { .. } => "function_calls",
+            ResponsesInputItem::FunctionCallOutput { .. } => "function_outputs",
+            ResponsesInputItem::ReplayHint { .. } => "replay_hints",
+        };
+        *input_bytes.entry(name).or_default() += serde_json::to_vec(item).map_or(0, |v| v.len());
+    }
+    for name in [
+        "user_messages",
+        "assistant_messages",
+        "reasoning_history",
+        "function_calls",
+        "function_outputs",
+        "replay_hints",
+    ] {
+        let bytes = input_bytes.get(name).copied().unwrap_or(0);
+        push_segment(name, bytes > 0, bytes);
+    }
+    push_segment(
+        "tool_schemas",
+        !provider_request.tools.is_empty(),
+        serde_json::to_vec(&provider_request.tools).map_or(0, |v| v.len()),
+    );
+    let reasoning_bytes = provider_request.reasoning.as_ref().map_or(0, |reasoning| {
+        serde_json::to_vec(reasoning).map_or(0, |v| v.len())
+    });
+    push_segment(
+        "reasoning_policy",
+        provider_request.reasoning.is_some(),
+        reasoning_bytes,
+    );
+    let chain_metadata = json!({
+        "has_previous_response_id": provider_request.previous_response_id.is_some(),
+        "has_provider_state": provider_state.is_some(),
+        "strategy": metrics.effective_strategy_id,
+    });
+    push_segment(
+        "response_chain_state",
+        provider_request.previous_response_id.is_some() || provider_state.is_some(),
+        serde_json::to_vec(&chain_metadata).map_or(0, |v| v.len()),
+    );
+
+    let (fill_percent, admission_state, usable_input_tokens, reason_code) =
+        match (input_tokens.tokens, context_window_tokens.tokens) {
+            (Some(input), Some(window)) if window > 0 => {
+                let fill = input.saturating_mul(100).saturating_add(window - 1) / window;
+                let compact_at = compaction_policy
+                    .map(|policy| policy.compact_at_percent)
+                    .unwrap_or(100);
+                let state = if fill >= u64::from(compact_at) {
+                    ContextAdmissionState::RequiresCompaction
+                } else if fill.saturating_add(10) >= u64::from(compact_at) {
+                    ContextAdmissionState::NearThreshold
+                } else {
+                    ContextAdmissionState::Admitted
+                };
+                let usable = window.saturating_sub(reserved_response_tokens.tokens.unwrap_or(0));
+                let usable_measurement = ContextTokenMeasurement::estimate(
+                    usable,
+                    ContextMeasurementSource::SerializedEstimate,
+                    "configured_context_budget_v1".to_string(),
+                    None,
+                )
+                .expect("configured context budget uses a stable estimator id");
+                (Some(fill.min(100) as u32), state, usable_measurement, None)
+            }
+            _ => (
+                None,
+                ContextAdmissionState::Unavailable,
+                ContextTokenMeasurement::unavailable(),
+                Some("context_window_unavailable".to_string()),
+            ),
+        };
+
+    let latest_artifact = compaction_state.artifacts.last();
+    let compaction = ContextCompactionProjection {
+        strategy_id: compaction_policy.map(|policy| policy.strategy_id.clone()),
+        strategy_revision: Some("responses-replay-v1".to_string()),
+        enabled: compaction_policy.is_some_and(|policy| policy.enabled),
+        auto_compaction_enabled: compaction_policy
+            .is_some_and(|policy| policy.auto_compaction_enabled),
+        phase: latest_artifact
+            .map(|_| ContextCompactionPhase::Completed)
+            .unwrap_or(ContextCompactionPhase::Idle),
+        last_artifact_id: latest_artifact
+            .map(|artifact| format!("responses:compaction:{}", artifact.sequence)),
+        last_sequence: latest_artifact.map(|artifact| artifact.sequence),
+        trigger_reason: latest_artifact.map(|artifact| artifact.reason_code.clone()),
+        input_tokens_before: latest_artifact
+            .map(|artifact| {
+                ContextTokenMeasurement::provider(artifact.usage_before.input_tokens, None)
+            })
+            .unwrap_or_else(ContextTokenMeasurement::unavailable),
+        input_tokens_after: latest_artifact
+            .map(|artifact| {
+                ContextTokenMeasurement::estimate(
+                    artifact.estimated_tokens_after,
+                    ContextMeasurementSource::SerializedEstimate,
+                    "json_bytes_per_token_v1".to_string(),
+                    None,
+                )
+                .expect("compaction estimate has a stable estimator id")
+            })
+            .unwrap_or_else(ContextTokenMeasurement::unavailable),
+        compacted_item_count: latest_artifact.map(|artifact| artifact.compacted_item_count),
+        retained_item_count: latest_artifact.map(|artifact| artifact.retained_item_count),
+        provider_chain_action: latest_artifact
+            .and_then(|artifact| artifact.provider_chain_action.clone()),
+    };
+    let durable_projection = (
+        &base_history.input_items,
+        &base_history.replay_hints,
+        continuation_items,
+        committed_output_items,
+    );
+    let durable_message_count = base_history
+        .input_items
+        .len()
+        .saturating_add(base_history.replay_hints.len())
+        .saturating_add(continuation_items.len())
+        .saturating_add(committed_output_items.len());
+    let provider_state_fingerprint = responses_json_fingerprint(&json!({
+        "previous_response_id": provider_request.previous_response_id,
+        "response_id": response_id,
+        "provider_state": provider_state.map(|state| (&state.module_id, &state.payload_version)),
+    }))
+    .ok();
+    let mut snapshot = ContextAccountingSnapshot::unavailable(ContextProviderDescriptor {
+        protocol: ContextProviderProtocol::Responses,
+        provider_alias: None,
+        model_id: Some(provider_request.model.clone()),
+    });
+    snapshot.session_id = Some(request.session_id.0.clone());
+    snapshot.wake_id = Some(request.wake_id.clone());
+    snapshot.prompt_projection = ContextPromptProjection {
+        input_tokens,
+        context_window_tokens,
+        protocol_projection: rusty_crew_brain_runtime::ContextProtocolProjection::Responses {
+            chain_strategy: Some(metrics.effective_strategy_id.to_string()),
+            replay_item_count: Some(provider_request.input.len() as u64),
+            response_lineage_fingerprint: provider_state_fingerprint.clone(),
+        },
+        segments,
+    };
+    snapshot.reserved_output = ContextReservedOutput {
+        response_tokens: reserved_response_tokens,
+        safety_margin_tokens: ContextTokenMeasurement::unavailable(),
+    };
+    snapshot.admission = ContextAdmission {
+        state: admission_state,
+        fill_percent,
+        usable_input_tokens,
+        compact_at_percent: compaction_policy.map(|policy| policy.compact_at_percent),
+        max_context_percent_for_wake: compaction_policy.map(|policy| policy.compact_at_percent),
+        reason_code,
+    };
+    snapshot.provider_usage = ContextProviderUsage {
+        current_request: current_usage
+            .map(responses_context_usage_totals)
+            .unwrap_or_else(|| ContextTokenUsageTotals {
+                input_tokens: serialized_context_tokens(provider_request),
+                cached_input_tokens: ContextTokenMeasurement::unavailable(),
+                cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
+                output_tokens: ContextTokenMeasurement::unavailable(),
+                reasoning_tokens: ContextTokenMeasurement::unavailable(),
+            }),
+        logical_wake: (metrics.usage_event_count > 0)
+            .then(|| responses_aggregate_context_usage(metrics))
+            .unwrap_or_else(ContextTokenUsageTotals::unavailable),
+        request_count: metrics.provider_request_count,
+    };
+    snapshot.durable_transcript = ContextDurableTranscript {
+        event_count: None,
+        message_count: Some(durable_message_count as u64),
+        serialized_size: serialized_context_size(&durable_projection),
+    };
+    snapshot.provider_state = ContextProviderState {
+        state_kind: Some(
+            if provider_request.previous_response_id.is_some() {
+                "responses_previous_response_chain"
+            } else {
+                "responses_replay_projection"
+            }
+            .to_string(),
+        ),
+        item_count: Some(provider_request.input.len() as u64),
+        serialized_size: provider_state
+            .map(|state| serialized_context_size(&state.payload))
+            .unwrap_or_else(|| serialized_context_size(&provider_request.input)),
+        lineage_fingerprint: provider_state_fingerprint,
+    };
+    snapshot.compaction = compaction;
+    snapshot.diagnostics = vec![ContextAccountingDiagnostic {
+        severity: ContextDiagnosticSeverity::Info,
+        code: "responses_projection_accounted".to_string(),
+        message: "Snapshot contains the assembled Responses projection and chain dimensions without raw prompt or credential payloads.".to_string(),
+    }];
+    snapshot
+}
+
+fn responses_context_accounting_status(
+    request: &BrainWakeRequest,
+    snapshot: &ContextAccountingSnapshot,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Info,
+            message: "Context accounting snapshot captured for the assembled Responses request."
+                .to_string(),
+            metadata_json: Some(
+                json!({
+                    "kind": "context_accounting_snapshot",
+                    "snapshot": snapshot,
+                })
+                .to_string(),
+            ),
+        },
+    )
 }
 
 fn strategy_id_static(strategy_id: &str) -> &'static str {
@@ -2965,7 +3333,7 @@ where
                         let mut projected_text = String::new();
                         let mut projected_reasoning = String::new();
                         let disposition = match self.client.stream_observed(
-                            replay_request,
+                            replay_request.clone(),
                             &mut |provider_event| {
                                 let item = projected_streaming_item_from_provider_event(
                                     &request,
@@ -2991,8 +3359,11 @@ where
                             },
                         ) {
                             Ok(events) => {
+                                let current_usage = responses_usage_from_events(&events);
+                                let current_response_id =
+                                    responses_response_id_from_events(&events);
                                 metrics.observe_events(&events, request_started_at.elapsed());
-                                self.process_provider_events(
+                                let disposition = self.process_provider_events(
                                     &request,
                                     &mut items,
                                     events,
@@ -3007,7 +3378,30 @@ where
                                     no_progress_policy,
                                     &mut no_progress_state,
                                     &mut output_continuation,
-                                )
+                                );
+                                if disposition.is_ok() {
+                                    let snapshot = responses_context_accounting_snapshot(
+                                        &request,
+                                        &replay_request,
+                                        &base_history,
+                                        &continuation_items,
+                                        &committed_output_items,
+                                        provider_state.as_ref(),
+                                        &metrics,
+                                        self.request_builder.config.context_compaction.as_ref(),
+                                        &output_continuation.context_compaction,
+                                        current_usage.as_ref(),
+                                        last_response_id
+                                            .as_deref()
+                                            .or(current_response_id.as_deref()),
+                                    );
+                                    push_stream_item(
+                                        &mut items,
+                                        responses_context_accounting_status(&request, &snapshot),
+                                        &mut sink,
+                                    );
+                                }
+                                disposition
                             }
                             Err(error) => {
                                 pause_on_provider_context_limit!(error);
@@ -3107,6 +3501,8 @@ where
                     ));
                 }
             };
+            let current_usage = responses_usage_from_events(&events);
+            let current_response_id = responses_response_id_from_events(&events);
             let disposition = self.process_provider_events(
                 &request,
                 &mut items,
@@ -3123,6 +3519,28 @@ where
                 &mut no_progress_state,
                 &mut output_continuation,
             );
+            if disposition.is_ok() {
+                let snapshot = responses_context_accounting_snapshot(
+                    &request,
+                    &planned_request.request,
+                    &base_history,
+                    &continuation_items,
+                    &committed_output_items,
+                    provider_state.as_ref(),
+                    &metrics,
+                    self.request_builder.config.context_compaction.as_ref(),
+                    &output_continuation.context_compaction,
+                    current_usage.as_ref(),
+                    last_response_id
+                        .as_deref()
+                        .or(current_response_id.as_deref()),
+                );
+                push_stream_item(
+                    &mut items,
+                    responses_context_accounting_status(&request, &snapshot),
+                    &mut sink,
+                );
+            }
             let disposition = match disposition {
                 Ok(done) => done,
                 Err(error) => {
@@ -4006,6 +4424,8 @@ fn responses_continuation_state(
             "continuation strategy and metrics selection disagree".to_string(),
         ));
     }
+    validate_compaction_artifacts(&state.output_continuation.context_compaction.artifacts)
+        .map_err(ResponsesStreamError::ContinuationStateInvalid)?;
     Ok(state)
 }
 
@@ -5713,6 +6133,7 @@ mod tests {
         assert_eq!(result.transport_metrics.output_tokens, 5);
         assert_eq!(result.transport_metrics.reasoning_output_tokens, 1);
         assert_eq!(result.transport_metrics.total_tokens, 15);
+        assert_eq!(result.transport_metrics.usage_event_count, 1);
         assert!(result
             .transport_metrics
             .first_text_delta_latency_ms
@@ -5726,6 +6147,106 @@ mod tests {
             payload.last_completed_response.unwrap().output_items[0].item_type,
             "message"
         );
+    }
+
+    #[test]
+    fn context_accounting_snapshot_reports_responses_chain_and_provider_usage() {
+        let mut config = ResponsesBrainConfig::previous_response_chain("gpt-5");
+        config.instructions = Some("review the assembled request".to_string());
+        config.max_output_tokens = Some(256);
+        config.context_compaction = Some(BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 1_000,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 55,
+        });
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![
+                ResponsesEvent::TextDelta("accounted".to_string()),
+                ResponsesEvent::Completed {
+                    response_id: "resp-accounted".to_string(),
+                    usage: Some(ResponsesTokenUsage {
+                        input_tokens: 120,
+                        cached_input_tokens: 12,
+                        output_tokens: 18,
+                        reasoning_output_tokens: 6,
+                        total_tokens: 138,
+                    }),
+                },
+            ])]),
+            MapToolExecutor::default(),
+            config,
+        );
+
+        let result = brain
+            .wake_with_history(
+                wake_request(None, None),
+                ResponsesReplayProjection {
+                    input_items: vec![ResponsesInputItem::UserMessage {
+                        content: "inspect the request".to_string(),
+                    }],
+                    replay_hints: Vec::new(),
+                },
+            )
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+        let snapshot: ContextAccountingSnapshot = items
+            .iter()
+            .find_map(|item| match item {
+                BrainWakeStreamItem::Event { event } => match &event.event {
+                    BrainEvent::ProviderStatus {
+                        metadata_json: Some(metadata),
+                        ..
+                    } => serde_json::from_str::<Value>(metadata)
+                        .ok()
+                        .filter(|value| {
+                            value.get("kind").and_then(Value::as_str)
+                                == Some("context_accounting_snapshot")
+                        })
+                        .and_then(|value| serde_json::from_value(value["snapshot"].clone()).ok()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("Responses context accounting snapshot");
+
+        snapshot
+            .validate()
+            .expect("valid Responses context accounting snapshot");
+        assert_eq!(
+            snapshot.provider.protocol,
+            ContextProviderProtocol::Responses
+        );
+        assert_eq!(snapshot.prompt_projection.input_tokens.tokens, Some(120));
+        assert_eq!(
+            snapshot
+                .provider_usage
+                .current_request
+                .cached_input_tokens
+                .tokens,
+            Some(12)
+        );
+        assert_eq!(
+            snapshot.provider_usage.logical_wake.output_tokens.tokens,
+            Some(18)
+        );
+        assert_eq!(snapshot.provider_usage.request_count, 1);
+        assert!(matches!(
+            snapshot.prompt_projection.protocol_projection,
+            rusty_crew_brain_runtime::ContextProtocolProjection::Responses {
+                chain_strategy: Some(_),
+                replay_item_count: Some(1),
+                response_lineage_fingerprint: Some(_),
+            }
+        ));
+        assert!(snapshot
+            .prompt_projection
+            .segments
+            .iter()
+            .any(|segment| segment.name == "tool_schemas" && segment.included));
+        assert_eq!(snapshot.compaction.phase, ContextCompactionPhase::Idle);
     }
 
     #[test]
