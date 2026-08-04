@@ -17,22 +17,43 @@ impl CoreEngine {
                     "review_submission_caller_not_found",
                 )
             })?;
-        if record.phase != ReviewSubmissionPhase::ReviewerDispatchPending {
-            return Err(CoreError::new(
+        match record.phase {
+            ReviewSubmissionPhase::ReviewerDispatchPending => {
+                let session = self.sessions.get_session(&record.submitter_session_id)?;
+                if session.status == SessionStatus::Archived
+                    || session.agent_id != record.submitter_agent_id
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::SessionExpired,
+                        "review_submission_submitter_session_changed",
+                    ));
+                }
+                Ok((record.submitter_agent_id, record.submitter_session_id))
+            }
+            ReviewSubmissionPhase::ReviewerDispatched
+            | ReviewSubmissionPhase::DenFinalizationPending
+            | ReviewSubmissionPhase::DenFinalized
+            | ReviewSubmissionPhase::ReplyPending => {
+                let reviewer_session_id = record.reviewer_session_id.ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        "review_submission_reviewer_session_missing",
+                    )
+                })?;
+                let session = self.sessions.get_session(&reviewer_session_id)?;
+                if session.status == SessionStatus::Archived {
+                    return Err(CoreError::new(
+                        CoreErrorKind::SessionExpired,
+                        "review_submission_reviewer_session_archived",
+                    ));
+                }
+                Ok((session.agent_id, reviewer_session_id))
+            }
+            _ => Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
-                "review_submission_caller_not_dispatch_pending",
-            ));
+                "review_submission_caller_not_replyable",
+            )),
         }
-        let session = self.sessions.get_session(&record.submitter_session_id)?;
-        if session.status == SessionStatus::Archived
-            || session.agent_id != record.submitter_agent_id
-        {
-            return Err(CoreError::new(
-                CoreErrorKind::SessionExpired,
-                "review_submission_submitter_session_changed",
-            ));
-        }
-        Ok((record.submitter_agent_id, record.submitter_session_id))
     }
 
     pub fn begin_review_submission(
@@ -103,6 +124,20 @@ impl CoreEngine {
             reviewer_session_id: None,
             dispatch_message_id: None,
             dispatch_delivery_id: None,
+            review_result_digest: None,
+            review_result_json: None,
+            review_finalization_id: None,
+            review_packet_id: None,
+            review_packet_message_id: None,
+            review_exact_head_commit: None,
+            review_verdict: None,
+            review_finding_statuses: Vec::new(),
+            review_task_status: None,
+            review_material_digest: None,
+            reply_message_id: None,
+            reply_delivery_id: None,
+            reply_status: None,
+            reply_reason_code: None,
             terminal_reason: None,
             last_adapter_error: None,
             created_at: request.now.clone(),
@@ -207,6 +242,107 @@ impl CoreEngine {
                 record.phase = ReviewSubmissionPhase::ReviewerDispatched;
                 record.last_adapter_error = None;
             }
+            ReviewSubmissionTransition::DenFinalizationPending {
+                result_digest,
+                result_json,
+            } => {
+                require_review_phase(&record, ReviewSubmissionPhase::ReviewerDispatched)?;
+                if result_digest.trim().is_empty() || result_json.trim().is_empty() {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "review result digest and JSON are required",
+                    ));
+                }
+                if result_json.len() > 8192 {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "review result JSON exceeds 8192 bytes",
+                    ));
+                }
+                record.review_result_digest = Some(result_digest);
+                record.review_result_json = Some(result_json);
+                record.phase = ReviewSubmissionPhase::DenFinalizationPending;
+                record.last_adapter_error = None;
+            }
+            ReviewSubmissionTransition::DenFinalized {
+                finalization_id,
+                packet_id,
+                packet_message_id,
+                exact_head_commit,
+                verdict,
+                finding_statuses,
+                task_status,
+                material_digest,
+            } => {
+                require_review_phase(&record, ReviewSubmissionPhase::DenFinalizationPending)?;
+                if finalization_id == 0
+                    || packet_id == 0
+                    || packet_message_id == 0
+                    || exact_head_commit.trim().is_empty()
+                    || verdict.trim().is_empty()
+                    || task_status.trim().is_empty()
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "incomplete Den review finalization receipt",
+                    ));
+                }
+                record.review_finalization_id = Some(finalization_id);
+                record.review_packet_id = Some(packet_id);
+                record.review_packet_message_id = Some(packet_message_id);
+                record.review_exact_head_commit = Some(exact_head_commit);
+                record.review_verdict = Some(verdict);
+                record.review_finding_statuses = finding_statuses;
+                record.review_task_status = Some(task_status);
+                record.review_material_digest = material_digest;
+                record.phase = ReviewSubmissionPhase::DenFinalized;
+                record.last_adapter_error = None;
+            }
+            ReviewSubmissionTransition::ReplyPending => {
+                require_review_phase(&record, ReviewSubmissionPhase::DenFinalized)?;
+                record.phase = ReviewSubmissionPhase::ReplyPending;
+                record.reply_reason_code = None;
+                record.last_adapter_error = None;
+            }
+            ReviewSubmissionTransition::ReplySent {
+                reply_message_id,
+                reply_delivery_id,
+                reply_status,
+            } => {
+                require_review_phase(&record, ReviewSubmissionPhase::ReplyPending)?;
+                if reply_message_id.trim().is_empty()
+                    || reply_delivery_id.trim().is_empty()
+                    || reply_status.trim().is_empty()
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "reply delivery identifiers and status are required",
+                    ));
+                }
+                record.reply_message_id = Some(reply_message_id);
+                record.reply_delivery_id = Some(reply_delivery_id);
+                record.reply_status = Some(reply_status);
+                record.phase = ReviewSubmissionPhase::Replied;
+                record.last_adapter_error = None;
+            }
+            ReviewSubmissionTransition::ReplyTerminal { reason_code } => {
+                if !matches!(
+                    record.phase,
+                    ReviewSubmissionPhase::DenFinalized | ReviewSubmissionPhase::ReplyPending
+                ) {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "review_submission_phase_mismatch: reply terminal cannot settle {:?}",
+                            record.phase
+                        ),
+                    ));
+                }
+                record.reply_reason_code = Some(reason_code.clone());
+                record.terminal_reason = Some(reason_code);
+                record.phase = ReviewSubmissionPhase::ReplyTerminal;
+                record.last_adapter_error = None;
+            }
             ReviewSubmissionTransition::GateFailureSettled { terminal_reason }
             | ReviewSubmissionTransition::ReviewTerminal { terminal_reason } => {
                 if review_submission_terminal(record.phase) {
@@ -241,6 +377,9 @@ impl CoreEngine {
                     .submitter_session_id
                     .as_ref()
                     .is_none_or(|session_id| record.submitter_session_id == *session_id)
+                && query.reviewer_session_id.as_ref().is_none_or(|session_id| {
+                    record.reviewer_session_id.as_ref() == Some(session_id)
+                })
                 && (!query.pending_only
                     || matches!(
                         record.phase,
@@ -248,6 +387,10 @@ impl CoreEngine {
                             | ReviewSubmissionPhase::DenHandoffRecorded
                             | ReviewSubmissionPhase::GateFailed
                             | ReviewSubmissionPhase::ReviewerDispatchPending
+                            | ReviewSubmissionPhase::ReviewerDispatched
+                            | ReviewSubmissionPhase::DenFinalizationPending
+                            | ReviewSubmissionPhase::DenFinalized
+                            | ReviewSubmissionPhase::ReplyPending
                     ))
         });
         records.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
@@ -440,7 +583,10 @@ fn require_review_phase(
 fn review_submission_terminal(phase: ReviewSubmissionPhase) -> bool {
     matches!(
         phase,
-        ReviewSubmissionPhase::ReviewTerminal | ReviewSubmissionPhase::Superseded
+        ReviewSubmissionPhase::Replied
+            | ReviewSubmissionPhase::ReplyTerminal
+            | ReviewSubmissionPhase::ReviewTerminal
+            | ReviewSubmissionPhase::Superseded
     )
 }
 

@@ -539,8 +539,20 @@ pub enum ReviewSubmissionPhase {
     GateFailed,
     ReviewerDispatchPending,
     ReviewerDispatched,
+    DenFinalizationPending,
+    DenFinalized,
+    ReplyPending,
+    Replied,
+    ReplyTerminal,
     ReviewTerminal,
     Superseded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFindingStatus {
+    pub finding_id: u64,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -582,6 +594,21 @@ pub struct ReviewSubmissionRecord {
     pub reviewer_session_id: Option<SessionId>,
     pub dispatch_message_id: Option<String>,
     pub dispatch_delivery_id: Option<String>,
+    pub review_result_digest: Option<String>,
+    pub review_result_json: Option<String>,
+    pub review_finalization_id: Option<u64>,
+    pub review_packet_id: Option<u64>,
+    pub review_packet_message_id: Option<u64>,
+    pub review_exact_head_commit: Option<String>,
+    pub review_verdict: Option<String>,
+    #[serde(default)]
+    pub review_finding_statuses: Vec<ReviewFindingStatus>,
+    pub review_task_status: Option<String>,
+    pub review_material_digest: Option<String>,
+    pub reply_message_id: Option<String>,
+    pub reply_delivery_id: Option<String>,
+    pub reply_status: Option<String>,
+    pub reply_reason_code: Option<String>,
     pub terminal_reason: Option<String>,
     pub last_adapter_error: Option<String>,
     pub created_at: IsoTimestamp,
@@ -611,6 +638,29 @@ pub enum ReviewSubmissionTransition {
         dispatch_message_id: String,
         dispatch_delivery_id: String,
     },
+    DenFinalizationPending {
+        result_digest: String,
+        result_json: String,
+    },
+    DenFinalized {
+        finalization_id: u64,
+        packet_id: u64,
+        packet_message_id: u64,
+        exact_head_commit: String,
+        verdict: String,
+        finding_statuses: Vec<ReviewFindingStatus>,
+        task_status: String,
+        material_digest: Option<String>,
+    },
+    ReplyPending,
+    ReplySent {
+        reply_message_id: String,
+        reply_delivery_id: String,
+        reply_status: String,
+    },
+    ReplyTerminal {
+        reason_code: String,
+    },
     GateFailureSettled {
         terminal_reason: String,
     },
@@ -634,6 +684,7 @@ pub struct ReviewSubmissionQuery {
     pub submission_id: Option<String>,
     pub task_id: Option<TaskId>,
     pub submitter_session_id: Option<SessionId>,
+    pub reviewer_session_id: Option<SessionId>,
     pub pending_only: bool,
 }
 

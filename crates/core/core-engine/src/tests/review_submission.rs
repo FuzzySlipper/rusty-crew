@@ -149,6 +149,139 @@ fn submitted_workflow_is_restart_pending_and_can_fill_initial_base_commit() {
 }
 
 #[test]
+fn routed_completion_checkpoints_are_restart_durable_and_reply_terminal_is_stable() {
+    let engine = test_engine();
+    let submitter = engine
+        .create_session(session_config(
+            "review-checkpoint-submit",
+            "review-checkpoint-runner",
+            "review-checkpoint-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let reviewer = engine
+        .create_session(session_config(
+            "review-checkpoint-reviewer",
+            "review-checkpoint-reviewer-agent",
+            "review-checkpoint-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let mut record = begin(&engine, &submitter.session_id, 6609, '5');
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenHandoffRecorded {
+                review_round_id: 701,
+            },
+            now: "2026-08-02T00:04:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::GateRegistered { gate_id: 702 },
+            now: "2026-08-02T00:04:30Z".to_string(),
+        })
+        .unwrap();
+    engine
+        .consume_github_gate_terminal_event(GitHubGateTerminalEvent {
+            event_id: 703,
+            gate_id: 702,
+            project_id: ProjectId::new("rusty-crew"),
+            task_id: TaskId::new("6609"),
+            commit_sha: exact_sha('5'),
+            status: "passed".to_string(),
+            terminal_reason: "checks_passed".to_string(),
+            summary: None,
+            failure_summary: None,
+            completed_at: "2026-08-02T00:04:45Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            submission_id: Some(record.submission_id.clone()),
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap()
+        .remove(0);
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReviewerDispatched {
+                reviewer_session_id: reviewer.session_id.clone(),
+                dispatch_message_id: "review-message:checkpoint".to_string(),
+                dispatch_delivery_id: "review-delivery:checkpoint".to_string(),
+            },
+            now: "2026-08-02T00:05:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenFinalizationPending {
+                result_digest: "digest".to_string(),
+                result_json: r#"{"verdict":"looks_good"}"#.to_string(),
+            },
+            now: "2026-08-02T00:06:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenFinalized {
+                finalization_id: 1,
+                packet_id: 2,
+                packet_message_id: 3,
+                exact_head_commit: exact_sha('5'),
+                verdict: "looks_good".to_string(),
+                finding_statuses: vec![],
+                task_status: "done".to_string(),
+                material_digest: Some("material".to_string()),
+            },
+            now: "2026-08-02T00:07:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReplyPending,
+            now: "2026-08-02T00:08:00Z".to_string(),
+        })
+        .unwrap();
+    let terminal = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReplyTerminal {
+                reason_code: "requester_expired".to_string(),
+            },
+            now: "2026-08-02T00:09:00Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(terminal.phase, ReviewSubmissionPhase::ReplyTerminal);
+    assert_eq!(terminal.review_finalization_id, Some(1));
+    assert_eq!(
+        terminal.reply_reason_code.as_deref(),
+        Some("requester_expired")
+    );
+    let pending = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            reviewer_session_id: Some(reviewer.session_id),
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].phase, ReviewSubmissionPhase::ReplyTerminal);
+}
+
+#[test]
 #[ignore = "requires local PostgreSQL dev database env"]
 fn postgres_review_submission_matches_restart_and_revision_contract() {
     let database_url = std::env::var("RUSTY_CREW_DATABASE_URL")

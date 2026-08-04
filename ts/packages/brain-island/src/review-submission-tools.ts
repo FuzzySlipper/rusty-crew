@@ -19,8 +19,49 @@ const submitTaskForReviewParameters = Type.Object(
   { additionalProperties: false },
 );
 
+const reviewFindingResolution = Type.Object(
+  {
+    findingId: Type.Integer({ minimum: 1 }),
+    status: Type.String({ minLength: 1 }),
+    verificationNote: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const reviewNewFinding = Type.Object(
+  {
+    category: Type.String({ minLength: 1 }),
+    summary: Type.String({ minLength: 1 }),
+    notes: Type.Optional(Type.String()),
+    fileReferences: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+    testCommands: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+  },
+  { additionalProperties: false },
+);
+
+const completeRoutedReviewParameters = Type.Object(
+  {
+    verdict: Type.Union([
+      Type.Literal("looks_good"),
+      Type.Literal("changes_requested"),
+    ]),
+    notes: Type.Optional(Type.String({ maxLength: 4096 })),
+    evidence: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
+        maxItems: 32,
+      }),
+    ),
+    priorFindingResolutions: Type.Optional(Type.Array(reviewFindingResolution)),
+    newFindings: Type.Optional(Type.Array(reviewNewFinding)),
+  },
+  { additionalProperties: false },
+);
+
 export type SubmitTaskForReviewParameters = Static<
   typeof submitTaskForReviewParameters
+>;
+export type CompleteRoutedReviewParameters = Static<
+  typeof completeRoutedReviewParameters
 >;
 
 export interface ReviewSubmissionToolReceipt {
@@ -33,18 +74,47 @@ export interface ReviewSubmissionToolReceipt {
   summary: string;
 }
 
+export interface CompleteRoutedReviewToolReceipt {
+  ok: boolean;
+  submissionId?: string;
+  taskId?: number;
+  commitSha?: string;
+  reviewRoundId?: number;
+  finalizationId?: number;
+  packetId?: number;
+  packetMessageId?: number;
+  exactHeadCommit?: string;
+  verdict?: string;
+  findingStatuses?: Array<{ findingId: number; status: string }>;
+  taskStatus?: string;
+  replyMessageId?: string;
+  replyStatus?: string;
+  reasonCode?: string;
+  summary: string;
+}
+
 export interface ReviewSubmissionToolRuntime {
   submit(
     input: SubmitTaskForReviewParameters & {
       caller: AgentCoordinationCaller;
     },
   ): Promise<ReviewSubmissionToolReceipt>;
+  complete(
+    input: CompleteRoutedReviewParameters & {
+      caller: AgentCoordinationCaller;
+      reviewerSessionId: string;
+      correlationId?: string;
+    },
+  ): Promise<CompleteRoutedReviewToolReceipt>;
 }
 
 export function createReviewSubmissionToolResolver(
   runtime?: ReviewSubmissionToolRuntime,
 ): BrainToolResolver {
-  return () => [submitTaskForReviewTool(runtime)];
+  return () => [
+    submitTaskForReviewTool(runtime),
+    completeRoutedReviewTool(runtime),
+  ];
 }
 
 export function submitTaskForReviewTool(
@@ -92,10 +162,64 @@ export function submitTaskForReviewTool(
   };
 }
 
+export function completeRoutedReviewTool(
+  runtime?: ReviewSubmissionToolRuntime,
+): BrainTool<
+  typeof completeRoutedReviewParameters,
+  CompleteRoutedReviewToolReceipt
+> {
+  return {
+    name: "complete_routed_review",
+    label: "Complete routed review",
+    description:
+      "Complete the currently routed Den review using only a structured verdict, finding resolutions, new findings, and notes. Den finalizes the authoritative round; Rusty Crew then sends exactly one receipt-based reply to the requester.",
+    parameters: completeRoutedReviewParameters,
+    executeWithContext: async (params, context) => {
+      if (runtime === undefined) {
+        return completeResult({
+          ok: false,
+          reasonCode: "review_submission_runtime_unavailable",
+          summary: "Rusty Crew review completion runtime is unavailable.",
+        });
+      }
+      const receipt = await runtime.complete({
+        ...params,
+        caller: {
+          type: "review_submission",
+          submissionId: "context-resolved",
+        },
+        reviewerSessionId: context.sessionId,
+        correlationId:
+          context.wake.state.pendingMessages.find((message) =>
+            message.correlationId?.startsWith("review:"),
+          )?.correlationId ?? undefined,
+      });
+      return completeResult(receipt, receipt.ok ? "complete_turn" : undefined);
+    },
+    execute: async (_callId, _params) =>
+      completeResult({
+        ok: false,
+        reasonCode: "tool_context_required",
+        summary: "complete_routed_review requires trusted wake context.",
+      }),
+  };
+}
+
 function result(
   receipt: ReviewSubmissionToolReceipt,
   turnDisposition?: "complete_turn",
 ): BrainToolResult<ReviewSubmissionToolReceipt> {
+  return {
+    content: [{ type: "text", text: receipt.summary }],
+    details: receipt,
+    ...(turnDisposition === undefined ? {} : { turnDisposition }),
+  };
+}
+
+function completeResult(
+  receipt: CompleteRoutedReviewToolReceipt,
+  turnDisposition?: "complete_turn",
+): BrainToolResult<CompleteRoutedReviewToolReceipt> {
   return {
     content: [{ type: "text", text: receipt.summary }],
     details: receipt,

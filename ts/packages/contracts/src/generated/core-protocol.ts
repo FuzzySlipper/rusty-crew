@@ -1626,10 +1626,16 @@ export type ResourceLimits = {
   workdir?: string | null;
 };
 
-export type ReviewSubmissionPhase = "submitted" | "den_handoff_recorded" | "gate_pending" | "gate_failed" | "reviewer_dispatch_pending" | "reviewer_dispatched" | "review_terminal" | "superseded";
+export type ReviewFindingStatus = {
+  findingId: number;
+  status: string;
+};
+
+export type ReviewSubmissionPhase = "submitted" | "den_handoff_recorded" | "gate_pending" | "gate_failed" | "reviewer_dispatch_pending" | "reviewer_dispatched" | "den_finalization_pending" | "den_finalized" | "reply_pending" | "replied" | "reply_terminal" | "review_terminal" | "superseded";
 
 export type ReviewSubmissionQuery = {
   pendingOnly: boolean;
+  reviewerSessionId?: string | null;
   submissionId?: string | null;
   submitterSessionId?: string | null;
   taskId?: string | null;
@@ -1648,10 +1654,24 @@ export type ReviewSubmissionRecord = {
   lastAdapterError?: string | null;
   phase: ReviewSubmissionPhase;
   projectId: string;
+  replyDeliveryId?: string | null;
+  replyMessageId?: string | null;
+  replyReasonCode?: string | null;
+  replyStatus?: string | null;
   repository: string;
   requiredChecks: Array<string>;
+  reviewExactHeadCommit?: string | null;
+  reviewFinalizationId?: number | null;
+  reviewFindingStatuses?: Array<ReviewFindingStatus>;
+  reviewMaterialDigest?: string | null;
+  reviewPacketId?: number | null;
+  reviewPacketMessageId?: number | null;
+  reviewResultDigest?: string | null;
+  reviewResultJson?: string | null;
   reviewRoundId?: number | null;
   reviewSummaryMd: string;
+  reviewTaskStatus?: string | null;
+  reviewVerdict?: string | null;
   reviewer: string;
   reviewerSessionId?: string | null;
   revision: number;
@@ -1692,6 +1712,30 @@ export type ReviewSubmissionTransition = {
   dispatchMessageId: string;
   reviewerSessionId: string;
   type: "reviewer_dispatched";
+} | {
+  resultDigest: string;
+  resultJson: string;
+  type: "den_finalization_pending";
+} | {
+  exactHeadCommit: string;
+  finalizationId: number;
+  findingStatuses: Array<ReviewFindingStatus>;
+  materialDigest?: string | null;
+  packetId: number;
+  packetMessageId: number;
+  taskStatus: string;
+  type: "den_finalized";
+  verdict: string;
+} | {
+  type: "reply_pending";
+} | {
+  replyDeliveryId: string;
+  replyMessageId: string;
+  replyStatus: string;
+  type: "reply_sent";
+} | {
+  reasonCode: string;
+  type: "reply_terminal";
 } | {
   terminalReason: string;
   type: "gate_failure_settled";

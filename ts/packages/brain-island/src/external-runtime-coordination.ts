@@ -18,6 +18,8 @@ import {
   formatModelAgentDirectory,
 } from "./coordination-addressing.js";
 import type {
+  CompleteRoutedReviewParameters,
+  CompleteRoutedReviewToolReceipt,
   ReviewSubmissionToolReceipt,
   SubmitTaskForReviewParameters,
 } from "./review-submission-tools.js";
@@ -33,6 +35,7 @@ export interface CodexCoordinationBinding {
   readonly bindingId: string;
   readonly controllerInstanceId: string;
   readonly controllerGeneration: number;
+  readonly reviewerSessionId?: string;
 }
 
 export interface CodexCoordinationPort {
@@ -60,6 +63,12 @@ export async function resolveCodexCoordinationToolCall(input: {
       caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
     },
   ) => Promise<ReviewSubmissionToolReceipt>;
+  readonly onReviewCompletion?: (
+    input: CompleteRoutedReviewParameters & {
+      caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
+      reviewerSessionId: string;
+    },
+  ) => Promise<CompleteRoutedReviewToolReceipt>;
   readonly now?: () => Date;
 }): Promise<DynamicToolCallResponse | undefined> {
   const { params } = input;
@@ -69,7 +78,8 @@ export async function resolveCodexCoordinationToolCall(input: {
     params.tool !== "send_agent_message" &&
     params.tool !== "reply_agent_message" &&
     params.tool !== "agent_round" &&
-    params.tool !== "submit_task_for_review"
+    params.tool !== "submit_task_for_review" &&
+    params.tool !== "complete_routed_review"
   ) {
     return failed(`unsupported Rusty Crew coordination tool ${params.tool}`);
   }
@@ -109,6 +119,22 @@ export async function resolveCodexCoordinationToolCall(input: {
     const receipt = await input.onReviewSubmission({
       ...reviewArgs,
       caller,
+    });
+    return receipt.ok ? succeeded(receipt.summary) : failed(receipt.summary);
+  }
+  if (params.tool === "complete_routed_review") {
+    if (input.onReviewCompletion === undefined) {
+      return failed("review completion runtime is unavailable");
+    }
+    if (input.binding.reviewerSessionId === undefined) {
+      return failed("review completion requires a bound Crew reviewer session");
+    }
+    const reviewArgs = parseReviewCompletionArguments(params.arguments);
+    if (typeof reviewArgs === "string") return failed(reviewArgs);
+    const receipt = await input.onReviewCompletion({
+      ...reviewArgs,
+      caller,
+      reviewerSessionId: input.binding.reviewerSessionId,
     });
     return receipt.ok ? succeeded(receipt.summary) : failed(receipt.summary);
   }
@@ -294,6 +320,69 @@ function parseReviewSubmissionArguments(
       ? {}
       : { reviewer: record.reviewer as string }),
   };
+}
+
+function parseReviewCompletionArguments(
+  value: unknown,
+): CompleteRoutedReviewParameters | string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return "complete_routed_review arguments must be an object";
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.verdict !== "looks_good" &&
+    record.verdict !== "changes_requested"
+  ) {
+    return "verdict must be looks_good or changes_requested";
+  }
+  if (record.notes !== undefined && typeof record.notes !== "string") {
+    return "notes must be a string when supplied";
+  }
+  if (
+    record.evidence !== undefined &&
+    (!Array.isArray(record.evidence) ||
+      record.evidence.some(
+        (item) => typeof item !== "string" || item.trim() === "",
+      ))
+  ) {
+    return "evidence must be a non-empty string array when supplied";
+  }
+  if (
+    record.priorFindingResolutions !== undefined &&
+    (!Array.isArray(record.priorFindingResolutions) ||
+      record.priorFindingResolutions.some((item) => {
+        if (typeof item !== "object" || item === null) return true;
+        const finding = item as Record<string, unknown>;
+        return (
+          typeof finding.findingId !== "number" ||
+          !Number.isSafeInteger(finding.findingId) ||
+          finding.findingId <= 0 ||
+          typeof finding.status !== "string" ||
+          finding.status.trim() === "" ||
+          typeof finding.verificationNote !== "string" ||
+          finding.verificationNote.trim() === ""
+        );
+      }))
+  ) {
+    return "priorFindingResolutions contains an invalid finding resolution";
+  }
+  if (
+    record.newFindings !== undefined &&
+    (!Array.isArray(record.newFindings) ||
+      record.newFindings.some((item) => {
+        if (typeof item !== "object" || item === null) return true;
+        const finding = item as Record<string, unknown>;
+        return (
+          typeof finding.category !== "string" ||
+          finding.category.trim() === "" ||
+          typeof finding.summary !== "string" ||
+          finding.summary.trim() === ""
+        );
+      }))
+  ) {
+    return "newFindings contains an invalid finding";
+  }
+  return record as unknown as CompleteRoutedReviewParameters;
 }
 
 function parseArguments(value: unknown): CoordinationArguments | string {

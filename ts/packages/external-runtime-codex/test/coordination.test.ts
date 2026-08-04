@@ -16,6 +16,7 @@ test("coordination catalog keeps model arguments small", () => {
       "reply_agent_message",
       "agent_round",
       "submit_task_for_review",
+      "complete_routed_review",
     ],
   );
   const directorySchema = namespace.tools[0]?.inputSchema as {

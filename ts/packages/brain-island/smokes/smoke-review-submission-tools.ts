@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { submitTaskForReviewTool } from "../src/review-submission-tools.js";
+import {
+  completeRoutedReviewTool,
+  submitTaskForReviewTool,
+} from "../src/review-submission-tools.js";
 import { createDefaultMcpDiscoveryClient } from "../src/service-mcp-tools.js";
 
 const calls: unknown[] = [];
@@ -61,6 +64,74 @@ assert.deepEqual(calls, [
       wakeId: "wake-1",
       toolCallId: "call-1",
     },
+  },
+]);
+
+const completionCalls: unknown[] = [];
+const completionTool = completeRoutedReviewTool({
+  async submit() {
+    throw new Error("not used");
+  },
+  async complete(input) {
+    completionCalls.push(input);
+    return {
+      ok: true,
+      submissionId: "review-submission:one",
+      taskId: 6574,
+      commitSha: "a".repeat(40),
+      finalizationId: 12,
+      packetId: 13,
+      packetMessageId: 14,
+      exactHeadCommit: "a".repeat(40),
+      verdict: input.verdict,
+      findingStatuses: [],
+      taskStatus: "done",
+      replyMessageId: "review-reply-message:one",
+      replyStatus: "accepted",
+      summary: "completed",
+    };
+  },
+});
+assert.ok(completionTool.executeWithContext);
+const completionResult = await completionTool.executeWithContext!(
+  {
+    verdict: "looks_good",
+    notes: "Focused checks passed.",
+    evidence: ["npm test", "git diff --check"],
+  },
+  {
+    wake: {
+      state: {
+        session: { agentId: "reviewer" },
+        pendingMessages: [
+          {
+            from: "runner",
+            to: "reviewer",
+            body: "review request",
+            correlationId: "review:6574:" + "a".repeat(40),
+          },
+        ],
+      },
+    } as never,
+    wakeId: "wake-review",
+    sessionId: "reviewer-session",
+    callId: "call-review",
+    signal: new AbortController().signal,
+  },
+);
+assert.equal(completionResult.turnDisposition, "complete_turn");
+assert.equal(completionResult.details.replyStatus, "accepted");
+assert.deepEqual(completionCalls, [
+  {
+    verdict: "looks_good",
+    notes: "Focused checks passed.",
+    evidence: ["npm test", "git diff --check"],
+    caller: {
+      type: "review_submission",
+      submissionId: "context-resolved",
+    },
+    reviewerSessionId: "reviewer-session",
+    correlationId: "review:6574:" + "a".repeat(40),
   },
 ]);
 

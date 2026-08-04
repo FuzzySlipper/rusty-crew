@@ -6853,6 +6853,23 @@
       },
       "type": "object"
     },
+    "ReviewFindingStatus": {
+      "properties": {
+        "findingId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "findingId",
+        "status"
+      ],
+      "type": "object"
+    },
     "ReviewSubmissionPhase": {
       "enum": [
         "submitted",
@@ -6861,6 +6878,11 @@
         "gate_failed",
         "reviewer_dispatch_pending",
         "reviewer_dispatched",
+        "den_finalization_pending",
+        "den_finalized",
+        "reply_pending",
+        "replied",
+        "reply_terminal",
         "review_terminal",
         "superseded"
       ],
@@ -6870,6 +6892,12 @@
       "properties": {
         "pendingOnly": {
           "type": "boolean"
+        },
+        "reviewerSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "submissionId": {
           "type": [
@@ -6953,6 +6981,30 @@
         "projectId": {
           "type": "string"
         },
+        "replyDeliveryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "repository": {
           "type": "string"
         },
@@ -6961,6 +7013,61 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "reviewExactHeadCommit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewFinalizationId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewFindingStatuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReviewFindingStatus"
+          },
+          "type": "array"
+        },
+        "reviewMaterialDigest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewPacketId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewPacketMessageId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewResultDigest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewResultJson": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewRoundId": {
           "format": "uint64",
@@ -6972,6 +7079,18 @@
         },
         "reviewSummaryMd": {
           "type": "string"
+        },
+        "reviewTaskStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewVerdict": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewer": {
           "type": "string"
@@ -7164,6 +7283,133 @@
             "reviewerSessionId",
             "dispatchMessageId",
             "dispatchDeliveryId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "resultDigest": {
+              "type": "string"
+            },
+            "resultJson": {
+              "type": "string"
+            },
+            "type": {
+              "const": "den_finalization_pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "resultDigest",
+            "resultJson"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "exactHeadCommit": {
+              "type": "string"
+            },
+            "finalizationId": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "findingStatuses": {
+              "items": {
+                "$ref": "#/$defs/ReviewFindingStatus"
+              },
+              "type": "array"
+            },
+            "materialDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "packetId": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "packetMessageId": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "taskStatus": {
+              "type": "string"
+            },
+            "type": {
+              "const": "den_finalized",
+              "type": "string"
+            },
+            "verdict": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "finalizationId",
+            "packetId",
+            "packetMessageId",
+            "exactHeadCommit",
+            "verdict",
+            "findingStatuses",
+            "taskStatus"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "reply_pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "replyDeliveryId": {
+              "type": "string"
+            },
+            "replyMessageId": {
+              "type": "string"
+            },
+            "replyStatus": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reply_sent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "replyMessageId",
+            "replyDeliveryId",
+            "replyStatus"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reasonCode": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reply_terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reasonCode"
           ],
           "type": "object"
         },

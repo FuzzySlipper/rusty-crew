@@ -859,6 +859,7 @@ function assertDynamicToolReadiness(): void {
     "send_agent_message",
     "agent_round",
     "submit_task_for_review",
+    "complete_routed_review",
   ]) {
     if (!names.has(required)) {
       throw new CodexProtocolError(

@@ -1038,6 +1038,15 @@ export async function createRustyCrewServiceApp(
           reviewSubmissionContext(state),
         ).submit(input);
       },
+      onReviewCompletion: async (input) => {
+        const state = liveState;
+        if (state === undefined) {
+          throw new Error("service review completion runtime is not ready");
+        }
+        return createServiceReviewSubmissionRuntime(() =>
+          reviewSubmissionContext(state),
+        ).complete(input);
+      },
     });
     const externalMemoryReadiness = createServiceExternalMemoryReadiness(
       config,

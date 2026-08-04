@@ -341,6 +341,12 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:review-submission-tools",
   },
   {
+    name: "complete_routed_review",
+    implementationModule:
+      "./review-submission-tools.js#completeRoutedReviewTool",
+    inventoryTest: "smoke:review-submission-tools",
+  },
+  {
     name: "web_search",
     implementationModule: "./web-tools.js#webSearchTool",
     inventoryTest: "smoke:tool-registry",

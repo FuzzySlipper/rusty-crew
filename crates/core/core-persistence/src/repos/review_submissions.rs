@@ -147,6 +147,11 @@ pub(crate) fn review_submission_phase_as_str(phase: ReviewSubmissionPhase) -> &'
         ReviewSubmissionPhase::GateFailed => "gate_failed",
         ReviewSubmissionPhase::ReviewerDispatchPending => "reviewer_dispatch_pending",
         ReviewSubmissionPhase::ReviewerDispatched => "reviewer_dispatched",
+        ReviewSubmissionPhase::DenFinalizationPending => "den_finalization_pending",
+        ReviewSubmissionPhase::DenFinalized => "den_finalized",
+        ReviewSubmissionPhase::ReplyPending => "reply_pending",
+        ReviewSubmissionPhase::Replied => "replied",
+        ReviewSubmissionPhase::ReplyTerminal => "reply_terminal",
         ReviewSubmissionPhase::ReviewTerminal => "review_terminal",
         ReviewSubmissionPhase::Superseded => "superseded",
     }

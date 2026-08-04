@@ -225,6 +225,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "complete_routed_review",
+      "description": "Complete the currently routed Den review with a structured verdict and let Rusty Crew finalize in Den and deliver one receipt-based reply.",
+      "category": "coordination",
+      "toolsets": ["review_readonly"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action", "network_access", "external_write"],
+      "output_shape": "coordination.review_completion_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "web_search",
       "description": "Search the public web through the configured provider and return bounded results.",
       "category": "web",

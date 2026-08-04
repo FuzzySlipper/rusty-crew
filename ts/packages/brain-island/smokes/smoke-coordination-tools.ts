@@ -298,7 +298,14 @@ const selection = selectToolProfile({
 });
 assert.deepEqual(
   selection.toolProfile.tools.map((tool) => tool.name),
-  ["list_agents", "send_agent_message", "reply_agent_message", "agent_round"],
+  [
+    "list_agents",
+    "send_agent_message",
+    "reply_agent_message",
+    "agent_round",
+    "submit_task_for_review",
+    "rusty_crew_help",
+  ],
 );
 const resolved = resolveToolSession({
   wake,

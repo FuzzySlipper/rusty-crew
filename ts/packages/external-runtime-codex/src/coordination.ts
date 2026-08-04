@@ -121,6 +121,63 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
           additionalProperties: false,
         },
       },
+      {
+        type: "function",
+        name: "complete_routed_review",
+        description:
+          "Complete the currently routed Den review with a structured verdict; Crew finalizes Den and sends one receipt-based reply.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            verdict: {
+              type: "string",
+              enum: ["looks_good", "changes_requested"],
+            },
+            notes: { type: "string", maxLength: 4096 },
+            evidence: {
+              type: "array",
+              items: { type: "string", minLength: 1, maxLength: 512 },
+              maxItems: 32,
+            },
+            priorFindingResolutions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  findingId: { type: "integer", minimum: 1 },
+                  status: { type: "string", minLength: 1 },
+                  verificationNote: { type: "string", minLength: 1 },
+                },
+                required: ["findingId", "status", "verificationNote"],
+                additionalProperties: false,
+              },
+            },
+            newFindings: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  category: { type: "string", minLength: 1 },
+                  summary: { type: "string", minLength: 1 },
+                  notes: { type: "string" },
+                  fileReferences: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                  },
+                  testCommands: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                  },
+                },
+                required: ["category", "summary"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["verdict"],
+          additionalProperties: false,
+        },
+      },
     ],
   },
 ];

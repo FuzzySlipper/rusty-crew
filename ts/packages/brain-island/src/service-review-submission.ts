@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import type {
+  AgentCoordinationCaller,
   AgentMessageDeliveryReceipt,
   McpBindingRecord,
+  ReviewFindingStatus,
   ReviewSubmissionRecord,
   SessionId,
 } from "@rusty-crew/contracts";
@@ -10,6 +13,8 @@ import type { RustyCrewServiceConfig } from "./service-config.js";
 import type {
   ReviewSubmissionToolReceipt,
   ReviewSubmissionToolRuntime,
+  CompleteRoutedReviewParameters,
+  CompleteRoutedReviewToolReceipt,
   SubmitTaskForReviewParameters,
 } from "./review-submission-tools.js";
 import {
@@ -39,6 +44,13 @@ export function createServiceReviewSubmissionRuntime(
       }
       return submitReview(context, input);
     },
+    async complete(input) {
+      const context = getContext();
+      if (context === undefined) {
+        throw new Error("service review completion runtime is not ready");
+      }
+      return completeReview(context, input);
+    },
   };
 }
 
@@ -59,6 +71,12 @@ export async function reconcileReviewSubmissions(
       await settleFailedGate(context, record);
     } else if (record.phase === "reviewer_dispatch_pending") {
       await dispatchReviewer(context, record);
+    } else if (
+      record.phase === "den_finalization_pending" ||
+      record.phase === "den_finalized" ||
+      record.phase === "reply_pending"
+    ) {
+      await resumeRoutedReview(context, record);
     }
   }
 }
@@ -91,6 +109,504 @@ async function submitReview(
   }
 
   return advanceDenHandoff(context, record);
+}
+
+async function completeReview(
+  context: ServiceReviewSubmissionContext,
+  input: CompleteRoutedReviewParameters & {
+    caller: AgentCoordinationCaller;
+    reviewerSessionId: string;
+    correlationId?: string;
+  },
+): Promise<CompleteRoutedReviewToolReceipt> {
+  const records = await context.bridge.listReviewSubmissions({
+    pendingOnly: false,
+    reviewerSessionId: input.reviewerSessionId,
+  });
+  const eligible = records
+    .filter((record) =>
+      [
+        "reviewer_dispatched",
+        "den_finalization_pending",
+        "den_finalized",
+        "reply_pending",
+        "replied",
+        "reply_terminal",
+      ].includes(record.phase),
+    )
+    .filter((record) =>
+      input.correlationId === undefined
+        ? true
+        : input.correlationId === `review:${record.taskId}:${record.commitSha}`,
+    );
+  const result = canonicalReviewResult(input);
+  if (eligible.length === 0) {
+    return {
+      ok: false,
+      reasonCode: "review_context_required",
+      summary:
+        "No active routed review is bound to this reviewer wake. Use the managed reviewer wake that carried the review request.",
+    };
+  }
+  if (eligible.length > 1) {
+    return {
+      ok: false,
+      reasonCode: "multiple_active_review_requests",
+      summary:
+        "More than one active routed review is bound to this reviewer session; completion is refused until the wake context is unambiguous.",
+    };
+  }
+  if (eligible[0].phase === "reply_terminal") {
+    return {
+      ok: false,
+      submissionId: eligible[0].submissionId,
+      taskId: Number(eligible[0].taskId),
+      commitSha: eligible[0].commitSha,
+      reasonCode: eligible[0].replyReasonCode ?? "review_reply_terminal",
+      summary:
+        "Den finalization is durable, but this routed requester has a terminal reply outcome; no replacement requester was selected.",
+    };
+  }
+  if (eligible[0].phase === "replied") {
+    if (eligible[0].reviewResultDigest === result.digest) {
+      return completedReceipt(eligible[0]);
+    }
+    return {
+      ok: false,
+      submissionId: eligible[0].submissionId,
+      taskId: Number(eligible[0].taskId),
+      commitSha: eligible[0].commitSha,
+      reasonCode: "review_result_conflict",
+      summary:
+        "This routed review is already finalized with a different structured result; no second Den finalization or reply was sent.",
+    };
+  }
+  if (
+    eligible[0].reviewResultDigest !== undefined &&
+    eligible[0].reviewResultDigest !== null &&
+    eligible[0].reviewResultDigest !== result.digest
+  ) {
+    return {
+      ok: false,
+      submissionId: eligible[0].submissionId,
+      taskId: Number(eligible[0].taskId),
+      commitSha: eligible[0].commitSha,
+      reasonCode: "review_result_conflict",
+      summary:
+        "This routed review already has a different structured result; no alternate Den finalization or reply was sent.",
+    };
+  }
+  return resumeRoutedReview(context, eligible[0], result);
+}
+
+interface CanonicalReviewResult {
+  verdict: "looks_good" | "changes_requested";
+  notes?: string;
+  evidence: string[];
+  priorFindingResolutions: NonNullable<
+    CompleteRoutedReviewParameters["priorFindingResolutions"]
+  >;
+  newFindings: NonNullable<CompleteRoutedReviewParameters["newFindings"]>;
+  digest: string;
+  json: string;
+}
+
+function canonicalReviewResult(
+  input: CompleteRoutedReviewParameters,
+): CanonicalReviewResult {
+  const normalized = {
+    verdict: input.verdict,
+    ...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
+    evidence: [...(input.evidence ?? [])]
+      .map((item) => item.trim())
+      .filter(Boolean),
+    priorFindingResolutions: [...(input.priorFindingResolutions ?? [])]
+      .map((finding) => ({
+        findingId: finding.findingId,
+        status: finding.status.trim(),
+        verificationNote: finding.verificationNote.trim(),
+      }))
+      .sort((left, right) => left.findingId - right.findingId),
+    newFindings: [...(input.newFindings ?? [])]
+      .map((finding) => ({
+        category: finding.category.trim(),
+        summary: finding.summary.trim(),
+        ...(finding.notes?.trim() ? { notes: finding.notes.trim() } : {}),
+        ...(finding.fileReferences?.length
+          ? { fileReferences: [...finding.fileReferences].sort() }
+          : {}),
+        ...(finding.testCommands?.length
+          ? { testCommands: [...finding.testCommands].sort() }
+          : {}),
+      }))
+      .sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right)),
+      ),
+  };
+  const json = JSON.stringify(normalized);
+  return {
+    verdict: normalized.verdict,
+    notes:
+      normalized.notes === undefined && normalized.evidence.length === 0
+        ? undefined
+        : [normalized.notes, ...normalized.evidence]
+            .filter((item): item is string => item !== undefined)
+            .join("\n"),
+    evidence: normalized.evidence,
+    priorFindingResolutions: normalized.priorFindingResolutions,
+    newFindings: normalized.newFindings,
+    digest: createHash("sha256").update(json).digest("hex"),
+    json,
+  };
+}
+
+async function resumeRoutedReview(
+  context: ServiceReviewSubmissionContext,
+  initial: ReviewSubmissionRecord,
+  suppliedResult?: CanonicalReviewResult,
+): Promise<CompleteRoutedReviewToolReceipt> {
+  let record = initial;
+  try {
+    if (record.phase === "reviewer_dispatched") {
+      if (suppliedResult === undefined) {
+        return {
+          ok: false,
+          submissionId: record.submissionId,
+          taskId: Number(record.taskId),
+          commitSha: record.commitSha,
+          reasonCode: "review_result_required",
+          summary:
+            "A structured review result is required for this routed review.",
+        };
+      }
+      record = await context.bridge.transitionReviewSubmission({
+        submissionId: record.submissionId,
+        expectedRevision: record.revision,
+        transition: {
+          type: "den_finalization_pending",
+          resultDigest: suppliedResult.digest,
+          resultJson: suppliedResult.json,
+        },
+        now: context.now(),
+      });
+    }
+
+    if (record.phase === "den_finalization_pending") {
+      const result = parseStoredReviewResult(record.reviewResultJson);
+      const binding = denBinding(context, record.submitterSessionId);
+      if (binding === undefined) {
+        return completionFailed(
+          context,
+          record,
+          "den_mcp_binding_unavailable",
+          "Submitting session has no active Den MCP binding.",
+        );
+      }
+      const payload = await denCall(context, binding, "finalize_review", {
+        review_round_id: record.reviewRoundId,
+        verdict: result.verdict,
+        decided_by: reviewerAgentId(context, record) ?? record.reviewer,
+        ...(result.notes === undefined ? {} : { notes: result.notes }),
+        prior_finding_resolutions: result.priorFindingResolutions.map(
+          (finding) => ({
+            finding_id: finding.findingId,
+            status: finding.status,
+            verification_note: finding.verificationNote,
+          }),
+        ),
+        new_findings: result.newFindings.map((finding) => ({
+          category: finding.category,
+          summary: finding.summary,
+          ...(finding.notes === undefined ? {} : { notes: finding.notes }),
+          ...(finding.fileReferences === undefined
+            ? {}
+            : { file_references: finding.fileReferences }),
+          ...(finding.testCommands === undefined
+            ? {}
+            : { test_commands: finding.testCommands }),
+        })),
+      });
+      const receipt = parseFinalizationReceipt(payload, record);
+      record = await context.bridge.transitionReviewSubmission({
+        submissionId: record.submissionId,
+        expectedRevision: record.revision,
+        transition: {
+          type: "den_finalized",
+          finalizationId: receipt.finalizationId,
+          packetId: receipt.packetId,
+          packetMessageId: receipt.packetMessageId,
+          exactHeadCommit: receipt.exactHeadCommit,
+          verdict: receipt.verdict,
+          findingStatuses: receipt.findingStatuses,
+          taskStatus: receipt.taskStatus,
+          materialDigest: receipt.materialDigest,
+        },
+        now: context.now(),
+      });
+    }
+
+    if (record.phase === "den_finalized") {
+      record = await context.bridge.transitionReviewSubmission({
+        submissionId: record.submissionId,
+        expectedRevision: record.revision,
+        transition: { type: "reply_pending" },
+        now: context.now(),
+      });
+    }
+
+    if (record.phase === "reply_pending") {
+      return deliverReviewReceipt(context, record);
+    }
+    return completedReceipt(record);
+  } catch (error) {
+    const reasonCode =
+      error instanceof ReviewSubmissionAdapterError
+        ? error.reasonCode
+        : "review_completion_failed";
+    return completionFailed(context, record, reasonCode, errorMessage(error));
+  }
+}
+
+function parseStoredReviewResult(
+  json: string | null | undefined,
+): CanonicalReviewResult {
+  if (json === undefined || json === null) {
+    throw new ReviewSubmissionAdapterError(
+      "review_result_missing",
+      "Durable routed review result is missing.",
+    );
+  }
+  let parsed: CompleteRoutedReviewParameters;
+  try {
+    parsed = JSON.parse(json) as CompleteRoutedReviewParameters;
+  } catch {
+    throw new ReviewSubmissionAdapterError(
+      "review_result_corrupt",
+      "Durable routed review result is not valid JSON.",
+    );
+  }
+  return canonicalReviewResult(parsed);
+}
+
+function parseFinalizationReceipt(
+  payload: unknown,
+  record: ReviewSubmissionRecord,
+): {
+  finalizationId: number;
+  packetId: number;
+  packetMessageId: number;
+  exactHeadCommit: string;
+  verdict: string;
+  findingStatuses: ReviewFindingStatus[];
+  taskStatus: string;
+  materialDigest?: string;
+} {
+  const response = allObjects(payload).find(
+    (value) =>
+      numericValue(value, ["id", "finalization_id"]) !== undefined &&
+      numericValue(value, ["packet_id", "packetId"]) !== undefined &&
+      stringValue(value, ["verdict"]) !== undefined,
+  );
+  if (response === undefined) {
+    throw new ReviewSubmissionAdapterError(
+      "den_finalization_receipt_invalid",
+      "Den finalize_review omitted its compact completion receipt.",
+    );
+  }
+  const packetMessageId = numericValue(response, [
+    "packet_message_id",
+    "packetMessageId",
+    "message_id",
+    "messageId",
+  ]);
+  if (packetMessageId === undefined) {
+    throw new ReviewSubmissionAdapterError(
+      "den_finalization_receipt_invalid",
+      "Den finalization receipt omitted its packet message id.",
+    );
+  }
+  const exactHeadCommit = stringValue(response, [
+    "exact_head_commit",
+    "exactHeadCommit",
+  ]);
+  const verdict = stringValue(response, ["verdict"]);
+  const taskStatus = stringValue(response, [
+    "resulting_task_status",
+    "target_task_status",
+    "task_status",
+  ]);
+  if (
+    exactHeadCommit === undefined ||
+    verdict === undefined ||
+    taskStatus === undefined
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "den_finalization_receipt_invalid",
+      "Den finalization receipt omitted exact head, verdict, or task status.",
+    );
+  }
+  const findingStatuses = Array.isArray(response.finding_statuses)
+    ? response.finding_statuses.flatMap((value): ReviewFindingStatus[] => {
+        if (typeof value !== "object" || value === null) return [];
+        const finding = value as Record<string, unknown>;
+        const findingId = numericValue(finding, ["finding_id", "findingId"]);
+        const status = stringValue(finding, ["status"]);
+        return findingId === undefined || status === undefined
+          ? []
+          : [{ findingId, status }];
+      })
+    : [];
+  return {
+    finalizationId: requiredNumericId(response, ["id", "finalization_id"]),
+    packetId: requiredNumericId(response, ["packet_id", "packetId"]),
+    packetMessageId,
+    exactHeadCommit,
+    verdict,
+    findingStatuses,
+    taskStatus,
+    materialDigest: stringValue(response, [
+      "material_digest",
+      "materialDigest",
+    ]),
+  };
+}
+
+async function deliverReviewReceipt(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): Promise<CompleteRoutedReviewToolReceipt> {
+  const dispatchMessageId = record.dispatchMessageId;
+  if (dispatchMessageId === undefined || dispatchMessageId === null) {
+    return completionFailed(
+      context,
+      record,
+      "review_dispatch_message_missing",
+      "The routed review has no requester message to reply to.",
+    );
+  }
+  const identity = record.submissionId.replaceAll(":", "-");
+  const initial = await context.bridge.replyAgentMessage({
+    caller: { type: "review_submission", submissionId: record.submissionId },
+    deliveryId: `review-reply-delivery:${identity}`,
+    idempotencyKey: `review-reply-delivery:${identity}`,
+    messageId: `review-reply-message:${identity}`,
+    inReplyToMessageId: dispatchMessageId,
+    body: reviewReceiptBody(record),
+    createdAt: context.now(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+  });
+  const receipt = await context.applyCoordinationDelivery(initial);
+  if (receipt.status !== "accepted") {
+    const reasonCode = receipt.reasonCode ?? "reviewer_reply_delivery_failed";
+    try {
+      await context.bridge.transitionReviewSubmission({
+        submissionId: record.submissionId,
+        expectedRevision: record.revision,
+        transition: { type: "reply_terminal", reasonCode },
+        now: context.now(),
+      });
+    } catch {}
+    return completionFailed(
+      context,
+      record,
+      reasonCode,
+      `Review finalization succeeded, but the requester reply was ${receipt.status}.`,
+    );
+  }
+  const settled = await context.bridge.transitionReviewSubmission({
+    submissionId: record.submissionId,
+    expectedRevision: record.revision,
+    transition: {
+      type: "reply_sent",
+      replyMessageId: receipt.request.messageId,
+      replyDeliveryId: receipt.request.deliveryId,
+      replyStatus: receipt.status,
+    },
+    now: context.now(),
+  });
+  return completedReceipt(settled);
+}
+
+function reviewReceiptBody(record: ReviewSubmissionRecord): string {
+  const findingStatuses = record.reviewFindingStatuses ?? [];
+  const findings = findingStatuses.length
+    ? findingStatuses
+        .map((finding) => `#${finding.findingId}=${finding.status}`)
+        .join(", ")
+    : "none";
+  return [
+    `REVIEW COMPLETE — Den finalization ${record.reviewFinalizationId ?? "?"}.`,
+    `Task #${record.taskId}; verdict=${record.reviewVerdict ?? "unknown"}; task=${record.reviewTaskStatus ?? "unknown"}.`,
+    `Exact SHA ${record.reviewExactHeadCommit ?? record.commitSha}.`,
+    `Findings: ${findings}. Packet/message ${record.reviewPacketId ?? "?"}/${record.reviewPacketMessageId ?? "?"}.`,
+  ].join("\n");
+}
+
+function completedReceipt(
+  record: ReviewSubmissionRecord,
+): CompleteRoutedReviewToolReceipt {
+  return boundCompletionReceipt({
+    ok: true,
+    submissionId: record.submissionId,
+    taskId: Number(record.taskId),
+    commitSha: record.commitSha,
+    reviewRoundId: record.reviewRoundId ?? undefined,
+    finalizationId: record.reviewFinalizationId ?? undefined,
+    packetId: record.reviewPacketId ?? undefined,
+    packetMessageId: record.reviewPacketMessageId ?? undefined,
+    exactHeadCommit: record.reviewExactHeadCommit ?? undefined,
+    verdict: record.reviewVerdict ?? undefined,
+    findingStatuses: record.reviewFindingStatuses ?? [],
+    taskStatus: record.reviewTaskStatus ?? undefined,
+    replyMessageId: record.replyMessageId ?? undefined,
+    replyStatus: record.replyStatus ?? undefined,
+    summary: `Den finalized task #${record.taskId} at ${record.reviewExactHeadCommit ?? record.commitSha} with verdict ${record.reviewVerdict ?? "unknown"}; reply=${record.replyStatus ?? record.phase}.`,
+  });
+}
+
+async function completionFailed(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+  reasonCode: string,
+  summary: string,
+): Promise<CompleteRoutedReviewToolReceipt> {
+  await recordAdapterFailure(context, record, reasonCode, summary).catch(
+    () => {},
+  );
+  return boundCompletionReceipt({
+    ok: false,
+    submissionId: record.submissionId,
+    taskId: Number(record.taskId),
+    commitSha: record.commitSha,
+    reasonCode,
+    summary,
+  });
+}
+
+function boundCompletionReceipt(
+  receipt: CompleteRoutedReviewToolReceipt,
+): CompleteRoutedReviewToolReceipt {
+  let bounded = { ...receipt };
+  while (
+    serializedBytes(bounded) > 2048 &&
+    (bounded.findingStatuses?.length ?? 0) > 0
+  ) {
+    bounded = {
+      ...bounded,
+      findingStatuses: bounded.findingStatuses?.slice(0, -1),
+    };
+  }
+  if (serializedBytes(bounded) > 2048) {
+    bounded = {
+      ...bounded,
+      summary: bounded.summary.slice(0, 256),
+    };
+  }
+  return bounded;
+}
+
+function serializedBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
 async function advanceDenHandoff(
@@ -470,6 +986,30 @@ function stringValue(
     if (typeof value[key] === "string") return value[key];
   }
   return undefined;
+}
+
+function numericValue(
+  value: Record<string, unknown>,
+  keys: string[],
+): number | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "number" && Number.isSafeInteger(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function reviewerAgentId(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): string | undefined {
+  const reviewerSessionId = record.reviewerSessionId;
+  if (reviewerSessionId === undefined) return undefined;
+  return context.runtimeConfig.sessions.find(
+    (session) => session.sessionId === reviewerSessionId,
+  )?.agentId;
 }
 
 function errorMessage(error: unknown): string {

@@ -328,6 +328,9 @@ export class ServiceExternalRuntimeController {
   readonly #onReviewSubmission?: Parameters<
     typeof resolveCodexCoordinationToolCall
   >[0]["onReviewSubmission"];
+  readonly #onReviewCompletion?: Parameters<
+    typeof resolveCodexCoordinationToolCall
+  >[0]["onReviewCompletion"];
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -360,6 +363,9 @@ export class ServiceExternalRuntimeController {
     onReviewSubmission?: Parameters<
       typeof resolveCodexCoordinationToolCall
     >[0]["onReviewSubmission"];
+    onReviewCompletion?: Parameters<
+      typeof resolveCodexCoordinationToolCall
+    >[0]["onReviewCompletion"];
     recoveryBaseDelayMs?: number;
     recoveryMaxDelayMs?: number;
   }) {
@@ -368,6 +374,7 @@ export class ServiceExternalRuntimeController {
     this.#instanceId = input.instanceId ?? `service-host:${randomUUID()}`;
     this.#onCoordinationDelivery = input.onCoordinationDelivery;
     this.#onReviewSubmission = input.onReviewSubmission;
+    this.#onReviewCompletion = input.onReviewCompletion;
     this.#recoveryBaseDelayMs =
       input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
     this.#recoveryMaxDelayMs =
@@ -3366,10 +3373,12 @@ export class ServiceExternalRuntimeController {
           bindingId: binding.bindingId,
           controllerInstanceId: this.#instanceId,
           controllerGeneration: controlled.lease.generation,
+          reviewerSessionId: binding.sessionId ?? undefined,
         },
         port: this.#bridge,
         onDelivery: this.#onCoordinationDelivery,
         onReviewSubmission: this.#onReviewSubmission,
+        onReviewCompletion: this.#onReviewCompletion,
         now: this.#now,
       });
       return result === undefined
