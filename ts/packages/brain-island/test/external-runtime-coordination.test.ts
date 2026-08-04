@@ -111,6 +111,46 @@ test("Codex review submission derives external caller and returns without pollin
   });
 });
 
+test("Codex review completion carries persisted routed correlation", async () => {
+  const port = new RecordingPort();
+  const calls: unknown[] = [];
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-review",
+      turnId: "turn-review",
+      callId: "call-review-complete",
+      namespace: "rusty_crew",
+      tool: "complete_routed_review",
+      arguments: { verdict: "looks_good" },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-review",
+      controllerInstanceId: "controller-review",
+      controllerGeneration: 11,
+      reviewerSessionId: "reviewer-session",
+      reviewCorrelationId: `review:6574:${"a".repeat(40)}`,
+    },
+    port,
+    onReviewCompletion: async (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        submissionId: "review-submission:test",
+        taskId: 6574,
+        commitSha: "a".repeat(40),
+        summary: "completed",
+      };
+    },
+  });
+  assert.equal(result?.success, true);
+  assert.equal(
+    (calls[0] as { correlationId?: string }).correlationId,
+    `review:6574:${"a".repeat(40)}`,
+  );
+  assert.equal("correlationId" in (calls[0] as Record<string, unknown>), true);
+});
+
 test("Codex coordination lists routes separately from raw same-service diagnostics", async () => {
   const port = new RecordingPort();
   const result = await resolveCodexCoordinationToolCall({

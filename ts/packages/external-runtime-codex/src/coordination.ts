@@ -181,3 +181,34 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
     ],
   },
 ];
+
+/**
+ * Managed reviewers complete routed reviews through the durable receipt path.
+ * Keep the low-level reply primitive available to direct and recovery lanes,
+ * but do not advertise it to the reviewer profile.
+ */
+export const CODEX_MANAGED_REVIEWER_DYNAMIC_TOOLS: readonly DynamicToolSpec[] =
+  CODEX_COORDINATION_DYNAMIC_TOOLS.map((namespace) =>
+    namespace.type !== "namespace"
+      ? namespace
+      : {
+          ...namespace,
+          tools: namespace.tools.filter(
+            (tool) => tool.name !== "reply_agent_message",
+          ),
+        },
+  );
+
+export function codexCoordinationDynamicToolsForProfile(input: {
+  readonly agentId?: string | null;
+  readonly profileId?: string | null;
+}): readonly DynamicToolSpec[] {
+  return isManagedReviewerIdentity(input.agentId) ||
+    isManagedReviewerIdentity(input.profileId)
+    ? CODEX_MANAGED_REVIEWER_DYNAMIC_TOOLS
+    : CODEX_COORDINATION_DYNAMIC_TOOLS;
+}
+
+function isManagedReviewerIdentity(value: string | null | undefined): boolean {
+  return value === "reviewer" || value?.startsWith("reviewer-") === true;
+}

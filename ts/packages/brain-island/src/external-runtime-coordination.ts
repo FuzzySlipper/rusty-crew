@@ -33,9 +33,13 @@ const MAX_MESSAGE_TTL_MS = 24 * 60 * 60_000;
 export interface CodexCoordinationBinding {
   readonly runtimeId: string;
   readonly bindingId: string;
+  readonly agentId?: string | null;
+  readonly profileId?: string | null;
   readonly controllerInstanceId: string;
   readonly controllerGeneration: number;
   readonly reviewerSessionId?: string;
+  /** Derived from Rust-owned active-turn provenance; never model supplied. */
+  readonly reviewCorrelationId?: string;
 }
 
 export interface CodexCoordinationPort {
@@ -67,6 +71,7 @@ export async function resolveCodexCoordinationToolCall(input: {
     input: CompleteRoutedReviewParameters & {
       caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
       reviewerSessionId: string;
+      correlationId?: string;
     },
   ) => Promise<CompleteRoutedReviewToolReceipt>;
   readonly now?: () => Date;
@@ -135,6 +140,9 @@ export async function resolveCodexCoordinationToolCall(input: {
       ...reviewArgs,
       caller,
       reviewerSessionId: input.binding.reviewerSessionId,
+      ...(input.binding.reviewCorrelationId === undefined
+        ? {}
+        : { correlationId: input.binding.reviewCorrelationId }),
     });
     return receipt.ok ? succeeded(receipt.summary) : failed(receipt.summary);
   }

@@ -123,32 +123,9 @@ async function completeReview(
     pendingOnly: false,
     reviewerSessionId: input.reviewerSessionId,
   });
-  const eligible = records
-    .filter((record) =>
-      [
-        "reviewer_dispatched",
-        "den_finalization_pending",
-        "den_finalized",
-        "reply_pending",
-        "replied",
-        "reply_terminal",
-      ].includes(record.phase),
-    )
-    .filter((record) =>
-      input.correlationId === undefined
-        ? true
-        : input.correlationId === `review:${record.taskId}:${record.commitSha}`,
-    );
+  const selection = selectRoutedReviewRecord(records, input.correlationId);
   const result = canonicalReviewResult(input);
-  if (eligible.length === 0) {
-    return {
-      ok: false,
-      reasonCode: "review_context_required",
-      summary:
-        "No active routed review is bound to this reviewer wake. Use the managed reviewer wake that carried the review request.",
-    };
-  }
-  if (eligible.length > 1) {
+  if (selection.ambiguous) {
     return {
       ok: false,
       reasonCode: "multiple_active_review_requests",
@@ -156,47 +133,95 @@ async function completeReview(
         "More than one active routed review is bound to this reviewer session; completion is refused until the wake context is unambiguous.",
     };
   }
-  if (eligible[0].phase === "reply_terminal") {
+  const eligible = selection.record;
+  if (eligible === undefined) {
     return {
       ok: false,
-      submissionId: eligible[0].submissionId,
-      taskId: Number(eligible[0].taskId),
-      commitSha: eligible[0].commitSha,
-      reasonCode: eligible[0].replyReasonCode ?? "review_reply_terminal",
+      reasonCode: "review_context_required",
+      summary:
+        "No active routed review is bound to this reviewer wake. Use the managed reviewer wake that carried the review request.",
+    };
+  }
+  if (eligible.phase === "reply_terminal") {
+    return {
+      ok: false,
+      submissionId: eligible.submissionId,
+      taskId: Number(eligible.taskId),
+      commitSha: eligible.commitSha,
+      reasonCode: eligible.replyReasonCode ?? "review_reply_terminal",
       summary:
         "Den finalization is durable, but this routed requester has a terminal reply outcome; no replacement requester was selected.",
     };
   }
-  if (eligible[0].phase === "replied") {
-    if (eligible[0].reviewResultDigest === result.digest) {
-      return completedReceipt(eligible[0]);
+  if (eligible.phase === "replied") {
+    if (eligible.reviewResultDigest === result.digest) {
+      return completedReceipt(eligible);
     }
     return {
       ok: false,
-      submissionId: eligible[0].submissionId,
-      taskId: Number(eligible[0].taskId),
-      commitSha: eligible[0].commitSha,
+      submissionId: eligible.submissionId,
+      taskId: Number(eligible.taskId),
+      commitSha: eligible.commitSha,
       reasonCode: "review_result_conflict",
       summary:
         "This routed review is already finalized with a different structured result; no second Den finalization or reply was sent.",
     };
   }
   if (
-    eligible[0].reviewResultDigest !== undefined &&
-    eligible[0].reviewResultDigest !== null &&
-    eligible[0].reviewResultDigest !== result.digest
+    eligible.reviewResultDigest !== undefined &&
+    eligible.reviewResultDigest !== null &&
+    eligible.reviewResultDigest !== result.digest
   ) {
     return {
       ok: false,
-      submissionId: eligible[0].submissionId,
-      taskId: Number(eligible[0].taskId),
-      commitSha: eligible[0].commitSha,
+      submissionId: eligible.submissionId,
+      taskId: Number(eligible.taskId),
+      commitSha: eligible.commitSha,
       reasonCode: "review_result_conflict",
       summary:
         "This routed review already has a different structured result; no alternate Den finalization or reply was sent.",
     };
   }
-  return resumeRoutedReview(context, eligible[0], result);
+  return resumeRoutedReview(context, eligible, result);
+}
+
+const ROUTED_REVIEW_PHASES = new Set<ReviewSubmissionRecord["phase"]>([
+  "reviewer_dispatched",
+  "den_finalization_pending",
+  "den_finalized",
+  "reply_pending",
+  "replied",
+  "reply_terminal",
+]);
+
+const TERMINAL_ROUTED_REVIEW_PHASES = new Set<ReviewSubmissionRecord["phase"]>([
+  "replied",
+  "reply_terminal",
+]);
+
+export function selectRoutedReviewRecord(
+  records: readonly ReviewSubmissionRecord[],
+  correlationId?: string,
+): { readonly record?: ReviewSubmissionRecord; readonly ambiguous: boolean } {
+  const eligible = records.filter((record) =>
+    ROUTED_REVIEW_PHASES.has(record.phase),
+  );
+  const correlated =
+    correlationId === undefined
+      ? eligible
+      : eligible.filter(
+          (record) =>
+            correlationId === `review:${record.taskId}:${record.commitSha}`,
+        );
+  const active = correlated.filter(
+    (record) => !TERMINAL_ROUTED_REVIEW_PHASES.has(record.phase),
+  );
+  const candidates =
+    correlationId === undefined && active.length > 0 ? active : correlated;
+  return {
+    ...(candidates.length === 1 ? { record: candidates[0] } : {}),
+    ambiguous: candidates.length > 1,
+  };
 }
 
 interface CanonicalReviewResult {

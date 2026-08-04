@@ -20,7 +20,7 @@ import type {
 import { EXTERNAL_BINDING_RESTORE_API_REASON_CODES } from "./external-runtime-api-contract.js";
 import {
   CODEX_APP_SERVER_PROTOCOL,
-  CODEX_COORDINATION_DYNAMIC_TOOLS,
+  codexCoordinationDynamicToolsForProfile,
   CodexAppServerDriver,
   CodexRpcError,
   UnixWebSocketTransport,
@@ -1088,7 +1088,9 @@ export class ServiceExternalRuntimeController {
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+          dynamicTools: [
+            ...codexCoordinationDynamicToolsForProfile(creation.binding),
+          ],
           threadSource: creation.nativeThreadSource,
           developerInstructions,
         });
@@ -1303,7 +1305,7 @@ export class ServiceExternalRuntimeController {
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
           threadSource,
           developerInstructions: profile.developerInstructions,
         });
@@ -2794,7 +2796,7 @@ export class ServiceExternalRuntimeController {
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
           threadSource,
           developerInstructions,
         });
@@ -3021,8 +3023,8 @@ export class ServiceExternalRuntimeController {
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
           ...(isRecord(request.payload) ? request.payload : {}),
+          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
           baseInstructions: undefined,
           developerInstructions,
         });
@@ -3366,14 +3368,29 @@ export class ServiceExternalRuntimeController {
           message: "dynamic tool call has no active Crew agent binding",
         };
       }
+      const activeReviewTurn = (
+        await this.#bridge.listActiveExternalTurns()
+      ).find(
+        (candidate) =>
+          candidate.runtimeId === controlled.registration.runtimeId &&
+          candidate.request.bindingId === binding.bindingId &&
+          candidate.nativeThreadId === params.threadId &&
+          candidate.nativeTurnId === params.turnId &&
+          candidate.request.provenance.correlationId?.startsWith("review:") ===
+            true,
+      );
       const result = await resolveCodexCoordinationToolCall({
         params,
         binding: {
           runtimeId: binding.runtimeId,
           bindingId: binding.bindingId,
+          agentId: binding.agentId,
+          profileId: binding.profileId,
           controllerInstanceId: this.#instanceId,
           controllerGeneration: controlled.lease.generation,
           reviewerSessionId: binding.sessionId ?? undefined,
+          reviewCorrelationId:
+            activeReviewTurn?.request.provenance.correlationId ?? undefined,
         },
         port: this.#bridge,
         onDelivery: this.#onCoordinationDelivery,

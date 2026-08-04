@@ -949,6 +949,48 @@ test("controller atomically creates and idempotently reuses an external agent se
   }
 });
 
+test("controller scopes Codex coordination tools by the bound reviewer profile", async () => {
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "reviewer",
+  );
+  try {
+    await fixture.controller.createAgentSession({
+      idempotencyKey: "reviewer-dynamic-tools",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const startRequest = fixture.transport.sent.find(
+      (message) => message.method === "thread/start",
+    );
+    const params = startRequest?.params as Record<string, unknown>;
+    const namespaces = params.dynamicTools as Array<{
+      type?: string;
+      tools?: Array<{ name?: string }>;
+    }>;
+    const coordination = namespaces.find(
+      (namespace) => namespace.type === "namespace",
+    );
+    assert.deepEqual(
+      coordination?.tools?.map((tool) => tool.name),
+      [
+        "list_agents",
+        "send_agent_message",
+        "agent_round",
+        "submit_task_for_review",
+        "complete_routed_review",
+      ],
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("profile prompt refresh replaces the native thread and preserves Crew identity", async () => {
   const fixture = await externalCreationFixture(false);
   try {
@@ -3384,12 +3426,13 @@ async function externalCreationFixture(
     message: string;
   },
   profilelessBindingReads = false,
+  profileIdOverride = "creation-profile",
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
   );
   const runtimeId = "creation-runtime";
-  const profileId = "creation-profile";
+  const profileId = profileIdOverride;
   const bridge = await loadNativeBridge();
   const controllerBridge = new Proxy(bridge, {
     get(target, property, receiver) {

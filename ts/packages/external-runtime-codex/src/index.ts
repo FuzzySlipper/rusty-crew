@@ -5,7 +5,11 @@ export {
   projectCodexErrorDiagnostic,
   type CodexErrorDiagnostic,
 } from "./error-diagnostics.js";
-export { CODEX_COORDINATION_DYNAMIC_TOOLS } from "./coordination.js";
+export {
+  CODEX_COORDINATION_DYNAMIC_TOOLS,
+  CODEX_MANAGED_REVIEWER_DYNAMIC_TOOLS,
+  codexCoordinationDynamicToolsForProfile,
+} from "./coordination.js";
 export { CODEX_APP_SERVER_PROTOCOL } from "./protocol-manifest.js";
 export { captureBoundedRawDetail } from "./raw-detail.js";
 export {
