@@ -65,7 +65,7 @@ const lineageDiagnostics = mergeProviderStateDiagnostics(
   ],
   [],
 );
-assert.equal(lineageDiagnostics.length, 3);
+assert.equal(lineageDiagnostics.length, 4);
 assert.deepEqual(
   lineageDiagnostics
     .map((diagnostic) => [
@@ -75,6 +75,7 @@ assert.deepEqual(
     ])
     .sort(),
   [
+    ["profile-a", "provider-a", undefined],
     ["profile-a", "provider-a", "lineage-a-current"],
     ["profile-b", "provider-b", "lineage-b-current"],
     [
@@ -365,6 +366,15 @@ assert.equal(projectedSuperseded?.providerState?.status, "valid");
 assert.equal(
   projectedSuperseded?.providerState?.sessions[0]?.lastWakeId,
   "new-wake",
+);
+assert.deepEqual(
+  projectedSuperseded?.providerState?.sessions[0]?.history?.map((state) => [
+    state.status,
+    state.lastWakeId,
+    state.invalidationReason,
+  ]),
+  [["invalidated", "old-wake", "superseded"]],
+  "historical invalidation remains inspectable beside the selected current state",
 );
 
 console.log("provider state diagnostics smoke passed");

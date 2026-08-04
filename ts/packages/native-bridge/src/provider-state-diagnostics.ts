@@ -88,6 +88,7 @@ export function mergeProviderStateDiagnostics(
     source: "durable" | "runtime_observation";
   };
   const byKey = new Map<string, Candidate>();
+  const storedByKey = new Map<string, NativeProviderStateDiagnostic[]>();
   const consider = (candidate: Candidate): void => {
     const diagnostic = candidate.diagnostic;
     const key = providerStateDiagnosticKey(diagnostic);
@@ -100,8 +101,13 @@ export function mergeProviderStateDiagnostics(
     }
   };
   for (const diagnostic of storedDiagnostics) {
+    const durable = { ...diagnostic, source: "durable" as const };
+    const key = providerStateDiagnosticKey(durable);
+    const history = storedByKey.get(key) ?? [];
+    history.push(durable);
+    storedByKey.set(key, history);
     consider({
-      diagnostic: { ...diagnostic, source: "durable" },
+      diagnostic: durable,
       source: "durable",
     });
   }
@@ -111,7 +117,32 @@ export function mergeProviderStateDiagnostics(
       source: "runtime_observation",
     });
   }
-  return [...byKey.values()].map(({ diagnostic }) => diagnostic);
+  return [...byKey.entries()].flatMap(([key, selected]) => {
+    const current = { ...selected.diagnostic, isCurrent: true };
+    const history = (storedByKey.get(key) ?? [])
+      .filter(
+        (diagnostic) =>
+          !providerStateDiagnosticsEquivalent(diagnostic, current),
+      )
+      .map((diagnostic) => ({ ...diagnostic, isCurrent: false }));
+    return [current, ...history];
+  });
+}
+
+function providerStateDiagnosticsEquivalent(
+  left: NativeProviderStateDiagnostic,
+  right: NativeProviderStateDiagnostic,
+): boolean {
+  if (left.recordId !== undefined && right.recordId !== undefined) {
+    return left.recordId === right.recordId;
+  }
+  return (
+    left.status === right.status &&
+    left.lastWakeId === right.lastWakeId &&
+    left.updatedAt === right.updatedAt &&
+    left.payloadVersion === right.payloadVersion &&
+    left.invalidationReason === right.invalidationReason
+  );
 }
 
 function shouldReplaceProviderStateDiagnostic(

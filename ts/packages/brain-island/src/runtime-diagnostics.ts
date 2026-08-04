@@ -102,6 +102,21 @@ export interface RuntimeProviderStateSessionDiagnostics {
   invalidationReason?: string;
   isCurrent?: boolean;
   source?: "durable" | "runtime_observation";
+  history?: RuntimeProviderStateHistoryDiagnostic[];
+}
+
+export type RuntimeProviderStateHistoryDiagnostic = Omit<
+  RuntimeProviderStateSessionDiagnostics,
+  "history"
+>;
+
+function providerStateHistory(
+  states: readonly RuntimeProviderStateSessionDiagnostics[],
+  current: RuntimeProviderStateSessionDiagnostics,
+): RuntimeProviderStateHistoryDiagnostic[] {
+  return states
+    .filter((state) => state !== current)
+    .map(({ history: _history, ...state }) => state);
 }
 
 export interface RuntimeProviderStateDiagnostics {
@@ -810,23 +825,27 @@ function providerStateDiagnosticsForModule(
           ),
         ]
       : sessions.map((session) => {
-          const existing = selectProviderStateDiagnostic(
-            providerStates.filter(
-              (state) =>
-                state.sessionId === session.sessionId &&
-                state.moduleId === module.moduleId &&
-                state.strategyId === strategyId,
-            ),
+          const matchingStates = providerStates.filter(
+            (state) =>
+              state.sessionId === session.sessionId &&
+              state.moduleId === module.moduleId &&
+              state.strategyId === strategyId,
           );
-          return (
-            existing ??
-            missingProviderStateSession(
+          const existing = selectProviderStateDiagnostic(matchingStates);
+          if (existing === undefined) {
+            return missingProviderStateSession(
               session.sessionId,
               module.moduleId,
               strategyId,
               providerStateMode,
-            )
-          );
+            );
+          }
+          return {
+            ...existing,
+            ...(matchingStates.length <= 1
+              ? {}
+              : { history: providerStateHistory(matchingStates, existing) }),
+          };
         });
   return {
     moduleId: module.moduleId,
@@ -840,6 +859,7 @@ function selectProviderStateDiagnostic(
   states: readonly RuntimeProviderStateSessionDiagnostics[],
 ): RuntimeProviderStateSessionDiagnostics | undefined {
   return (
+    states.find((state) => state.isCurrent === true) ??
     states.find((state) => state.status === "valid") ??
     states.find((state) => state.status === "save_failed") ??
     states.find((state) => state.status === "load_failed") ??
