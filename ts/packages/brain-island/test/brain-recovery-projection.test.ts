@@ -166,6 +166,62 @@ test("provider-state recovery fails before the brain runs when a later page is u
   assert.deepEqual(observed, []);
 });
 
+test("provider-state recovery rejects a page that advertises more data without a cursor", async () => {
+  const observed: BrainWakeInput[] = [];
+  const buffers = recoveryBuffers({
+    bodyState: JSON.stringify({ session: { agentId: "agent-1" } }),
+    readChatSession: async () => ({
+      events: [
+        {
+          kind: "message_created",
+          payload: { role: "user", body: "partial prompt" },
+        },
+      ],
+      has_more: true,
+    }),
+  });
+
+  await assert.rejects(
+    wakeBrainFromBridgeRequest(
+      buffers,
+      recordingBrain(observed),
+      wakeRequest(),
+    ),
+    (error: unknown) =>
+      error instanceof DurableConversationReconstructionError &&
+      error.failureKind === "pagination_cursor_missing" &&
+      error.loadedMessageCount === 1 &&
+      error.cursor === "session-1:0",
+  );
+  assert.deepEqual(observed, []);
+});
+
+test("provider-state recovery rejects a page with a non-string next cursor", async () => {
+  const observed: BrainWakeInput[] = [];
+  const buffers = recoveryBuffers({
+    bodyState: JSON.stringify({ session: { agentId: "agent-1" } }),
+    readChatSession: async () => ({
+      events: [],
+      has_more: true,
+      latest_cursor: 2,
+    }),
+  });
+
+  await assert.rejects(
+    wakeBrainFromBridgeRequest(
+      buffers,
+      recordingBrain(observed),
+      wakeRequest(),
+    ),
+    (error: unknown) =>
+      error instanceof DurableConversationReconstructionError &&
+      error.failureKind === "pagination_cursor_missing" &&
+      error.loadedMessageCount === 0 &&
+      error.cursor === "session-1:0",
+  );
+  assert.deepEqual(observed, []);
+});
+
 function recordingBrain(observed: BrainWakeInput[]): BrainHostExecutor {
   return {
     async wake(input) {

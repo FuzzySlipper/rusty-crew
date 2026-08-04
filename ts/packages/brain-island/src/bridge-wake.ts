@@ -31,6 +31,7 @@ export type DurableConversationReconstructionFailureKind =
   | "reader_unavailable"
   | "read_failed"
   | "invalid_page"
+  | "pagination_cursor_missing"
   | "pagination_cycle";
 
 export class DurableConversationReconstructionError extends Error {
@@ -162,8 +163,29 @@ async function loadDurableConversation(
       const message = durableConversationMessage(event);
       if (message !== undefined) messages.push(message);
     }
-    if (page.has_more !== true || typeof page.latest_cursor !== "string") {
+    if (typeof page.has_more !== "boolean") {
+      throw new DurableConversationReconstructionError(
+        sessionId,
+        cursor,
+        messages.length,
+        "invalid_page",
+        `durable conversation read returned invalid pagination metadata for ${sessionId} at ${cursor}`,
+      );
+    }
+    if (page.has_more === false) {
       break;
+    }
+    if (
+      typeof page.latest_cursor !== "string" ||
+      page.latest_cursor.trim().length === 0
+    ) {
+      throw new DurableConversationReconstructionError(
+        sessionId,
+        cursor,
+        messages.length,
+        "pagination_cursor_missing",
+        `durable conversation page for ${sessionId} at ${cursor} advertises more data without a valid latest cursor`,
+      );
     }
     if (seenCursors.has(page.latest_cursor)) {
       throw new DurableConversationReconstructionError(
