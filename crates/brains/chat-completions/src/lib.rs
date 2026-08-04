@@ -1230,15 +1230,15 @@ where
         if restored.is_none() {
             extend_stream_items(&mut stream, mapper.map_started(&input.context), &mut sink);
         }
-        let fresh_messages = if restored.is_some() {
-            Vec::new()
+        let (fresh_messages, provider_context_compaction) = if restored.is_some() {
+            (Vec::new(), None)
         } else {
             match chat_completions_messages_with_provider_state(
                 &self.request_builder.config,
                 input.provider_state.as_ref(),
                 input.messages,
             ) {
-                Ok(messages) => messages,
+                Ok(result) => result,
                 Err(message) => {
                     push_stream_item(
                         &mut stream,
@@ -1341,6 +1341,7 @@ where
         let mut context_compaction = restored
             .as_ref()
             .map(|state| state.context_compaction.clone())
+            .or(provider_context_compaction)
             .unwrap_or_default();
 
         loop {
@@ -1704,6 +1705,7 @@ where
                         &self.request_builder.config,
                         input.provider_state.as_ref(),
                         durable_messages,
+                        context_compaction.clone(),
                     )
                 } else {
                     None
@@ -2083,6 +2085,7 @@ where
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
                     durable_messages,
+                    context_compaction.clone(),
                 );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
@@ -2301,6 +2304,7 @@ where
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
                     durable_messages,
+                    context_compaction.clone(),
                 );
                 return ChatCompletionsBrainLoopOutput {
                     stream,
@@ -3587,6 +3591,8 @@ struct ChatCompletionsProviderStateV1 {
     strategy_id: String,
     payload_version: String,
     messages: Vec<ChatCompletionMessage>,
+    #[serde(default)]
+    context_compaction: ChatCompletionsContextCompactionState,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3703,9 +3709,15 @@ fn chat_completions_messages_with_provider_state(
     config: &ChatCompletionsChatConfig,
     provider_state: Option<&BrainWakeProviderStateInput>,
     current_messages: Vec<ChatCompletionMessage>,
-) -> Result<Vec<ChatCompletionMessage>, String> {
+) -> Result<
+    (
+        Vec<ChatCompletionMessage>,
+        Option<ChatCompletionsContextCompactionState>,
+    ),
+    String,
+> {
     let Some(state) = provider_state else {
-        return Ok(current_messages);
+        return Ok((current_messages, None));
     };
     if state.module_id != MODULE_ID {
         return Err(format!(
@@ -3736,6 +3748,7 @@ fn chat_completions_messages_with_provider_state(
         return Err("chat completions provider state payload identity mismatch".to_string());
     }
 
+    let context_compaction = payload.context_compaction.clone();
     let mut merged = Vec::with_capacity(payload.messages.len() + current_messages.len());
     merged.extend(
         current_messages
@@ -3752,7 +3765,9 @@ fn chat_completions_messages_with_provider_state(
             .into_iter()
             .filter(|message| message.role != ChatMessageRole::System),
     );
-    Ok(merged)
+    validate_compaction_artifacts(&context_compaction.artifacts)
+        .map_err(|error| format!("chat completions compaction artifacts are invalid: {error}"))?;
+    Ok((merged, Some(context_compaction)))
 }
 
 fn chat_completions_provider_state_output(
@@ -3760,6 +3775,7 @@ fn chat_completions_provider_state_output(
     config: &ChatCompletionsChatConfig,
     previous_state: Option<&BrainWakeProviderStateInput>,
     messages: Vec<ChatCompletionMessage>,
+    context_compaction: ChatCompletionsContextCompactionState,
 ) -> Option<BrainWakeProviderStateOutput> {
     let payload = ChatCompletionsProviderStateV1 {
         kind: MODULE_ID.to_string(),
@@ -3770,6 +3786,7 @@ fn chat_completions_provider_state_output(
             .filter(|message| message.role != ChatMessageRole::System)
             .map(|message| message_for_reasoning_history(message, config.reasoning_history))
             .collect(),
+        context_compaction,
     };
     Some(BrainWakeProviderStateOutput::Replace {
         state: BrainWakeProviderStateUpdate {
@@ -6609,6 +6626,7 @@ mod tests {
                     tool_calls: Vec::new(),
                 },
             ],
+            context_compaction: ChatCompletionsContextCompactionState::default(),
         };
         let prior_state = BrainWakeProviderStateInput {
             module_id: MODULE_ID.to_string(),
@@ -7721,7 +7739,14 @@ mod tests {
             continuation_state: second.continuation_state,
             final_message_fallback: None,
         });
-        assert!(completed.completed);
+        assert!(
+            completed.completed,
+            "second phase did not complete: yielded={} requests={} rounds={} terminal={}",
+            completed.yielded,
+            completed.provider_request_count,
+            completed.tool_round_count,
+            terminal_kind(&completed.stream),
+        );
         assert!(!completed.yielded);
         assert_eq!(completed.tool_round_count, 2);
         assert_eq!(completed.provider_request_count, 3);
@@ -7903,6 +7928,118 @@ mod tests {
                 .count(),
             6,
         );
+    }
+
+    #[test]
+    fn completed_wake_provider_state_preserves_compaction_for_next_wake() {
+        let mut scripts = (1..=5)
+            .map(|round| {
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(PendingChatFunctionCall {
+                        index: 0,
+                        id: Some(format!("call_{round}")),
+                        name: "lookup".to_string(),
+                        arguments_json: format!(r#"{{"round":{round}}}"#),
+                    }),
+                    ChatCompletionsEvent::Usage(ChatTokenUsage {
+                        prompt_tokens: if round >= 5 { 20_000 } else { 100 },
+                        completion_tokens: 10,
+                        total_tokens: if round >= 5 { 20_010 } else { 110 },
+                        cached_prompt_tokens: 0,
+                        cache_write_prompt_tokens: 0,
+                        reasoning_completion_tokens: 0,
+                    }),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ])
+            })
+            .collect::<Vec<_>>();
+        scripts.push(Ok(vec![
+            ChatCompletionsEvent::ContentDelta("first wake complete".to_string()),
+            ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ]));
+        let context_config = ChatCompletionsBrainLoopConfig {
+            work_quantum_tool_rounds: 16,
+            context_compaction: Some(BrainContextCompactionPolicy {
+                enabled: true,
+                auto_compaction_enabled: true,
+                strategy_id: "rolling_summary_compaction".to_string(),
+                context_window_tokens: 22_000,
+                compact_at_percent: 80,
+                target_percent_after_compaction: 55,
+            }),
+            ..ChatCompletionsBrainLoopConfig::default()
+        };
+        let mut first_brain = loop_with(
+            scripts,
+            (1..=5)
+                .map(|round| {
+                    ChatCompletionsToolOutput::ok(format!("result-{round}-{}", "x".repeat(3000)))
+                })
+                .collect(),
+        )
+        .with_loop_config(context_config.clone());
+        let first = first_brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: vec![ChatCompletionMessage::user("complete this with tools")],
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: None,
+            final_message_fallback: None,
+        });
+        assert!(first.yielded);
+        let completed = first_brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: Vec::new(),
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: first.continuation_state,
+            final_message_fallback: None,
+        });
+        assert!(
+            completed.completed,
+            "second phase did not complete: yielded={} requests={} rounds={} terminal={}",
+            completed.yielded,
+            completed.provider_request_count,
+            completed.tool_round_count,
+            terminal_kind(&completed.stream),
+        );
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = completed.provider_state else {
+            panic!("completed wake must persist provider state");
+        };
+        let payload: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(state.payload.clone()).expect("provider state payload");
+        assert_eq!(payload.context_compaction.artifacts.len(), 1);
+
+        let mut second_brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("second wake complete".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+        )
+        .with_loop_config(context_config);
+        let second = second_brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: vec![ChatCompletionMessage::user("continue after restart")],
+            input_images: Vec::new(),
+            provider_state: Some(provider_state_input(state)),
+            continuation_state: None,
+            final_message_fallback: None,
+        });
+        assert!(second.completed);
+        assert!(events(&second.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ProviderStatus {
+                metadata_json: Some(metadata),
+                ..
+            } if metadata.contains("chat-completions:compaction:1")
+        )));
     }
 
     #[test]

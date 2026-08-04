@@ -685,6 +685,8 @@ pub struct OpenAiResponsesProviderStateV1 {
     pub previous_response_chain: Option<PreviousResponseChainStateV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_hints: Option<OpenAiResponsesReplayHints>,
+    #[serde(default)]
+    context_compaction: ResponsesContextCompactionState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3067,6 +3069,16 @@ where
         let mut output_continuation = restored
             .as_ref()
             .map(|state| state.output_continuation.clone())
+            .or_else(|| {
+                provider_state.as_ref().and_then(|state| {
+                    serde_json::from_value::<OpenAiResponsesProviderStateV1>(state.payload.clone())
+                        .ok()
+                        .map(|payload| ResponsesOutputContinuationState {
+                            context_compaction: payload.context_compaction,
+                            ..ResponsesOutputContinuationState::default()
+                        })
+                })
+            })
             .unwrap_or_default();
         let no_progress_policy =
             BrainNoProgressPolicy::new(self.request_builder.config.no_progress_attention_threshold)
@@ -3439,6 +3451,9 @@ where
                                     usage: last_usage,
                                     committed_input_items: replay_input_items,
                                     request_fingerprint: replay_fingerprint,
+                                    context_compaction: output_continuation
+                                        .context_compaction
+                                        .clone(),
                                 },
                                 metrics.finish(),
                             ));
@@ -3566,6 +3581,7 @@ where
                         usage: last_usage,
                         committed_input_items,
                         request_fingerprint: planned_fingerprint,
+                        context_compaction: output_continuation.context_compaction.clone(),
                     },
                     metrics.finish(),
                 ));
@@ -4235,6 +4251,7 @@ struct CompletedResponsesAttempt {
     usage: Option<ResponsesTokenUsage>,
     committed_input_items: Vec<ResponsesInputItem>,
     request_fingerprint: String,
+    context_compaction: ResponsesContextCompactionState,
 }
 
 fn finish_responses_wake(
@@ -4268,6 +4285,7 @@ fn finish_responses_wake(
         completed.usage,
         completed.committed_input_items,
         completed.request_fingerprint,
+        completed.context_compaction,
     );
     ResponsesBrainWakeResult {
         stream: BrainWakeStream::from_items(items),
@@ -4444,6 +4462,7 @@ fn provider_state_output(
     usage: Option<ResponsesTokenUsage>,
     committed_input_items: Vec<ResponsesInputItem>,
     request_fingerprint: String,
+    context_compaction: ResponsesContextCompactionState,
 ) -> BrainWakeProviderStateOutput {
     let output_records =
         deduplicate_output_records(output_items.iter().map(output_record_from_item).collect());
@@ -4475,6 +4494,7 @@ fn provider_state_output(
         stateless_replay_context,
         previous_response_chain,
         replay_hints: None,
+        context_compaction,
     };
     BrainWakeProviderStateOutput::Replace {
         state: BrainWakeProviderStateUpdate {
@@ -5288,6 +5308,7 @@ mod tests {
             None,
             vec![first_user.clone()],
             "fingerprint-1".to_string(),
+            ResponsesContextCompactionState::default(),
         )));
         let first_state = provider_state(serde_json::to_value(first_state).unwrap());
         let second_user = ResponsesInputItem::UserMessage {
@@ -5346,6 +5367,7 @@ mod tests {
             None,
             second_request.input,
             "fingerprint-2".to_string(),
+            ResponsesContextCompactionState::default(),
         )));
         let second_state = provider_state(serde_json::to_value(second_state).unwrap());
         let third_request = builder.build(
@@ -7484,6 +7506,7 @@ mod tests {
                 provider_response_metadata: None,
             }),
             replay_hints: None,
+            context_compaction: ResponsesContextCompactionState::default(),
         };
         provider_state(serde_json::to_value(payload).unwrap())
     }
@@ -7572,6 +7595,7 @@ mod tests {
                 .collect(),
             previous_response_chain: None,
             replay_hints: None,
+            context_compaction: ResponsesContextCompactionState::default(),
         })
         .unwrap()
     }
