@@ -22,10 +22,12 @@ Each run writes a durable packet to:
 
 The packet records `service.sourceRevision`, profile/session IDs, the
 compaction artifact ID, complete event references for both scenarios, and
-durable transcript counts at the pre-restart, post-restart-hydration, and
-post-continuation checkpoints. The smoke requires each later durable count to
-be greater than or equal to the preceding count and requires the new
-post-restart user message to survive into the next provider-state write.
+durable transcript counts at the first post-compaction snapshot, pre-restart,
+post-restart-hydration, and post-continuation checkpoints. The smoke requires
+the pre-restart count to retain the first post-compaction count, then requires
+each later durable count to be greater than or equal to the preceding count.
+It also requires the new post-restart user message to survive into the next
+provider-state write.
 
 ## Service
 

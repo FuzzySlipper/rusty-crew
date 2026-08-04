@@ -177,9 +177,17 @@ try {
     hydratedBeforeRestart,
     "before restart",
   );
+  const durableCountAfterCompaction = durableMessageCount(
+    afterCompaction,
+    "after compaction",
+  );
   const durableCountAfterRestart = durableMessageCount(
     hydratedAfter,
     "after restart hydration",
+  );
+  assert.ok(
+    durableCountBeforeRestart >= durableCountAfterCompaction,
+    "durable transcript must not shrink between compaction and pre-restart hydration",
   );
   assert.equal(hydratedAfter.sessionId, successful.sessionId);
   assert.equal(
@@ -326,6 +334,7 @@ try {
       artifactId: artifactIdBeforeRestart,
       eventRefs: successfulEvents.map(eventReference),
       durableTranscriptCounts: {
+        afterCompaction: durableCountAfterCompaction,
         beforeRestart: durableCountBeforeRestart,
         afterRestartHydration: durableCountAfterRestart,
         afterRestartContinuation: durableCountAfterContinuation,
