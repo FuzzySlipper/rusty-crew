@@ -62,8 +62,15 @@ schemas, or chat mutation conflict envelopes drift.
 - `GET /v1/chat/sessions/{session_id}`: open a session and return a bounded
   transcript page plus the latest cursor.
 - `GET /v1/chat/sessions/{session_id}/context`: return browser-safe provider,
-  brain, tool, and context-window diagnostics. Chat Completions providers expose
-  their configured dialect, thinking mode, reasoning-history policy, optional
+  brain, tool, and context-window diagnostics. After a provider request, the
+  `native_snapshot` field is the latest Rust-owned, versioned projection replayed
+  from the durable event log. It separates next-request prompt occupancy,
+  reserved output, admission, provider usage, durable transcript size, provider
+  state, and compaction status. Before the first provider request it is omitted
+  and the legacy `context` fields are explicitly compatibility-only estimates.
+  Neither form exposes raw prompts, authorization headers, provider secrets, or
+  unrestricted tool payloads. Chat Completions providers expose their
+  configured dialect, thinking mode, reasoning-history policy, optional
   reasoning budget, and explicit booleans indicating which vendor settings are
   actually applied to provider requests. Configuration values remain visible
   even when a dialect does not apply them.

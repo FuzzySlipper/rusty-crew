@@ -178,7 +178,7 @@
     "/v1/chat/sessions/{session_id}/context": {
       "get": {
         "operationId": "getChatSessionContextUsage",
-        "summary": "Read model/provider/brain and approximate context usage diagnostics",
+        "summary": "Read model/provider/brain and Rust-owned context accounting diagnostics",
         "parameters": [
           { "$ref": "#/components/parameters/SessionId" }
         ],
@@ -1776,6 +1776,9 @@
             },
             "additionalProperties": false
           },
+          "native_snapshot": {
+            "$ref": "#/components/schemas/NativeContextAccountingSnapshot"
+          },
           "latest_compaction_artifact": {
             "type": "object",
             "required": ["artifact_id", "strategy_id", "enters_future_context", "context_policy", "created_at", "updated_at"],
@@ -1806,6 +1809,28 @@
               "additionalProperties": false
             }
           }
+        },
+        "additionalProperties": false
+      },
+      "NativeContextAccountingSnapshot": {
+        "type": "object",
+        "required": ["schema_version", "provider", "prompt_projection", "reserved_output", "admission", "provider_usage", "durable_transcript", "provider_state", "compaction", "diagnostics"],
+        "properties": {
+          "schema_version": { "type": "integer", "const": 1 },
+          "session_id": { "type": ["string", "null"] },
+          "wake_id": { "type": ["string", "null"] },
+          "logical_turn_id": { "type": ["string", "null"] },
+          "execution_epoch_id": { "type": ["string", "null"] },
+          "measured_at": { "type": ["string", "null"], "format": "date-time" },
+          "provider": { "type": "object", "additionalProperties": true },
+          "prompt_projection": { "type": "object", "additionalProperties": true },
+          "reserved_output": { "type": "object", "additionalProperties": true },
+          "admission": { "type": "object", "additionalProperties": true },
+          "provider_usage": { "type": "object", "additionalProperties": true },
+          "durable_transcript": { "type": "object", "additionalProperties": true },
+          "provider_state": { "type": "object", "additionalProperties": true },
+          "compaction": { "type": "object", "additionalProperties": true },
+          "diagnostics": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
         },
         "additionalProperties": false
       },
@@ -1854,6 +1879,7 @@
           "logical_turn_completed",
           "logical_turn_cancelled",
           "logical_turn_failed",
+          "runtime_rebuild_transition",
           "message_slot_created",
           "message_variant_created",
           "message_variant_deleted",

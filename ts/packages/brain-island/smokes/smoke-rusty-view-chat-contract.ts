@@ -210,6 +210,29 @@ assert.deepEqual(schema("ProviderRequestDebugDetail").required, [
 const contextProvider = schema("SessionContextUsageResult").properties
   ?.provider;
 assert.ok(contextProvider?.properties, "missing context provider schema");
+const nativeSnapshot = schema("SessionContextUsageResult").properties
+  ?.native_snapshot;
+assert.equal(
+  nativeSnapshot?.$ref,
+  "#/components/schemas/NativeContextAccountingSnapshot",
+  "context diagnostics must expose the Rust-owned snapshot when available",
+);
+assert.deepEqual(schema("NativeContextAccountingSnapshot").required, [
+  "schema_version",
+  "provider",
+  "prompt_projection",
+  "reserved_output",
+  "admission",
+  "provider_usage",
+  "durable_transcript",
+  "provider_state",
+  "compaction",
+  "diagnostics",
+]);
+assert.deepEqual(
+  schema("NativeContextAccountingSnapshot").properties?.schema_version?.const,
+  1,
+);
 assert.deepEqual(contextProvider.required, ["alias", "status"]);
 assert.deepEqual(contextProvider.properties.chat_completions_dialect?.enum, [
   ...CHAT_COMPLETIONS_DIALECT_VALUES,
@@ -321,6 +344,7 @@ interface Operation {
 interface JsonSchema {
   $ref?: string;
   type?: string;
+  const?: unknown;
   enum?: string[];
   required?: string[];
   oneOf?: JsonSchema[];

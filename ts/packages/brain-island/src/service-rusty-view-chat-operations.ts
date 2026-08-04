@@ -72,6 +72,7 @@ import type {
   MessageVariantPage,
   MessageVariantRecord,
   MessageVariantsReorderResult,
+  NativeContextAccountingSnapshot,
   ProviderRequestDebugDetail,
   ReorderMessageVariantsInput,
   RemoveAttachmentInput,
@@ -539,6 +540,15 @@ export async function rustyViewSessionContextUsage(
     undefined,
     1_000,
   );
+  const nativeSnapshot = latestNativeContextAccountingSnapshot(sampledEvents);
+  if (nativeSnapshot === undefined) {
+    diagnostics.push({
+      severity: "info",
+      code: "native_context_snapshot_not_yet_available",
+      message:
+        "the Rust-owned context accounting snapshot is emitted after a provider request; legacy fields below are compatibility-only estimates until one is available",
+    });
+  }
   const sampledMessageCount = sampledEvents.filter(
     (event) =>
       event.kind === "message_created" ||
@@ -793,6 +803,7 @@ export async function rustyViewSessionContextUsage(
         notes: segmentNotes,
       },
     },
+    native_snapshot: nativeSnapshot,
     latest_compaction_artifact:
       latestCompactionArtifact === undefined
         ? undefined
@@ -811,6 +822,50 @@ export async function rustyViewSessionContextUsage(
     degraded: diagnostics.some((diagnostic) => diagnostic.severity !== "info"),
     diagnostics,
   };
+}
+
+function latestNativeContextAccountingSnapshot(
+  events: readonly ChatEvent[],
+): NativeContextAccountingSnapshot | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "provider_status") continue;
+    const payload = optionalRecord(event.payload);
+    if (payload === undefined) continue;
+    const metadataJson = optionalString(payload.metadata_json);
+    if (metadataJson === undefined) continue;
+    let metadata: unknown;
+    try {
+      metadata = JSON.parse(metadataJson);
+    } catch {
+      continue;
+    }
+    const record = optionalRecord(metadata);
+    if (record === undefined) continue;
+    if (record.kind !== "context_accounting_snapshot") continue;
+    const snapshot = optionalRecord(record.snapshot);
+    if (snapshot === undefined) continue;
+    if (!isNativeContextAccountingSnapshot(snapshot)) continue;
+    return snapshot;
+  }
+  return undefined;
+}
+
+function isNativeContextAccountingSnapshot(
+  value: Record<string, unknown>,
+): value is NativeContextAccountingSnapshot {
+  return (
+    value.schema_version === 1 &&
+    optionalRecord(value.provider) !== undefined &&
+    optionalRecord(value.prompt_projection) !== undefined &&
+    optionalRecord(value.reserved_output) !== undefined &&
+    optionalRecord(value.admission) !== undefined &&
+    optionalRecord(value.provider_usage) !== undefined &&
+    optionalRecord(value.durable_transcript) !== undefined &&
+    optionalRecord(value.provider_state) !== undefined &&
+    optionalRecord(value.compaction) !== undefined &&
+    Array.isArray(value.diagnostics)
+  );
 }
 
 export async function rustyViewToolCallDebugDetail(

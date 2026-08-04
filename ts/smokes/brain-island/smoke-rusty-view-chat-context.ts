@@ -96,6 +96,64 @@ try {
     200,
     JSON.stringify(roleplaySession.body),
   );
+  await bridge.appendChatEvent({
+    session_id: "chat-session" as SessionId,
+    created_at: "2026-06-30T00:59:00Z",
+    kind: "provider_status",
+    payload: {
+      metadata_json: JSON.stringify({
+        kind: "context_accounting_snapshot",
+        snapshot: {
+          schema_version: 1,
+          session_id: "chat-session",
+          wake_id: "wake-context-smoke",
+          logical_turn_id: null,
+          execution_epoch_id: null,
+          measured_at: "2026-06-30T00:59:00Z",
+          provider: {
+            protocol: "chat_completions",
+            provider_alias: "default",
+            model_id: "gpt",
+          },
+          prompt_projection: {
+            input_tokens: {
+              tokens: 1234,
+              source: "provider",
+              quality: "exact",
+            },
+            context_window_tokens: {
+              tokens: 128000,
+              source: "serialized_estimate",
+              quality: "approximate",
+              estimator_id: "configured_context_budget_v1",
+            },
+            protocol_projection: {
+              kind: "chat_completions",
+              message_count: 4,
+              tool_schema_count: 2,
+              reasoning_policy: "preserve_all",
+            },
+            segments: [],
+          },
+          reserved_output: {},
+          admission: {},
+          provider_usage: {
+            current_request: {},
+            logical_wake: {},
+            request_count: 1,
+          },
+          durable_transcript: {},
+          provider_state: {},
+          compaction: {
+            phase: "idle",
+            enabled: false,
+            auto_compaction_enabled: false,
+          },
+          diagnostics: [],
+        },
+      }),
+    },
+  });
   await bridge.saveContextCompactionArtifact({
     artifact_id: "context_artifact_smoke",
     session_id: "chat-session" as SessionId,
@@ -186,6 +244,16 @@ try {
   assert.equal(
     contextUsage.body.data.context_strategy.auto_compaction_enabled,
     false,
+  );
+  assert.equal(contextUsage.body.data.native_snapshot.schema_version, 1);
+  assert.equal(
+    contextUsage.body.data.native_snapshot.prompt_projection.input_tokens
+      .tokens,
+    1234,
+  );
+  assert.equal(
+    contextUsage.body.data.native_snapshot.provider_usage.request_count,
+    1,
   );
   assert.equal(
     contextUsage.body.data.latest_compaction_artifact.artifact_id,

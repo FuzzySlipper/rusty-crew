@@ -3514,7 +3514,7 @@
     "/v1/chat/sessions/{session_id}/context": {
       "get": {
         "operationId": "chatSessionsContext",
-        "summary": "Read browser-safe model/provider/brain and approximate context usage diagnostics for a chat session.",
+        "summary": "Read browser-safe model/provider/brain and Rust-owned context accounting diagnostics for a chat session.",
         "tags": ["chat", "session", "diagnostics"],
         "security": [{ "ChatBearer": [] }],
         "parameters": [
