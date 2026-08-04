@@ -3728,18 +3728,17 @@ fn continuation_payload_fingerprint(payload: &Value) -> Result<String, String> {
         .map_err(|error| format!("fingerprint chat-completions continuation payload: {error}"))
 }
 
+type ChatCompletionsProviderMessages = (
+    Vec<ChatCompletionMessage>,
+    Option<ChatCompletionsContextCompactionState>,
+    Vec<ChatCompletionMessage>,
+);
+
 fn chat_completions_messages_with_provider_state(
     config: &ChatCompletionsChatConfig,
     provider_state: Option<&BrainWakeProviderStateInput>,
     current_messages: Vec<ChatCompletionMessage>,
-) -> Result<
-    (
-        Vec<ChatCompletionMessage>,
-        Option<ChatCompletionsContextCompactionState>,
-        Vec<ChatCompletionMessage>,
-    ),
-    String,
-> {
+) -> Result<ChatCompletionsProviderMessages, String> {
     let Some(state) = provider_state else {
         return Ok((current_messages.clone(), None, current_messages));
     };
