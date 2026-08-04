@@ -73,6 +73,10 @@ import {
 } from "./admin-diagnostics-api.js";
 import { buildMemorySurfaceCatalog } from "./memory-surface-diagnostics.js";
 import { builtInSkillCatalogDiagnostics } from "./built-in-skills.js";
+import {
+  isNativeReasoningEffort,
+  resolveReasoningEffort,
+} from "./reasoning-effort-policy.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
 import { handleAdminBrainCatalogRequest } from "./service-brain-catalog-routes.js";
 import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
@@ -4011,24 +4015,52 @@ function createServiceControlExecutor(
     })(),
     setSessionEffort: async (command) => {
       const raw = command.body.reasoningEffort;
-      if (raw !== null && typeof raw !== "string") {
+      if (
+        raw !== null &&
+        (typeof raw !== "string" || !isNativeReasoningEffort(raw))
+      ) {
         throw new Error(
-          "reasoningEffort must be a lowercase provider token or null",
+          "reasoningEffort must be one of none, minimal, low, medium, high, xhigh, or null",
         );
       }
-      const session = await state.bridge.setSessionReasoningEffort(
+      const sessionSummary = await state.bridge.setSessionReasoningEffort(
         command.target.sessionId as SessionId,
         raw === null ? undefined : raw,
       );
-      const resolved = raw ?? "provider default";
+      const session = (await state.bridge.listSessions()).find(
+        (candidate) => candidate.sessionId === sessionSummary.sessionId,
+      );
+      const contextUsage =
+        session === undefined
+          ? undefined
+          : await rustyViewSessionContextUsage(
+              rustyViewChatOperationsContext(state),
+              { session, requestId: command.requestId },
+            ).catch(() => undefined);
+      const reasoningEffort = resolveReasoningEffort(
+        session?.inferenceOverrides?.reasoningEffort ??
+          sessionSummary.reasoningEffort,
+        contextUsage?.provider.provider_reasoning_effort,
+      );
+      const resolved = reasoningEffort.value ?? "provider default";
       return {
         status: "completed",
         summary:
           raw === null
-            ? `session ${session.sessionId} now uses provider-default reasoning effort`
-            : `session ${session.sessionId} reasoning effort set to ${resolved}`,
-        affectedIds: { sessionId: session.sessionId },
-        result: session,
+            ? `session ${sessionSummary.sessionId} now uses ${resolved} reasoning effort (${reasoningEffort.source})`
+            : `session ${sessionSummary.sessionId} reasoning effort set to ${resolved} (${reasoningEffort.source})`,
+        affectedIds: { sessionId: sessionSummary.sessionId },
+        result: {
+          session: sessionSummary,
+          reasoningEffort: reasoningEffort.value ?? null,
+          reasoningEffortSource: reasoningEffort.source,
+          providerReasoningEffort:
+            contextUsage?.provider.provider_reasoning_effort ?? null,
+          sessionReasoningEffortOverride:
+            session?.inferenceOverrides?.reasoningEffort ??
+            sessionSummary.reasoningEffort ??
+            null,
+        },
       };
     },
     pauseRuntime: async (command) => pauseRuntimeTarget(state, command),

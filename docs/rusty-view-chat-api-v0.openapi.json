@@ -1694,6 +1694,9 @@
               "max_output_tokens": { "type": "integer", "minimum": 0 },
               "temperature": { "type": "number", "minimum": 0 },
               "reasoning_effort": { "type": "string" },
+              "reasoning_effort_source": { "type": "string", "enum": ["session_override", "profile", "provider_default"] },
+              "provider_reasoning_effort": { "type": "string" },
+              "session_reasoning_effort_override": { "type": "string" },
               "reasoning_format": { "type": "string" },
               "chat_completions_dialect": {
                 "type": "string",

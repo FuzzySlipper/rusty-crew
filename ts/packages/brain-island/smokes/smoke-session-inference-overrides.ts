@@ -24,6 +24,20 @@ try {
   const restarted = await start("2026-07-16T00:01:00Z");
   const restored = await session();
   assert.equal(restored?.inferenceOverrides?.reasoningEffort, "high");
+  const concurrent = await Promise.all([
+    native.setSessionReasoningEffort(sessionId, "low"),
+    native.setSessionReasoningEffort(sessionId, "medium"),
+  ]);
+  assert.deepEqual(
+    concurrent.map((candidate) => candidate.reasoningEffort).sort(),
+    ["low", "medium"],
+  );
+  const concurrentRead = await session();
+  assert.ok(
+    concurrentRead?.inferenceOverrides?.reasoningEffort === "low" ||
+      concurrentRead?.inferenceOverrides?.reasoningEffort === "medium",
+    `concurrent update was not persisted: ${JSON.stringify(concurrentRead)}`,
+  );
   const cleared = await native.setSessionReasoningEffort(sessionId, undefined);
   assert.equal(cleared.reasoningEffort, undefined);
   await native.shutdownEngine({ engine: restarted, drainTimeoutMs: 1_000 });
@@ -36,6 +50,9 @@ try {
       {
         sessionId,
         restoredEffort: restored?.inferenceOverrides?.reasoningEffort,
+        concurrentEfforts: concurrent.map(
+          (candidate) => candidate.reasoningEffort,
+        ),
         clearedEffort:
           restoredClear?.inferenceOverrides?.reasoningEffort ?? null,
       },

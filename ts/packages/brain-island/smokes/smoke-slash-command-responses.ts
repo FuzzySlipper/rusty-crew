@@ -149,6 +149,7 @@ const modelContext: SessionContextUsageResult = {
     max_output_tokens: 4096,
     temperature: 0.5,
     reasoning_effort: "high",
+    reasoning_effort_source: "session_override",
     provider_reasoning_effort: "low",
     session_reasoning_effort_override: "high",
     reasoning_format: "none",
@@ -214,6 +215,7 @@ assert.equal(model.fields?.estimatorId, "test_estimator");
 assert.equal(model.fields?.providerReasoningEffort, "low");
 assert.equal(model.fields?.sessionReasoningEffortOverride, "high");
 assert.equal(model.fields?.resolvedReasoningEffort, "high");
+assert.equal(model.fields?.reasoningEffortSource, "session_override");
 assert.equal(model.fields?.chatCompletionsDialect, "qwen");
 assert.equal(model.fields?.thinkingMode, "enabled");
 assert.equal(model.fields?.reasoningHistory, "preserve_all");
@@ -255,6 +257,7 @@ const effort = buildReadOnlySlashCommandResponse("effort", {
 });
 assert.equal(effort.fields?.sessionOverride, "high");
 assert.equal(effort.fields?.resolvedReasoningEffort, "high");
+assert.equal(effort.fields?.reasoningEffortSource, "session_override");
 
 const missingSession = buildReadOnlySlashCommandResponse("session", {
   diagnostics,

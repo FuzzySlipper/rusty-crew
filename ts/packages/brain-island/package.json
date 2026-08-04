@@ -80,6 +80,7 @@
     "smoke:session-defaults": "tsx smokes/smoke-session-defaults.ts",
     "smoke:session-history-window": "tsx smokes/smoke-session-history-window.ts",
     "smoke:session-inference-overrides": "tsx smokes/smoke-session-inference-overrides.ts",
+    "smoke:session-effort-live-debug-service": "tsx smokes/session-effort-live-debug-service.ts",
     "smoke:post-turn-maintenance": "tsx smokes/smoke-post-turn-maintenance.ts",
     "smoke:rusty-view-chat-contract": "tsx smokes/smoke-rusty-view-chat-contract.ts",
     "smoke:rusty-view-chat-authority-boundary": "tsx smokes/smoke-rusty-view-chat-authority-boundary.ts",

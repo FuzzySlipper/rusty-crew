@@ -2,6 +2,7 @@ import { buildRuntimeHealthProjection } from "./runtime-health.js";
 import { slashCommandNames } from "./api-command-registry.js";
 import type { SessionContextUsageResult } from "./rusty-view-chat-api.js";
 import type { RuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
+import { resolveReasoningEffort } from "./reasoning-effort-policy.js";
 import type {
   SlashCommandName,
   SlashCommandResponse,
@@ -94,6 +95,12 @@ function modelResponse(
         model.provider.session_reasoning_effort_override ?? "none",
       resolvedReasoningEffort:
         model.provider.reasoning_effort ?? "provider default",
+      reasoningEffortSource:
+        model.provider.reasoning_effort_source ??
+        resolveReasoningEffort(
+          model.provider.session_reasoning_effort_override,
+          model.provider.provider_reasoning_effort,
+        ).source,
       responsesDialect: model.provider.responses_dialect ?? "not applicable",
       chatCompletionsDialect:
         model.provider.chat_completions_dialect ?? "standard",
@@ -158,19 +165,22 @@ function effortResponse(
   const model = context.modelContext;
   const providerEffort = model?.provider.provider_reasoning_effort;
   const override = context.session.reasoningEffortOverride;
-  const resolved = override ?? providerEffort;
+  const resolution = resolveReasoningEffort(override, providerEffort);
+  const resolved = resolution.value;
   return {
     title: "Reasoning Effort",
-    summary: override
-      ? `This session overrides reasoning effort to ${override}.`
-      : resolved
-        ? `This session uses provider reasoning effort ${resolved}.`
-        : "This session leaves reasoning effort to the provider default.",
+    summary:
+      resolution.source === "session_override"
+        ? `This session overrides reasoning effort to ${resolved}.`
+        : resolution.source === "profile"
+          ? `This session uses profile reasoning effort ${resolved}.`
+          : "This session leaves reasoning effort to the provider default.",
     fields: {
       sessionId: context.session.sessionId,
       providerReasoningEffort: providerEffort ?? "provider default",
       sessionOverride: override ?? "none",
       resolvedReasoningEffort: resolved ?? "provider default",
+      reasoningEffortSource: resolution.source,
     },
   };
 }

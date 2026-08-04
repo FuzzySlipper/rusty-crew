@@ -17,6 +17,7 @@ import {
 import { loadProfileContext } from "./profile-loading.js";
 import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
 import { defaultProfileBrainForModelProvider } from "./service-profile-admin-mutations.js";
+import { resolveReasoningEffort } from "./reasoning-effort-policy.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
@@ -676,6 +677,10 @@ export async function rustyViewSessionContextUsage(
       return undefined;
     });
   const redactedUrl = redactedProviderUrl(provider?.baseUrl);
+  const reasoningEffort = resolveReasoningEffort(
+    input.session.inferenceOverrides?.reasoningEffort ?? undefined,
+    provider?.reasoningEffort,
+  );
   return {
     session_id: input.session.sessionId,
     agent_id: input.session.agentId,
@@ -695,9 +700,8 @@ export async function rustyViewSessionContextUsage(
         provider?.temperatureMilli === undefined
           ? undefined
           : provider.temperatureMilli / 1_000,
-      reasoning_effort:
-        input.session.inferenceOverrides?.reasoningEffort ??
-        provider?.reasoningEffort,
+      reasoning_effort: reasoningEffort.value,
+      reasoning_effort_source: reasoningEffort.source,
       provider_reasoning_effort: provider?.reasoningEffort,
       session_reasoning_effort_override:
         input.session.inferenceOverrides?.reasoningEffort ?? undefined,

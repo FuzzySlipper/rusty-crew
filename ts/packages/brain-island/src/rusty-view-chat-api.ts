@@ -17,6 +17,7 @@ import type {
   ChatCompletionsReasoningHistory,
   ChatCompletionsThinkingMode,
 } from "./model-provider-admin-contract.js";
+import type { ReasoningEffortSource } from "./reasoning-effort-policy.js";
 import type { SlashCommandResponse } from "./slash-command-router.js";
 
 export type {
@@ -412,6 +413,7 @@ export interface SessionContextUsageResult {
     max_output_tokens?: number;
     temperature?: number;
     reasoning_effort?: string;
+    reasoning_effort_source?: ReasoningEffortSource;
     provider_reasoning_effort?: string;
     session_reasoning_effort_override?: string;
     reasoning_format?: string;
