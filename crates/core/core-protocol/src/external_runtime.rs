@@ -533,6 +533,11 @@ pub struct ExternalAgentBinding {
     pub profile_prompt_hash: Option<String>,
     #[serde(default)]
     pub profile_prompt_snapshot: Option<String>,
+    /// Fingerprint of the exact dynamic-tool catalog applied at native thread start.
+    /// Missing values are an explicit stale/unknown state for bindings created
+    /// before catalog reconciliation was introduced.
+    #[serde(default)]
+    pub dynamic_tool_catalog_fingerprint: Option<String>,
     #[serde(default)]
     pub message_delivery_policy: ExternalMessageDeliveryPolicy,
     pub purpose: ExternalBindingPurpose,
@@ -629,6 +634,9 @@ impl ExternalAgentBinding {
             "effective_config_fingerprint",
             &self.effective_config_fingerprint,
         )?;
+        if let Some(fingerprint) = &self.dynamic_tool_catalog_fingerprint {
+            validate_non_empty("dynamic_tool_catalog_fingerprint", fingerprint)?;
+        }
         if self.purpose == ExternalBindingPurpose::CrewAgent
             && (self.session_id.is_none()
                 || self.agent_id.is_none()
@@ -1660,6 +1668,7 @@ mod tests {
             profile_revision: None,
             profile_prompt_hash: None,
             profile_prompt_snapshot: None,
+            dynamic_tool_catalog_fingerprint: None,
             message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
             purpose: ExternalBindingPurpose::ImportedObserver,
             native_thread_id: Some("thread".into()),

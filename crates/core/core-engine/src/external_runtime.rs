@@ -331,6 +331,7 @@ impl CoreEngine {
                     .trim()
                     .to_owned(),
             ),
+            dynamic_tool_catalog_fingerprint: None,
             message_delivery_policy: external_message_delivery_policy(&profile)?,
             purpose: ExternalBindingPurpose::CrewAgent,
             native_thread_id: None,

@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
+
 import type { DynamicToolSpec } from "../protocol/0.144.1/ts/v2/DynamicToolSpec.js";
 
 const COORDINATION_NAMESPACE = "rusty_crew";
 const MAX_ROUND_TIMEOUT_MS = 300_000;
 const MAX_MESSAGE_TTL_SECONDS = 86_400;
+export const CODEX_COORDINATION_DYNAMIC_TOOL_CATALOG_REVISION =
+  "rusty-crew-codex-coordination-v1";
 
 export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
   {
@@ -207,6 +211,26 @@ export function codexCoordinationDynamicToolsForProfile(input: {
     isManagedReviewerIdentity(input.profileId)
     ? CODEX_MANAGED_REVIEWER_DYNAMIC_TOOLS
     : CODEX_COORDINATION_DYNAMIC_TOOLS;
+}
+
+/**
+ * The app-server only accepts dynamic tools during thread/start. Persist this
+ * fingerprint beside the Crew binding so reconnect can distinguish an exact
+ * resume from a native thread that predates the current catalog.
+ */
+export function codexCoordinationDynamicToolCatalogFingerprint(input: {
+  readonly agentId?: string | null;
+  readonly profileId?: string | null;
+}): string {
+  const catalog = codexCoordinationDynamicToolsForProfile(input);
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        revision: CODEX_COORDINATION_DYNAMIC_TOOL_CATALOG_REVISION,
+        catalog,
+      }),
+    )
+    .digest("hex");
 }
 
 function isManagedReviewerIdentity(value: string | null | undefined): boolean {

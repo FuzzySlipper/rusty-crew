@@ -4677,6 +4677,14 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "dynamicToolCatalogFingerprint": {
+            "default": null,
+            "description": "Fingerprint of the exact dynamic-tool catalog applied at native thread start.\nMissing values are an explicit stale/unknown state for bindings created\nbefore catalog reconciliation was introduced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "effectiveConfigFingerprint": {
             "type": "string"
           },
@@ -7960,6 +7968,14 @@ export const bridgeWireSchemaArtifact = {
           "type": "string"
         },
         "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dynamicToolCatalogFingerprint": {
+          "default": null,
+          "description": "Fingerprint of the exact dynamic-tool catalog applied at native thread start.\nMissing values are an explicit stale/unknown state for bindings created\nbefore catalog reconciliation was introduced.",
           "type": [
             "string",
             "null"
@@ -21169,6 +21185,14 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "dynamicToolCatalogFingerprint": {
+          "default": null,
+          "description": "Fingerprint of the exact dynamic-tool catalog applied at native thread start.\nMissing values are an explicit stale/unknown state for bindings created\nbefore catalog reconciliation was introduced.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "effectiveConfigFingerprint": {
           "type": "string"
         },
@@ -21305,6 +21329,14 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dynamicToolCatalogFingerprint": {
+              "default": null,
+              "description": "Fingerprint of the exact dynamic-tool catalog applied at native thread start.\nMissing values are an explicit stale/unknown state for bindings created\nbefore catalog reconciliation was introduced.",
               "type": [
                 "string",
                 "null"
@@ -21651,6 +21683,14 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dynamicToolCatalogFingerprint": {
+              "default": null,
+              "description": "Fingerprint of the exact dynamic-tool catalog applied at native thread start.\nMissing values are an explicit stale/unknown state for bindings created\nbefore catalog reconciliation was introduced.",
               "type": [
                 "string",
                 "null"

@@ -277,6 +277,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
   nameSetError?: { code: number; message: string };
   readonly archivedThreadIds = new Set<string>();
   readonly unmaterializedThreadIds = new Set<string>();
+  readonly threadDynamicTools = new Map<string, unknown>();
   readonly threadSettings = new Map<
     string,
     { model: string; modelProvider: string; effort: string | null }
@@ -415,6 +416,7 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       for (const deletedThreadId of deletedThreadIds) {
         this.archivedThreadIds.delete(deletedThreadId);
         this.unmaterializedThreadIds.delete(deletedThreadId);
+        this.threadDynamicTools.delete(deletedThreadId);
       }
       if (this.loseNextDeleteResponse) {
         this.loseNextDeleteResponse = false;
@@ -458,6 +460,10 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
         String(params.threadSource),
       );
       this.threads.push(thread);
+      this.threadDynamicTools.set(
+        String(thread.id),
+        params.dynamicTools ?? null,
+      );
       const config = (params.config ?? {}) as Record<string, unknown>;
       this.threadSettings.set(String(thread.id), {
         model: typeof params.model === "string" ? params.model : "gpt-5.4",
@@ -529,6 +535,10 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
         cwd: params.cwd ?? source.cwd,
       };
       this.threads.push(thread);
+      this.threadDynamicTools.set(
+        String(thread.id),
+        this.threadDynamicTools.get(String(params.threadId)) ?? null,
+      );
       this.threadSettings.set(String(thread.id), {
         model: "gpt-5.4",
         modelProvider: "openai",
@@ -987,6 +997,120 @@ test("controller scopes Codex coordination tools by the bound reviewer profile",
       ],
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("reconnect replaces a native thread when its dynamic tool catalog is stale", async () => {
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "reviewer",
+  );
+  let recoveredController: ServiceExternalRuntimeController | undefined;
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "dynamic-catalog-reconnect",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+      label: "dynamic catalog reconnect",
+    });
+    const before = created.creation.binding;
+    assert.equal(typeof before.dynamicToolCatalogFingerprint, "string");
+    const stale = await fixture.bridge.bindExternalAgent({
+      binding: {
+        ...before,
+        dynamicToolCatalogFingerprint: null,
+        updatedAt: new Date().toISOString(),
+      },
+      expectedRevision: before.revision,
+    });
+    await fixture.controller.stop();
+
+    recoveredController = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "reconnect-test-controller",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    await recoveredController.connect(fixture.runtimeId);
+
+    const after = await fixture.bridge.getExternalBinding(stale.bindingId);
+    assert.ok(after);
+    assert.notEqual(after.nativeThreadId, before.nativeThreadId);
+    assert.equal(
+      after.dynamicToolCatalogFingerprint,
+      before.dynamicToolCatalogFingerprint,
+    );
+    assert.equal(after.sessionId, before.sessionId);
+    assert.equal(after.agentId, before.agentId);
+    assert.equal(after.label, before.label);
+    assert.ok(
+      fixture.transport.archivedThreadIds.has(before.nativeThreadId as string),
+    );
+
+    const refreshStart = [...fixture.transport.sent]
+      .reverse()
+      .find(
+        (message) =>
+          message.method === "thread/start" &&
+          String(
+            (message.params as Record<string, unknown>).threadSource,
+          ).startsWith("rusty-crew:dynamic-tools-refresh:"),
+      );
+    assert.ok(refreshStart);
+    const dynamicTools = (refreshStart.params as Record<string, unknown>)
+      .dynamicTools as Array<{
+      type?: string;
+      tools?: Array<{ name?: string }>;
+    }>;
+    const namespace = dynamicTools.find((entry) => entry.type === "namespace");
+    assert.ok(
+      namespace?.tools?.some((tool) => tool.name === "submit_task_for_review"),
+    );
+    assert.ok(
+      namespace?.tools?.some((tool) => tool.name === "complete_routed_review"),
+    );
+    assert.equal(
+      namespace?.tools?.some((tool) => tool.name === "reply_agent_message"),
+      false,
+    );
+    const refreshEvents = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      afterSequence: 0,
+      limit: 100,
+    });
+    assert.ok(
+      refreshEvents.some(
+        (event) =>
+          event.kind === "dynamic_tool_catalog_refreshed" &&
+          typeof event.payload === "object" &&
+          event.payload !== null &&
+          (event.payload as Record<string, unknown>).previousNativeThreadId ===
+            before.nativeThreadId &&
+          (event.payload as Record<string, unknown>).nativeThreadId ===
+            after.nativeThreadId,
+      ),
+    );
+
+    const startCount = fixture.transport.sent.filter(
+      (message) => message.method === "thread/start",
+    ).length;
+    await recoveredController.connect(fixture.runtimeId);
+    assert.equal(
+      fixture.transport.sent.filter(
+        (message) => message.method === "thread/start",
+      ).length,
+      startCount,
+    );
+  } finally {
+    await recoveredController?.stop().catch(() => undefined);
     await fixture.cleanup();
   }
 });

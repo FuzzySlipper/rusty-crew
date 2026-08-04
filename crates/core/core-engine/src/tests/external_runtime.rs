@@ -1712,6 +1712,7 @@ pub(super) fn binding() -> ExternalAgentBinding {
         profile_revision: Some(1),
         profile_prompt_hash: Some("profile-prompt-hash".into()),
         profile_prompt_snapshot: Some("profile prompt".into()),
+        dynamic_tool_catalog_fingerprint: None,
         message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
         purpose: ExternalBindingPurpose::CrewAgent,
         native_thread_id: Some("native-thread-7".into()),
@@ -1725,7 +1726,6 @@ pub(super) fn binding() -> ExternalAgentBinding {
         updated_at: "2026-06-19T00:00:00Z".into(),
     }
 }
-
 pub(super) fn external_controller_lease() -> ExternalControllerLease {
     ExternalControllerLease {
         runtime_id: ExternalRuntimeId::new("codex-local"),

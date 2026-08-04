@@ -784,6 +784,7 @@ export type ExternalAgentBinding = {
   bindingId: string;
   createdAt: string;
   cwd?: string | null;
+  dynamicToolCatalogFingerprint?: string | null;
   effectiveConfigFingerprint: string;
   label?: string | null;
   messageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
