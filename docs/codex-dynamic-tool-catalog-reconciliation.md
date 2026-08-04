@@ -52,10 +52,23 @@ use the full catalog.
 Codex does not currently provide a stable local app-server operation that
 combines an existing persisted thread history with a changed dynamic-tool
 catalog. `thread/resume.history` is an unstable Codex Cloud contract and
-`thread/fork` does not accept a new dynamic catalog. Crew therefore retains the
-old native thread as an archived artifact and retains the durable Crew
-projection, but does not pretend that a replacement has native conversation
-history identical to the old thread.
+`thread/fork` does not accept a new dynamic catalog. Before starting a
+replacement, Crew therefore reads the old native thread with
+`thread/read(includeTurns=true)` and constructs a bounded, redacted
+`RUSTY_CREW_DYNAMIC_TOOL_REFRESH_HANDOFF` developer-context block. The block
+contains the prior user/assistant/tool context, a SHA-256 digest of the full
+native turn payload, counts, and an explicit truncation marker when the
+reconstruction boundary is reached. The existing profile instructions remain
+the prefix; the handoff is appended rather than replacing them.
+
+Crew retains the old native thread as an archived artifact and retains the
+durable Crew projection. The replacement is not claimed to have byte-for-byte
+native history: it has a versioned, observable reconstruction contract that
+preserves the model-facing context needed to continue the work. If the old
+thread cannot be read with turns, Crew refuses the replacement and leaves the
+stale binding in place for a later retry rather than silently starting a blank
+session. The durable refresh event records whether the handoff was applied,
+its digest, turn/item counts, and truncation state.
 
 This is an explicit, observable replacement rather than a hidden fallback or a
 silent session reset. A future history-transfer implementation must add a
@@ -82,8 +95,11 @@ The deterministic controller coverage must prove all of the following:
 - unknown/stale catalog replaces once and archives the previous thread;
 - a second reconnect resumes the replacement without another `thread/start`;
 - reviewer catalog identity is preserved through replacement;
-- replacement preserves Crew identity, settings, label, and task reference;
+- replacement preserves the reconstructed context marker and prior tool
+  context in addition to Crew identity, settings, label, and task reference;
 - replacement events expose old/new thread IDs and the fingerprint;
+- replacement reads the old thread with `includeTurns=true` and records the
+  handoff digest/counts;
 - active turns and pending interactions defer replacement and surface the
   stale state;
 - a restart during replacement recovers the idempotent candidate.

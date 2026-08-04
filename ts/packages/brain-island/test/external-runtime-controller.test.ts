@@ -1021,6 +1021,53 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
     });
     const before = created.creation.binding;
     assert.equal(typeof before.dynamicToolCatalogFingerprint, "string");
+    const previousThread = fixture.transport.threads.find(
+      (thread) => thread.id === before.nativeThreadId,
+    );
+    assert.ok(previousThread);
+    previousThread.turns = [
+      {
+        id: "prior-turn-1",
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1,
+        items: [
+          {
+            type: "userMessage",
+            id: "prior-user-1",
+            clientId: null,
+            content: [
+              {
+                type: "text",
+                text: "LONG_LIVED_CONTEXT_MARKER",
+                text_elements: [],
+              },
+            ],
+          },
+          {
+            type: "agentMessage",
+            id: "prior-agent-1",
+            text: "The marker was received before catalog refresh.",
+            phase: null,
+            memoryCitation: null,
+          },
+          {
+            type: "dynamicToolCall",
+            id: "prior-tool-1",
+            namespace: "rusty_crew",
+            tool: "send_agent_message",
+            arguments: { body: "prior tool context" },
+            status: "completed",
+            contentItems: [{ type: "inputText", text: "delivered" }],
+            success: true,
+            durationMs: 1,
+          },
+        ],
+      },
+    ];
     const stale = await fixture.bridge.bindExternalAgent({
       binding: {
         ...before,
@@ -1065,6 +1112,32 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
           ).startsWith("rusty-crew:dynamic-tools-refresh:"),
       );
     assert.ok(refreshStart);
+    const refreshRead = [...fixture.transport.sent]
+      .reverse()
+      .find(
+        (message) =>
+          message.method === "thread/read" &&
+          (message.params as Record<string, unknown>).threadId ===
+            before.nativeThreadId,
+      );
+    assert.ok(refreshRead);
+    assert.equal(
+      (refreshRead?.params as Record<string, unknown>).includeTurns,
+      true,
+    );
+    const replacementDeveloperInstructions = String(
+      (refreshStart.params as Record<string, unknown>).developerInstructions,
+    );
+    assert.match(
+      replacementDeveloperInstructions,
+      /RUSTY_CREW_DYNAMIC_TOOL_REFRESH_HANDOFF/,
+    );
+    assert.match(
+      replacementDeveloperInstructions,
+      /CREATION_PROFILE_SOUL_MARKER/,
+    );
+    assert.match(replacementDeveloperInstructions, /LONG_LIVED_CONTEXT_MARKER/);
+    assert.match(replacementDeveloperInstructions, /send_agent_message/);
     const dynamicTools = (refreshStart.params as Record<string, unknown>)
       .dynamicTools as Array<{
       type?: string;
@@ -1097,6 +1170,23 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
           (event.payload as Record<string, unknown>).nativeThreadId ===
             after.nativeThreadId,
       ),
+    );
+    const refreshEvent = refreshEvents.find(
+      (event) => event.kind === "dynamic_tool_catalog_refreshed",
+    );
+    assert.equal(
+      (refreshEvent?.payload as Record<string, unknown>).historyHandoffApplied,
+      true,
+    );
+    assert.equal(
+      (refreshEvent?.payload as Record<string, unknown>)
+        .historyHandoffTurnCount,
+      1,
+    );
+    assert.equal(
+      (refreshEvent?.payload as Record<string, unknown>)
+        .historyHandoffItemCount,
+      3,
     );
 
     const startCount = fixture.transport.sent.filter(

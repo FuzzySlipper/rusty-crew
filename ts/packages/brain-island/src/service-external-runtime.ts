@@ -35,6 +35,8 @@ import {
   type CodexServerRequestContext,
   type NeutralExternalRuntimeEvent,
   type ServerRequestResolution,
+  type Thread,
+  type ThreadItem,
 } from "@rusty-crew/external-runtime-codex";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { resolveCodexCoordinationToolCall } from "./external-runtime-coordination.js";
@@ -67,6 +69,9 @@ const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
 const DEFAULT_RECOVERY_BASE_DELAY_MS = 5_000;
 const DEFAULT_RECOVERY_MAX_DELAY_MS = 60_000;
+const DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES = 256 * 1024;
+const DYNAMIC_TOOL_REFRESH_HANDOFF_TAG =
+  "RUSTY_CREW_DYNAMIC_TOOL_REFRESH_HANDOFF";
 export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
   "external_agent_creation_idempotency_key_required",
   "external_agent_creation_idempotency_conflict",
@@ -232,6 +237,7 @@ export class ExternalThreadLifecycleError extends Error {
       | "external_thread_not_found"
       | "external_thread_active"
       | "external_thread_interaction_pending"
+      | "external_thread_context_unavailable"
       | "external_thread_listing_limit_exceeded"
       | "external_thread_binding_reconciliation_failed"
       | "external_thread_native_delete_failed",
@@ -1265,7 +1271,11 @@ export class ServiceExternalRuntimeController {
             ),
           };
         } catch (error) {
-          if (error instanceof ExternalThreadLifecycleError) {
+          if (
+            error instanceof ExternalThreadLifecycleError &&
+            (error.reasonCode === "external_thread_active" ||
+              error.reasonCode === "external_thread_interaction_pending")
+          ) {
             throw new ExternalBindingProfileRefreshError(
               "external_binding_profile_refresh_thread_busy",
               error.message,
@@ -2025,6 +2035,7 @@ export class ServiceExternalRuntimeController {
     readonly nativeThreadId: string;
     readonly settings: ControlledThreadSettings;
     readonly previousNativeThreadArchived: boolean;
+    readonly historyHandoff: DynamicToolRefreshHistoryHandoff | null;
   }> {
     await this.#assertThreadHasNoCrewWork(
       binding.runtimeId,
@@ -2042,12 +2053,33 @@ export class ServiceExternalRuntimeController {
     let nextSettings: ControlledThreadSettings | undefined;
     let candidateMayBeDeleted = false;
     let saved: ExternalAgentBinding | undefined;
+    let historyHandoff: DynamicToolRefreshHistoryHandoff | null = null;
     try {
       const recovered = await this.#findThreadBySource(
         controlled,
         threadSource,
       );
       if (recovered === undefined) {
+        let previousThread: Thread;
+        try {
+          previousThread = (
+            await controlled.driver.threadRead({
+              threadId: previousNativeThreadId,
+              includeTurns: true,
+            })
+          ).thread;
+        } catch (error) {
+          throw new ExternalThreadLifecycleError(
+            "external_thread_context_unavailable",
+            `cannot reconstruct native thread ${previousNativeThreadId} before dynamic-tool refresh: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+        historyHandoff = buildDynamicToolRefreshHistoryHandoff(
+          previousThread,
+          developerInstructions,
+        );
         const started = await controlled.driver.threadStart({
           ...(previousSettings === undefined
             ? {}
@@ -2070,7 +2102,7 @@ export class ServiceExternalRuntimeController {
           environments: [{ environmentId: "local", cwd }],
           dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
           threadSource,
-          developerInstructions,
+          developerInstructions: historyHandoff.developerInstructions,
         });
         nextNativeThreadId = started.thread.id;
         candidateMayBeDeleted = true;
@@ -2078,7 +2110,7 @@ export class ServiceExternalRuntimeController {
           model: started.model,
           modelProvider: started.modelProvider,
           reasoning_effort: started.reasoningEffort,
-          developer_instructions: developerInstructions,
+          developer_instructions: historyHandoff.developerInstructions,
         };
       } else {
         nextNativeThreadId = recovered.id;
@@ -2123,7 +2155,8 @@ export class ServiceExternalRuntimeController {
               effort: previousSettings.reasoning_effort,
             },
           )),
-          developer_instructions: developerInstructions,
+          developer_instructions:
+            historyHandoff?.developerInstructions ?? developerInstructions,
         };
       }
       if (typeof binding.label === "string") {
@@ -2180,6 +2213,11 @@ export class ServiceExternalRuntimeController {
             nativeThreadId: nextNativeThreadId,
             dynamicToolCatalogFingerprint,
             previousNativeThreadArchived,
+            historyHandoffApplied: historyHandoff !== null,
+            historyHandoffDigest: historyHandoff?.digest ?? null,
+            historyHandoffTurnCount: historyHandoff?.turnCount ?? null,
+            historyHandoffItemCount: historyHandoff?.itemCount ?? null,
+            historyHandoffTruncated: historyHandoff?.truncated ?? null,
           },
           rawDetailRef: null,
         },
@@ -2190,6 +2228,7 @@ export class ServiceExternalRuntimeController {
       nativeThreadId: nextNativeThreadId,
       settings: nextSettings,
       previousNativeThreadArchived,
+      historyHandoff,
     };
   }
 
@@ -4784,6 +4823,186 @@ function appliedDeveloperInstructions(
   return binding.profilePromptSnapshot === ""
     ? null
     : binding.profilePromptSnapshot;
+}
+
+interface DynamicToolRefreshHistoryHandoff {
+  readonly developerInstructions: string;
+  readonly digest: string;
+  readonly turnCount: number;
+  readonly itemCount: number;
+  readonly truncated: boolean;
+}
+
+function takeUtf8Prefix(value: string, maxBytes: number): string {
+  let result = "";
+  let bytes = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > maxBytes) break;
+    result += character;
+    bytes += characterBytes;
+  }
+  return result;
+}
+
+function takeUtf8Suffix(value: string, maxBytes: number): string {
+  const characters = [...value];
+  let result = "";
+  let bytes = 0;
+  for (let index = characters.length - 1; index >= 0; index -= 1) {
+    const character = characters[index];
+    if (character === undefined) continue;
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > maxBytes) break;
+    result = character + result;
+    bytes += characterBytes;
+  }
+  return result;
+}
+
+function boundHistoryText(value: string): {
+  readonly text: string;
+  readonly truncated: boolean;
+} {
+  if (
+    Buffer.byteLength(value, "utf8") <= DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES
+  ) {
+    return { text: value, truncated: false };
+  }
+  const omission =
+    "\n[history handoff middle omitted at the Rusty Crew reconstruction boundary]\n";
+  const available = Math.max(
+    0,
+    DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES -
+      Buffer.byteLength(omission, "utf8"),
+  );
+  const prefixBytes = Math.floor(available / 2);
+  const suffixBytes = available - prefixBytes;
+  return {
+    text:
+      takeUtf8Prefix(value, prefixBytes) +
+      omission +
+      takeUtf8Suffix(value, suffixBytes),
+    truncated: true,
+  };
+}
+
+function boundedHistoryValue(value: unknown, maxBytes = 32 * 1024): string {
+  return captureBoundedRawDetail(value, maxBytes).json;
+}
+
+function userInputText(item: ThreadItem): string {
+  if (item.type !== "userMessage") return "";
+  const text = item.content
+    .filter((content) => content.type === "text")
+    .map((content) => content.text)
+    .join("\n");
+  return text || "[non-text user input]";
+}
+
+function renderHistoryItem(item: ThreadItem): string {
+  switch (item.type) {
+    case "userMessage":
+      return `USER: ${userInputText(item)}`;
+    case "agentMessage":
+      return `ASSISTANT${item.phase == null ? "" : ` (${item.phase})`}: ${item.text}`;
+    case "reasoning":
+      return `REASONING SUMMARY: ${item.summary.join("\n")}`;
+    case "commandExecution":
+      return [
+        `COMMAND (${item.status}): ${item.command}`,
+        item.aggregatedOutput === null
+          ? "COMMAND OUTPUT: [none]"
+          : `COMMAND OUTPUT: ${item.aggregatedOutput}`,
+      ].join("\n");
+    case "fileChange":
+      return `FILE CHANGE (${item.status}): ${boundedHistoryValue(item.changes)}`;
+    case "mcpToolCall":
+      return [
+        `MCP TOOL (${item.status}): ${item.server}.${item.tool}`,
+        `MCP ARGUMENTS: ${boundedHistoryValue(item.arguments)}`,
+        `MCP RESULT: ${boundedHistoryValue(item.result)}`,
+        `MCP ERROR: ${boundedHistoryValue(item.error)}`,
+      ].join("\n");
+    case "dynamicToolCall":
+      return [
+        `DYNAMIC TOOL (${item.status}, success=${String(item.success)}): ${
+          item.namespace == null ? item.tool : `${item.namespace}.${item.tool}`
+        }`,
+        `DYNAMIC ARGUMENTS: ${boundedHistoryValue(item.arguments)}`,
+        `DYNAMIC OUTPUT: ${boundedHistoryValue(item.contentItems)}`,
+      ].join("\n");
+    case "collabAgentToolCall":
+      return [
+        `COLLAB TOOL (${item.status}): ${item.tool}`,
+        `COLLAB PROMPT: ${item.prompt ?? "[none]"}`,
+      ].join("\n");
+    case "subAgentActivity":
+      return `SUBAGENT ACTIVITY (${item.kind}): ${item.agentPath}`;
+    case "plan":
+      return `PLAN: ${item.text}`;
+    case "hookPrompt":
+      return `HOOK PROMPT: ${boundedHistoryValue(item.fragments)}`;
+    case "webSearch":
+      return `WEB SEARCH: ${boundedHistoryValue(item)}`;
+    case "imageView":
+      return `IMAGE VIEW: ${item.path}`;
+    case "sleep":
+      return `SLEEP: ${item.durationMs}ms`;
+    case "imageGeneration":
+      return `IMAGE GENERATION: ${boundedHistoryValue(item)}`;
+    case "enteredReviewMode":
+      return `ENTERED REVIEW MODE: ${item.review}`;
+    case "exitedReviewMode":
+      return `EXITED REVIEW MODE: ${item.review}`;
+    case "contextCompaction":
+      return "CONTEXT COMPACTION";
+    default:
+      return `CODEX ITEM: ${boundedHistoryValue(item)}`;
+  }
+}
+
+function buildDynamicToolRefreshHistoryHandoff(
+  thread: Thread,
+  baseDeveloperInstructions: string | null,
+): DynamicToolRefreshHistoryHandoff {
+  const turns = thread.turns ?? [];
+  const itemCount = turns.reduce((count, turn) => count + turn.items.length, 0);
+  const digest = createHash("sha256")
+    .update(JSON.stringify(turns))
+    .digest("hex");
+  const renderedHistory =
+    turns.length === 0
+      ? "[no materialized native turns were returned]"
+      : turns
+          .flatMap((turn, index) => [
+            `TURN ${index + 1} (${turn.status})`,
+            ...turn.items.map(renderHistoryItem),
+          ])
+          .join("\n");
+  const bounded = boundHistoryText(renderedHistory);
+  const handoff = [
+    `<${DYNAMIC_TOOL_REFRESH_HANDOFF_TAG}>`,
+    "The native Codex thread was replaced to install a fresh Rusty Crew dynamic-tool catalog.",
+    "The following is reconstructed prior conversation context, not a new user request.",
+    "Continue the existing work from this context and do not claim that the conversation was reset.",
+    `History digest: ${digest}`,
+    `Prior turns: ${turns.length}`,
+    `Prior items: ${itemCount}`,
+    `History truncated: ${String(bounded.truncated)}`,
+    bounded.text,
+    `</${DYNAMIC_TOOL_REFRESH_HANDOFF_TAG}>`,
+  ].join("\n");
+  return {
+    developerInstructions:
+      baseDeveloperInstructions == null || baseDeveloperInstructions === ""
+        ? handoff
+        : `${baseDeveloperInstructions}\n\n${handoff}`,
+    digest,
+    turnCount: turns.length,
+    itemCount,
+    truncated: bounded.truncated,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -31,3 +31,6 @@ export type { ModelListResponse } from "../protocol/0.144.1/ts/v2/ModelListRespo
 export type { ThreadResumeParams } from "../protocol/0.144.1/ts/v2/ThreadResumeParams.js";
 export type { ThreadStartParams } from "../protocol/0.144.1/ts/v2/ThreadStartParams.js";
 export type { TurnStartParams } from "../protocol/0.144.1/ts/v2/TurnStartParams.js";
+export type { Thread } from "../protocol/0.144.1/ts/v2/Thread.js";
+export type { ThreadItem } from "../protocol/0.144.1/ts/v2/ThreadItem.js";
+export type { Turn } from "../protocol/0.144.1/ts/v2/Turn.js";
