@@ -326,9 +326,11 @@ fn apply_postgres_external_runtime_event_retention(
 
 fn postgres_external_event_record_jsonb_expression() -> &'static str {
     // PostgreSQL JSONB cannot represent NUL, while historical JSON text can
-    // validly contain its escaped form. Normalize only the migration read;
+    // validly contain its escaped form. Match only an active JSON escape: an
+    // even-length run of preceding backslashes is structural, while an odd
+    // run denotes literal backslash text. Normalize only the migration read;
     // the durable event payload remains byte-for-byte unchanged.
-    "replace(record_json, E'\\\\u0000', E'\\\\ufffd')::jsonb"
+    r#"regexp_replace(record_json, $$((?<!\\)(?:\\\\)*)\\u0000$$, $$\1\\ufffd$$, 'g')::jsonb"#
 }
 
 fn apply_postgres_agent_routes(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
@@ -2132,10 +2134,10 @@ mod tests {
     }
 
     #[test]
-    fn external_runtime_retention_jsonb_read_normalizes_only_escaped_nul() {
+    fn external_runtime_retention_jsonb_read_normalizes_only_unescaped_nul() {
         assert_eq!(
             postgres_external_event_record_jsonb_expression(),
-            "replace(record_json, E'\\\\u0000', E'\\\\ufffd')::jsonb"
+            r#"regexp_replace(record_json, $$((?<!\\)(?:\\\\)*)\\u0000$$, $$\1\\ufffd$$, 'g')::jsonb"#
         );
     }
 
@@ -2182,15 +2184,19 @@ mod tests {
                  INSERT INTO {schema}.external_runtime_registrations(runtime_id) VALUES ('runtime-1');"
             ))
             .unwrap();
-        let original = r#"{"nativeThreadId":"thread-1","nativeTurnId":"turn-1","diagnostic":"before\u0000after"}"#;
+        let original_with_escaped_nul = r#"{"nativeThreadId":"thread-1","nativeTurnId":"turn-1","diagnostic":"before\u0000after"}"#;
+        let original_with_literal_escape =
+            r#"{"nativeThreadId":"thread-\\u0000-x","nativeTurnId":"turn-\\u0000-y"}"#;
         client
             .execute(
                 &format!(
                     "INSERT INTO {schema}.external_runtime_events(
                         event_id, runtime_id, session_id, sequence_id, kind, created_at, record_json
-                     ) VALUES ('event-1', 'runtime-1', 'session-1', 1, 'item', '2026-08-02T00:00:00Z', $1)"
+                     ) VALUES
+                        ('event-1', 'runtime-1', 'session-1', 1, 'item', '2026-08-02T00:00:00Z', $1),
+                        ('event-2', 'runtime-1', 'session-1', 2, 'item', '2026-08-02T00:00:00Z', $2)"
                 ),
-                &[&original],
+                &[&original_with_escaped_nul, &original_with_literal_escape],
             )
             .unwrap();
 
@@ -2198,7 +2204,7 @@ mod tests {
         apply_postgres_external_runtime_event_retention(&mut tx, &schema).unwrap();
         tx.commit().unwrap();
 
-        let row = client
+        let escaped_nul_row = client
             .query_one(
                 &format!(
                     "SELECT native_thread_id, native_turn_id, record_json
@@ -2208,9 +2214,41 @@ mod tests {
                 &[],
             )
             .unwrap();
-        assert_eq!(row.get::<_, Option<String>>(0).as_deref(), Some("thread-1"));
-        assert_eq!(row.get::<_, Option<String>>(1).as_deref(), Some("turn-1"));
-        assert_eq!(row.get::<_, String>(2), original);
+        assert_eq!(
+            escaped_nul_row.get::<_, Option<String>>(0).as_deref(),
+            Some("thread-1")
+        );
+        assert_eq!(
+            escaped_nul_row.get::<_, Option<String>>(1).as_deref(),
+            Some("turn-1")
+        );
+        assert_eq!(
+            escaped_nul_row.get::<_, String>(2),
+            original_with_escaped_nul
+        );
+
+        let literal_escape_row = client
+            .query_one(
+                &format!(
+                    "SELECT native_thread_id, native_turn_id, record_json
+                       FROM {schema}.external_runtime_events
+                      WHERE event_id = 'event-2'"
+                ),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            literal_escape_row.get::<_, Option<String>>(0).as_deref(),
+            Some(r#"thread-\u0000-x"#)
+        );
+        assert_eq!(
+            literal_escape_row.get::<_, Option<String>>(1).as_deref(),
+            Some(r#"turn-\u0000-y"#)
+        );
+        assert_eq!(
+            literal_escape_row.get::<_, String>(2),
+            original_with_literal_escape
+        );
 
         client
             .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
