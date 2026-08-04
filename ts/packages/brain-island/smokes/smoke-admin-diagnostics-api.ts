@@ -153,6 +153,10 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
         ],
       },
       providerStateMode: "optional",
+      providerStateRebuild: {
+        action: "reconstruct",
+        reason: "rebuild from the durable conversation projection",
+      },
       selectedToolCount: 1,
       selectedToolSource: "default-local-tools",
       toolAdapterStatus: "native_neutral_tools",
@@ -593,6 +597,11 @@ assert.equal(
   okData<Array<{ providerState?: { status: string } }>>(providerState)[0]
     ?.providerState?.status,
   "valid",
+);
+assert.equal(
+  okData<Array<{ providerStateRebuild?: { action: string } }>>(providerState)[0]
+    ?.providerStateRebuild?.action,
+  "reconstruct",
 );
 
 const bufferedRuns = handleAdminDiagnosticsRequest(

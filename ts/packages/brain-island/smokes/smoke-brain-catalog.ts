@@ -132,7 +132,7 @@ try {
     assert.equal(
       applyResult.brainDiagnosticsByProfileId["responses-profile"]
         ?.providerStateRebuild?.action,
-      "discard",
+      "reconstruct",
     );
     assert.equal(
       applyResult.brainDiagnosticsByProfileId["responses-profile"]

@@ -5597,7 +5597,7 @@
         "type": "string"
       },
       "ProviderStateClearReason": {
-        "enum": ["brain_requested_clear"],
+        "enum": ["brain_requested_clear", "operator_requested_clear"],
         "type": "string"
       },
       "ProviderStateMode": {

@@ -15,6 +15,7 @@ import type {
 import { rustCoreEventValidationError } from "./bridge-core-event-validation.js";
 import type {
   BrainHostExecutor,
+  BrainConversationMessage,
   BrainRoleAssembly,
   BrainWakeOptions,
   BrainWakeResult,
@@ -23,6 +24,7 @@ import type {
 export interface BridgeBufferClient {
   getBuffer(handle: RuntimeBufferHandle): Promise<RuntimeBufferView>;
   releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit>;
+  readChatSession?(input: unknown): Promise<unknown>;
 }
 
 export async function wakeBrainFromBridgeRequest(
@@ -46,13 +48,20 @@ export async function wakeBrainFromBridgeRequest(
         buffers.getBuffer(request.roleAssembly),
       ]);
 
+    const state = parseBodyStateBuffer(bodyStateView);
+    const durableConversation =
+      request.providerState === undefined
+        ? await loadDurableConversation(buffers, request.sessionId)
+        : undefined;
+
     return await brain.wake(
       {
         wakeId: request.wakeId,
         sessionId: request.sessionId,
-        state: parseBodyStateBuffer(bodyStateView),
+        state,
         systemPrompt: decodeBuffer(systemPromptView),
         roleAssembly: parseJsonBuffer<BrainRoleAssembly>(roleAssemblyView),
+        ...(durableConversation === undefined ? {} : { durableConversation }),
         continuationState: request.continuationState ?? undefined,
         providerState: request.providerState ?? undefined,
         providerStateAbsence: request.providerStateAbsence ?? undefined,
@@ -74,6 +83,71 @@ export async function wakeBrainFromBridgeRequest(
       throw failedRelease.reason;
     }
   }
+}
+
+async function loadDurableConversation(
+  buffers: BridgeBufferClient,
+  sessionId: BrainWakeRequest["sessionId"],
+): Promise<BrainConversationMessage[] | undefined> {
+  if (buffers.readChatSession === undefined) return undefined;
+
+  const messages: BrainConversationMessage[] = [];
+  // A null cursor asks the chat read model for its newest page, which is
+  // useful for a UI but cannot reconstruct a long-running conversation. Use
+  // the explicit zero cursor so pagination walks the event log from its
+  // durable beginning.
+  let cursor = `${sessionId}:0`;
+  const seenCursors = new Set<string>();
+  for (;;) {
+    let raw: unknown;
+    try {
+      raw = await buffers.readChatSession({
+        session_id: sessionId,
+        cursor,
+        limit: 1_000,
+        include_alternates: false,
+      });
+    } catch {
+      // Transcript recovery must never turn a recoverable provider-state
+      // mismatch into a second failure. The normal wake still has its body
+      // projection and can report the provider error if replay is impossible.
+      return messages.length === 0 ? undefined : messages;
+    }
+    const page = isRecord(raw) ? raw : {};
+    const events = Array.isArray(page.events) ? page.events : [];
+    for (const event of events) {
+      const message = durableConversationMessage(event);
+      if (message !== undefined) messages.push(message);
+    }
+    if (page.has_more !== true || typeof page.latest_cursor !== "string") {
+      break;
+    }
+    if (seenCursors.has(page.latest_cursor)) break;
+    seenCursors.add(page.latest_cursor);
+    cursor = page.latest_cursor;
+  }
+  return messages;
+}
+
+function durableConversationMessage(
+  value: unknown,
+): BrainConversationMessage | undefined {
+  if (!isRecord(value) || value.kind !== "message_created") return undefined;
+  const payload = isRecord(value.payload) ? value.payload : undefined;
+  const role = payload?.role;
+  const body = payload?.body;
+  if (
+    (role !== "user" && role !== "assistant" && role !== "tool") ||
+    typeof body !== "string" ||
+    body.length === 0
+  ) {
+    return undefined;
+  }
+  return { role, content: body };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseJsonBuffer<T>(view: RuntimeBufferView): T {

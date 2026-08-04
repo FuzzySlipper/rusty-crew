@@ -146,24 +146,19 @@ fn load_provider_wire_state_for_wake_in_tx(
         });
     }
     if record.profile_fingerprint != lookup.profile_fingerprint {
-        invalidate_provider_wire_state_by_row_in_tx(
-            tx,
-            record.row_id,
-            &lookup.now,
-            ProviderWireStateInvalidationReason::ProfileChanged,
-        )?;
+        // Fingerprint drift is a recoverable rebuild boundary, not a reason to
+        // destroy the last provider-owned continuation. Keep the old row
+        // available for a later rollback and let the brain reconstruct from
+        // the durable conversation projection. A successful replacement will
+        // supersede it transactionally.
         return Ok(ProviderWireStateWakeResult {
             record: None,
             absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
         });
     }
     if record.provider_fingerprint != lookup.provider_fingerprint {
-        invalidate_provider_wire_state_by_row_in_tx(
-            tx,
-            record.row_id,
-            &lookup.now,
-            ProviderWireStateInvalidationReason::ProviderChanged,
-        )?;
+        // See the profile-fingerprint branch above. Provider changes may be
+        // reversed, and failed reconstruction must not erase the prior state.
         return Ok(ProviderWireStateWakeResult {
             record: None,
             absence_reason: Some(ProviderStateAbsenceReason::Invalidated),

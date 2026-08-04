@@ -28,12 +28,24 @@ export interface BrainRoleAssembly {
   initialMessages?: RustyAgentMessage[];
 }
 
+/**
+ * Durable transcript content supplied by Rust when provider-owned wire state
+ * is unavailable. This is deliberately smaller than a provider request: the
+ * brain decides how the neutral conversation should be encoded for its wire
+ * protocol.
+ */
+export interface BrainConversationMessage {
+  role: "user" | "assistant" | "tool";
+  content: string;
+}
+
 export interface BrainWakeInput {
   wakeId: string;
   sessionId: SessionId;
   state: BodyState;
   systemPrompt: string;
   roleAssembly: BrainRoleAssembly;
+  durableConversation?: readonly BrainConversationMessage[];
   providerState?: BrainWakeProviderStateInput;
   continuationState?: BrainContinuationPayload;
   providerStateAbsence?: ProviderStateAbsenceReason;

@@ -6813,7 +6813,8 @@
     },
     "ProviderStateClearReason": {
       "enum": [
-        "brain_requested_clear"
+        "brain_requested_clear",
+        "operator_requested_clear"
       ],
       "type": "string"
     },

@@ -1419,7 +1419,7 @@ function createNativeBridgeModule(
     clearBrainProviderState: async (input) => {
       const output: BrainWakeProviderStateOutput = {
         type: "clear",
-        reason: "brain_requested_clear",
+        reason: input.reason ?? "brain_requested_clear",
       };
       binding.applyBrainProviderStateOutputJson(
         input.brain,

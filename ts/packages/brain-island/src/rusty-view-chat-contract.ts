@@ -58,6 +58,7 @@ export const RUSTY_VIEW_LOGICAL_TURN_EVENT_KIND_VALUES = [
   "logical_turn_completed",
   "logical_turn_cancelled",
   "logical_turn_failed",
+  "runtime_rebuild_transition",
 ] as const;
 
 export const RUSTY_VIEW_CHAT_EVENT_KIND_VALUES = [

@@ -17,7 +17,7 @@ export interface BrainModuleSelection {
 }
 
 export type BrainModuleProviderStateRebuildAction =
-  | "discard"
+  | "reconstruct"
   | "migrate"
   | "unsupported";
 

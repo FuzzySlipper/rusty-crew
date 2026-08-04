@@ -13,6 +13,7 @@ import type {
   BrainProviderStateScope,
   BrainWakeProviderStateOutput,
   BrainWakeProviderStateInput,
+  ProviderStateClearReason,
   BrainWakeAccepted,
   BrainWakeAttention,
   BrainWakeFailure,
@@ -120,6 +121,11 @@ import type {
   NativeServiceCredentialDelete,
   NativeServiceCredentialWrite,
 } from "./model-provider-public-api.js";
+import type {
+  BridgeBufferClient,
+  BrainWakeExecutor,
+  NativeChatSessionReadResult,
+} from "./brain-wake-public-api.js";
 
 export type {
   NativeModelProviderAffectedProfile,
@@ -146,6 +152,12 @@ export type {
   NativeServiceCredentialDelete,
   NativeServiceCredentialWrite,
 } from "./model-provider-public-api.js";
+
+export type {
+  BridgeBufferClient,
+  BrainWakeExecutor,
+  NativeChatSessionReadResult,
+} from "./brain-wake-public-api.js";
 export type {
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
@@ -165,11 +177,6 @@ export interface NativeSessionConfigInput {
   resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
   historyWindow?: SessionState["historyWindow"];
-}
-
-export interface BridgeBufferClient {
-  getBuffer(handle: RuntimeBufferHandle): Promise<RuntimeBufferView>;
-  releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit>;
 }
 
 export interface BrainWakeExecutionResult {
@@ -304,6 +311,10 @@ export interface OpenAiResponsesBrainRunInput {
   wakeId: string;
   sessionId: SessionId;
   bodyState: BodyState;
+  durableConversation?: ReadonlyArray<{
+    role: "user" | "assistant" | "tool";
+    content: string;
+  }>;
   tools?: Array<{
     name: string;
     description: string;
@@ -426,14 +437,6 @@ export interface NativeBrainWakeProviderStateInput {
   payload_version: string;
   payload: unknown;
   expires_at?: string;
-}
-
-export interface BrainWakeExecutor {
-  wake(
-    request: BrainWakeRequest,
-    buffers: BridgeBufferClient,
-    options?: { signal?: AbortSignal },
-  ): Promise<BrainWakeExecutionResult> | BrainWakeExecutionResult;
 }
 
 export { brainWakeStreamItemsFromExecutionResult } from "./brain-wake-stream.js";
@@ -1534,7 +1537,7 @@ export type NativeBrainHostCapability =
 export interface NativeBrainProviderStatePolicy {
   mode: NativeBrainProviderStateMode;
   rebuild: {
-    action: "discard" | "migrate" | "unsupported";
+    action: "reconstruct" | "migrate" | "unsupported";
     reason: string;
     migration_id?: string;
   };
@@ -1948,19 +1951,6 @@ export interface NativeChatSessionSummaryPage {
   page: NativeExactPage<NativeChatSessionReadFacts>;
 }
 
-export interface NativeChatSessionReadResult {
-  session: SessionState;
-  execution: SessionExecutionState;
-  events: NativeChatEventLogEvent[];
-  latest_cursor: string;
-  has_more: boolean;
-  has_more_before: boolean;
-  total: number;
-  message_count: number;
-  source: NativeChatReadModelPage["source"];
-  message_slots: NativeExactPage<unknown>;
-}
-
 export interface NativeBridgeModule
   extends
     NativeExternalRuntimeBridgeMethods,
@@ -1994,6 +1984,7 @@ export interface NativeBridgeModule
     brain: BrainImplementationHandle;
     sessionId: SessionId;
     wakeId: string;
+    reason?: ProviderStateClearReason;
   }): Promise<Unit>;
   wakeBrain(
     request: BrainWakeRequest,

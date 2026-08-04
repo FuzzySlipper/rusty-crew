@@ -16,6 +16,8 @@ struct JsOpenAiResponsesBrainRunInput {
     session_id: String,
     body_state: BodyState,
     #[serde(default)]
+    durable_conversation: Vec<JsDurableConversationMessage>,
+    #[serde(default)]
     tools: Vec<JsOpenAiResponsesNeutralTool>,
     #[serde(default)]
     provider_state: Option<BrainWakeProviderStateInput>,
@@ -26,6 +28,13 @@ struct JsOpenAiResponsesBrainRunInput {
     config: JsOpenAiResponsesBrainConfig,
     #[serde(default)]
     client: JsOpenAiResponsesClientConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsDurableConversationMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -843,9 +852,13 @@ where
             })
             .collect::<Vec<_>>()
     };
-    let history = rusty_crew_openai_responses_brain::ResponsesReplayProjection::from_body_state(
-        &input.body_state,
-    );
+    let history =
+        rusty_crew_openai_responses_brain::ResponsesReplayProjection::from_body_state_and_durable_conversation(
+            &input.body_state,
+            input.durable_conversation.iter().map(|message| {
+                (message.role.as_str(), message.content.as_str())
+            }),
+        );
     let request = BrainWakeRequest {
         brain: BrainImplementationHandle::new(0),
         session_id: SessionId::new(input.session_id),

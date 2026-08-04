@@ -1,5 +1,6 @@
 export type {
   BrainActionPlanner,
+  BrainConversationMessage,
   BrainHostExecutor,
   BrainRoleAssembly,
   BrainWakeInput,

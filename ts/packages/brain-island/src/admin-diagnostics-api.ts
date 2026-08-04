@@ -249,6 +249,7 @@ export function handleAdminDiagnosticsRequest(
           strategyId: module.effectiveStrategy ?? module.strategy,
           modelProvider: module.modelProvider,
           providerStateMode: module.providerStateMode,
+          providerStateRebuild: module.providerStateRebuild,
           providerState: module.providerState,
           responsesWakeMetrics: module.responsesWakeMetrics ?? [],
         })),

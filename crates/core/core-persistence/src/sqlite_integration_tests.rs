@@ -4333,7 +4333,7 @@ fn provider_wire_state_replaces_current_record_and_preserves_payload_version() {
     assert_eq!(store.count_rows("provider_wire_states").unwrap(), 2);
     let loaded = store
         .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
-            key,
+            key: key.clone(),
             profile_fingerprint: "profile-fp-1".to_string(),
             provider_fingerprint: "provider-fp-1".to_string(),
             now: "2026-06-20T00:02:00Z".to_string(),
@@ -4353,7 +4353,7 @@ fn provider_wire_state_replaces_current_record_and_preserves_payload_version() {
 }
 
 #[test]
-fn provider_wire_state_withholds_expired_and_fingerprint_stale_records() {
+fn provider_wire_state_withholds_expired_and_preserves_fingerprint_stale_records() {
     let db_path = temp_db_path("provider-wire-invalidation");
     let store = CoordinationStore::open_file(&db_path).unwrap();
     let key = sample_provider_wire_state_key();
@@ -4413,6 +4413,18 @@ fn provider_wire_state_withholds_expired_and_fingerprint_stale_records() {
         profile_stale.absence_reason,
         Some(ProviderStateAbsenceReason::Invalidated)
     );
+    let profile_rollback = store
+        .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+            key: key.clone(),
+            profile_fingerprint: "profile-fp-1".to_string(),
+            provider_fingerprint: "provider-fp-1".to_string(),
+            now: "2026-06-20T00:07:30Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        profile_rollback.record.unwrap().payload_version,
+        "provider-owned-v2"
+    );
 
     store
         .save_provider_wire_state(&sample_provider_wire_state_write(
@@ -4430,7 +4442,7 @@ fn provider_wire_state_withholds_expired_and_fingerprint_stale_records() {
         .unwrap();
     let provider_stale = store
         .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
-            key,
+            key: key.clone(),
             profile_fingerprint: "profile-fp-2".to_string(),
             provider_fingerprint: "provider-fp-2".to_string(),
             now: "2026-06-20T00:09:00Z".to_string(),
@@ -4440,6 +4452,18 @@ fn provider_wire_state_withholds_expired_and_fingerprint_stale_records() {
     assert_eq!(
         provider_stale.absence_reason,
         Some(ProviderStateAbsenceReason::Invalidated)
+    );
+    let provider_rollback = store
+        .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+            key,
+            profile_fingerprint: "profile-fp-2".to_string(),
+            provider_fingerprint: "provider-fp-1".to_string(),
+            now: "2026-06-20T00:09:30Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        provider_rollback.record.unwrap().payload_version,
+        "provider-owned-v3"
     );
 
     remove_temp_db(&db_path);

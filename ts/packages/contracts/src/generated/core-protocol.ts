@@ -1616,7 +1616,7 @@ export type ProjectionVisibility = "observation" | "user_visible";
 
 export type ProviderStateAbsenceReason = "not_configured" | "missing" | "expired" | "invalidated" | "module_does_not_use_state" | "load_failed";
 
-export type ProviderStateClearReason = "brain_requested_clear";
+export type ProviderStateClearReason = "brain_requested_clear" | "operator_requested_clear";
 
 export type ProviderStateMode = "unused" | "optional" | "required";
 

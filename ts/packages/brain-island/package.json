@@ -161,6 +161,7 @@
     "smoke:responses-concurrency-capacity": "tsx ../../smokes/brain-island/smoke-responses-concurrency-capacity.ts",
     "smoke:responses-service-live-field-test": "tsx ../../smokes/brain-island/smoke-responses-service-field-test.ts",
     "smoke:deepseek-responses-live-debug-service": "tsx smokes/deepseek-responses-live-debug-service.ts",
+    "smoke:runtime-rebuild-continuity-live": "tsx smokes/runtime-rebuild-continuity-live-debug-service.ts",
     "smoke:provider-state-fingerprints": "tsx smokes/smoke-provider-state-fingerprints.ts",
     "smoke:provider-state-diagnostics": "tsx smokes/smoke-provider-state-diagnostics.ts",
     "smoke:local-code-tools": "tsx smokes/smoke-local-code-tools.ts",

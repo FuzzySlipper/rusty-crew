@@ -1955,16 +1955,14 @@ impl PostgresBackendStore {
             });
         }
         if record.profile_fingerprint != lookup.profile_fingerprint {
-            invalidate_provider_wire_state_by_row_in_tx(
-                &mut tx,
-                &schema,
-                record.row_id,
-                &lookup.now,
-                ProviderWireStateInvalidationReason::ProfileChanged,
-            )?;
+            // Fingerprint drift is a recoverable rebuild boundary, not a
+            // reason to destroy the last provider-owned continuation. Keep
+            // the old row available for rollback and let the brain rebuild
+            // from the durable conversation projection. A successful
+            // replacement will supersede it transactionally.
             tx.commit().map_err(|error| {
                 postgres_error(
-                    "commit profile-invalidated PostgreSQL provider wire state lookup",
+                    "commit profile-drift PostgreSQL provider wire state lookup",
                     error,
                 )
             })?;
@@ -1974,16 +1972,11 @@ impl PostgresBackendStore {
             });
         }
         if record.provider_fingerprint != lookup.provider_fingerprint {
-            invalidate_provider_wire_state_by_row_in_tx(
-                &mut tx,
-                &schema,
-                record.row_id,
-                &lookup.now,
-                ProviderWireStateInvalidationReason::ProviderChanged,
-            )?;
+            // Provider changes may be reversed, and failed reconstruction
+            // must not erase the prior state.
             tx.commit().map_err(|error| {
                 postgres_error(
-                    "commit provider-invalidated PostgreSQL provider wire state lookup",
+                    "commit provider-drift PostgreSQL provider wire state lookup",
                     error,
                 )
             })?;
@@ -15600,7 +15593,7 @@ mod tests {
             .unwrap();
         let profile_stale = store
             .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
-                key: profile_key,
+                key: profile_key.clone(),
                 profile_fingerprint: "profile:v2".to_string(),
                 provider_fingerprint: "provider:v1".to_string(),
                 now: "2026-06-26T00:06:00Z".to_string(),
@@ -15610,6 +15603,18 @@ mod tests {
         assert_eq!(
             profile_stale.absence_reason,
             Some(ProviderStateAbsenceReason::Invalidated)
+        );
+        let profile_rollback = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: profile_key.clone(),
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:06:30Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            profile_rollback.record.unwrap().payload_version,
+            "responses:v1"
         );
 
         let provider_key =
@@ -15628,7 +15633,7 @@ mod tests {
             .unwrap();
         let provider_stale = store
             .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
-                key: provider_key,
+                key: provider_key.clone(),
                 profile_fingerprint: "profile:v1".to_string(),
                 provider_fingerprint: "provider:v2".to_string(),
                 now: "2026-06-26T00:08:00Z".to_string(),
@@ -15638,6 +15643,18 @@ mod tests {
         assert_eq!(
             provider_stale.absence_reason,
             Some(ProviderStateAbsenceReason::Invalidated)
+        );
+        let provider_rollback = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: provider_key.clone(),
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:08:30Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            provider_rollback.record.unwrap().payload_version,
+            "responses:v1"
         );
 
         let clear_key = provider_wire_state_key("session-clear", "openai-responses", "replay");

@@ -11,8 +11,8 @@ import {
   brainWakeRequestSchema,
 } from "./bridge-validation-schemas.js";
 import { validateBridgeValue } from "./bridge-validation.js";
+import type { BrainWakeExecutor } from "./brain-wake-public-api.js";
 import {
-  type BrainWakeExecutor,
   type NativeBridgeModule,
   type NativeProviderStateDiagnostic,
 } from "./public-api.js";

@@ -675,7 +675,19 @@ function runtimeRebuildContext(state: ServiceState) {
       eventType: string;
       summary: string;
       severity?: "info" | "warning" | "error";
+      workRef?: Record<string, unknown>;
+      resultRef?: Record<string, unknown>;
     }) => recordServiceEvent(state, event),
+    recordDurableTransition: async (sessionId: string, transition: unknown) => {
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        sessionId as SessionId,
+        {
+          kind: "runtime_rebuild_transition",
+          payload: isRecord(transition) ? transition : {},
+        },
+      );
+    },
   };
 }
 

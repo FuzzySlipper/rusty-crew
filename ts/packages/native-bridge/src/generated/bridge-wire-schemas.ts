@@ -8609,7 +8609,7 @@ export const bridgeWireSchemaArtifact = {
                           "properties": {
                             "action": {
                               "enum": [
-                                "discard",
+                                "reconstruct",
                                 "migrate",
                                 "unsupported"
                               ],
@@ -8706,7 +8706,7 @@ export const bridgeWireSchemaArtifact = {
               "properties": {
                 "action": {
                   "enum": [
-                    "discard",
+                    "reconstruct",
                     "migrate",
                     "unsupported"
                   ],

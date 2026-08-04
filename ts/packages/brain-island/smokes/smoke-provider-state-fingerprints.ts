@@ -16,8 +16,8 @@ const moduleStrategy: BrainModuleStrategyMetadata = {
   providerState: {
     mode: "optional",
     rebuild: {
-      action: "discard",
-      reason: "fingerprint smoke discards provider state on rebuild",
+      action: "reconstruct",
+      reason: "fingerprint smoke reconstructs provider state on rebuild",
     },
   },
   fingerprints: {

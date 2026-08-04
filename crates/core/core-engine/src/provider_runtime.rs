@@ -163,6 +163,9 @@ impl CoreEngine {
             ProviderStateClearReason::BrainRequestedClear => {
                 ProviderWireStateInvalidationReason::BrainRequestedClear
             }
+            ProviderStateClearReason::OperatorRequestedClear => {
+                ProviderWireStateInvalidationReason::OperatorRequestedClear
+            }
         };
         clear_provider_state_store(
             &self.store,

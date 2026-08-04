@@ -725,4 +725,7 @@ export type RawBrainWakeProviderStateOutput =
       type: "replace";
       state: NativeBrainWakeProviderStateInput & { ttl_ms?: number };
     }
-  | { type: "clear"; reason: "brain_requested_clear" };
+  | {
+      type: "clear";
+      reason: "brain_requested_clear" | "operator_requested_clear";
+    };

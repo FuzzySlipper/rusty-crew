@@ -596,6 +596,46 @@ impl ResponsesReplayProjection {
             replay_hints: Vec::new(),
         }
     }
+
+    /// Rebuild provider-neutral replay history from the durable session
+    /// projection when provider-owned state was invalidated by a runtime
+    /// rebuild. The body projection still contributes the current pending
+    /// messages and delegated completions; duplicate durable tail items are
+    /// ignored by the same equality rule used for replay messages.
+    pub fn from_body_state_and_durable_conversation<'a, I>(
+        body: &BodyState,
+        durable_messages: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let durable_items = durable_messages
+            .into_iter()
+            .filter_map(|(role, content)| match role {
+                "assistant" => Some(ResponsesInputItem::AssistantMessage {
+                    content: content.to_string(),
+                }),
+                "user" | "tool" => Some(ResponsesInputItem::UserMessage {
+                    content: content.to_string(),
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if durable_items.is_empty() {
+            return Self::from_body_state(body);
+        }
+
+        let mut merged = durable_items;
+        for item in Self::from_body_state(body).input_items {
+            if !merged.contains(&item) {
+                merged.push(item);
+            }
+        }
+        Self {
+            input_items: merged,
+            replay_hints: Vec::new(),
+        }
+    }
 }
 
 fn push_message_item(

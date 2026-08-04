@@ -1273,6 +1273,7 @@ pub enum BrainWakeProviderStateOutput {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderStateClearReason {
     BrainRequestedClear,
+    OperatorRequestedClear,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

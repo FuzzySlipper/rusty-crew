@@ -13,6 +13,10 @@ export function toNativeOpenAiResponsesBrainRunInput(
     wakeId: input.wakeId,
     sessionId: input.sessionId,
     bodyState: toNativeBodyState(input.bodyState),
+    durableConversation: input.durableConversation?.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
     tools: input.tools?.map((tool) => ({
       name: tool.name,
       description: tool.description,

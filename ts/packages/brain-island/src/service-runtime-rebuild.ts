@@ -26,6 +26,25 @@ export interface ServiceRuntimeRebuildEvent {
   eventType: string;
   summary: string;
   severity?: "info" | "warning" | "error";
+  workRef?: Record<string, unknown>;
+  resultRef?: Record<string, unknown>;
+}
+
+export type ServiceRuntimeProviderStateOutcome =
+  | "preserved"
+  | "reconstructed"
+  | "explicit_reset"
+  | "failed_recovery";
+
+export interface ServiceRuntimeRebuildTransition {
+  transitionId: string;
+  profileId: string;
+  sessionId: string;
+  outcome: ServiceRuntimeProviderStateOutcome;
+  action: "reconstruct" | "migrate" | "unsupported";
+  transition: "preserved" | "reconstructed" | "explicit_reset";
+  clearedSessions: number;
+  reason: string;
 }
 
 export interface ServiceRuntimeRebuildMcpRefreshResult {
@@ -62,10 +81,12 @@ export interface ServiceRuntimeRebuildPlan {
     requiredBeforeApply: boolean;
   };
   providerState: {
-    action: "discard" | "migrate" | "unsupported";
+    action: "reconstruct" | "migrate" | "unsupported";
     reason: string;
+    transition: "preserved" | "reconstructed" | "explicit_reset";
     migrationId?: string;
     clearedSessions?: number;
+    outcome?: ServiceRuntimeProviderStateOutcome;
   };
   queuedMessages: {
     action:
@@ -183,6 +204,10 @@ export interface ServiceRuntimeRebuildContext {
     command: AdminControlCommand,
   ): Promise<ServiceRuntimeRebuildMcpRefreshResult>;
   recordEvent(event: ServiceRuntimeRebuildEvent): void;
+  recordDurableTransition?(
+    sessionId: SessionId,
+    transition: ServiceRuntimeRebuildTransition,
+  ): Promise<void>;
 }
 
 export async function planServiceRuntimeRebuild(
@@ -290,6 +315,11 @@ export async function planServiceRuntimeRebuild(
     providerState: {
       action: providerStateRebuild.action,
       reason: providerStateRebuild.reason,
+      transition: replaceSessionIdentity
+        ? "explicit_reset"
+        : providerStateRebuild.action === "reconstruct" && sessionIds.length > 0
+          ? "reconstructed"
+          : "preserved",
       ...(providerStateRebuild.migrationId === undefined
         ? {}
         : { migrationId: providerStateRebuild.migrationId }),
@@ -395,30 +425,65 @@ export async function applyServiceRuntimeRebuild(
 
   const previousBrain =
     context.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId];
-  let clearedSessions = 0;
   const providerStateMode =
     context.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId]
       ?.providerStateMode;
-  if (
+  const providerStateOutcome: ServiceRuntimeProviderStateOutcome =
     previousBrain !== undefined &&
-    plan.providerState.action === "discard" &&
     providerStateMode !== undefined &&
-    providerStateMode !== "unused"
-  ) {
-    for (const sessionId of plan.sessionIds) {
-      await context.bridge.clearBrainProviderState({
-        brain: previousBrain,
-        sessionId: sessionId as SessionId,
-        wakeId: `runtime-rebuild-${Date.now()}-${sessionId}`,
-      });
-      clearedSessions += 1;
-    }
-  }
+    providerStateMode !== "unused" &&
+    plan.providerState.transition === "reconstructed"
+      ? "reconstructed"
+      : "preserved";
 
-  const rebuild = await context.rebuildBrainRuntime(
-    plan.profileId as ProfileId,
-  );
-  applyBrainRuntimeRebuild(context, plan.profileId, rebuild);
+  let rebuild: RustyCrewBrainRuntimeRebuildResult;
+  try {
+    rebuild = await context.rebuildBrainRuntime(plan.profileId as ProfileId);
+    applyBrainRuntimeRebuild(context, plan.profileId, rebuild);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordDurableRebuildTransitions(context, plan, command, {
+      outcome: "failed_recovery",
+      clearedSessions: 0,
+      reason: message,
+    });
+    context.recordEvent({
+      source: "service-host",
+      eventType: "runtime_rebuild_provider_state_recovery_failed",
+      severity: "error",
+      summary: `Runtime rebuild for profile ${plan.profileId} failed before provider-state recovery completed: ${message}`,
+      workRef: {
+        profileId: plan.profileId,
+        sessionIds: plan.sessionIds,
+      },
+      resultRef: {
+        outcome: "failed_recovery",
+        action: plan.providerState.action,
+        transition: plan.providerState.transition,
+      },
+    });
+    throw error;
+  }
+  await recordDurableRebuildTransitions(context, plan, command, {
+    outcome: providerStateOutcome,
+    clearedSessions: 0,
+    reason: plan.providerState.reason,
+  });
+  context.recordEvent({
+    source: "service-host",
+    eventType: "runtime_rebuild_provider_state_reconstructed",
+    summary: `Runtime rebuild for profile ${plan.profileId} preserved durable session history and will reconstruct provider state from the session projection on the next wake.`,
+    workRef: {
+      profileId: plan.profileId,
+      sessionIds: plan.sessionIds,
+    },
+    resultRef: {
+      outcome: providerStateOutcome,
+      action: plan.providerState.action,
+      transition: plan.providerState.transition,
+      clearedSessions: 0,
+    },
+  });
   context.recordEvent({
     source: "service-host",
     eventType: "runtime_rebuild_applied",
@@ -433,7 +498,8 @@ export async function applyServiceRuntimeRebuild(
     ...plan,
     providerState: {
       ...plan.providerState,
-      clearedSessions,
+      clearedSessions: 0,
+      outcome: providerStateOutcome,
     },
     mcp: mcpRefresh,
     apply: {
@@ -632,7 +698,6 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
   let clearedSessions = 0;
   if (
     previousBrain !== undefined &&
-    plan.providerState.action === "discard" &&
     providerStateMode !== undefined &&
     providerStateMode !== "unused"
   ) {
@@ -640,6 +705,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
       brain: previousBrain,
       sessionId: oldSessionId as SessionId,
       wakeId: `runtime-rebuild-replace-${Date.now()}-${oldSessionId}`,
+      reason: "operator_requested_clear",
     });
     clearedSessions = 1;
   }
@@ -656,10 +722,57 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     eventType: "runtime_rebuild_replacement_session_created",
     summaryPrefix: `Runtime rebuild replaced session ${oldSessionId}`,
   });
-  const rebuild = await context.rebuildBrainRuntime(
-    plan.profileId as ProfileId,
-  );
-  applyBrainRuntimeRebuild(context, plan.profileId, rebuild);
+  let rebuild: RustyCrewBrainRuntimeRebuildResult;
+  try {
+    rebuild = await context.rebuildBrainRuntime(plan.profileId as ProfileId);
+    applyBrainRuntimeRebuild(context, plan.profileId, rebuild);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordDurableRebuildTransitions(context, plan, command, {
+      outcome: "failed_recovery",
+      clearedSessions,
+      reason: message,
+    });
+    context.recordEvent({
+      source: "service-host",
+      eventType: "runtime_rebuild_provider_state_recovery_failed",
+      severity: "error",
+      summary: `Explicit replacement for profile ${plan.profileId} failed while rebuilding the new session: ${message}`,
+      workRef: {
+        profileId: plan.profileId,
+        oldSessionId,
+        newSessionId,
+      },
+      resultRef: {
+        outcome: "failed_recovery",
+        action: plan.providerState.action,
+        transition: "explicit_reset",
+      },
+    });
+    throw error;
+  }
+  await recordDurableRebuildTransitions(context, plan, command, {
+    outcome: "explicit_reset",
+    clearedSessions,
+    reason: command.reason ?? "operator requested replacement session",
+  });
+  context.recordEvent({
+    source: "service-host",
+    eventType: "runtime_rebuild_provider_state_explicit_reset",
+    severity: "warning",
+    summary: `Explicit replacement reset ${oldSessionId} and created ${newSessionId}; prior session context was intentionally discarded.`,
+    workRef: {
+      profileId: plan.profileId,
+      oldSessionId,
+      newSessionId,
+    },
+    resultRef: {
+      outcome: "explicit_reset",
+      action: plan.providerState.action,
+      transition: "explicit_reset",
+      clearedSessions,
+    },
+  });
   context.recordEvent({
     source: "service-host",
     eventType: "runtime_rebuild_replacement_session_applied",
@@ -676,6 +789,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     providerState: {
       ...plan.providerState,
       clearedSessions,
+      outcome: "explicit_reset",
     },
     queuedMessages: {
       action: "start_replacement_session_with_empty_queue",
@@ -700,6 +814,49 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     },
     diagnostics: plan.diagnostics,
   };
+}
+
+async function recordDurableRebuildTransitions(
+  context: ServiceRuntimeRebuildContext,
+  plan: ServiceRuntimeRebuildPlan,
+  command: AdminControlCommand,
+  input: {
+    outcome: ServiceRuntimeProviderStateOutcome;
+    clearedSessions: number;
+    reason: string;
+  },
+): Promise<void> {
+  if (context.recordDurableTransition === undefined) return;
+  const transitionId = command.requestId || `runtime-rebuild-${Date.now()}`;
+  await Promise.all(
+    plan.sessionIds.map(async (sessionId) => {
+      try {
+        await context.recordDurableTransition!(sessionId as SessionId, {
+          transitionId,
+          profileId: plan.profileId,
+          sessionId,
+          outcome: input.outcome,
+          action: plan.providerState.action,
+          transition: plan.providerState.transition,
+          clearedSessions: input.clearedSessions,
+          reason: input.reason,
+        });
+      } catch (error) {
+        context.recordEvent({
+          source: "service-host",
+          eventType: "runtime_rebuild_transition_persistence_failed",
+          severity: "warning",
+          summary: `Could not persist runtime rebuild transition for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+          workRef: { profileId: plan.profileId, sessionId },
+          resultRef: {
+            outcome: input.outcome,
+            action: plan.providerState.action,
+            transition: plan.providerState.transition,
+          },
+        });
+      }
+    }),
+  );
 }
 
 function applyBrainRuntimeRebuild(

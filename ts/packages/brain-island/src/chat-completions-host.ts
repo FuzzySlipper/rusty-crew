@@ -376,8 +376,10 @@ function rustChatCompletionsMessages(
   const system = [wake.systemPrompt, wake.roleAssembly.instructions]
     .filter(Boolean)
     .join("\n\n");
+  const durableMessages =
+    wake.providerState === undefined ? (wake.durableConversation ?? []) : [];
   const initialMessages =
-    wake.providerState === undefined
+    durableMessages.length === 0 && wake.providerState === undefined
       ? (wake.roleAssembly.initialMessages ?? [])
       : [];
   const priorContents = chatCompletionsProviderStateMessageContents(
@@ -388,6 +390,10 @@ function rustChatCompletionsMessages(
     .filter((message) => !priorContents.has(message));
   return [
     ...(system ? [{ role: "system" as const, content: system }] : []),
+    ...durableMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
     ...initialMessages.map((message) => ({
       role: "user" as const,
       content: message.body,

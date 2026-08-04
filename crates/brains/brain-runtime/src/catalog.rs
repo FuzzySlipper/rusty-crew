@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt;
 
-pub const BRAIN_CATALOG_REVISION: u32 = 2;
+pub const BRAIN_CATALOG_REVISION: u32 = 3;
 pub const CHAT_COMPLETIONS_BRAIN_ID: &str = "chat-completions";
 pub const OPENAI_RESPONSES_BRAIN_ID: &str = "openai-responses";
 
@@ -37,7 +37,7 @@ pub enum BrainProviderStateMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainProviderStateRebuildAction {
-    Discard,
+    Reconstruct,
     Migrate,
     Unsupported,
 }
@@ -291,7 +291,7 @@ fn chat_completions_module() -> BrainCatalogModule {
             strategy(
                 "default",
                 BrainProviderStateMode::Optional,
-                "chat completions reasoning history is provider-scoped and is discarded on runtime brain rebuild",
+                "chat completions provider wire state is invalidated on runtime brain rebuild and reconstructed from the durable session projection",
                 None,
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "default".to_string(),
@@ -304,7 +304,7 @@ fn chat_completions_module() -> BrainCatalogModule {
             strategy(
                 "roleplay_narrator",
                 BrainProviderStateMode::Optional,
-                "roleplay narrator chat completions reasoning history is provider-scoped and is discarded on runtime brain rebuild",
+                "roleplay narrator provider wire state is invalidated on runtime brain rebuild and reconstructed from the durable session projection",
                 None,
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "roleplay_narrator".to_string(),
@@ -329,7 +329,7 @@ fn openai_responses_module() -> BrainCatalogModule {
             strategy(
                 "replay",
                 BrainProviderStateMode::Optional,
-                "OpenAI Responses wire state is response-chain scoped and is discarded on runtime brain rebuild unless a safe migration is explicitly implemented",
+                "OpenAI Responses wire state is invalidated on runtime brain rebuild and reconstructed by replaying the durable session projection",
                 Some(json!({"strategy": "replay"})),
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "replay".to_string(),
@@ -342,7 +342,7 @@ fn openai_responses_module() -> BrainCatalogModule {
             strategy(
                 "previous-response-chain",
                 BrainProviderStateMode::Optional,
-                "OpenAI Responses previous_response_id state is provider-chain scoped and is discarded on runtime brain rebuild unless a safe migration is explicitly implemented",
+                "OpenAI Responses previous_response_id state is invalidated on runtime brain rebuild and reconstructed by replaying the durable session projection",
                 Some(json!({"strategy": "previous-response-chain"})),
                 BrainStrategyDiagnostics {
                     selected_strategy_id: "previous-response-chain".to_string(),
@@ -372,7 +372,7 @@ fn strategy(
         provider_state: BrainProviderStatePolicy {
             mode,
             rebuild: BrainProviderStateRebuildPolicy {
-                action: BrainProviderStateRebuildAction::Discard,
+                action: BrainProviderStateRebuildAction::Reconstruct,
                 reason: rebuild_reason.to_string(),
                 migration_id: None,
             },

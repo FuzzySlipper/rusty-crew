@@ -244,6 +244,7 @@ export interface ChatEvent {
     | "logical_turn_completed"
     | "logical_turn_cancelled"
     | "logical_turn_failed"
+    | "runtime_rebuild_transition"
     | "message_slot_created"
     | "message_variant_created"
     | "message_variant_deleted"

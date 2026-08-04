@@ -248,6 +248,9 @@ export async function createOpenAiResponsesBrainHost(
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
         bodyState: wake.state,
+        ...(wake.providerState === undefined && wake.durableConversation
+          ? { durableConversation: wake.durableConversation }
+          : {}),
         providerState: wake.providerState,
         providerStateAbsence: wake.providerStateAbsence,
         continuationState: wake.continuationState,

@@ -347,6 +347,7 @@ pub(crate) fn parse_brain_provider_state_output_json(
     #[serde(rename_all = "snake_case")]
     enum WireClearReason {
         BrainRequestedClear,
+        OperatorRequestedClear,
     }
 
     let parsed = serde_json::from_str::<WireOutput>(raw).map_err(|error| {
@@ -372,6 +373,9 @@ pub(crate) fn parse_brain_provider_state_output_json(
             reason: match reason {
                 WireClearReason::BrainRequestedClear => {
                     rusty_crew_core_bridge_api::ProviderStateClearReason::BrainRequestedClear
+                }
+                WireClearReason::OperatorRequestedClear => {
+                    rusty_crew_core_bridge_api::ProviderStateClearReason::OperatorRequestedClear
                 }
             },
         },
