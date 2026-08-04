@@ -15,6 +15,9 @@ const modelId =
 const evidenceRoot =
   process.env.RUSTY_CREW_CONTEXT_CERT_EVIDENCE_ROOT ??
   "/home/system/rusty-crew-debug/evidence/task-6617";
+const expectedSourceRevision =
+  process.env.RUSTY_CREW_CONTEXT_CERT_SOURCE_SHA ??
+  execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const suffix = Date.now().toString(36);
 const successfulCompactAtPercent = 60;
 const successfulTargetPercentAfterCompaction = 30;
@@ -35,7 +38,7 @@ assert.equal(
 assert.equal(serviceUnit, "rusty-crew-debug.service");
 
 try {
-  await apiData("GET", "/v1/admin/healthz");
+  await assertServiceSourceRevision();
   await createProvider(providerAlias, 16_384, 512, {
     certification: "task-6617",
     scenario: "successful-compaction",
@@ -170,16 +173,24 @@ try {
   });
   await waitForService();
   const hydratedAfter = await readNativeSnapshot(successful.sessionId);
+  const durableCountBeforeRestart = durableMessageCount(
+    hydratedBeforeRestart,
+    "before restart",
+  );
+  const durableCountAfterRestart = durableMessageCount(
+    hydratedAfter,
+    "after restart hydration",
+  );
   assert.equal(hydratedAfter.sessionId, successful.sessionId);
   assert.equal(
     hydratedAfter.compaction?.lastArtifactId,
     artifactIdBeforeRestart,
   );
   assert.ok(
-    Number(hydratedAfter.durableTranscript?.messageCount) >=
-      Number(hydratedBeforeRestart.durableTranscript?.messageCount),
+    durableCountAfterRestart >= durableCountBeforeRestart,
     "restart must not discard the durable transcript",
   );
+  await assertServiceSourceRevision();
   const restarted = await sendAndWait(
     successful.sessionId,
     `After the debug service restart, recall CONTEXT_FACT_${suffix}, then use terminal exactly once to run printf 'CONTEXT_RESTART_CONTINUITY_${suffix}'. Reply with both the remembered fact and the exact terminal marker.`,
@@ -200,6 +211,14 @@ try {
   assert.ok(successfulToolCount(restarted.events) >= 1);
   const restartedSnapshot = await readNativeSnapshot(successful.sessionId);
   assertSnapshot(restartedSnapshot);
+  const durableCountAfterContinuation = durableMessageCount(
+    restartedSnapshot,
+    "after restart continuation",
+  );
+  assert.ok(
+    durableCountAfterContinuation >= durableCountAfterRestart,
+    "a subsequent turn and compaction must not shrink the durable transcript",
+  );
   assert.notEqual(
     restartedSnapshot.admission?.state,
     "requires_compaction",
@@ -276,7 +295,13 @@ try {
   const evidence = {
     schemaVersion: "task-6617-live-v1",
     generatedAt: new Date().toISOString(),
-    service: { baseUrl, serviceUnit, providerBaseUrl, modelId },
+    service: {
+      baseUrl,
+      serviceUnit,
+      providerBaseUrl,
+      modelId,
+      sourceRevision: expectedSourceRevision,
+    },
     successfulScenario: {
       providerAlias,
       profileId,
@@ -299,6 +324,14 @@ try {
         ...new Set(successfulEvents.flatMap(eventMetadataKinds)),
       ],
       artifactId: artifactIdBeforeRestart,
+      eventRefs: successfulEvents.map(eventReference),
+      durableTranscriptCounts: {
+        beforeRestart: durableCountBeforeRestart,
+        afterRestartHydration: durableCountAfterRestart,
+        afterRestartContinuation: durableCountAfterContinuation,
+      },
+      hydratedBeforeRestart: summarizeSnapshot(hydratedBeforeRestart),
+      hydratedAfterRestart: summarizeSnapshot(hydratedAfter),
       restartContinuity: summarizeSnapshot(restartedSnapshot),
       restartedToolCalls: successfulToolCount(restarted.events),
     },
@@ -307,6 +340,7 @@ try {
       profileId: failureProfileId,
       sessionId: failure.sessionId,
       compactionKinds: [...new Set(failedEvents.flatMap(eventMetadataKinds))],
+      eventRefs: failedEvents.map(eventReference),
       snapshot: summarizeSnapshot(failedSnapshot),
     },
   };
@@ -696,6 +730,28 @@ function summarizeSnapshot(
   };
 }
 
+function durableMessageCount(
+  snapshot: Record<string, any>,
+  label: string,
+): number {
+  const count = snapshot.durableTranscript?.messageCount;
+  assert.ok(
+    Number.isSafeInteger(count) && count >= 0,
+    `${label} snapshot must report a durable transcript message count`,
+  );
+  return count as number;
+}
+
+function eventReference(event: ChatEvent): Record<string, unknown> {
+  return {
+    eventId: event.event_id,
+    sequenceId: event.sequence_id,
+    kind: event.kind,
+    wakeId: nestedString(event, "payload", "wake_id"),
+    metadataKinds: eventMetadataKinds(event),
+  };
+}
+
 function providerWriteBody(
   provider: Record<string, unknown>,
   overrides: Record<string, unknown>,
@@ -742,6 +798,18 @@ async function waitForService(): Promise<void> {
     await delay(250);
   }
   throw new Error(`${serviceUnit} did not become healthy`);
+}
+
+async function assertServiceSourceRevision(): Promise<void> {
+  const health = await apiData<Record<string, unknown>>(
+    "GET",
+    "/v1/admin/healthz",
+  );
+  assert.equal(
+    health.sourceRevision,
+    expectedSourceRevision,
+    `debug service source revision must match the exact certification head ${expectedSourceRevision}`,
+  );
 }
 
 async function apiData<T>(

@@ -10,6 +10,7 @@ export type RuntimeHealthDomain = "internal" | "external";
 export interface RuntimeHealthProbe {
   ok: boolean;
   generatedAt: string;
+  sourceRevision?: string;
   health: DiagnosticsHealth;
   degraded: boolean;
   reasonCodes: DiagnosticsReasonCode[];
@@ -50,8 +51,13 @@ export interface RuntimeHealthProjection {
   metrics: RuntimeMetricSample[];
 }
 
+export interface RuntimeHealthBuildMetadata {
+  sourceRevision?: string;
+}
+
 export function buildRuntimeHealthProjection(
   diagnostics: RuntimeDiagnosticsProjection,
+  metadata: RuntimeHealthBuildMetadata = {},
 ): RuntimeHealthProjection {
   const internal = domainStatus(
     diagnostics.issues.filter((issue) => issueDomain(issue) === "internal"),
@@ -72,6 +78,9 @@ export function buildRuntimeHealthProjection(
     liveness: {
       ok: true,
       generatedAt: diagnostics.generatedAt,
+      ...(metadata.sourceRevision === undefined
+        ? {}
+        : { sourceRevision: metadata.sourceRevision }),
       health: "ok",
       degraded: false,
       reasonCodes: ["ok"],
@@ -81,6 +90,9 @@ export function buildRuntimeHealthProjection(
       ok: ready,
       ready,
       generatedAt: diagnostics.generatedAt,
+      ...(metadata.sourceRevision === undefined
+        ? {}
+        : { sourceRevision: metadata.sourceRevision }),
       health: ready ? internal.health : "blocked",
       degraded: diagnostics.degraded,
       reasonCodes:

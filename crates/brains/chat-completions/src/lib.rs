@@ -1230,41 +1230,42 @@ where
         if restored.is_none() {
             extend_stream_items(&mut stream, mapper.map_started(&input.context), &mut sink);
         }
-        let (fresh_messages, provider_context_compaction) = if restored.is_some() {
-            (Vec::new(), None)
-        } else {
-            match chat_completions_messages_with_provider_state(
-                &self.request_builder.config,
-                input.provider_state.as_ref(),
-                input.messages,
-            ) {
-                Ok(result) => result,
-                Err(message) => {
-                    push_stream_item(
-                        &mut stream,
-                        wake_failed_item_with_reason(
-                            &input.context,
-                            CoreErrorKind::InvalidInput,
-                            "chat_completions_provider_state_invalid",
-                            message,
-                        ),
-                        &mut sink,
-                    );
-                    return ChatCompletionsBrainLoopOutput {
-                        stream,
-                        completed: false,
-                        yielded: false,
-                        attention: None,
-                        provider_request_count: 0,
-                        tool_round_count: 0,
-                        provider_event_counts: BTreeMap::new(),
-                        provider_request_debug_samples: Vec::new(),
-                        provider_state: None,
-                        continuation_state: None,
-                    };
+        let (fresh_messages, provider_context_compaction, fresh_durable_messages) =
+            if restored.is_some() {
+                (Vec::new(), None, Vec::new())
+            } else {
+                match chat_completions_messages_with_provider_state(
+                    &self.request_builder.config,
+                    input.provider_state.as_ref(),
+                    input.messages,
+                ) {
+                    Ok(result) => result,
+                    Err(message) => {
+                        push_stream_item(
+                            &mut stream,
+                            wake_failed_item_with_reason(
+                                &input.context,
+                                CoreErrorKind::InvalidInput,
+                                "chat_completions_provider_state_invalid",
+                                message,
+                            ),
+                            &mut sink,
+                        );
+                        return ChatCompletionsBrainLoopOutput {
+                            stream,
+                            completed: false,
+                            yielded: false,
+                            attention: None,
+                            provider_request_count: 0,
+                            tool_round_count: 0,
+                            provider_event_counts: BTreeMap::new(),
+                            provider_request_debug_samples: Vec::new(),
+                            provider_state: None,
+                            continuation_state: None,
+                        };
+                    }
                 }
-            }
-        };
+            };
         let mut messages = restored
             .as_ref()
             .map(|state| state.messages.clone())
@@ -1272,7 +1273,7 @@ where
         let mut durable_messages = restored
             .as_ref()
             .map(|state| state.durable_messages.clone())
-            .unwrap_or(fresh_messages);
+            .unwrap_or(fresh_durable_messages);
         let mut no_progress_state = restored
             .as_ref()
             .map(|state| state.no_progress_state.clone())
@@ -1706,6 +1707,7 @@ where
                         &self.request_builder.config,
                         input.provider_state.as_ref(),
                         messages,
+                        durable_messages,
                         context_compaction.clone(),
                     )
                 } else {
@@ -2086,6 +2088,7 @@ where
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
                     messages,
+                    durable_messages,
                     context_compaction.clone(),
                 );
                 return ChatCompletionsBrainLoopOutput {
@@ -2305,6 +2308,7 @@ where
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
                     messages,
+                    durable_messages,
                     context_compaction.clone(),
                 );
                 return ChatCompletionsBrainLoopOutput {
@@ -3609,6 +3613,8 @@ struct ChatCompletionsProviderStateV1 {
     payload_version: String,
     messages: Vec<ChatCompletionMessage>,
     #[serde(default)]
+    durable_messages: Vec<ChatCompletionMessage>,
+    #[serde(default)]
     context_compaction: ChatCompletionsContextCompactionState,
 }
 
@@ -3730,11 +3736,12 @@ fn chat_completions_messages_with_provider_state(
     (
         Vec<ChatCompletionMessage>,
         Option<ChatCompletionsContextCompactionState>,
+        Vec<ChatCompletionMessage>,
     ),
     String,
 > {
     let Some(state) = provider_state else {
-        return Ok((current_messages, None));
+        return Ok((current_messages.clone(), None, current_messages));
     };
     if state.module_id != MODULE_ID {
         return Err(format!(
@@ -3766,6 +3773,17 @@ fn chat_completions_messages_with_provider_state(
     }
 
     let context_compaction = payload.context_compaction.clone();
+    let mut durable_messages = if payload.durable_messages.is_empty() {
+        payload.messages.clone()
+    } else {
+        payload.durable_messages.clone()
+    };
+    durable_messages.extend(
+        current_messages
+            .iter()
+            .filter(|message| message.role != ChatMessageRole::System)
+            .cloned(),
+    );
     let mut merged = Vec::with_capacity(payload.messages.len() + current_messages.len());
     merged.extend(
         current_messages
@@ -3784,7 +3802,7 @@ fn chat_completions_messages_with_provider_state(
     );
     validate_compaction_artifacts(&context_compaction.artifacts)
         .map_err(|error| format!("chat completions compaction artifacts are invalid: {error}"))?;
-    Ok((merged, Some(context_compaction)))
+    Ok((merged, Some(context_compaction), durable_messages))
 }
 
 fn chat_completions_provider_state_output(
@@ -3792,6 +3810,7 @@ fn chat_completions_provider_state_output(
     config: &ChatCompletionsChatConfig,
     previous_state: Option<&BrainWakeProviderStateInput>,
     messages: Vec<ChatCompletionMessage>,
+    durable_messages: Vec<ChatCompletionMessage>,
     context_compaction: ChatCompletionsContextCompactionState,
 ) -> Option<BrainWakeProviderStateOutput> {
     // Tool-round counts belong to one logical wake. A completed provider
@@ -3808,6 +3827,13 @@ fn chat_completions_provider_state_output(
         strategy_id: config.provider_state_strategy_id.clone(),
         payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
         messages: messages
+            .into_iter()
+            .filter(|message| {
+                message.role != ChatMessageRole::System && !is_transient_recovery_message(message)
+            })
+            .map(|message| message_for_reasoning_history(message, config.reasoning_history))
+            .collect(),
+        durable_messages: durable_messages
             .into_iter()
             .filter(|message| {
                 message.role != ChatMessageRole::System && !is_transient_recovery_message(message)
@@ -6662,6 +6688,7 @@ mod tests {
                     tool_calls: Vec::new(),
                 },
             ],
+            durable_messages: Vec::new(),
             context_compaction: ChatCompletionsContextCompactionState::default(),
         };
         let prior_state = BrainWakeProviderStateInput {
@@ -8057,6 +8084,14 @@ mod tests {
             payload.messages.len() < 12,
             "restartable provider state must contain the compacted model projection, not the raw transcript"
         );
+        assert!(
+            payload.durable_messages.len() >= 11,
+            "restartable provider state must retain the un-compacted durable transcript"
+        );
+        assert!(
+            payload.durable_messages.len() > payload.messages.len(),
+            "compaction must not replace durable history with the smaller model projection"
+        );
 
         let mut second_brain = loop_with(
             vec![
@@ -8121,6 +8156,25 @@ mod tests {
             final_message_fallback: None,
         });
         assert!(completed_second.completed);
+        let Some(BrainWakeProviderStateOutput::Replace {
+            state: second_state,
+        }) = completed_second.provider_state
+        else {
+            panic!("completed restarted wake must persist provider state");
+        };
+        let second_payload: ChatCompletionsProviderStateV1 =
+            serde_json::from_value(second_state.payload).expect("second provider state payload");
+        assert!(
+            second_payload.durable_messages.len() >= payload.durable_messages.len(),
+            "durable transcript must not shrink across a restarted compaction"
+        );
+        assert!(
+            second_payload.durable_messages.iter().any(|message| {
+                message.role == ChatMessageRole::User
+                    && message.content.as_deref() == Some("continue after restart")
+            }),
+            "the new wake message must join the durable transcript before the next compaction"
+        );
         assert!(events(&second.stream).iter().any(|event| matches!(
             event,
             BrainEvent::ProviderStatus {

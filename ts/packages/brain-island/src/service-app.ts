@@ -284,7 +284,10 @@ import {
   executeRustyViewChatCommand,
   type RustyViewSlashCommandContext,
 } from "./service-rusty-view-chat-commands.js";
-import type { RuntimeHealthProjection } from "./runtime-health.js";
+import {
+  buildRuntimeHealthProjection,
+  type RuntimeHealthProjection,
+} from "./runtime-health.js";
 import {
   heartbeatConfiguredSessionsToDenRuntime,
   type DenSuccessorGatewayStartupReport,
@@ -2142,6 +2145,9 @@ async function buildDiagnosticsContext(
       : [],
     runtimePauses: runtimePauseDiagnostics(state, sessions),
   });
+  const health = buildRuntimeHealthProjection(diagnostics, {
+    sourceRevision: state.config.sourceRevision,
+  });
   const memorySurfaces = buildMemorySurfaceCatalog({
     now,
     dataDir: state.config.paths.dataDir,
@@ -2166,6 +2172,7 @@ async function buildDiagnosticsContext(
   });
   return {
     diagnostics,
+    health,
     storage,
     memorySpaces,
     memorySurfaces,

@@ -29,6 +29,7 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_STATIC_DIR?: string;
   RUSTY_CREW_DEFAULT_WORKDIR?: string;
   RUSTY_CREW_DEPLOYMENT_ROLE?: string;
+  RUSTY_CREW_SOURCE_REVISION?: string;
   RUSTY_CREW_ADMIN_HOST?: string;
   RUSTY_CREW_ADMIN_PORT?: string;
   RUSTY_CREW_ADMIN_ALLOW_LAN?: string;
@@ -186,6 +187,7 @@ export interface RustyCrewStorageConfig {
 
 export interface RustyCrewServiceConfig {
   deploymentRole: RustyCrewDeploymentRole;
+  sourceRevision?: string;
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
   openAiOauth: RustyCrewOpenAiOauthConfig;
@@ -250,6 +252,7 @@ export function loadRustyCrewServiceConfig(
   paths.serviceConfigFile = join(paths.configDir, "service.json");
   paths.lockFile = join(paths.runDir, "service.lock");
   const deploymentRole = parseDeploymentRole(env.RUSTY_CREW_DEPLOYMENT_ROLE);
+  const sourceRevision = normalizeOptional(env.RUSTY_CREW_SOURCE_REVISION);
 
   const admin: RustyCrewAdminConfig = {
     host: normalizeHost(
@@ -337,6 +340,7 @@ export function loadRustyCrewServiceConfig(
   });
   return {
     deploymentRole,
+    ...(sourceRevision === undefined ? {} : { sourceRevision }),
     paths,
     admin,
     openAiOauth,
