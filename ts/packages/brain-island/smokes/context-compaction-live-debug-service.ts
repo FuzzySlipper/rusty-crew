@@ -58,7 +58,7 @@ try {
   const snapshots: Record<string, unknown>[] = [];
   const turnResults: TurnResult[] = [];
   let cursor = await latestCursor(successful.sessionId);
-  for (let turn = 1; turn <= 12; turn += 1) {
+  for (let turn = 1; turn <= 20; turn += 1) {
     const marker = `CONTEXT_CERT_TOOL_${turn}_${suffix}`;
     const body = [
       turn === 1
@@ -81,7 +81,9 @@ try {
     if (hasCompletedCompaction(snapshot, result.events)) break;
   }
 
-  const successfulEvents = await readAllEvents(successful.sessionId);
+  const successfulEvents = orderEvents(
+    await readAllEvents(successful.sessionId),
+  );
   const successfulSnapshots = [
     ...snapshots,
     ...snapshotsFromEvents(successfulEvents),
@@ -99,13 +101,7 @@ try {
         (typeof snapshot.admission?.fillPercent === "number" &&
           snapshot.admission.fillPercent >= successfulCompactAtPercent)),
   );
-  const afterCompaction = [...successfulSnapshots]
-    .reverse()
-    .find(hasCompactionArtifact);
   assert.ok(beforePressure, "missing pre-pressure native context snapshot");
-  assert.ok(afterCompaction, "missing post-compaction native context snapshot");
-  // Pressure is durably recorded on the compaction-start event; a transient
-  // requires_compaction snapshot is not guaranteed to be persisted.
   const compactionStarted = successfulEvents
     .flatMap(eventMetadata)
     .find((metadata) => metadata.kind === "context_compaction_started");
@@ -117,33 +113,54 @@ try {
     isRecord(compactionStarted.usage),
     "compaction started event must carry the pressure accounting usage",
   );
+  const afterCompaction = firstSnapshotAfterMetadata(
+    successfulEvents,
+    "context_compaction_completed",
+  );
   assert.ok(
-    successfulEvents.some((event) =>
-      eventMetadataKinds(event).includes("context_compaction_completed"),
-    ),
-    "live event log must contain context_compaction_completed",
+    afterCompaction,
+    "live event log must contain an accounting snapshot after context_compaction_completed",
+  );
+  assert.equal(
+    afterCompaction.promptProjection?.inputTokens?.source,
+    "provider",
+    "post-compaction request must carry provider input-token provenance",
+  );
+  assert.equal(
+    afterCompaction.promptProjection?.inputTokens?.quality,
+    "exact",
+    "post-compaction request must carry exact input-token quality",
+  );
+  assert.equal(
+    afterCompaction.providerUsage?.currentRequest?.inputTokens?.source,
+    "provider",
+    "post-compaction current request must be provider-reported",
+  );
+  assert.equal(
+    afterCompaction.providerUsage?.currentRequest?.inputTokens?.quality,
+    "exact",
+    "post-compaction current request must be exact",
+  );
+  assert.notEqual(
+    afterCompaction.admission?.state,
+    "requires_compaction",
+    "the request immediately after compaction must be admitted",
+  );
+  assert.ok(
+    Number(afterCompaction.admission?.fillPercent) < successfulCompactAtPercent,
+    "post-compaction provider request must be below the compaction threshold",
+  );
+  assert.ok(
+    Number(afterCompaction.promptProjection?.inputTokens?.tokens) <
+      Number(compactionStarted.usage.inputTokens),
+    "post-compaction provider request must be smaller than the pressured request",
   );
   const firstTurnSummary = assistantSummary(turnResults[0]?.events ?? []);
   assert.match(firstTurnSummary, new RegExp(`CONTEXT_CERT_TOOL_1_${suffix}`));
 
-  const continuity = await sendAndWait(
-    successful.sessionId,
-    `After compaction, recall CONTEXT_FACT_${suffix} and include it together with CONTEXT_COMPACTION_CONTINUITY_${suffix}. Use no tools.`,
-    cursor,
-  );
-  assert.equal(
-    assistantSummary(continuity.events).includes(`CONTEXT_FACT_${suffix}`),
-    true,
-    "model output must retain a pre-compaction continuity fact",
-  );
-  assert.match(
-    assistantSummary(continuity.events),
-    new RegExp(`CONTEXT_COMPACTION_CONTINUITY_${suffix}`),
-  );
-  cursor = continuity.cursor;
-
-  const hydratedBefore = await readNativeSnapshot(successful.sessionId);
-  const artifactIdBeforeRestart = hydratedBefore.compaction?.lastArtifactId;
+  const hydratedBeforeRestart = await readNativeSnapshot(successful.sessionId);
+  const artifactIdBeforeRestart =
+    hydratedBeforeRestart.compaction?.lastArtifactId;
   assert.ok(
     artifactIdBeforeRestart,
     "compaction lineage must be present before restart",
@@ -160,14 +177,18 @@ try {
   );
   assert.ok(
     Number(hydratedAfter.durableTranscript?.messageCount) >=
-      Number(hydratedBefore.durableTranscript?.messageCount),
+      Number(hydratedBeforeRestart.durableTranscript?.messageCount),
     "restart must not discard the durable transcript",
   );
-
   const restarted = await sendAndWait(
     successful.sessionId,
-    `After the debug service restart, use terminal exactly once to run printf 'CONTEXT_RESTART_CONTINUITY_${suffix}'. Then reply with that exact marker.`,
+    `After the debug service restart, recall CONTEXT_FACT_${suffix}, then use terminal exactly once to run printf 'CONTEXT_RESTART_CONTINUITY_${suffix}'. Reply with both the remembered fact and the exact terminal marker.`,
     await latestCursor(successful.sessionId),
+  );
+  assert.equal(
+    assistantSummary(restarted.events).includes(`CONTEXT_FACT_${suffix}`),
+    true,
+    "restart must retain a pre-compaction continuity fact",
   );
   assert.equal(
     assistantSummary(restarted.events).includes(
@@ -177,6 +198,28 @@ try {
     "same session must continue with the real provider after restart",
   );
   assert.ok(successfulToolCount(restarted.events) >= 1);
+  const restartedSnapshot = await readNativeSnapshot(successful.sessionId);
+  assertSnapshot(restartedSnapshot);
+  assert.notEqual(
+    restartedSnapshot.admission?.state,
+    "requires_compaction",
+    `the first provider request after restart must be admitted: ${JSON.stringify(
+      {
+        snapshot: summarizeSnapshot(restartedSnapshot),
+        events: orderEvents(restarted.events).map((event) => ({
+          sequenceId: event.sequence_id,
+          kind: event.kind,
+          wakeId: nestedString(event, "payload", "wake_id"),
+          metadataKinds: eventMetadataKinds(event),
+        })),
+      },
+    )}`,
+  );
+  assert.ok(
+    Number(restartedSnapshot.promptProjection?.inputTokens?.tokens) <
+      Number(compactionStarted.usage.inputTokens),
+    "the first provider request after restart must retain the reduced projection",
+  );
 
   await createProvider(failureProviderAlias, 12_288, 512, {
     certification: "task-6617",
@@ -256,7 +299,7 @@ try {
         ...new Set(successfulEvents.flatMap(eventMetadataKinds)),
       ],
       artifactId: artifactIdBeforeRestart,
-      restartContinuity: summarizeSnapshot(hydratedAfter),
+      restartContinuity: summarizeSnapshot(restartedSnapshot),
       restartedToolCalls: successfulToolCount(restarted.events),
     },
     failureScenario: {
@@ -304,6 +347,7 @@ interface ApiResponse {
 
 interface ChatEvent {
   event_id?: string;
+  sequence_id?: number;
   kind?: string;
   payload?: Record<string, unknown>;
 }
@@ -555,6 +599,41 @@ function snapshotsFromEvents(events: ChatEvent[]): Record<string, any>[] {
     }
     return [];
   });
+}
+
+function firstSnapshotAfterMetadata(
+  events: ChatEvent[],
+  metadataKind: string,
+): Record<string, any> | undefined {
+  const completionIndex = events.findIndex((event) =>
+    eventMetadataKinds(event).includes(metadataKind),
+  );
+  if (completionIndex < 0) return undefined;
+  for (const event of events.slice(completionIndex + 1)) {
+    const snapshot = eventMetadata(event).find(
+      (metadata) =>
+        metadata.kind === "context_accounting_snapshot" &&
+        isRecord(metadata.snapshot),
+    )?.snapshot;
+    if (isRecord(snapshot)) return snapshot as Record<string, any>;
+  }
+  return undefined;
+}
+
+function orderEvents(events: ChatEvent[]): ChatEvent[] {
+  return events
+    .map((event, index) => ({ event, index }))
+    .sort((left, right) => {
+      if (
+        typeof left.event.sequence_id === "number" &&
+        typeof right.event.sequence_id === "number" &&
+        left.event.sequence_id !== right.event.sequence_id
+      ) {
+        return left.event.sequence_id - right.event.sequence_id;
+      }
+      return left.index - right.index;
+    })
+    .map(({ event }) => event);
 }
 
 function eventMetadataKinds(event: ChatEvent): string[] {

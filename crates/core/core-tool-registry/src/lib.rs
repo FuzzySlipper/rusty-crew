@@ -1808,7 +1808,7 @@ mod tests {
 
         assert_eq!(artifact.schema_version, 1);
         assert_eq!(artifact.catalog_id, "default-local-tools");
-        assert_eq!(artifact.tools.len(), 69);
+        assert_eq!(artifact.tools.len(), 70);
 
         let result = validate_tool_metadata_list(&artifact.tools);
 

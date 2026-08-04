@@ -203,11 +203,6 @@ import {
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
 import {
-  estimateContextUsage,
-  estimateTextFragmentsTokens,
-  textFragmentsFromPayload,
-} from "./context-estimate.js";
-import {
   loadProfileConfig,
   loadProfileContext,
   loadProfileCuratorDiscoveryContext,

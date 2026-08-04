@@ -7,49 +7,151 @@
   "measuredAt": null,
   "provider": { "protocol": "unknown", "providerAlias": null, "modelId": null },
   "promptProjection": {
-    "inputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-    "contextWindowTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
+    "inputTokens": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
+    "contextWindowTokens": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
     "protocolProjection": { "kind": "unknown" },
     "segments": []
   },
   "reservedOutput": {
-    "responseTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-    "safetyMarginTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null }
+    "responseTokens": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
+    "safetyMarginTokens": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    }
   },
   "admission": {
     "state": "unavailable",
     "fillPercent": null,
-    "usableInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
+    "usableInputTokens": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
     "compactAtPercent": null,
     "maxContextPercentForWake": null,
     "reasonCode": "context_window_unavailable"
   },
   "providerUsage": {
     "currentRequest": {
-      "inputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "cachedInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "cacheWriteInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "outputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "reasoningTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null }
+      "inputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "cachedInputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "cacheWriteInputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "outputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "reasoningTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      }
     },
     "logicalWake": {
-      "inputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "cachedInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "cacheWriteInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "outputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "reasoningTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null }
+      "inputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "cachedInputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "cacheWriteInputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "outputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "reasoningTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      }
     },
     "requestCount": 0
   },
   "durableTranscript": {
     "eventCount": null,
     "message_count": null,
-    "serializedSize": { "bytes": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null }
+    "serializedSize": {
+      "bytes": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    }
   },
   "providerState": {
     "stateKind": null,
     "itemCount": null,
-    "serializedSize": { "bytes": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
+    "serializedSize": {
+      "bytes": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
     "lineageFingerprint": null
   },
   "compaction": {
@@ -61,11 +163,29 @@
     "lastArtifactId": null,
     "lastSequence": null,
     "triggerReason": null,
-    "inputTokensBefore": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-    "inputTokensAfter": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
+    "inputTokensBefore": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
+    "inputTokensAfter": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
     "compactedItemCount": null,
     "retainedItemCount": null,
     "providerChainAction": null
   },
-  "diagnostics": [{ "severity": "info", "code": "context_accounting_unavailable", "message": "Provider projection accounting is not available yet." }]
+  "diagnostics": [
+    {
+      "severity": "info",
+      "code": "context_accounting_unavailable",
+      "message": "Provider projection accounting is not available yet."
+    }
+  ]
 }

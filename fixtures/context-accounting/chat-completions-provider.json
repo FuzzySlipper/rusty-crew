@@ -11,54 +11,201 @@
     "modelId": "fixture-chat-model"
   },
   "promptProjection": {
-    "inputTokens": { "tokens": 1200, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-    "contextWindowTokens": { "tokens": 128000, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "configured_context_budget_v1", "measuredAt": null },
-    "protocolProjection": { "kind": "chat_completions", "message_count": 9, "tool_schema_count": 4, "reasoning_policy": "preserve_all" },
+    "inputTokens": {
+      "tokens": 1200,
+      "source": "provider",
+      "quality": "exact",
+      "estimatorId": null,
+      "measuredAt": "2026-08-04T00:00:00Z"
+    },
+    "contextWindowTokens": {
+      "tokens": 128000,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "configured_context_budget_v1",
+      "measuredAt": null
+    },
+    "protocolProjection": {
+      "kind": "chat_completions",
+      "message_count": 9,
+      "tool_schema_count": 4,
+      "reasoning_policy": "preserve_all"
+    },
     "segments": [
-      { "name": "system", "included": true, "tokens": { "tokens": 220, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" } },
-      { "name": "history", "included": true, "tokens": { "tokens": 840, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" } },
-      { "name": "tool_schemas", "included": true, "tokens": { "tokens": 140, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" } },
-      { "name": "reasoning", "included": true, "tokens": { "tokens": 0, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" } }
+      {
+        "name": "system",
+        "included": true,
+        "tokens": {
+          "tokens": 220,
+          "source": "provider",
+          "quality": "exact",
+          "estimatorId": null,
+          "measuredAt": "2026-08-04T00:00:00Z"
+        }
+      },
+      {
+        "name": "history",
+        "included": true,
+        "tokens": {
+          "tokens": 840,
+          "source": "provider",
+          "quality": "exact",
+          "estimatorId": null,
+          "measuredAt": "2026-08-04T00:00:00Z"
+        }
+      },
+      {
+        "name": "tool_schemas",
+        "included": true,
+        "tokens": {
+          "tokens": 140,
+          "source": "provider",
+          "quality": "exact",
+          "estimatorId": null,
+          "measuredAt": "2026-08-04T00:00:00Z"
+        }
+      },
+      {
+        "name": "reasoning",
+        "included": true,
+        "tokens": {
+          "tokens": 0,
+          "source": "provider",
+          "quality": "exact",
+          "estimatorId": null,
+          "measuredAt": "2026-08-04T00:00:00Z"
+        }
+      }
     ]
   },
   "reservedOutput": {
-    "responseTokens": { "tokens": 512, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": null },
-    "safetyMarginTokens": { "tokens": 128, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "safety_margin_v1", "measuredAt": null }
+    "responseTokens": {
+      "tokens": 512,
+      "source": "provider",
+      "quality": "exact",
+      "estimatorId": null,
+      "measuredAt": null
+    },
+    "safetyMarginTokens": {
+      "tokens": 128,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "safety_margin_v1",
+      "measuredAt": null
+    }
   },
   "admission": {
     "state": "admitted",
     "fillPercent": 1,
-    "usableInputTokens": { "tokens": 127360, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "configured_context_budget_v1", "measuredAt": null },
+    "usableInputTokens": {
+      "tokens": 127360,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "configured_context_budget_v1",
+      "measuredAt": null
+    },
     "compactAtPercent": 80,
     "maxContextPercentForWake": 95,
     "reasonCode": null
   },
   "providerUsage": {
     "currentRequest": {
-      "inputTokens": { "tokens": 1200, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "cachedInputTokens": { "tokens": 300, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "cacheWriteInputTokens": { "tokens": 0, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "outputTokens": { "tokens": 100, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "reasoningTokens": { "tokens": 20, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" }
+      "inputTokens": {
+        "tokens": 1200,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "cachedInputTokens": {
+        "tokens": 300,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "cacheWriteInputTokens": {
+        "tokens": 0,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "outputTokens": {
+        "tokens": 100,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "reasoningTokens": {
+        "tokens": 20,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      }
     },
     "logicalWake": {
-      "inputTokens": { "tokens": 2500, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "cachedInputTokens": { "tokens": 700, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "cacheWriteInputTokens": { "tokens": 0, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "outputTokens": { "tokens": 180, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" },
-      "reasoningTokens": { "tokens": 30, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:00Z" }
+      "inputTokens": {
+        "tokens": 2500,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "cachedInputTokens": {
+        "tokens": 700,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "cacheWriteInputTokens": {
+        "tokens": 0,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "outputTokens": {
+        "tokens": 180,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      },
+      "reasoningTokens": {
+        "tokens": 30,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:00:00Z"
+      }
     },
     "requestCount": 2
   },
   "durableTranscript": {
     "eventCount": 18,
     "message_count": 9,
-    "serializedSize": { "bytes": 24000, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "json_bytes_v1", "measuredAt": null }
+    "serializedSize": {
+      "bytes": 24000,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "json_bytes_v1",
+      "measuredAt": null
+    }
   },
   "providerState": {
     "stateKind": "chat_completions_messages",
     "itemCount": 9,
-    "serializedSize": { "bytes": 32000, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "json_bytes_v1", "measuredAt": null },
+    "serializedSize": {
+      "bytes": 32000,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "json_bytes_v1",
+      "measuredAt": null
+    },
     "lineageFingerprint": "fixture-chat-lineage"
   },
   "compaction": {
@@ -70,11 +217,29 @@
     "lastArtifactId": null,
     "lastSequence": null,
     "triggerReason": null,
-    "inputTokensBefore": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-    "inputTokensAfter": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
+    "inputTokensBefore": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
+    "inputTokensAfter": {
+      "tokens": null,
+      "source": "unavailable",
+      "quality": "unavailable",
+      "estimatorId": null,
+      "measuredAt": null
+    },
     "compactedItemCount": null,
     "retainedItemCount": null,
     "providerChainAction": null
   },
-  "diagnostics": [{ "severity": "info", "code": "fixture_projection", "message": "Deterministic fixture contains no raw provider payload." }]
+  "diagnostics": [
+    {
+      "severity": "info",
+      "code": "fixture_projection",
+      "message": "Deterministic fixture contains no raw provider payload."
+    }
+  ]
 }

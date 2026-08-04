@@ -1600,16 +1600,17 @@ where
                 );
             });
 
-            let accounting_snapshot = chat_context_accounting_snapshot(
-                &input.context,
-                &request,
-                &input_images,
-                &durable_messages,
-                &context_compaction,
-                &self.request_builder.config,
-                self.config.context_compaction.as_ref(),
-                current_usage.as_ref(),
-            );
+            let accounting_snapshot =
+                chat_context_accounting_snapshot(ChatContextAccountingInput {
+                    context: &input.context,
+                    request: &request,
+                    input_images: &input_images,
+                    durable_messages: &durable_messages,
+                    state: &context_compaction,
+                    config: &self.request_builder.config,
+                    compaction_policy: self.config.context_compaction.as_ref(),
+                    current_usage: current_usage.as_ref(),
+                });
             push_stream_item(
                 &mut stream,
                 chat_context_accounting_status(&input.context, &accounting_snapshot),
@@ -1704,7 +1705,7 @@ where
                         &input.context,
                         &self.request_builder.config,
                         input.provider_state.as_ref(),
-                        durable_messages,
+                        messages,
                         context_compaction.clone(),
                     )
                 } else {
@@ -2084,7 +2085,7 @@ where
                     &input.context,
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
-                    durable_messages,
+                    messages,
                     context_compaction.clone(),
                 );
                 return ChatCompletionsBrainLoopOutput {
@@ -2303,7 +2304,7 @@ where
                     &input.context,
                     &self.request_builder.config,
                     input.provider_state.as_ref(),
-                    durable_messages,
+                    messages,
                     context_compaction.clone(),
                 );
                 return ChatCompletionsBrainLoopOutput {
@@ -2436,16 +2437,30 @@ fn chat_context_usage_totals(usage: &ChatTokenUsage) -> ContextTokenUsageTotals 
     )
 }
 
+struct ChatContextAccountingInput<'a> {
+    context: &'a BrainEventContext,
+    request: &'a ChatCompletionsRequest,
+    input_images: &'a [ChatCompletionsInputImage],
+    durable_messages: &'a [ChatCompletionMessage],
+    state: &'a ChatCompletionsContextCompactionState,
+    config: &'a ChatCompletionsChatConfig,
+    compaction_policy: Option<&'a BrainContextCompactionPolicy>,
+    current_usage: Option<&'a ChatTokenUsage>,
+}
+
 fn chat_context_accounting_snapshot(
-    context: &BrainEventContext,
-    request: &ChatCompletionsRequest,
-    input_images: &[ChatCompletionsInputImage],
-    durable_messages: &[ChatCompletionMessage],
-    state: &ChatCompletionsContextCompactionState,
-    config: &ChatCompletionsChatConfig,
-    compaction_policy: Option<&BrainContextCompactionPolicy>,
-    current_usage: Option<&ChatTokenUsage>,
+    input: ChatContextAccountingInput<'_>,
 ) -> ContextAccountingSnapshot {
+    let ChatContextAccountingInput {
+        context,
+        request,
+        input_images,
+        durable_messages,
+        state,
+        config,
+        compaction_policy,
+        current_usage,
+    } = input;
     let request_estimate = serialized_context_tokens(request);
     let input_tokens = current_usage
         .map(|usage| ContextTokenMeasurement::provider(usage.prompt_tokens, None))
@@ -2633,9 +2648,11 @@ fn chat_context_accounting_snapshot(
                 output_tokens: ContextTokenMeasurement::unavailable(),
                 reasoning_tokens: ContextTokenMeasurement::unavailable(),
             }),
-        logical_wake: (state.usage_event_count > 0)
-            .then(|| chat_context_usage_totals(&state.logical_wake_usage))
-            .unwrap_or_else(ContextTokenUsageTotals::unavailable),
+        logical_wake: if state.usage_event_count > 0 {
+            chat_context_usage_totals(&state.logical_wake_usage)
+        } else {
+            ContextTokenUsageTotals::unavailable()
+        },
         request_count: state.usage_event_count,
     };
     snapshot.durable_transcript = ContextDurableTranscript {
@@ -3777,13 +3794,24 @@ fn chat_completions_provider_state_output(
     messages: Vec<ChatCompletionMessage>,
     context_compaction: ChatCompletionsContextCompactionState,
 ) -> Option<BrainWakeProviderStateOutput> {
+    // Tool-round counts belong to one logical wake. A completed provider
+    // projection can be hydrated by a later wake whose counter starts at zero;
+    // retaining the old count would suppress compaction when that new wake
+    // reaches its first tool round. Continuation checkpoints retain the
+    // counter separately while the same wake is being resumed.
+    let context_compaction = ChatCompletionsContextCompactionState {
+        last_compacted_tool_round: 0,
+        ..context_compaction
+    };
     let payload = ChatCompletionsProviderStateV1 {
         kind: MODULE_ID.to_string(),
         strategy_id: config.provider_state_strategy_id.clone(),
         payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
         messages: messages
             .into_iter()
-            .filter(|message| message.role != ChatMessageRole::System)
+            .filter(|message| {
+                message.role != ChatMessageRole::System && !is_transient_recovery_message(message)
+            })
             .map(|message| message_for_reasoning_history(message, config.reasoning_history))
             .collect(),
         context_compaction,
@@ -3802,6 +3830,14 @@ fn chat_completions_provider_state_output(
             payload: serde_json::to_value(payload).unwrap_or_else(|_| json!({})),
             ttl_ms: Some(PROVIDER_STATE_TTL_MS),
         },
+    })
+}
+
+fn is_transient_recovery_message(message: &ChatCompletionMessage) -> bool {
+    message.content.as_deref().is_some_and(|content| {
+        content.starts_with("[Rusty Crew tool-call recovery ")
+            || content.starts_with("[Rusty Crew operator attention]")
+            || content.starts_with("[Rusty Crew output continuation ")
     })
 }
 
@@ -8013,15 +8049,47 @@ mod tests {
         let payload: ChatCompletionsProviderStateV1 =
             serde_json::from_value(state.payload.clone()).expect("provider state payload");
         assert_eq!(payload.context_compaction.artifacts.len(), 1);
+        assert_eq!(
+            payload.context_compaction.last_compacted_tool_round, 0,
+            "completed provider state must reset the wake-local compaction counter"
+        );
+        assert!(
+            payload.messages.len() < 12,
+            "restartable provider state must contain the compacted model projection, not the raw transcript"
+        );
 
         let mut second_brain = loop_with(
-            vec![Ok(vec![
-                ChatCompletionsEvent::ContentDelta("second wake complete".to_string()),
-                ChatCompletionsEvent::Finished {
-                    finish_reason: Some("stop".to_string()),
-                },
-            ])],
-            Vec::new(),
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(PendingChatFunctionCall {
+                        index: 0,
+                        id: Some("call_after_restart".to_string()),
+                        name: "lookup".to_string(),
+                        arguments_json: r#"{"round":1}"#.to_string(),
+                    }),
+                    ChatCompletionsEvent::Usage(ChatTokenUsage {
+                        prompt_tokens: 20_000,
+                        completion_tokens: 10,
+                        total_tokens: 20_010,
+                        cached_prompt_tokens: 0,
+                        cache_write_prompt_tokens: 0,
+                        reasoning_completion_tokens: 0,
+                    }),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("second wake complete".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok(format!(
+                "result-after-restart-{}",
+                "x".repeat(3000)
+            ))],
         )
         .with_loop_config(context_config);
         let second = second_brain.wake(ChatCompletionsBrainLoopInput {
@@ -8032,7 +8100,27 @@ mod tests {
             continuation_state: None,
             final_message_fallback: None,
         });
-        assert!(second.completed);
+        assert!(second.yielded);
+        assert!(events(&second.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ProviderStatus {
+                metadata_json: Some(metadata),
+                ..
+            } if metadata.contains("context_compaction_completed")
+        )));
+        let second_continuation = second
+            .continuation_state
+            .as_ref()
+            .expect("post-restart compaction continuation");
+        let completed_second = second_brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: Vec::new(),
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: Some(second_continuation.clone()),
+            final_message_fallback: None,
+        });
+        assert!(completed_second.completed);
         assert!(events(&second.stream).iter().any(|event| matches!(
             event,
             BrainEvent::ProviderStatus {

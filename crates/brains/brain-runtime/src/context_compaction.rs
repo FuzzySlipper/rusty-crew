@@ -255,6 +255,23 @@ mod tests {
     }
 
     #[test]
+    fn disabled_policy_does_not_compact() {
+        let mut disabled = policy();
+        disabled.enabled = false;
+        assert_eq!(
+            decide_context_compaction(Some(&disabled), Some(100), 0).unwrap(),
+            BrainContextCompactionDecision::Disabled
+        );
+
+        disabled.enabled = true;
+        disabled.auto_compaction_enabled = false;
+        assert_eq!(
+            decide_context_compaction(Some(&disabled), Some(100), 0).unwrap(),
+            BrainContextCompactionDecision::Disabled
+        );
+    }
+
+    #[test]
     fn classifies_common_provider_context_limit_failures() {
         for message in [
             "maximum context length is 128000 tokens",

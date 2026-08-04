@@ -5830,6 +5830,11 @@ export const bridgeWireSchemaArtifact = {
               "gate_failed",
               "reviewer_dispatch_pending",
               "reviewer_dispatched",
+              "den_finalization_pending",
+              "den_finalized",
+              "reply_pending",
+              "replied",
+              "reply_terminal",
               "review_terminal",
               "superseded"
             ],
@@ -5837,6 +5842,30 @@ export const bridgeWireSchemaArtifact = {
           },
           "projectId": {
             "type": "string"
+          },
+          "replyDeliveryId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replyMessageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replyReasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replyStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "repository": {
             "type": "string"
@@ -5846,6 +5875,75 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "type": "array"
+          },
+          "reviewExactHeadCommit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewFinalizationId": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reviewFindingStatuses": {
+            "default": [],
+            "items": {
+              "properties": {
+                "findingId": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "findingId",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "reviewMaterialDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewPacketId": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reviewPacketMessageId": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reviewResultDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewResultJson": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "reviewRoundId": {
             "format": "uint64",
@@ -5857,6 +5955,18 @@ export const bridgeWireSchemaArtifact = {
           },
           "reviewSummaryMd": {
             "type": "string"
+          },
+          "reviewTaskStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewVerdict": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "reviewer": {
             "type": "string"
@@ -24289,6 +24399,11 @@ export const bridgeWireSchemaArtifact = {
             "gate_failed",
             "reviewer_dispatch_pending",
             "reviewer_dispatched",
+            "den_finalization_pending",
+            "den_finalized",
+            "reply_pending",
+            "replied",
+            "reply_terminal",
             "review_terminal",
             "superseded"
           ],
@@ -24296,6 +24411,30 @@ export const bridgeWireSchemaArtifact = {
         },
         "projectId": {
           "type": "string"
+        },
+        "replyDeliveryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyReasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replyStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "repository": {
           "type": "string"
@@ -24305,6 +24444,75 @@ export const bridgeWireSchemaArtifact = {
             "type": "string"
           },
           "type": "array"
+        },
+        "reviewExactHeadCommit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewFinalizationId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewFindingStatuses": {
+          "default": [],
+          "items": {
+            "properties": {
+              "findingId": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "findingId",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "reviewMaterialDigest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewPacketId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewPacketMessageId": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviewResultDigest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewResultJson": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewRoundId": {
           "format": "uint64",
@@ -24316,6 +24524,18 @@ export const bridgeWireSchemaArtifact = {
         },
         "reviewSummaryMd": {
           "type": "string"
+        },
+        "reviewTaskStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewVerdict": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewer": {
           "type": "string"

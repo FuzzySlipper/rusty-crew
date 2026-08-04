@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "description": "Executable deterministic coverage catalog for provider projection, compaction policy, persistence, stream ordering, and bridge field ratchets.",
+  "cases": [
+    {
+      "id": "chat-tool-output-image-continuation-retry",
+      "class": "provider_projection",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "snapshot",
+        "path": "chat-completions-provider.json",
+        "providerProtocol": "chat_completions",
+        "requiredSegments": ["tool_schemas", "reasoning"]
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::context_accounting_snapshot_reports_provider_usage_and_request_segments",
+        "crates/brains/chat-completions/src/lib.rs::opted_image_is_serialized_once_and_redacted_from_debug_samples"
+      ]
+    },
+    {
+      "id": "responses-tool-output-image-continuation-retry",
+      "class": "provider_projection",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "snapshot",
+        "path": "responses-chain.json",
+        "providerProtocol": "responses",
+        "requiredSegments": ["replay_items", "reasoning"]
+      },
+      "testRefs": [
+        "crates/brains/openai-responses/src/lib.rs::context_accounting_snapshot_reports_responses_chain_and_provider_usage",
+        "crates/brains/openai-responses/src/lib.rs::provider_state_replays_typed_reasoning_function_call_and_output_items"
+      ]
+    },
+    {
+      "id": "threshold-admitted",
+      "class": "admission_policy",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "decision",
+        "policy": {
+          "enabled": true,
+          "autoCompactionEnabled": true,
+          "contextWindowTokens": 1000,
+          "compactAtPercent": 80,
+          "targetPercentAfterCompaction": 50
+        },
+        "providerInputTokens": 500,
+        "serializedModelContextBytes": 32,
+        "expected": "below_threshold",
+        "expectedSource": "provider"
+      },
+      "testRefs": [
+        "crates/brains/brain-runtime/src/context_compaction.rs::provider_usage_wins_over_estimate"
+      ]
+    },
+    {
+      "id": "threshold-near-threshold",
+      "class": "admission_policy",
+      "sourceQuality": "serialized_estimate/approximate",
+      "fixture": {
+        "kind": "decision",
+        "policy": {
+          "enabled": true,
+          "autoCompactionEnabled": true,
+          "contextWindowTokens": 1000,
+          "compactAtPercent": 80,
+          "targetPercentAfterCompaction": 50
+        },
+        "providerInputTokens": null,
+        "serializedModelContextBytes": 2250,
+        "expected": "below_threshold",
+        "expectedSource": "conservative_estimate"
+      },
+      "testRefs": [
+        "crates/brains/brain-runtime/src/context_compaction.rs::conservative_estimate_triggers_without_usage"
+      ]
+    },
+    {
+      "id": "threshold-requires-compaction",
+      "class": "admission_policy",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "decision",
+        "policy": {
+          "enabled": true,
+          "autoCompactionEnabled": true,
+          "contextWindowTokens": 1000,
+          "compactAtPercent": 80,
+          "targetPercentAfterCompaction": 50
+        },
+        "providerInputTokens": 800,
+        "serializedModelContextBytes": 16,
+        "expected": "compact",
+        "expectedSource": "provider"
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::mid_turn_context_compaction_checkpoints_before_next_provider_request"
+      ]
+    },
+    {
+      "id": "disabled-policy",
+      "class": "compaction_policy",
+      "sourceQuality": "unavailable/unavailable",
+      "fixture": {
+        "kind": "decision",
+        "policy": {
+          "enabled": false,
+          "autoCompactionEnabled": false,
+          "contextWindowTokens": 1000,
+          "compactAtPercent": 80,
+          "targetPercentAfterCompaction": 50
+        },
+        "providerInputTokens": 999,
+        "serializedModelContextBytes": 9999,
+        "expected": "disabled",
+        "expectedSource": null
+      },
+      "testRefs": [
+        "crates/brains/brain-runtime/src/context_compaction.rs::disabled_policy_does_not_compact"
+      ]
+    },
+    {
+      "id": "manual-safe-boundary",
+      "class": "compaction_policy",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "event_order",
+        "events": [
+          "context_compaction_started",
+          "context_compaction_completed",
+          "provider_request"
+        ]
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::mid_turn_context_compaction_checkpoints_before_next_provider_request"
+      ]
+    },
+    {
+      "id": "unsafe-boundary-rejected",
+      "class": "compaction_policy",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "event_order",
+        "events": [
+          "provider_context_limit",
+          "context_compaction_failed",
+          "attention_required"
+        ]
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_pauses_compaction_turn_for_attention"
+      ]
+    },
+    {
+      "id": "duplicate-compaction-idempotent",
+      "class": "compaction_persistence",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "persistence",
+        "backend": "sqlite",
+        "replays": 2,
+        "expectedRows": 1,
+        "expectedOutcome": "same_artifact"
+      },
+      "testRefs": [
+        "crates/core/core-persistence/src/sqlite_integration_tests.rs::context_compaction_artifacts_preserve_raw_message_history",
+        "crates/core/core-persistence/src/postgres_backend.rs::postgres_context_compaction_artifact_persists_and_reloads"
+      ]
+    },
+    {
+      "id": "concurrent-compaction-conflict",
+      "class": "compaction_persistence",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "persistence",
+        "backend": "postgres",
+        "replays": 2,
+        "expectedRows": 1,
+        "expectedOutcome": "serialized_artifact_write"
+      },
+      "testRefs": [
+        "crates/core/core-persistence/src/postgres_backend.rs::postgres_context_compaction_artifact_persists_and_reloads"
+      ]
+    },
+    {
+      "id": "failed-compaction-preserves-prior-projection",
+      "class": "compaction_recovery",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "lineage",
+        "before": "projection-before",
+        "after": "projection-before",
+        "expectedOutcome": "prior_projection_preserved"
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_pauses_compaction_turn_for_attention",
+        "crates/brains/openai-responses/src/lib.rs::provider_failure_and_closed_stream_do_not_commit_provider_state"
+      ]
+    },
+    {
+      "id": "sqlite-restart-hydrates-lineage",
+      "class": "restart_hydration",
+      "sourceQuality": "serialized_estimate/approximate",
+      "fixture": {
+        "kind": "lineage",
+        "before": "artifact_context_one",
+        "after": "artifact_context_one",
+        "expectedOutcome": "same_artifact_and_raw_transcript"
+      },
+      "testRefs": [
+        "crates/core/core-persistence/src/sqlite_integration_tests.rs::context_compaction_artifacts_preserve_raw_message_history"
+      ]
+    },
+    {
+      "id": "sse-compaction-ordering",
+      "class": "stream_ordering",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "event_order",
+        "events": [
+          "context_compaction_started",
+          "context_compaction_completed",
+          "context_accounting"
+        ]
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::stream_sink_receives_started_deltas_and_tool_lifecycle_before_wake_returns"
+      ]
+    },
+    {
+      "id": "sse-loss-visible",
+      "class": "stream_ordering",
+      "sourceQuality": "unavailable/unavailable",
+      "fixture": {
+        "kind": "diagnostic",
+        "severity": "error",
+        "code": "context_compaction_failed",
+        "expectedOutcome": "visible_failure"
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_pauses_compaction_turn_for_attention"
+      ]
+    },
+    {
+      "id": "chat-projection-field-ratchet",
+      "class": "schema_fingerprint",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "schema",
+        "path": "chat-completions-provider.json",
+        "fingerprint": "schema-fingerprint.json"
+      },
+      "testRefs": [
+        "crates/brains/brain-runtime/src/context_accounting.rs::checked_in_schema_fingerprint_covers_snapshot_fields"
+      ]
+    },
+    {
+      "id": "responses-projection-field-ratchet",
+      "class": "schema_fingerprint",
+      "sourceQuality": "provider/exact",
+      "fixture": {
+        "kind": "schema",
+        "path": "responses-chain.json",
+        "fingerprint": "schema-fingerprint.json"
+      },
+      "testRefs": [
+        "crates/brains/brain-runtime/src/context_accounting.rs::checked_in_schema_fingerprint_covers_snapshot_fields"
+      ]
+    }
+  ]
+}

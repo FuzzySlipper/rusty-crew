@@ -31,6 +31,7 @@ export function observeProviderStateWake(
     sessionId: request.sessionId,
     moduleId: strategy.moduleId,
     strategyId: strategy.strategyId,
+    ...(registration?.providerStateScope ?? {}),
     status,
     source: "runtime_observation",
     lastWakeId: request.wakeId,
@@ -57,6 +58,7 @@ export function observeProviderStateFailure(
     sessionId: request.sessionId,
     moduleId: strategy.moduleId,
     strategyId: strategy.strategyId,
+    ...(registration?.providerStateScope ?? {}),
     status,
     source: "runtime_observation",
     lastWakeId: request.wakeId,
@@ -172,10 +174,20 @@ function compareDurableProviderStateDiagnostics(
 function providerStateDiagnosticKey(
   diagnostic: Pick<
     NativeProviderStateDiagnostic,
-    "sessionId" | "moduleId" | "strategyId"
+    | "sessionId"
+    | "moduleId"
+    | "strategyId"
+    | "profileFingerprint"
+    | "providerFingerprint"
   >,
 ): string {
-  return `${diagnostic.sessionId}\u0000${diagnostic.moduleId}\u0000${diagnostic.strategyId}`;
+  return JSON.stringify([
+    diagnostic.sessionId,
+    diagnostic.moduleId,
+    diagnostic.strategyId,
+    diagnostic.profileFingerprint ?? null,
+    diagnostic.providerFingerprint ?? null,
+  ]);
 }
 
 function providerStateDiagnosticPriority(

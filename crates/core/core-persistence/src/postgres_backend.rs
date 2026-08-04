@@ -17277,7 +17277,7 @@ mod tests {
         let schema = unique_schema("rusty_crew_context_compaction");
         let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         let artifact = ContextCompactionArtifact {
-            artifact_id: "fixture-postgres-context-compaction".to_string(),
+            artifact_id: "fixture_postgres_context_compaction".to_string(),
             session_id: SessionId::new("fixture-postgres-session"),
             branch_id: None,
             strategy_id: "rolling_summary_compaction".to_string(),

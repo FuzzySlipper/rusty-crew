@@ -9,7 +9,82 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import { mergeProviderStateDiagnostics } from "../../native-bridge/src/provider-state-diagnostics.js";
 import { buildRuntimeDiagnosticsProjection } from "../src/runtime-diagnostics.js";
+
+const lineageDiagnostics = mergeProviderStateDiagnostics(
+  [
+    {
+      sessionId: "lineage-session",
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      profileFingerprint: "profile-a",
+      providerFingerprint: "provider-a",
+      status: "invalidated",
+      invalidationReason: "superseded",
+      isCurrent: false,
+      recordId: 1,
+      updatedAt: "2026-08-04T00:00:01Z",
+    },
+    {
+      sessionId: "lineage-session",
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      profileFingerprint: "profile-a",
+      providerFingerprint: "provider-a",
+      status: "valid",
+      isCurrent: true,
+      lastWakeId: "lineage-a-current",
+      recordId: 2,
+      updatedAt: "2026-08-04T00:00:02Z",
+    },
+    {
+      sessionId: "lineage-session",
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      profileFingerprint: "profile-b",
+      providerFingerprint: "provider-b",
+      status: "valid",
+      isCurrent: true,
+      lastWakeId: "lineage-b-current",
+      recordId: 3,
+      updatedAt: "2026-08-04T00:00:02Z",
+    },
+    {
+      sessionId: "lineage-session",
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      profileFingerprint: "profile-c-reconstructed",
+      providerFingerprint: "provider-c-reconstructed",
+      status: "valid",
+      isCurrent: true,
+      lastWakeId: "lineage-c-reconstructed",
+      recordId: 4,
+      updatedAt: "2026-08-04T00:00:03Z",
+    },
+  ],
+  [],
+);
+assert.equal(lineageDiagnostics.length, 3);
+assert.deepEqual(
+  lineageDiagnostics
+    .map((diagnostic) => [
+      diagnostic.profileFingerprint,
+      diagnostic.providerFingerprint,
+      diagnostic.lastWakeId,
+    ])
+    .sort(),
+  [
+    ["profile-a", "provider-a", "lineage-a-current"],
+    ["profile-b", "provider-b", "lineage-b-current"],
+    [
+      "profile-c-reconstructed",
+      "provider-c-reconstructed",
+      "lineage-c-reconstructed",
+    ],
+  ].sort(),
+  "current and reconstructed provider-state lineages must not collapse by session alone",
+);
 
 const bridge = await loadNativeBridge();
 await bridge.initializeEngine({

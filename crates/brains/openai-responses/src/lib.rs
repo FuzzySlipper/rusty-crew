@@ -2272,9 +2272,11 @@ fn responses_context_accounting_snapshot(
                 output_tokens: ContextTokenMeasurement::unavailable(),
                 reasoning_tokens: ContextTokenMeasurement::unavailable(),
             }),
-        logical_wake: (metrics.usage_event_count > 0)
-            .then(|| responses_aggregate_context_usage(metrics))
-            .unwrap_or_else(ContextTokenUsageTotals::unavailable),
+        logical_wake: if metrics.usage_event_count > 0 {
+            responses_aggregate_context_usage(metrics)
+        } else {
+            ContextTokenUsageTotals::unavailable()
+        },
         request_count: metrics.provider_request_count,
     };
     snapshot.durable_transcript = ContextDurableTranscript {
@@ -4275,18 +4277,18 @@ fn finish_responses_wake(
         }],
     };
     push_stream_item(&mut items, BrainWakeStreamItem::actions(batch), sink);
-    let provider_state = provider_state_output(
+    let provider_state = provider_state_output(ProviderStateOutputInput {
         request,
         config,
-        completed
+        response_id: completed
             .response_id
             .unwrap_or_else(|| "unknown-response".to_string()),
-        completed.output_items,
-        completed.usage,
-        completed.committed_input_items,
-        completed.request_fingerprint,
-        completed.context_compaction,
-    );
+        output_items: completed.output_items,
+        usage: completed.usage,
+        committed_input_items: completed.committed_input_items,
+        request_fingerprint: completed.request_fingerprint,
+        context_compaction: completed.context_compaction,
+    });
     ResponsesBrainWakeResult {
         stream: BrainWakeStream::from_items(items),
         provider_state: Some(provider_state),
@@ -4454,16 +4456,28 @@ fn responses_json_fingerprint(value: &Value) -> Result<String, serde_json::Error
     Ok(format!("{:x}", digest.finalize()))
 }
 
-fn provider_state_output(
-    request: &BrainWakeRequest,
-    config: &ResponsesBrainConfig,
+struct ProviderStateOutputInput<'a> {
+    request: &'a BrainWakeRequest,
+    config: &'a ResponsesBrainConfig,
     response_id: String,
     output_items: Vec<ResponsesOutputItem>,
     usage: Option<ResponsesTokenUsage>,
     committed_input_items: Vec<ResponsesInputItem>,
     request_fingerprint: String,
     context_compaction: ResponsesContextCompactionState,
-) -> BrainWakeProviderStateOutput {
+}
+
+fn provider_state_output(input: ProviderStateOutputInput<'_>) -> BrainWakeProviderStateOutput {
+    let ProviderStateOutputInput {
+        request,
+        config,
+        response_id,
+        output_items,
+        usage,
+        committed_input_items,
+        request_fingerprint,
+        context_compaction,
+    } = input;
     let output_records =
         deduplicate_output_records(output_items.iter().map(output_record_from_item).collect());
     let stateless_replay_context =
@@ -5290,25 +5304,27 @@ mod tests {
             content: "first request".to_string(),
         };
         let first_state = provider_state_payload_from_output(Some(provider_state_output(
-            &wake_request(None, None),
-            &config,
-            "resp-1".to_string(),
-            vec![
-                ResponsesOutputItem::Reasoning {
-                    id: Some("reasoning-1".to_string()),
-                    content: Some("inspect first".to_string()),
-                    summary: None,
-                    encrypted_content: None,
-                },
-                ResponsesOutputItem::Message {
-                    id: Some("message-1".to_string()),
-                    text: "first answer".to_string(),
-                },
-            ],
-            None,
-            vec![first_user.clone()],
-            "fingerprint-1".to_string(),
-            ResponsesContextCompactionState::default(),
+            ProviderStateOutputInput {
+                request: &wake_request(None, None),
+                config: &config,
+                response_id: "resp-1".to_string(),
+                output_items: vec![
+                    ResponsesOutputItem::Reasoning {
+                        id: Some("reasoning-1".to_string()),
+                        content: Some("inspect first".to_string()),
+                        summary: None,
+                        encrypted_content: None,
+                    },
+                    ResponsesOutputItem::Message {
+                        id: Some("message-1".to_string()),
+                        text: "first answer".to_string(),
+                    },
+                ],
+                usage: None,
+                committed_input_items: vec![first_user.clone()],
+                request_fingerprint: "fingerprint-1".to_string(),
+                context_compaction: ResponsesContextCompactionState::default(),
+            },
         )));
         let first_state = provider_state(serde_json::to_value(first_state).unwrap());
         let second_user = ResponsesInputItem::UserMessage {
@@ -5337,37 +5353,39 @@ mod tests {
         ));
 
         let second_state = provider_state_payload_from_output(Some(provider_state_output(
-            &wake_request(Some(first_state), None),
-            &config,
-            "resp-2".to_string(),
-            vec![
-                ResponsesOutputItem::FunctionCall {
-                    id: Some("function-1".to_string()),
-                    call_id: "call-1".to_string(),
-                    name: "read_file".to_string(),
-                    arguments: "{\"path\":\"README.md\"}".to_string(),
-                },
-                ResponsesOutputItem::FunctionCall {
-                    id: Some("function-1".to_string()),
-                    call_id: "call-1".to_string(),
-                    name: "read_file".to_string(),
-                    arguments: "{\"path\":\"README.md\"}".to_string(),
-                },
-                ResponsesOutputItem::FunctionCallOutput {
-                    call_id: "call-1".to_string(),
-                    output: "readme content".to_string(),
-                    is_error: false,
-                },
-                ResponsesOutputItem::FunctionCallOutput {
-                    call_id: "call-1".to_string(),
-                    output: "readme content".to_string(),
-                    is_error: false,
-                },
-            ],
-            None,
-            second_request.input,
-            "fingerprint-2".to_string(),
-            ResponsesContextCompactionState::default(),
+            ProviderStateOutputInput {
+                request: &wake_request(Some(first_state), None),
+                config: &config,
+                response_id: "resp-2".to_string(),
+                output_items: vec![
+                    ResponsesOutputItem::FunctionCall {
+                        id: Some("function-1".to_string()),
+                        call_id: "call-1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"README.md\"}".to_string(),
+                    },
+                    ResponsesOutputItem::FunctionCall {
+                        id: Some("function-1".to_string()),
+                        call_id: "call-1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"README.md\"}".to_string(),
+                    },
+                    ResponsesOutputItem::FunctionCallOutput {
+                        call_id: "call-1".to_string(),
+                        output: "readme content".to_string(),
+                        is_error: false,
+                    },
+                    ResponsesOutputItem::FunctionCallOutput {
+                        call_id: "call-1".to_string(),
+                        output: "readme content".to_string(),
+                        is_error: false,
+                    },
+                ],
+                usage: None,
+                committed_input_items: second_request.input,
+                request_fingerprint: "fingerprint-2".to_string(),
+                context_compaction: ResponsesContextCompactionState::default(),
+            },
         )));
         let second_state = provider_state(serde_json::to_value(second_state).unwrap());
         let third_request = builder.build(

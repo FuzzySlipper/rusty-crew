@@ -13,25 +13,40 @@ service. It is intentionally separate from the live PostgreSQL service.
 - Storage: `/home/system/rusty-crew-debug/data/engine/coordination.sqlite3`
 - Provider route: local den-router `http://127.0.0.1:18082/v1`
 - Model: `deepseek-flash`
-- Evidence packet: `/home/system/rusty-crew-debug/evidence/task-6617/msee1ud5/live-results.json`
+- Evidence packet: `/home/system/rusty-crew-debug/evidence/task-6617/msej5byp/live-results.json`.
 
 The certification created secret-free disposable provider and profile records.
 The profiles were deleted and the providers were archived after the run.
 
 ## Successful Scenario
 
-Profile/session: `task-6617-context-msee1ud5` /
-`task-6617-context-msee1ud5-session`
+Profile/session: `task-6617-context-msej5byp` /
+`task-6617-context-msej5byp-session`
 
-- 12 provider-backed turns completed.
-- 12 real terminal tool calls completed successfully.
-- Pre-pressure snapshot: 46% fill.
-- Pressure boundary: 60% fill, recorded in the durable
-  `context_compaction_started` event with provider usage accounting.
-- Compaction artifact: `chat-completions:compaction:1`.
-- Compaction reduced the provider projection from 9,762 exact input tokens to
-  approximately 3,256 serialized-estimate tokens, retaining 11 items after
-  compacting 27.
+- The certification now uses a 16,384-token provider context and runs up to 20
+  provider-backed turns with one real terminal call per turn, so the pressure
+  boundary is reached without making fixed prompt overhead dominate the target.
+- The smoke records the first provider accounting snapshot after
+  `context_compaction_completed`. It requires `provider/exact` provenance for
+  both the prompt projection and current request, admission below the 60%
+  threshold, and fewer prompt tokens than the pressured request.
+- Latest successful packet: `/home/system/rusty-crew-debug/evidence/task-6617/msej5byp/live-results.json`.
+
+The run crossed the boundary after 20 real terminal-backed turns: the
+pressured request was 9,819 exact provider input tokens at 60%, and the first
+accounting snapshot after `context_compaction_completed` was 9,113 exact
+provider input tokens at 56% and near-threshold. The artifact estimate was 3,248
+serialized-estimate tokens after compacting 27 items and retaining 11; that
+estimate is reported as artifact metadata, not substituted for the next
+provider request.
+
+The service restarted before the continuity turn. Hydration retained the same
+artifact, the reduced projection, and the durable transcript; the post-restart
+turn recalled the pre-compaction fact, completed one real terminal call, and
+triggered a second compaction artifact. Its authoritative provider snapshot was
+9,406 exact input tokens at 58%, with 28 items compacted and 11 retained. The
+separate failure scenario emitted `context_compaction_failed`, retained three
+durable messages, and preserved the prior chat-completions projection.
 - The post-compaction turn retained both the pre-compaction continuity fact and
   a new continuity marker.
 - After restarting `rusty-crew-debug.service`, the same session ID and
@@ -40,8 +55,8 @@ Profile/session: `task-6617-context-msee1ud5` /
 
 ## Failure Scenario
 
-Profile/session: `task-6617-context-failure-msee1ud5` /
-`task-6617-context-failure-msee1ud5-session`
+Profile/session: `task-6617-context-failure-msej5byp` /
+`task-6617-context-failure-msej5byp-session`
 
 The deliberately undersized 12,288-token profile emitted
 `context_compaction_started` followed by `context_compaction_failed` when no

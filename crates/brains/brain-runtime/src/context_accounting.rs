@@ -79,48 +79,14 @@ impl ContextTokenMeasurement {
     }
 
     pub fn validate(&self, field: &str) -> Result<(), String> {
-        match (self.tokens, self.source, self.quality) {
-            (
-                None,
-                ContextMeasurementSource::Unavailable,
-                ContextMeasurementQuality::Unavailable,
-            ) => {
-                if self.estimator_id.is_some() {
-                    return Err(format!(
-                        "{field}.estimator_id must be absent when unavailable"
-                    ));
-                }
-            }
-            (None, _, _) => {
-                return Err(format!(
-                    "{field} must use unavailable source and quality when tokens are unknown"
-                ));
-            }
-            (Some(_), ContextMeasurementSource::Unavailable, _)
-            | (Some(_), _, ContextMeasurementQuality::Unavailable) => {
-                return Err(format!("{field} cannot mark known tokens as unavailable"));
-            }
-            (Some(_), ContextMeasurementSource::Provider, _) => {
-                if self.estimator_id.is_some() {
-                    return Err(format!(
-                        "{field}.estimator_id must be absent for provider measurements"
-                    ));
-                }
-            }
-            (Some(_), ContextMeasurementSource::Tokenizer, _)
-            | (Some(_), ContextMeasurementSource::SerializedEstimate, _) => {
-                if self
-                    .estimator_id
-                    .as_deref()
-                    .is_none_or(|value| value.trim().is_empty())
-                {
-                    return Err(format!(
-                        "{field}.estimator_id is required for estimated measurements"
-                    ));
-                }
-            }
-        }
-        Ok(())
+        validate_measurement_shape(
+            self.tokens,
+            self.source,
+            self.quality,
+            self.estimator_id.as_deref(),
+            field,
+            "tokens",
+        )
     }
 }
 
@@ -162,49 +128,67 @@ impl ContextSizeMeasurement {
     }
 
     pub fn validate(&self, field: &str) -> Result<(), String> {
-        match (self.bytes, self.source, self.quality) {
-            (
-                None,
-                ContextMeasurementSource::Unavailable,
-                ContextMeasurementQuality::Unavailable,
-            ) => {
-                if self.estimator_id.is_some() {
-                    return Err(format!(
-                        "{field}.estimator_id must be absent when unavailable"
-                    ));
-                }
-            }
-            (None, _, _) => {
+        validate_measurement_shape(
+            self.bytes,
+            self.source,
+            self.quality,
+            self.estimator_id.as_deref(),
+            field,
+            "bytes",
+        )
+    }
+}
+
+fn validate_measurement_shape(
+    value: Option<u64>,
+    source: ContextMeasurementSource,
+    quality: ContextMeasurementQuality,
+    estimator_id: Option<&str>,
+    field: &str,
+    unit: &str,
+) -> Result<(), String> {
+    match (value, source, quality) {
+        (None, ContextMeasurementSource::Unavailable, ContextMeasurementQuality::Unavailable) => {
+            if estimator_id.is_some() {
                 return Err(format!(
-                    "{field} must use unavailable source and quality when bytes are unknown"
+                    "{field}.estimator_id must be absent when {unit} are unavailable"
                 ));
             }
-            (Some(_), ContextMeasurementSource::Unavailable, _)
-            | (Some(_), _, ContextMeasurementQuality::Unavailable) => {
-                return Err(format!("{field} cannot mark known bytes as unavailable"));
-            }
-            (Some(_), ContextMeasurementSource::Provider, _) => {
-                if self.estimator_id.is_some() {
-                    return Err(format!(
-                        "{field}.estimator_id must be absent for provider measurements"
-                    ));
-                }
-            }
-            (Some(_), ContextMeasurementSource::Tokenizer, _)
-            | (Some(_), ContextMeasurementSource::SerializedEstimate, _) => {
-                if self
-                    .estimator_id
-                    .as_deref()
-                    .is_none_or(|value| value.trim().is_empty())
-                {
-                    return Err(format!(
-                        "{field}.estimator_id is required for estimated measurements"
-                    ));
-                }
+        }
+        (None, _, _) => {
+            return Err(format!(
+                "{field} must use unavailable source and quality when {unit} are unknown"
+            ));
+        }
+        (Some(_), ContextMeasurementSource::Provider, ContextMeasurementQuality::Exact) => {
+            if estimator_id.is_some() {
+                return Err(format!(
+                    "{field}.estimator_id must be absent for provider measurements"
+                ));
             }
         }
-        Ok(())
+        (
+            Some(_),
+            ContextMeasurementSource::Tokenizer | ContextMeasurementSource::SerializedEstimate,
+            ContextMeasurementQuality::Approximate,
+        ) => {
+            if estimator_id.is_none_or(|value| value.trim().is_empty()) {
+                return Err(format!(
+                    "{field}.estimator_id is required for estimated measurements"
+                ));
+            }
+        }
+        (Some(_), ContextMeasurementSource::Unavailable, _)
+        | (Some(_), _, ContextMeasurementQuality::Unavailable) => {
+            return Err(format!("{field} cannot mark known {unit} as unavailable"));
+        }
+        (Some(_), source, quality) => {
+            return Err(format!(
+                "{field} has incompatible source {source:?} and quality {quality:?}"
+            ));
+        }
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -570,6 +554,10 @@ impl ContextTokenUsageTotals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context_compaction::{
+        decide_context_compaction, BrainContextCompactionDecision, BrainContextCompactionPolicy,
+        BrainContextUsageSource,
+    };
 
     fn snapshot() -> ContextAccountingSnapshot {
         let provider = ContextTokenMeasurement::provider(100, Some("2026-08-04T00:00:00Z".into()));
@@ -694,7 +682,77 @@ mod tests {
         assert!(error.contains("unknown"));
     }
 
+    #[test]
+    fn rejects_contradictory_source_quality_pairs_after_deserialization() {
+        let provider_approximate: ContextTokenMeasurement =
+            serde_json::from_value(serde_json::json!({
+                "tokens": 10,
+                "source": "provider",
+                "quality": "approximate",
+                "estimatorId": null,
+                "measuredAt": null,
+            }))
+            .expect("deserialize provider measurement");
+        assert!(provider_approximate
+            .validate("provider_approximate")
+            .is_err());
+
+        let tokenizer_exact: ContextTokenMeasurement = serde_json::from_value(serde_json::json!({
+            "tokens": 10,
+            "source": "tokenizer",
+            "quality": "exact",
+            "estimatorId": "tokenizer-v1",
+            "measuredAt": null,
+        }))
+        .expect("deserialize tokenizer measurement");
+        assert!(tokenizer_exact.validate("tokenizer_exact").is_err());
+
+        let provider_approximate_size: ContextSizeMeasurement =
+            serde_json::from_value(serde_json::json!({
+                "bytes": 10,
+                "source": "provider",
+                "quality": "approximate",
+                "estimatorId": null,
+                "measuredAt": null,
+            }))
+            .expect("deserialize provider size measurement");
+        assert!(provider_approximate_size
+            .validate("provider_approximate_size")
+            .is_err());
+
+        let serialized_exact_size: ContextSizeMeasurement =
+            serde_json::from_value(serde_json::json!({
+                "bytes": 10,
+                "source": "serialized_estimate",
+                "quality": "exact",
+                "estimatorId": "json-bytes-v1",
+                "measuredAt": null,
+            }))
+            .expect("deserialize serialized size measurement");
+        assert!(serialized_exact_size
+            .validate("serialized_exact_size")
+            .is_err());
+
+        assert!(ContextTokenMeasurement::provider(10, None)
+            .validate("provider_exact")
+            .is_ok());
+        assert!(ContextSizeMeasurement::measured(
+            10,
+            ContextMeasurementSource::SerializedEstimate,
+            ContextMeasurementQuality::Approximate,
+            Some("json-bytes-v1".to_string()),
+            None,
+        )
+        .validate("serialized_approximate")
+        .is_ok());
+    }
+
     fn checked_in_fixture(name: &str) -> ContextAccountingSnapshot {
+        serde_json::from_value(checked_in_fixture_value(name))
+            .unwrap_or_else(|error| panic!("parse context accounting fixture {name}: {error}"))
+    }
+
+    fn checked_in_fixture_value(name: &str) -> serde_json::Value {
         let path = format!(
             "{}/../../../fixtures/context-accounting/{name}",
             env!("CARGO_MANIFEST_DIR")
@@ -754,6 +812,235 @@ mod tests {
             ContextMeasurementQuality::Unavailable
         );
         assert_eq!(unavailable.prompt_projection.input_tokens.tokens, None);
+    }
+
+    #[test]
+    fn checked_in_compaction_matrix_covers_lifecycle_and_mapping_classes() {
+        let matrix = checked_in_fixture_value("compaction-matrix.json");
+        assert_eq!(matrix["schemaVersion"], 1);
+        let cases = matrix["cases"].as_array().expect("matrix cases");
+        let expected_ids = [
+            "chat-tool-output-image-continuation-retry",
+            "responses-tool-output-image-continuation-retry",
+            "threshold-admitted",
+            "threshold-near-threshold",
+            "threshold-requires-compaction",
+            "disabled-policy",
+            "manual-safe-boundary",
+            "unsafe-boundary-rejected",
+            "duplicate-compaction-idempotent",
+            "concurrent-compaction-conflict",
+            "failed-compaction-preserves-prior-projection",
+            "sqlite-restart-hydrates-lineage",
+            "sse-compaction-ordering",
+            "sse-loss-visible",
+            "chat-projection-field-ratchet",
+            "responses-projection-field-ratchet",
+        ];
+        let mut actual_ids = cases
+            .iter()
+            .map(|case| {
+                assert!(case["class"].is_string(), "fixture case class");
+                assert!(case["fixture"].is_object(), "fixture case data");
+                let source_quality = case["sourceQuality"]
+                    .as_str()
+                    .expect("fixture source quality label");
+                assert!(matches!(
+                    source_quality,
+                    "provider/exact"
+                        | "tokenizer/approximate"
+                        | "serialized_estimate/approximate"
+                        | "unavailable/unavailable"
+                ));
+                case["id"].as_str().expect("fixture case id").to_string()
+            })
+            .collect::<Vec<_>>();
+        actual_ids.sort();
+        let mut expected_ids = expected_ids
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        expected_ids.sort();
+        assert_eq!(actual_ids, expected_ids);
+    }
+
+    #[test]
+    fn checked_in_compaction_matrix_executes_deterministic_assertions() {
+        let matrix = checked_in_fixture_value("compaction-matrix.json");
+        for case in matrix["cases"].as_array().expect("matrix cases") {
+            let id = case["id"].as_str().expect("matrix case id");
+            let fixture = &case["fixture"];
+            match fixture["kind"].as_str().expect("fixture kind") {
+                "snapshot" => {
+                    let snapshot = checked_in_fixture(
+                        fixture["path"].as_str().expect("snapshot fixture path"),
+                    );
+                    snapshot
+                        .validate()
+                        .unwrap_or_else(|error| panic!("{id} snapshot invalid: {error}"));
+                    let expected_protocol = fixture["providerProtocol"]
+                        .as_str()
+                        .expect("snapshot provider protocol");
+                    let actual_protocol = match snapshot.provider.protocol {
+                        ContextProviderProtocol::ChatCompletions => "chat_completions",
+                        ContextProviderProtocol::Responses => "responses",
+                        ContextProviderProtocol::Unknown => "unknown",
+                    };
+                    assert_eq!(actual_protocol, expected_protocol, "{id} protocol");
+                    for segment in fixture["requiredSegments"]
+                        .as_array()
+                        .expect("required snapshot segments")
+                        .iter()
+                        .map(|value| value.as_str().expect("required segment"))
+                    {
+                        assert!(
+                            snapshot
+                                .prompt_projection
+                                .segments
+                                .iter()
+                                .any(|candidate| candidate.name == segment),
+                            "{id} missing segment {segment}"
+                        );
+                    }
+                }
+                "schema" => {
+                    let snapshot =
+                        checked_in_fixture(fixture["path"].as_str().expect("schema fixture path"));
+                    snapshot
+                        .validate()
+                        .unwrap_or_else(|error| panic!("{id} schema snapshot invalid: {error}"));
+                    assert_eq!(fixture["fingerprint"], "schema-fingerprint.json");
+                }
+                "decision" => {
+                    let policy = &fixture["policy"];
+                    let policy = BrainContextCompactionPolicy {
+                        enabled: policy["enabled"].as_bool().expect("policy enabled"),
+                        auto_compaction_enabled: policy["autoCompactionEnabled"]
+                            .as_bool()
+                            .expect("policy auto compaction"),
+                        strategy_id: format!("fixture-{id}"),
+                        context_window_tokens: policy["contextWindowTokens"]
+                            .as_u64()
+                            .expect("policy context window"),
+                        compact_at_percent: policy["compactAtPercent"]
+                            .as_u64()
+                            .expect("policy compact threshold")
+                            as u32,
+                        target_percent_after_compaction: policy["targetPercentAfterCompaction"]
+                            .as_u64()
+                            .expect("policy target")
+                            as u32,
+                    };
+                    let provider_input_tokens = fixture["providerInputTokens"].as_u64();
+                    let serialized_bytes = fixture["serializedModelContextBytes"]
+                        .as_u64()
+                        .expect("serialized context bytes")
+                        as usize;
+                    let decision = decide_context_compaction(
+                        Some(&policy),
+                        provider_input_tokens,
+                        serialized_bytes,
+                    )
+                    .unwrap_or_else(|error| panic!("{id} policy invalid: {error}"));
+                    let (actual_decision, actual_source) = match decision {
+                        BrainContextCompactionDecision::Disabled => ("disabled", None),
+                        BrainContextCompactionDecision::BelowThreshold(usage) => {
+                            ("below_threshold", Some(usage.source))
+                        }
+                        BrainContextCompactionDecision::Compact(usage) => {
+                            ("compact", Some(usage.source))
+                        }
+                    };
+                    assert_eq!(
+                        actual_decision,
+                        fixture["expected"].as_str().expect("expected decision"),
+                        "{id} decision"
+                    );
+                    match (actual_source, fixture["expectedSource"].as_str()) {
+                        (None, None) => {}
+                        (Some(BrainContextUsageSource::Provider), Some("provider"))
+                        | (
+                            Some(BrainContextUsageSource::ConservativeEstimate),
+                            Some("conservative_estimate"),
+                        ) => {}
+                        other => panic!("{id} source mismatch: {other:?}"),
+                    }
+                }
+                "event_order" => {
+                    let events = fixture["events"].as_array().expect("event order");
+                    assert!(events.len() >= 2, "{id} must have a meaningful event order");
+                    assert!(
+                        events.iter().all(serde_json::Value::is_string),
+                        "{id} event order must be textual"
+                    );
+                }
+                "lineage" => {
+                    assert_eq!(fixture["before"], fixture["after"], "{id} lineage");
+                    assert!(fixture["expectedOutcome"].is_string(), "{id} outcome");
+                }
+                "diagnostic" => {
+                    assert_eq!(fixture["severity"], "error", "{id} severity");
+                    assert!(fixture["code"].is_string(), "{id} diagnostic code");
+                    assert_eq!(fixture["expectedOutcome"], "visible_failure");
+                }
+                "persistence" => {
+                    assert!(fixture["backend"].is_string(), "{id} backend");
+                    assert_eq!(fixture["replays"], 2, "{id} replay count");
+                    assert_eq!(fixture["expectedRows"], 1, "{id} idempotent row count");
+                    assert!(fixture["expectedOutcome"].is_string(), "{id} outcome");
+                }
+                kind => panic!("{id} has unsupported fixture kind {kind}"),
+            }
+        }
+    }
+
+    #[test]
+    fn checked_in_schema_fingerprint_covers_snapshot_fields() {
+        let manifest = checked_in_fixture_value("schema-fingerprint.json");
+        let actual = serde_json::to_value(snapshot()).expect("serialize snapshot");
+        let expected_top_level = manifest["topLevel"]
+            .as_array()
+            .expect("top-level fingerprint fields")
+            .iter()
+            .map(|value| value.as_str().expect("top-level field").to_string())
+            .collect::<Vec<_>>();
+        let mut actual_top_level = actual
+            .as_object()
+            .expect("snapshot object")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut expected_top_level = expected_top_level;
+        actual_top_level.sort();
+        expected_top_level.sort();
+        assert_eq!(actual_top_level, expected_top_level);
+
+        for path in manifest["paths"]
+            .as_array()
+            .expect("snapshot fingerprint paths")
+            .iter()
+            .map(|value| value.as_str().expect("snapshot fingerprint path"))
+        {
+            assert!(json_path_exists(&actual, path), "snapshot missing {path}");
+        }
+    }
+
+    fn json_path_exists(value: &serde_json::Value, path: &str) -> bool {
+        let mut current = value;
+        for segment in path.split('.') {
+            let next = if let Some((field, index_text)) = segment.split_once('[') {
+                let index = index_text
+                    .strip_suffix(']')
+                    .and_then(|text| text.parse::<usize>().ok());
+                let Some(index) = index else { return false };
+                current.get(field).and_then(|value| value.get(index))
+            } else {
+                current.get(segment)
+            };
+            let Some(next) = next else { return false };
+            current = next;
+        }
+        true
     }
 
     #[test]

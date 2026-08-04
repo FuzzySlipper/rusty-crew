@@ -5,54 +5,185 @@
   "logicalTurnId": "fixture-responses-turn",
   "executionEpochId": "fixture-responses-epoch",
   "measuredAt": "2026-08-04T00:01:00Z",
-  "provider": { "protocol": "responses", "providerAlias": "fixture-responses-provider", "modelId": "fixture-responses-model" },
+  "provider": {
+    "protocol": "responses",
+    "providerAlias": "fixture-responses-provider",
+    "modelId": "fixture-responses-model"
+  },
   "promptProjection": {
-    "inputTokens": { "tokens": 900, "source": "tokenizer", "quality": "approximate", "estimatorId": "responses_serialized_tokens_v1", "measuredAt": null },
-    "contextWindowTokens": { "tokens": 200000, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": null },
-    "protocolProjection": { "kind": "responses", "chain_strategy": "previous-response-chain", "replay_item_count": 12, "response_lineage_fingerprint": "fixture-response-lineage" },
+    "inputTokens": {
+      "tokens": 900,
+      "source": "tokenizer",
+      "quality": "approximate",
+      "estimatorId": "responses_serialized_tokens_v1",
+      "measuredAt": null
+    },
+    "contextWindowTokens": {
+      "tokens": 200000,
+      "source": "provider",
+      "quality": "exact",
+      "estimatorId": null,
+      "measuredAt": null
+    },
+    "protocolProjection": {
+      "kind": "responses",
+      "chain_strategy": "previous-response-chain",
+      "replay_item_count": 12,
+      "response_lineage_fingerprint": "fixture-response-lineage"
+    },
     "segments": [
-      { "name": "replay_items", "included": true, "tokens": { "tokens": 650, "source": "tokenizer", "quality": "approximate", "estimatorId": "responses_serialized_tokens_v1", "measuredAt": null } },
-      { "name": "reasoning", "included": true, "tokens": { "tokens": 250, "source": "tokenizer", "quality": "approximate", "estimatorId": "responses_serialized_tokens_v1", "measuredAt": null } }
+      {
+        "name": "replay_items",
+        "included": true,
+        "tokens": {
+          "tokens": 650,
+          "source": "tokenizer",
+          "quality": "approximate",
+          "estimatorId": "responses_serialized_tokens_v1",
+          "measuredAt": null
+        }
+      },
+      {
+        "name": "reasoning",
+        "included": true,
+        "tokens": {
+          "tokens": 250,
+          "source": "tokenizer",
+          "quality": "approximate",
+          "estimatorId": "responses_serialized_tokens_v1",
+          "measuredAt": null
+        }
+      }
     ]
   },
   "reservedOutput": {
-    "responseTokens": { "tokens": 2048, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "configured_output_budget_v1", "measuredAt": null },
-    "safetyMarginTokens": { "tokens": 256, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "safety_margin_v1", "measuredAt": null }
+    "responseTokens": {
+      "tokens": 2048,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "configured_output_budget_v1",
+      "measuredAt": null
+    },
+    "safetyMarginTokens": {
+      "tokens": 256,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "safety_margin_v1",
+      "measuredAt": null
+    }
   },
   "admission": {
     "state": "near_threshold",
     "fillPercent": 2,
-    "usableInputTokens": { "tokens": 197696, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "responses_serialized_tokens_v1", "measuredAt": null },
+    "usableInputTokens": {
+      "tokens": 197696,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "responses_serialized_tokens_v1",
+      "measuredAt": null
+    },
     "compactAtPercent": 80,
     "maxContextPercentForWake": 95,
     "reasonCode": "fixture_near_threshold"
   },
   "providerUsage": {
     "currentRequest": {
-      "inputTokens": { "tokens": 1000, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" },
-      "cachedInputTokens": { "tokens": 400, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" },
-      "cacheWriteInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "outputTokens": { "tokens": 80, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" },
-      "reasoningTokens": { "tokens": 600, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" }
+      "inputTokens": {
+        "tokens": 1000,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      },
+      "cachedInputTokens": {
+        "tokens": 400,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      },
+      "cacheWriteInputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "outputTokens": {
+        "tokens": 80,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      },
+      "reasoningTokens": {
+        "tokens": 600,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      }
     },
     "logicalWake": {
-      "inputTokens": { "tokens": 2200, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" },
-      "cachedInputTokens": { "tokens": 900, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" },
-      "cacheWriteInputTokens": { "tokens": null, "source": "unavailable", "quality": "unavailable", "estimatorId": null, "measuredAt": null },
-      "outputTokens": { "tokens": 160, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" },
-      "reasoningTokens": { "tokens": 1200, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:01:00Z" }
+      "inputTokens": {
+        "tokens": 2200,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      },
+      "cachedInputTokens": {
+        "tokens": 900,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      },
+      "cacheWriteInputTokens": {
+        "tokens": null,
+        "source": "unavailable",
+        "quality": "unavailable",
+        "estimatorId": null,
+        "measuredAt": null
+      },
+      "outputTokens": {
+        "tokens": 160,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      },
+      "reasoningTokens": {
+        "tokens": 1200,
+        "source": "provider",
+        "quality": "exact",
+        "estimatorId": null,
+        "measuredAt": "2026-08-04T00:01:00Z"
+      }
     },
     "requestCount": 3
   },
   "durableTranscript": {
     "eventCount": 24,
     "message_count": 12,
-    "serializedSize": { "bytes": 40000, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "json_bytes_v1", "measuredAt": null }
+    "serializedSize": {
+      "bytes": 40000,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "json_bytes_v1",
+      "measuredAt": null
+    }
   },
   "providerState": {
     "stateKind": "responses_replay_projection",
     "itemCount": 12,
-    "serializedSize": { "bytes": 50000, "source": "serialized_estimate", "quality": "approximate", "estimatorId": "json_bytes_v1", "measuredAt": null },
+    "serializedSize": {
+      "bytes": 50000,
+      "source": "serialized_estimate",
+      "quality": "approximate",
+      "estimatorId": "json_bytes_v1",
+      "measuredAt": null
+    },
     "lineageFingerprint": "fixture-response-lineage"
   },
   "compaction": {
@@ -64,11 +195,29 @@
     "lastArtifactId": "context_compaction_fixture_responses",
     "lastSequence": 1,
     "triggerReason": "context_fill_threshold_exceeded",
-    "inputTokensBefore": { "tokens": 170000, "source": "provider", "quality": "exact", "estimatorId": null, "measuredAt": "2026-08-04T00:00:59Z" },
-    "inputTokensAfter": { "tokens": 900, "source": "tokenizer", "quality": "approximate", "estimatorId": "responses_serialized_tokens_v1", "measuredAt": "2026-08-04T00:01:00Z" },
+    "inputTokensBefore": {
+      "tokens": 170000,
+      "source": "provider",
+      "quality": "exact",
+      "estimatorId": null,
+      "measuredAt": "2026-08-04T00:00:59Z"
+    },
+    "inputTokensAfter": {
+      "tokens": 900,
+      "source": "tokenizer",
+      "quality": "approximate",
+      "estimatorId": "responses_serialized_tokens_v1",
+      "measuredAt": "2026-08-04T00:01:00Z"
+    },
     "compactedItemCount": 10,
     "retainedItemCount": 2,
     "providerChainAction": "rebuild_replay_projection"
   },
-  "diagnostics": [{ "severity": "info", "code": "fixture_projection", "message": "Deterministic fixture contains lineage identifiers but no raw provider payload." }]
+  "diagnostics": [
+    {
+      "severity": "info",
+      "code": "fixture_projection",
+      "message": "Deterministic fixture contains lineage identifiers but no raw provider payload."
+    }
+  ]
 }
