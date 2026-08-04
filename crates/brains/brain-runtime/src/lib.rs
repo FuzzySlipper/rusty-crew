@@ -1,10 +1,12 @@
 mod catalog;
+mod context_accounting;
 mod context_compaction;
 mod coordinator;
 mod host_protocol;
 mod tool_policy;
 
 pub use catalog::*;
+pub use context_accounting::*;
 pub use context_compaction::*;
 pub use coordinator::*;
 pub use host_protocol::*;
