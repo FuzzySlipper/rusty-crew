@@ -17,10 +17,8 @@
 - Treat the resolved Den guidance packet and its referenced Den documents as
   the source of truth.
 - If Den is unreachable, stop and tell the user which Den tool or command
-  failed and what you were about to do. Do not reconstruct Den state from local
-  files.
-- Use the project-local notes below only as bootstrap context for connecting to
-  Den and working in this repository.
+  failed and what you were about to do. Do not reconstruct Den state from local files.
+- Use the project-local notes below only as bootstrap context for connecting to Den and working in this repository.
 
 # Rusty Crew Local Bootstrap
 
