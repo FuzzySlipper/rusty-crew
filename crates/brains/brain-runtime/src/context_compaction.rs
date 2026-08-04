@@ -166,6 +166,57 @@ pub struct BrainContextCompactionArtifact {
     pub provider_chain_action: Option<String>,
 }
 
+pub fn validate_compaction_artifacts(
+    artifacts: &[BrainContextCompactionArtifact],
+) -> Result<(), String> {
+    let mut previous_sequence = 0;
+    for (index, artifact) in artifacts.iter().enumerate() {
+        if artifact.sequence == 0 {
+            return Err(format!(
+                "context compaction artifact {index} must have a positive sequence"
+            ));
+        }
+        if artifact.sequence <= previous_sequence {
+            return Err(format!(
+                "context compaction artifact {index} sequence {} is not strictly increasing",
+                artifact.sequence
+            ));
+        }
+        if artifact.strategy_id.trim().is_empty() {
+            return Err(format!(
+                "context compaction artifact {index} strategy_id must not be empty"
+            ));
+        }
+        if artifact.reason_code.trim().is_empty() {
+            return Err(format!(
+                "context compaction artifact {index} reason_code must not be empty"
+            ));
+        }
+        if artifact.summary_text.trim().is_empty() {
+            return Err(format!(
+                "context compaction artifact {index} summary_text must not be empty"
+            ));
+        }
+        if artifact.usage_before.context_window_tokens == 0 {
+            return Err(format!(
+                "context compaction artifact {index} context window must be positive"
+            ));
+        }
+        if artifact.estimated_tokens_after >= artifact.usage_before.input_tokens {
+            return Err(format!(
+                "context compaction artifact {index} does not reduce the provider projection"
+            ));
+        }
+        if artifact.compacted_item_count == 0 || artifact.retained_item_count == 0 {
+            return Err(format!(
+                "context compaction artifact {index} must retain and compact at least one item"
+            ));
+        }
+        previous_sequence = artifact.sequence;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +265,24 @@ mod tests {
             assert!(is_context_limit_provider_error(message), "{message}");
         }
         assert!(!is_context_limit_provider_error("provider rate limited"));
+    }
+
+    #[test]
+    fn validates_durable_compaction_artifact_sequence_and_reduction() {
+        let mut artifact = BrainContextCompactionArtifact {
+            sequence: 1,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            reason_code: "context_fill_threshold_exceeded".to_string(),
+            usage_before: BrainContextUsageSnapshot::from_provider(90, 100),
+            estimated_tokens_after: 50,
+            compacted_item_count: 4,
+            retained_item_count: 3,
+            summary_text: "summary".to_string(),
+            provider_chain_action: None,
+        };
+        validate_compaction_artifacts(std::slice::from_ref(&artifact)).expect("valid artifact");
+
+        artifact.sequence = 0;
+        assert!(validate_compaction_artifacts(&[artifact]).is_err());
     }
 }

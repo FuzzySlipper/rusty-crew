@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import type {
   BrainEvent,
   BrainImplementationHandle,
   CompletionPacket,
+  ContextCompactionArtifact,
   CoreEvent,
   ProfileId,
   RuntimeActivityFinish,
@@ -77,6 +79,7 @@ export interface ServiceWakeDispatchContext {
     | "finishRuntimeActivity"
     | "settleRuntimeActivityWake"
     | "readChatSession"
+    | "saveContextCompactionArtifact"
     | "subscribeEvents"
     | "unsubscribeEvents"
     | "wakeBrain"
@@ -146,6 +149,7 @@ export interface ServiceWakeDispatchContext {
     workRef?: Record<string, unknown>;
     resultRef?: Record<string, unknown>;
   }): void;
+  now: () => string;
 }
 
 export async function dispatchWake(
@@ -758,6 +762,22 @@ async function appendBrainEventToChatLog(
             : { metadata_json: event.metadataJson }),
         },
       });
+      if (compactionKind === "context_compaction_completed") {
+        const artifact = contextCompactionArtifactFromMetadata(
+          session.sessionId,
+          wakeId,
+          event.metadataJson,
+          context.now(),
+        );
+        if (artifact !== undefined) {
+          await persistContextCompactionArtifact(
+            context,
+            session,
+            wakeId,
+            artifact,
+          );
+        }
+      }
       return;
     case "tool_call_started":
       await context.appendChatEvent(session.sessionId, {
@@ -822,6 +842,153 @@ function contextCompactionEventKind(
   } catch {
     return undefined;
   }
+}
+
+type CompactionMetadata = {
+  kind?: unknown;
+  artifact?: unknown;
+};
+
+type CompactionRuntimeArtifact = {
+  sequence?: unknown;
+  strategyId?: unknown;
+  reasonCode?: unknown;
+  usageBefore?: unknown;
+  estimatedTokensAfter?: unknown;
+  compactedItemCount?: unknown;
+  retainedItemCount?: unknown;
+  summaryText?: unknown;
+  providerChainAction?: unknown;
+};
+
+function contextCompactionArtifactFromMetadata(
+  sessionId: SessionId,
+  wakeId: string | undefined,
+  metadataJson: string | null | undefined,
+  now: string,
+): ContextCompactionArtifact | undefined {
+  if (!metadataJson) return undefined;
+  let metadata: CompactionMetadata;
+  try {
+    const parsed: unknown = JSON.parse(metadataJson);
+    if (!isRecord(parsed)) return undefined;
+    metadata = parsed;
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(metadata.artifact)) return undefined;
+  const runtimeArtifact = metadata.artifact as CompactionRuntimeArtifact;
+  const sequence = positiveInteger(runtimeArtifact.sequence);
+  const strategyId = nonEmptyString(runtimeArtifact.strategyId);
+  const reasonCode = nonEmptyString(runtimeArtifact.reasonCode);
+  const usageBefore = runtimeArtifact.usageBefore;
+  const estimatedTokensAfter = nonNegativeInteger(
+    runtimeArtifact.estimatedTokensAfter,
+  );
+  const compactedItemCount = positiveInteger(
+    runtimeArtifact.compactedItemCount,
+  );
+  const retainedItemCount = positiveInteger(runtimeArtifact.retainedItemCount);
+  const summaryText = nonEmptyString(runtimeArtifact.summaryText);
+  if (
+    sequence === undefined ||
+    strategyId === undefined ||
+    reasonCode === undefined ||
+    !isRecord(usageBefore) ||
+    estimatedTokensAfter === undefined ||
+    compactedItemCount === undefined ||
+    retainedItemCount === undefined ||
+    summaryText === undefined
+  ) {
+    return undefined;
+  }
+
+  const providerChainAction =
+    runtimeArtifact.providerChainAction === null
+      ? null
+      : nonEmptyString(runtimeArtifact.providerChainAction);
+  const identity = [sessionId, wakeId ?? "unknown_wake", sequence].join(":");
+  const digest = createHash("sha256")
+    .update(identity)
+    .digest("hex")
+    .slice(0, 32);
+  return {
+    artifact_id: `context_compaction_${digest}`,
+    session_id: sessionId,
+    branch_id: undefined,
+    strategy_id: strategyId,
+    source_refs_json: {
+      source: "native_brain_stream",
+      wake_id: wakeId,
+      sequence,
+      reason_code: reasonCode,
+      compacted_item_count: compactedItemCount,
+      retained_item_count: retainedItemCount,
+    },
+    provider_metadata_json: {
+      provider_chain_action: providerChainAction,
+      source_event_kind: "context_compaction_completed",
+    },
+    estimate_before_json: usageBefore,
+    estimate_after_json: {
+      tokens: estimatedTokensAfter,
+      source: "serialized_compaction_projection",
+    },
+    summary_text: summaryText,
+    enters_future_context: true,
+    context_policy: strategyId,
+    metadata_json: {
+      schema_version: 1,
+      runtime_artifact_sequence: sequence,
+      wake_id: wakeId,
+      reason_code: reasonCode,
+    },
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+async function persistContextCompactionArtifact(
+  context: ServiceWakeDispatchContext,
+  session: SessionState,
+  wakeId: string | undefined,
+  artifact: ContextCompactionArtifact,
+): Promise<void> {
+  try {
+    await context.bridge.saveContextCompactionArtifact(artifact);
+  } catch (error) {
+    context.recordEvent({
+      source: "service-host",
+      eventType: "context_compaction_artifact_persist_failed",
+      severity: "warning",
+      summary: errorMessage(
+        error,
+        `context compaction artifact persistence failed for ${session.sessionId}`,
+      ),
+      workRef: {
+        session_id: session.sessionId,
+        wake_id: wakeId,
+        artifact_id: artifact.artifact_id,
+      },
+    });
+  }
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  const integer = nonNegativeInteger(value);
+  return integer === undefined || integer === 0 ? undefined : integer;
 }
 
 function chatToolCallId(

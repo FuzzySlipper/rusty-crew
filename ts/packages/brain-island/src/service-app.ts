@@ -6069,6 +6069,7 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
       state.deferredRuntimeActivitySettlements.defer(settlement);
     },
     recordEvent: (event) => recordServiceEvent(state, event),
+    now: state.now,
   };
 }
 
