@@ -191,7 +191,7 @@ export async function executeNativeBrainWake(
             reason_code:
               error instanceof BrainActionAdmissionError
                 ? error.reasonCode
-                : "brain_wake_failed",
+                : (errorReasonCode(error) ?? "brain_wake_failed"),
             summary: errorMessage(error),
           }),
         ),
@@ -219,4 +219,12 @@ export async function executeNativeBrainWake(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorReasonCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const reasonCode = (error as { reasonCode?: unknown }).reasonCode;
+  return typeof reasonCode === "string" && reasonCode.length > 0
+    ? reasonCode
+    : undefined;
 }

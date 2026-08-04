@@ -171,6 +171,24 @@ export interface ServiceRuntimeReplacementConfigPlan {
   scheduledJobs: ServiceRuntimeReplacementSessionResult["scheduledJobs"];
 }
 
+export class ServiceRuntimeRebuildPersistenceError extends Error {
+  readonly reasonCode = "runtime_rebuild_transition_persistence_failed";
+
+  constructor(
+    readonly failures: readonly {
+      sessionId: string;
+      error: unknown;
+    }[],
+  ) {
+    super(
+      `could not persist runtime rebuild transition for ${failures
+        .map((failure) => failure.sessionId)
+        .join(", ")}`,
+    );
+    this.name = "ServiceRuntimeRebuildPersistenceError";
+  }
+}
+
 export interface ServiceRuntimeRebuildContext {
   bridge: Pick<
     NativeBridgeModule,
@@ -204,7 +222,7 @@ export interface ServiceRuntimeRebuildContext {
     command: AdminControlCommand,
   ): Promise<ServiceRuntimeRebuildMcpRefreshResult>;
   recordEvent(event: ServiceRuntimeRebuildEvent): void;
-  recordDurableTransition?(
+  recordDurableTransition(
     sessionId: SessionId,
     transition: ServiceRuntimeRebuildTransition,
   ): Promise<void>;
@@ -826,12 +844,12 @@ async function recordDurableRebuildTransitions(
     reason: string;
   },
 ): Promise<void> {
-  if (context.recordDurableTransition === undefined) return;
   const transitionId = command.requestId || `runtime-rebuild-${Date.now()}`;
+  const failures: Array<{ sessionId: string; error: unknown }> = [];
   await Promise.all(
     plan.sessionIds.map(async (sessionId) => {
       try {
-        await context.recordDurableTransition!(sessionId as SessionId, {
+        await context.recordDurableTransition(sessionId as SessionId, {
           transitionId,
           profileId: plan.profileId,
           sessionId,
@@ -842,21 +860,30 @@ async function recordDurableRebuildTransitions(
           reason: input.reason,
         });
       } catch (error) {
-        context.recordEvent({
-          source: "service-host",
-          eventType: "runtime_rebuild_transition_persistence_failed",
-          severity: "warning",
-          summary: `Could not persist runtime rebuild transition for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
-          workRef: { profileId: plan.profileId, sessionId },
-          resultRef: {
-            outcome: input.outcome,
-            action: plan.providerState.action,
-            transition: plan.providerState.transition,
-          },
-        });
+        failures.push({ sessionId, error });
       }
     }),
   );
+  if (failures.length === 0) return;
+
+  const failure = new ServiceRuntimeRebuildPersistenceError(failures);
+  for (const item of failures) {
+    context.recordEvent({
+      source: "service-host",
+      eventType: "runtime_rebuild_transition_persistence_failed",
+      severity: "error",
+      summary: `Could not persist runtime rebuild transition for ${item.sessionId}: ${item.error instanceof Error ? item.error.message : String(item.error)}`,
+      workRef: { profileId: plan.profileId, sessionId: item.sessionId },
+      resultRef: {
+        outcome: "failed_recovery",
+        requestedOutcome: input.outcome,
+        action: plan.providerState.action,
+        transition: plan.providerState.transition,
+        reasonCode: failure.reasonCode,
+      },
+    });
+  }
+  throw failure;
 }
 
 function applyBrainRuntimeRebuild(

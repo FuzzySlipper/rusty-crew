@@ -13,7 +13,10 @@ import type {
   BrainHostExecutor,
   BrainWakeInput,
 } from "../src/brain-host-runtime.js";
-import { wakeBrainFromBridgeRequest } from "../src/bridge-wake.js";
+import {
+  DurableConversationReconstructionError,
+  wakeBrainFromBridgeRequest,
+} from "../src/bridge-wake.js";
 
 test("provider-state recovery loads the durable conversation projection", async () => {
   const observed: BrainWakeInput[] = [];
@@ -98,6 +101,69 @@ test("provider-state recovery does not read durable history when state is presen
 
   assert.equal(readCount, 0);
   assert.equal(observed[0]?.durableConversation, undefined);
+});
+
+test("provider-state recovery fails before the brain runs when the first page is unavailable", async () => {
+  const observed: BrainWakeInput[] = [];
+  const buffers = recoveryBuffers({
+    bodyState: JSON.stringify({ session: { agentId: "agent-1" } }),
+    readChatSession: async () => {
+      throw new Error("projection store unavailable");
+    },
+  });
+
+  await assert.rejects(
+    wakeBrainFromBridgeRequest(
+      buffers,
+      recordingBrain(observed),
+      wakeRequest(),
+    ),
+    (error: unknown) =>
+      error instanceof DurableConversationReconstructionError &&
+      error.reasonCode === "durable_conversation_reconstruction_failed" &&
+      error.failureKind === "read_failed" &&
+      error.loadedMessageCount === 0 &&
+      error.cursor === "session-1:0",
+  );
+  assert.deepEqual(observed, []);
+});
+
+test("provider-state recovery fails before the brain runs when a later page is unavailable", async () => {
+  const observed: BrainWakeInput[] = [];
+  let readCount = 0;
+  const buffers = recoveryBuffers({
+    bodyState: JSON.stringify({ session: { agentId: "agent-1" } }),
+    readChatSession: async () => {
+      readCount += 1;
+      if (readCount === 1) {
+        return {
+          events: [
+            {
+              kind: "message_created",
+              payload: { role: "user", body: "durable prompt" },
+            },
+          ],
+          has_more: true,
+          latest_cursor: "session-1:1",
+        };
+      }
+      throw new Error("projection store disconnected");
+    },
+  });
+
+  await assert.rejects(
+    wakeBrainFromBridgeRequest(
+      buffers,
+      recordingBrain(observed),
+      wakeRequest(),
+    ),
+    (error: unknown) =>
+      error instanceof DurableConversationReconstructionError &&
+      error.failureKind === "read_failed" &&
+      error.loadedMessageCount === 1 &&
+      error.cursor === "session-1:1",
+  );
+  assert.deepEqual(observed, []);
 });
 
 function recordingBrain(observed: BrainWakeInput[]): BrainHostExecutor {

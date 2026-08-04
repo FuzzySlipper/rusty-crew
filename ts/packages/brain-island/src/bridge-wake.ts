@@ -27,6 +27,28 @@ export interface BridgeBufferClient {
   readChatSession?(input: unknown): Promise<unknown>;
 }
 
+export type DurableConversationReconstructionFailureKind =
+  | "reader_unavailable"
+  | "read_failed"
+  | "invalid_page"
+  | "pagination_cycle";
+
+export class DurableConversationReconstructionError extends Error {
+  readonly reasonCode = "durable_conversation_reconstruction_failed";
+
+  constructor(
+    readonly sessionId: BrainWakeRequest["sessionId"],
+    readonly cursor: string,
+    readonly loadedMessageCount: number,
+    readonly failureKind: DurableConversationReconstructionFailureKind,
+    message: string,
+    readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = "DurableConversationReconstructionError";
+  }
+}
+
 export async function wakeBrainFromBridgeRequest(
   buffers: BridgeBufferClient,
   brain: BrainHostExecutor,
@@ -89,7 +111,15 @@ async function loadDurableConversation(
   buffers: BridgeBufferClient,
   sessionId: BrainWakeRequest["sessionId"],
 ): Promise<BrainConversationMessage[] | undefined> {
-  if (buffers.readChatSession === undefined) return undefined;
+  if (buffers.readChatSession === undefined) {
+    throw new DurableConversationReconstructionError(
+      sessionId,
+      `${sessionId}:0`,
+      0,
+      "reader_unavailable",
+      `durable conversation reader is unavailable for ${sessionId}`,
+    );
+  }
 
   const messages: BrainConversationMessage[] = [];
   // A null cursor asks the chat read model for its newest page, which is
@@ -107,14 +137,27 @@ async function loadDurableConversation(
         limit: 1_000,
         include_alternates: false,
       });
-    } catch {
-      // Transcript recovery must never turn a recoverable provider-state
-      // mismatch into a second failure. The normal wake still has its body
-      // projection and can report the provider error if replay is impossible.
-      return messages.length === 0 ? undefined : messages;
+    } catch (error) {
+      throw new DurableConversationReconstructionError(
+        sessionId,
+        cursor,
+        messages.length,
+        "read_failed",
+        `durable conversation read failed for ${sessionId} at ${cursor}: ${error instanceof Error ? error.message : String(error)}`,
+        error,
+      );
     }
-    const page = isRecord(raw) ? raw : {};
-    const events = Array.isArray(page.events) ? page.events : [];
+    if (!isRecord(raw) || !Array.isArray(raw.events)) {
+      throw new DurableConversationReconstructionError(
+        sessionId,
+        cursor,
+        messages.length,
+        "invalid_page",
+        `durable conversation read returned an invalid page for ${sessionId} at ${cursor}`,
+      );
+    }
+    const page = raw;
+    const events = page.events as readonly unknown[];
     for (const event of events) {
       const message = durableConversationMessage(event);
       if (message !== undefined) messages.push(message);
@@ -122,7 +165,15 @@ async function loadDurableConversation(
     if (page.has_more !== true || typeof page.latest_cursor !== "string") {
       break;
     }
-    if (seenCursors.has(page.latest_cursor)) break;
+    if (seenCursors.has(page.latest_cursor)) {
+      throw new DurableConversationReconstructionError(
+        sessionId,
+        cursor,
+        messages.length,
+        "pagination_cycle",
+        `durable conversation pagination repeated cursor ${page.latest_cursor} for ${sessionId}`,
+      );
+    }
     seenCursors.add(page.latest_cursor);
     cursor = page.latest_cursor;
   }

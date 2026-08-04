@@ -4,6 +4,7 @@ import test from "node:test";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type { SessionId } from "@rusty-crew/contracts";
 
+import { DurableConversationReconstructionError } from "../src/bridge-wake.js";
 import { DeferredRuntimeActivitySettlementQueue } from "../src/runtime-activity-settlement.js";
 import { classifyWakeDispatchFailure } from "../src/service-wake-dispatch.js";
 
@@ -67,6 +68,23 @@ test("PostgreSQL reason marker survives generic wake dispatch classification", (
       message:
         "PersistenceFailure: [postgres_storage_exhausted] insert PostgreSQL event index value: PostgreSQL SQLSTATE 53100: No space left on device",
       reasonCode: "postgres_storage_exhausted",
+    },
+  );
+});
+
+test("typed durable replay failures survive generic wake dispatch classification", () => {
+  const error = new DurableConversationReconstructionError(
+    "session-1" as SessionId,
+    "session-1:0",
+    0,
+    "read_failed",
+    "durable conversation read failed",
+  );
+  assert.deepEqual(
+    classifyWakeDispatchFailure(error, "session-1" as SessionId),
+    {
+      message: "durable conversation read failed",
+      reasonCode: "durable_conversation_reconstruction_failed",
     },
   );
 });

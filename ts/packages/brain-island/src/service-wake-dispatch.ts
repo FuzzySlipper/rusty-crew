@@ -588,10 +588,17 @@ export function classifyWakeDispatchFailure(
   sessionId: SessionId,
 ): { message: string; reasonCode: string } {
   const message = errorMessage(error, `wake for ${sessionId} failed`);
+  const explicitReasonCode =
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as { reasonCode?: unknown }).reasonCode === "string" &&
+    (error as { reasonCode: string }).reasonCode.length > 0
+      ? (error as { reasonCode: string }).reasonCode
+      : undefined;
   const classified = message.match(/\[(postgres_[a-z_]+)\]/)?.[1];
   return {
     message,
-    reasonCode: classified ?? "wake_dispatch_failed",
+    reasonCode: explicitReasonCode ?? classified ?? "wake_dispatch_failed",
   };
 }
 

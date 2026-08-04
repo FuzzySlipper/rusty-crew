@@ -93,6 +93,41 @@ test("replacement planning marks context loss as an explicit reset", async () =>
   assert.equal(plan.providerState.transition, "explicit_reset");
 });
 
+test("runtime rebuild cannot report completion when durable transition persistence fails", async () => {
+  const harness = rebuildHarness({
+    durableTransitionError: new Error("chat event log unavailable"),
+  });
+
+  await assert.rejects(
+    applyServiceRuntimeRebuild(harness.context, rebuildCommand()),
+    (error: unknown) =>
+      error instanceof Error &&
+      (error as { reasonCode?: unknown }).reasonCode ===
+        "runtime_rebuild_transition_persistence_failed",
+  );
+  assert.equal(harness.rebuildCalls(), 1);
+  assert.equal(harness.durableTransitions.length, 0);
+  assert.equal(
+    harness.events.some(
+      (event) => event.eventType === "runtime_rebuild_applied",
+    ),
+    false,
+  );
+  assert.deepEqual(
+    harness.events.find(
+      (event) =>
+        event.eventType === "runtime_rebuild_transition_persistence_failed",
+    )?.resultRef,
+    {
+      outcome: "failed_recovery",
+      requestedOutcome: "reconstructed",
+      action: "reconstruct",
+      transition: "reconstructed",
+      reasonCode: "runtime_rebuild_transition_persistence_failed",
+    },
+  );
+});
+
 function rebuildCommand(
   overrides: Partial<AdminControlCommand> = {},
 ): AdminControlCommand {
@@ -106,7 +141,12 @@ function rebuildCommand(
   };
 }
 
-function rebuildHarness(options: { rebuildError?: Error } = {}): {
+function rebuildHarness(
+  options: {
+    rebuildError?: Error;
+    durableTransitionError?: Error;
+  } = {},
+): {
   context: ServiceRuntimeRebuildContext;
   clearCalls: string[];
   events: Array<{
@@ -198,6 +238,9 @@ function rebuildHarness(options: { rebuildError?: Error } = {}): {
       sessionId: string,
       transition: Record<string, unknown>,
     ) => {
+      if (options.durableTransitionError !== undefined) {
+        throw options.durableTransitionError;
+      }
       durableTransitions.push({ sessionId, transition });
     },
   } as unknown as ServiceRuntimeRebuildContext;

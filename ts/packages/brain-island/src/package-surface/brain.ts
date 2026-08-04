@@ -46,8 +46,14 @@ export type {
   PreviousResponseChainFallbackReason,
   ResolvedBrainCatalogSelection,
 } from "../brain-catalog.js";
-export type { BridgeBufferClient } from "../bridge-wake.js";
-export { wakeBrainFromBridgeRequest } from "../bridge-wake.js";
+export type {
+  BridgeBufferClient,
+  DurableConversationReconstructionFailureKind,
+} from "../bridge-wake.js";
+export {
+  DurableConversationReconstructionError,
+  wakeBrainFromBridgeRequest,
+} from "../bridge-wake.js";
 export {
   BodyControlledDeltaQueue,
   defaultBodyDeltaPolicy,
