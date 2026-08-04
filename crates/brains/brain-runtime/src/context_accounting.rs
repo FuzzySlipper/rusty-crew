@@ -304,8 +304,8 @@ pub struct ContextProviderUsage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextDurableTranscript {
-    pub event_count: u64,
-    pub message_count: u64,
+    pub event_count: Option<u64>,
+    pub message_count: Option<u64>,
     pub serialized_size: ContextSizeMeasurement,
 }
 
@@ -382,6 +382,72 @@ pub struct ContextAccountingSnapshot {
 }
 
 impl ContextAccountingSnapshot {
+    pub fn unavailable(provider: ContextProviderDescriptor) -> Self {
+        Self {
+            schema_version: CONTEXT_ACCOUNTING_SCHEMA_VERSION,
+            session_id: None,
+            wake_id: None,
+            logical_turn_id: None,
+            execution_epoch_id: None,
+            measured_at: None,
+            provider,
+            prompt_projection: ContextPromptProjection {
+                input_tokens: ContextTokenMeasurement::unavailable(),
+                context_window_tokens: ContextTokenMeasurement::unavailable(),
+                protocol_projection: ContextProtocolProjection::Unknown,
+                segments: Vec::new(),
+            },
+            reserved_output: ContextReservedOutput {
+                response_tokens: ContextTokenMeasurement::unavailable(),
+                safety_margin_tokens: ContextTokenMeasurement::unavailable(),
+            },
+            admission: ContextAdmission {
+                state: ContextAdmissionState::Unavailable,
+                fill_percent: None,
+                usable_input_tokens: ContextTokenMeasurement::unavailable(),
+                compact_at_percent: None,
+                max_context_percent_for_wake: None,
+                reason_code: Some("context_window_unavailable".to_string()),
+            },
+            provider_usage: ContextProviderUsage {
+                current_request: ContextTokenUsageTotals::unavailable(),
+                logical_wake: ContextTokenUsageTotals::unavailable(),
+                request_count: 0,
+            },
+            durable_transcript: ContextDurableTranscript {
+                event_count: None,
+                message_count: None,
+                serialized_size: ContextSizeMeasurement::unavailable(),
+            },
+            provider_state: ContextProviderState {
+                state_kind: None,
+                item_count: None,
+                serialized_size: ContextSizeMeasurement::unavailable(),
+                lineage_fingerprint: None,
+            },
+            compaction: ContextCompactionProjection {
+                strategy_id: None,
+                strategy_revision: None,
+                enabled: false,
+                auto_compaction_enabled: false,
+                phase: ContextCompactionPhase::Idle,
+                last_artifact_id: None,
+                last_sequence: None,
+                trigger_reason: None,
+                input_tokens_before: ContextTokenMeasurement::unavailable(),
+                input_tokens_after: ContextTokenMeasurement::unavailable(),
+                compacted_item_count: None,
+                retained_item_count: None,
+                provider_chain_action: None,
+            },
+            diagnostics: vec![ContextAccountingDiagnostic {
+                severity: ContextDiagnosticSeverity::Info,
+                code: "context_accounting_unavailable".to_string(),
+                message: "Provider projection accounting is not available yet.".to_string(),
+            }],
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != CONTEXT_ACCOUNTING_SCHEMA_VERSION {
             return Err(format!(
@@ -460,6 +526,29 @@ impl ContextTokenUsageTotals {
             cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
             output_tokens: ContextTokenMeasurement::unavailable(),
             reasoning_tokens: ContextTokenMeasurement::unavailable(),
+        }
+    }
+
+    pub fn provider(
+        input_tokens: u64,
+        cached_input_tokens: u64,
+        cache_write_input_tokens: u64,
+        output_tokens: u64,
+        reasoning_tokens: u64,
+        measured_at: Option<String>,
+    ) -> Self {
+        Self {
+            input_tokens: ContextTokenMeasurement::provider(input_tokens, measured_at.clone()),
+            cached_input_tokens: ContextTokenMeasurement::provider(
+                cached_input_tokens,
+                measured_at.clone(),
+            ),
+            cache_write_input_tokens: ContextTokenMeasurement::provider(
+                cache_write_input_tokens,
+                measured_at.clone(),
+            ),
+            output_tokens: ContextTokenMeasurement::provider(output_tokens, measured_at.clone()),
+            reasoning_tokens: ContextTokenMeasurement::provider(reasoning_tokens, measured_at),
         }
     }
 
@@ -542,8 +631,8 @@ mod tests {
                 request_count: 1,
             },
             durable_transcript: ContextDurableTranscript {
-                event_count: 4,
-                message_count: 2,
+                event_count: Some(4),
+                message_count: Some(2),
                 serialized_size: ContextSizeMeasurement::measured(
                     400,
                     ContextMeasurementSource::SerializedEstimate,

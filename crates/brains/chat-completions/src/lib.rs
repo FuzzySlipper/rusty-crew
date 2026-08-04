@@ -9,9 +9,15 @@ use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
-    decide_context_compaction, is_context_limit_provider_error, BrainContextCompactionArtifact,
-    BrainContextCompactionDecision, BrainContextCompactionPolicy, BrainContextUsageSnapshot,
-    BufferedBrainHostTurnDisposition,
+    decide_context_compaction, is_context_limit_provider_error, validate_compaction_artifacts,
+    BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionPolicy,
+    BrainContextUsageSnapshot, BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic,
+    ContextAccountingSnapshot, ContextAdmission, ContextAdmissionState, ContextCompactionPhase,
+    ContextCompactionProjection, ContextDiagnosticSeverity, ContextDurableTranscript,
+    ContextMeasurementSource, ContextProjectionSegment, ContextPromptProjection,
+    ContextProtocolProjection, ContextProviderDescriptor, ContextProviderProtocol,
+    ContextProviderState, ContextProviderUsage, ContextReservedOutput, ContextSizeMeasurement,
+    ContextTokenMeasurement, ContextTokenUsageTotals,
 };
 use rusty_crew_core_protocol::{
     BrainActionBatch, BrainContinuationPayload, BrainEvent, BrainEventEnvelope,
@@ -917,7 +923,7 @@ fn adapt_neutral_tool(tool: &NeutralBrainTool) -> ChatToolDescriptor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatTokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
@@ -925,6 +931,25 @@ pub struct ChatTokenUsage {
     pub cached_prompt_tokens: u64,
     pub cache_write_prompt_tokens: u64,
     pub reasoning_completion_tokens: u64,
+}
+
+impl ChatTokenUsage {
+    fn add_assign(&mut self, usage: &Self) {
+        self.prompt_tokens = self.prompt_tokens.saturating_add(usage.prompt_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(usage.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+        self.cached_prompt_tokens = self
+            .cached_prompt_tokens
+            .saturating_add(usage.cached_prompt_tokens);
+        self.cache_write_prompt_tokens = self
+            .cache_write_prompt_tokens
+            .saturating_add(usage.cache_write_prompt_tokens);
+        self.reasoning_completion_tokens = self
+            .reasoning_completion_tokens
+            .saturating_add(usage.reasoning_completion_tokens);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1513,7 +1538,8 @@ where
             let mut pending_reasoning_overlap = output_limit_overlap_reasoning.clone();
             let mut projected_assistant_text = String::new();
             let mut projected_assistant_reasoning = String::new();
-            let result = self.client.stream_observed(request, &mut |event| {
+            let mut current_usage = None;
+            let result = self.client.stream_observed(request.clone(), &mut |event| {
                 record_provider_event(&mut provider_event_counts, event);
                 if let ChatCompletionsEvent::ContentDelta(text) = event {
                     assistant_text.push_str(text);
@@ -1528,7 +1554,12 @@ where
                     malformed_tool_calls.push(call.clone());
                 }
                 if let ChatCompletionsEvent::Usage(usage) = event {
+                    current_usage = Some(usage.clone());
                     context_compaction.last_provider_input_tokens = Some(usage.prompt_tokens);
+                    context_compaction.last_usage = Some(usage.clone());
+                    context_compaction.logical_wake_usage.add_assign(usage);
+                    context_compaction.usage_event_count =
+                        context_compaction.usage_event_count.saturating_add(1);
                     record_provider_usage_totals(&mut provider_event_counts, usage);
                 }
                 if let ChatCompletionsEvent::Finished {
@@ -1567,6 +1598,22 @@ where
                     &mut sink,
                 );
             });
+
+            let accounting_snapshot = chat_context_accounting_snapshot(
+                &input.context,
+                &request,
+                &input_images,
+                &durable_messages,
+                &context_compaction,
+                &self.request_builder.config,
+                self.config.context_compaction.as_ref(),
+                current_usage.as_ref(),
+            );
+            push_stream_item(
+                &mut stream,
+                chat_context_accounting_status(&input.context, &accounting_snapshot),
+                &mut sink,
+            );
 
             if let Err(error) = result {
                 if self.config.context_compaction.is_some()
@@ -2345,6 +2392,283 @@ fn context_compaction_status(
                     "kind": kind,
                     "usage": usage,
                     "artifact": artifact,
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
+fn serialized_context_tokens<T: Serialize>(value: &T) -> ContextTokenMeasurement {
+    let bytes = serde_json::to_vec(value).map_or(0, |value| value.len());
+    ContextTokenMeasurement::estimate(
+        bytes.saturating_add(2) as u64 / 3,
+        ContextMeasurementSource::SerializedEstimate,
+        "json_bytes_per_token_v1".to_string(),
+        None,
+    )
+    .expect("serialized context estimate has a stable estimator id")
+}
+
+fn serialized_context_size<T: Serialize>(value: &T) -> ContextSizeMeasurement {
+    let bytes = serde_json::to_vec(value).map_or(0, |value| value.len());
+    ContextSizeMeasurement::measured(
+        bytes as u64,
+        ContextMeasurementSource::SerializedEstimate,
+        rusty_crew_brain_runtime::ContextMeasurementQuality::Approximate,
+        Some("json_bytes_v1".to_string()),
+        None,
+    )
+}
+
+fn chat_context_usage_totals(usage: &ChatTokenUsage) -> ContextTokenUsageTotals {
+    ContextTokenUsageTotals::provider(
+        usage.prompt_tokens,
+        usage.cached_prompt_tokens,
+        usage.cache_write_prompt_tokens,
+        usage.completion_tokens,
+        usage.reasoning_completion_tokens,
+        None,
+    )
+}
+
+fn chat_context_accounting_snapshot(
+    context: &BrainEventContext,
+    request: &ChatCompletionsRequest,
+    input_images: &[ChatCompletionsInputImage],
+    durable_messages: &[ChatCompletionMessage],
+    state: &ChatCompletionsContextCompactionState,
+    config: &ChatCompletionsChatConfig,
+    compaction_policy: Option<&BrainContextCompactionPolicy>,
+    current_usage: Option<&ChatTokenUsage>,
+) -> ContextAccountingSnapshot {
+    let request_estimate = serialized_context_tokens(request);
+    let input_tokens = current_usage
+        .map(|usage| ContextTokenMeasurement::provider(usage.prompt_tokens, None))
+        .unwrap_or_else(|| request_estimate.clone());
+    let context_window_tokens = compaction_policy
+        .map(|policy| policy.context_window_tokens)
+        .map(|tokens| {
+            ContextTokenMeasurement::estimate(
+                tokens,
+                ContextMeasurementSource::SerializedEstimate,
+                "configured_context_window_v1".to_string(),
+                None,
+            )
+            .expect("configured context window uses a stable estimator id")
+        })
+        .unwrap_or_else(ContextTokenMeasurement::unavailable);
+    let reserved_response_tokens = config
+        .max_output_tokens
+        .map(|tokens| {
+            ContextTokenMeasurement::estimate(
+                u64::from(tokens),
+                ContextMeasurementSource::SerializedEstimate,
+                "configured_max_output_tokens_v1".to_string(),
+                None,
+            )
+            .expect("configured output budget uses a stable estimator id")
+        })
+        .unwrap_or_else(ContextTokenMeasurement::unavailable);
+    let mut segments = Vec::new();
+    let mut role_bytes: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut reasoning_bytes = 0usize;
+    let mut tool_call_bytes = 0usize;
+    for message in &request.messages {
+        let role = match &message.role {
+            ChatMessageRole::System => "system_instructions",
+            ChatMessageRole::User => "user_messages",
+            ChatMessageRole::Assistant => "assistant_messages",
+            ChatMessageRole::Tool => "tool_results",
+        };
+        *role_bytes.entry(role).or_default() += serde_json::to_vec(message).map_or(0, |v| v.len());
+        reasoning_bytes = reasoning_bytes
+            .saturating_add(message.reasoning_content.as_deref().map_or(0, str::len));
+        tool_call_bytes = tool_call_bytes
+            .saturating_add(serde_json::to_vec(&message.tool_calls).map_or(0, |v| v.len()));
+    }
+    for (name, bytes) in role_bytes {
+        segments.push(ContextProjectionSegment {
+            name: name.to_string(),
+            included: bytes > 0,
+            tokens: serialized_context_tokens(&vec![0u8; bytes]),
+        });
+    }
+    segments.push(ContextProjectionSegment {
+        name: "tool_schemas".to_string(),
+        included: !request.tools.is_empty(),
+        tokens: serialized_context_tokens(&request.tools),
+    });
+    segments.push(ContextProjectionSegment {
+        name: "reasoning_history".to_string(),
+        included: reasoning_bytes > 0,
+        tokens: serialized_context_tokens(&vec![0u8; reasoning_bytes]),
+    });
+    segments.push(ContextProjectionSegment {
+        name: "tool_calls".to_string(),
+        included: tool_call_bytes > 0,
+        tokens: serialized_context_tokens(&vec![0u8; tool_call_bytes]),
+    });
+    let image_bytes = input_images
+        .iter()
+        .map(|image| image.byte_size)
+        .fold(0u64, u64::saturating_add);
+    segments.push(ContextProjectionSegment {
+        name: "images".to_string(),
+        included: image_bytes > 0,
+        tokens: ContextTokenMeasurement::estimate(
+            image_bytes.saturating_add(2) / 3,
+            ContextMeasurementSource::SerializedEstimate,
+            "image_bytes_per_token_v1".to_string(),
+            None,
+        )
+        .expect("image context estimate has a stable estimator id"),
+    });
+
+    let (fill_percent, admission_state, usable_input_tokens, reason_code) =
+        match (input_tokens.tokens, context_window_tokens.tokens) {
+            (Some(input), Some(window)) if window > 0 => {
+                let fill = input.saturating_mul(100).saturating_add(window - 1) / window;
+                let compact_at = compaction_policy
+                    .map(|policy| policy.compact_at_percent)
+                    .unwrap_or(100);
+                let state = if fill >= u64::from(compact_at) {
+                    ContextAdmissionState::RequiresCompaction
+                } else if fill.saturating_add(10) >= u64::from(compact_at) {
+                    ContextAdmissionState::NearThreshold
+                } else {
+                    ContextAdmissionState::Admitted
+                };
+                let usable = window.saturating_sub(reserved_response_tokens.tokens.unwrap_or(0));
+                let usable_measurement = ContextTokenMeasurement::estimate(
+                    usable,
+                    ContextMeasurementSource::SerializedEstimate,
+                    "configured_context_budget_v1".to_string(),
+                    None,
+                )
+                .expect("configured context budget uses a stable estimator id");
+                (Some(fill.min(100) as u32), state, usable_measurement, None)
+            }
+            _ => (
+                None,
+                ContextAdmissionState::Unavailable,
+                ContextTokenMeasurement::unavailable(),
+                Some("context_window_unavailable".to_string()),
+            ),
+        };
+    let latest_artifact = state.artifacts.last();
+    let compaction = ContextCompactionProjection {
+        strategy_id: compaction_policy.map(|policy| policy.strategy_id.clone()),
+        strategy_revision: Some("rolling_summary_v1".to_string()),
+        enabled: compaction_policy.is_some_and(|policy| policy.enabled),
+        auto_compaction_enabled: compaction_policy
+            .is_some_and(|policy| policy.auto_compaction_enabled),
+        phase: ContextCompactionPhase::Idle,
+        last_artifact_id: latest_artifact
+            .map(|artifact| format!("chat-completions:compaction:{}", artifact.sequence)),
+        last_sequence: latest_artifact.map(|artifact| artifact.sequence),
+        trigger_reason: latest_artifact.map(|artifact| artifact.reason_code.clone()),
+        input_tokens_before: latest_artifact
+            .map(|artifact| {
+                ContextTokenMeasurement::provider(artifact.usage_before.input_tokens, None)
+            })
+            .unwrap_or_else(ContextTokenMeasurement::unavailable),
+        input_tokens_after: latest_artifact
+            .map(|artifact| {
+                ContextTokenMeasurement::estimate(
+                    artifact.estimated_tokens_after,
+                    ContextMeasurementSource::SerializedEstimate,
+                    "json_bytes_per_token_v1".to_string(),
+                    None,
+                )
+                .expect("compaction estimate has a stable estimator id")
+            })
+            .unwrap_or_else(ContextTokenMeasurement::unavailable),
+        compacted_item_count: latest_artifact.map(|artifact| artifact.compacted_item_count),
+        retained_item_count: latest_artifact.map(|artifact| artifact.retained_item_count),
+        provider_chain_action: latest_artifact
+            .and_then(|artifact| artifact.provider_chain_action.clone()),
+    };
+    let provider_state_size = serialized_context_size(&durable_messages);
+    let mut snapshot = ContextAccountingSnapshot::unavailable(ContextProviderDescriptor {
+        protocol: ContextProviderProtocol::ChatCompletions,
+        provider_alias: None,
+        model_id: Some(request.model.clone()),
+    });
+    snapshot.session_id = Some(context.session_id.0.clone());
+    snapshot.wake_id = Some(context.wake_id.clone());
+    snapshot.prompt_projection = ContextPromptProjection {
+        input_tokens,
+        context_window_tokens,
+        protocol_projection: ContextProtocolProjection::ChatCompletions {
+            message_count: Some(request.messages.len() as u64),
+            tool_schema_count: Some(request.tools.len() as u64),
+            reasoning_policy: Some(format!("{:?}", config.reasoning_history)),
+        },
+        segments,
+    };
+    snapshot.reserved_output = ContextReservedOutput {
+        response_tokens: reserved_response_tokens,
+        safety_margin_tokens: ContextTokenMeasurement::unavailable(),
+    };
+    snapshot.admission = ContextAdmission {
+        state: admission_state,
+        fill_percent,
+        usable_input_tokens,
+        compact_at_percent: compaction_policy.map(|policy| policy.compact_at_percent),
+        max_context_percent_for_wake: compaction_policy.map(|policy| policy.compact_at_percent),
+        reason_code,
+    };
+    snapshot.provider_usage = ContextProviderUsage {
+        current_request: current_usage
+            .map(chat_context_usage_totals)
+            .unwrap_or_else(|| ContextTokenUsageTotals {
+                input_tokens: serialized_context_tokens(request),
+                cached_input_tokens: ContextTokenMeasurement::unavailable(),
+                cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
+                output_tokens: ContextTokenMeasurement::unavailable(),
+                reasoning_tokens: ContextTokenMeasurement::unavailable(),
+            }),
+        logical_wake: (state.usage_event_count > 0)
+            .then(|| chat_context_usage_totals(&state.logical_wake_usage))
+            .unwrap_or_else(ContextTokenUsageTotals::unavailable),
+        request_count: state.usage_event_count,
+    };
+    snapshot.durable_transcript = ContextDurableTranscript {
+        event_count: None,
+        message_count: Some(durable_messages.len() as u64),
+        serialized_size: serialized_context_size(&durable_messages),
+    };
+    snapshot.provider_state = ContextProviderState {
+        state_kind: Some("chat_completions_messages".to_string()),
+        item_count: Some(durable_messages.len() as u64),
+        serialized_size: provider_state_size,
+        lineage_fingerprint: Some(progress_json_fingerprint(&durable_messages)),
+    };
+    snapshot.compaction = compaction;
+    snapshot.diagnostics = vec![ContextAccountingDiagnostic {
+        severity: ContextDiagnosticSeverity::Info,
+        code: "chat_completions_projection_accounted".to_string(),
+        message: "Snapshot contains the assembled request dimensions without raw prompt or credential payloads.".to_string(),
+    }];
+    snapshot
+}
+
+fn chat_context_accounting_status(
+    context: &BrainEventContext,
+    snapshot: &ContextAccountingSnapshot,
+) -> BrainWakeStreamItem {
+    brain_event_item(
+        context,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Info,
+            message:
+                "Context accounting snapshot captured for the assembled Chat Completions request."
+                    .to_string(),
+            metadata_json: Some(
+                json!({
+                    "kind": "context_accounting_snapshot",
+                    "snapshot": snapshot,
                 })
                 .to_string(),
             ),
@@ -3293,6 +3617,12 @@ struct ChatCompletionsContinuationStateV1 {
 #[serde(rename_all = "camelCase")]
 struct ChatCompletionsContextCompactionState {
     last_provider_input_tokens: Option<u64>,
+    #[serde(default)]
+    last_usage: Option<ChatTokenUsage>,
+    #[serde(default)]
+    logical_wake_usage: ChatTokenUsage,
+    #[serde(default)]
+    usage_event_count: u64,
     last_compacted_tool_round: usize,
     artifacts: Vec<BrainContextCompactionArtifact>,
 }
@@ -3315,6 +3645,8 @@ fn chat_completions_continuation_state(
     if payload.kind != MODULE_ID || payload.payload_version != CONTINUATION_PAYLOAD_VERSION {
         return Err("chat-completions continuation payload identity mismatch".to_string());
     }
+    validate_compaction_artifacts(&payload.context_compaction.artifacts)
+        .map_err(|error| format!("chat-completions compaction artifacts are invalid: {error}"))?;
     Ok(payload)
 }
 
@@ -6415,6 +6747,72 @@ mod tests {
     }
 
     #[test]
+    fn context_accounting_snapshot_reports_provider_usage_and_request_segments() {
+        let mut brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::Usage(ChatTokenUsage {
+                    prompt_tokens: 123,
+                    completion_tokens: 17,
+                    total_tokens: 140,
+                    cached_prompt_tokens: 11,
+                    cache_write_prompt_tokens: 3,
+                    reasoning_completion_tokens: 5,
+                }),
+                ChatCompletionsEvent::ContentDelta("accounted".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+        );
+
+        let output = brain.wake_with_messages(
+            context(),
+            vec![ChatCompletionMessage::user("measure this request")],
+        );
+        let snapshot: ContextAccountingSnapshot = events(&output.stream)
+            .into_iter()
+            .find_map(|event| match event {
+                BrainEvent::ProviderStatus {
+                    metadata_json: Some(metadata),
+                    ..
+                } => serde_json::from_str::<Value>(&metadata)
+                    .ok()
+                    .filter(|value| {
+                        value.get("kind").and_then(Value::as_str)
+                            == Some("context_accounting_snapshot")
+                    })
+                    .and_then(|value| serde_json::from_value(value["snapshot"].clone()).ok()),
+                _ => None,
+            })
+            .expect("chat context accounting snapshot");
+
+        snapshot
+            .validate()
+            .expect("valid chat context accounting snapshot");
+        assert_eq!(
+            snapshot.provider.protocol,
+            ContextProviderProtocol::ChatCompletions
+        );
+        assert_eq!(snapshot.prompt_projection.input_tokens.tokens, Some(123));
+        assert_eq!(
+            snapshot.provider_usage.current_request.output_tokens.tokens,
+            Some(17)
+        );
+        assert_eq!(
+            snapshot.provider_usage.logical_wake.input_tokens.tokens,
+            Some(123)
+        );
+        assert_eq!(snapshot.provider_usage.request_count, 1);
+        assert!(snapshot
+            .prompt_projection
+            .segments
+            .iter()
+            .any(|segment| segment.name == "tool_schemas" && segment.included));
+        assert_eq!(snapshot.durable_transcript.message_count, Some(1));
+    }
+
+    #[test]
     fn minimal_loop_fails_reasoning_only_output_limit_without_false_completion() {
         let truncated = || {
             Ok(vec![
@@ -7408,7 +7806,52 @@ mod tests {
         assert!(checkpoint.messages.len() < checkpoint.durable_messages.len());
         assert_eq!(checkpoint.durable_messages.len(), 11);
 
-        let second = brain.wake(ChatCompletionsBrainLoopInput {
+        let mut restarted_brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(PendingChatFunctionCall {
+                        index: 0,
+                        id: Some("call_6".to_string()),
+                        name: "lookup".to_string(),
+                        arguments_json: r#"{"round":6}"#.to_string(),
+                    }),
+                    ChatCompletionsEvent::Usage(ChatTokenUsage {
+                        prompt_tokens: 20_000,
+                        completion_tokens: 10,
+                        total_tokens: 20_010,
+                        cached_prompt_tokens: 0,
+                        cache_write_prompt_tokens: 0,
+                        reasoning_completion_tokens: 0,
+                    }),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("compacted turn complete".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![ChatCompletionsToolOutput::ok(format!(
+                "result-6-{}",
+                "x".repeat(3000)
+            ))],
+        )
+        .with_loop_config(ChatCompletionsBrainLoopConfig {
+            context_compaction: Some(BrainContextCompactionPolicy {
+                enabled: true,
+                auto_compaction_enabled: true,
+                strategy_id: "rolling_summary_compaction".to_string(),
+                context_window_tokens: 22_000,
+                compact_at_percent: 80,
+                target_percent_after_compaction: 55,
+            }),
+            ..ChatCompletionsBrainLoopConfig::default()
+        });
+
+        let second = restarted_brain.wake(ChatCompletionsBrainLoopInput {
             context: context(),
             messages: Vec::new(),
             input_images: Vec::new(),
@@ -7427,7 +7870,7 @@ mod tests {
         .expect("valid second compaction checkpoint");
         assert_eq!(second_checkpoint.context_compaction.artifacts.len(), 2);
 
-        let third = brain.wake(ChatCompletionsBrainLoopInput {
+        let third = restarted_brain.wake(ChatCompletionsBrainLoopInput {
             context: context(),
             messages: Vec::new(),
             input_images: Vec::new(),
