@@ -218,19 +218,19 @@ assert.equal(
   "context diagnostics must expose the Rust-owned snapshot when available",
 );
 assert.deepEqual(schema("NativeContextAccountingSnapshot").required, [
-  "schema_version",
+  "schemaVersion",
   "provider",
-  "prompt_projection",
-  "reserved_output",
+  "promptProjection",
+  "reservedOutput",
   "admission",
-  "provider_usage",
-  "durable_transcript",
-  "provider_state",
+  "providerUsage",
+  "durableTranscript",
+  "providerState",
   "compaction",
   "diagnostics",
 ]);
 assert.deepEqual(
-  schema("NativeContextAccountingSnapshot").properties?.schema_version?.const,
+  schema("NativeContextAccountingSnapshot").properties?.schemaVersion?.const,
   1,
 );
 assert.deepEqual(contextProvider.required, ["alias", "status"]);

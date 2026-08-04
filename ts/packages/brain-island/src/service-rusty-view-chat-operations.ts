@@ -855,14 +855,14 @@ function isNativeContextAccountingSnapshot(
   value: Record<string, unknown>,
 ): value is NativeContextAccountingSnapshot {
   return (
-    value.schema_version === 1 &&
+    value.schemaVersion === 1 &&
     optionalRecord(value.provider) !== undefined &&
-    optionalRecord(value.prompt_projection) !== undefined &&
-    optionalRecord(value.reserved_output) !== undefined &&
+    optionalRecord(value.promptProjection) !== undefined &&
+    optionalRecord(value.reservedOutput) !== undefined &&
     optionalRecord(value.admission) !== undefined &&
-    optionalRecord(value.provider_usage) !== undefined &&
-    optionalRecord(value.durable_transcript) !== undefined &&
-    optionalRecord(value.provider_state) !== undefined &&
+    optionalRecord(value.providerUsage) !== undefined &&
+    optionalRecord(value.durableTranscript) !== undefined &&
+    optionalRecord(value.providerState) !== undefined &&
     optionalRecord(value.compaction) !== undefined &&
     Array.isArray(value.diagnostics)
   );

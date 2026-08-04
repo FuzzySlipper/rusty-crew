@@ -104,24 +104,24 @@ try {
       metadata_json: JSON.stringify({
         kind: "context_accounting_snapshot",
         snapshot: {
-          schema_version: 1,
-          session_id: "chat-session",
-          wake_id: "wake-context-smoke",
-          logical_turn_id: null,
-          execution_epoch_id: null,
-          measured_at: "2026-06-30T00:59:00Z",
+          schemaVersion: 1,
+          sessionId: "chat-session",
+          wakeId: "wake-context-smoke",
+          logicalTurnId: null,
+          executionEpochId: null,
+          measuredAt: "2026-06-30T00:59:00Z",
           provider: {
             protocol: "chat_completions",
-            provider_alias: "default",
-            model_id: "gpt",
+            providerAlias: "default",
+            modelId: "gpt",
           },
-          prompt_projection: {
-            input_tokens: {
+          promptProjection: {
+            inputTokens: {
               tokens: 1234,
               source: "provider",
               quality: "exact",
             },
-            context_window_tokens: {
+            contextWindowTokens: {
               tokens: 128000,
               source: "serialized_estimate",
               quality: "approximate",
@@ -135,15 +135,15 @@ try {
             },
             segments: [],
           },
-          reserved_output: {},
+          reservedOutput: {},
           admission: {},
-          provider_usage: {
-            current_request: {},
-            logical_wake: {},
-            request_count: 1,
+          providerUsage: {
+            currentRequest: {},
+            logicalWake: {},
+            requestCount: 1,
           },
-          durable_transcript: {},
-          provider_state: {},
+          durableTranscript: {},
+          providerState: {},
           compaction: {
             phase: "idle",
             enabled: false,
@@ -245,14 +245,13 @@ try {
     contextUsage.body.data.context_strategy.auto_compaction_enabled,
     false,
   );
-  assert.equal(contextUsage.body.data.native_snapshot.schema_version, 1);
+  assert.equal(contextUsage.body.data.native_snapshot.schemaVersion, 1);
   assert.equal(
-    contextUsage.body.data.native_snapshot.prompt_projection.input_tokens
-      .tokens,
+    contextUsage.body.data.native_snapshot.promptProjection.inputTokens.tokens,
     1234,
   );
   assert.equal(
-    contextUsage.body.data.native_snapshot.provider_usage.request_count,
+    contextUsage.body.data.native_snapshot.providerUsage.requestCount,
     1,
   );
   assert.equal(

@@ -516,19 +516,19 @@ export interface SessionContextUsageResult {
 
 export interface NativeContextAccountingSnapshot {
   [key: string]: unknown;
-  schema_version: number;
-  session_id?: string | null;
-  wake_id?: string | null;
-  logical_turn_id?: string | null;
-  execution_epoch_id?: string | null;
-  measured_at?: string | null;
+  schemaVersion: number;
+  sessionId?: string | null;
+  wakeId?: string | null;
+  logicalTurnId?: string | null;
+  executionEpochId?: string | null;
+  measuredAt?: string | null;
   provider: Record<string, unknown>;
-  prompt_projection: Record<string, unknown>;
-  reserved_output: Record<string, unknown>;
+  promptProjection: Record<string, unknown>;
+  reservedOutput: Record<string, unknown>;
   admission: Record<string, unknown>;
-  provider_usage: Record<string, unknown>;
-  durable_transcript: Record<string, unknown>;
-  provider_state: Record<string, unknown>;
+  providerUsage: Record<string, unknown>;
+  durableTranscript: Record<string, unknown>;
+  providerState: Record<string, unknown>;
   compaction: Record<string, unknown>;
   diagnostics: unknown[];
 }
