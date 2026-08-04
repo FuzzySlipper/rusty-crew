@@ -694,6 +694,68 @@ mod tests {
         assert!(error.contains("unknown"));
     }
 
+    fn checked_in_fixture(name: &str) -> ContextAccountingSnapshot {
+        let path = format!(
+            "{}/../../../fixtures/context-accounting/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let contents = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read context accounting fixture {path}: {error}"));
+        serde_json::from_str(&contents)
+            .unwrap_or_else(|error| panic!("parse context accounting fixture {path}: {error}"))
+    }
+
+    #[test]
+    fn checked_in_fixtures_validate_all_provider_projection_modes() {
+        let chat = checked_in_fixture("chat-completions-provider.json");
+        let responses = checked_in_fixture("responses-chain.json");
+        let unavailable = checked_in_fixture("unavailable.json");
+
+        for snapshot in [&chat, &responses, &unavailable] {
+            snapshot.validate().expect("checked-in fixture validates");
+            let serialized = serde_json::to_string(snapshot).expect("serialize fixture");
+            assert!(!serialized.contains("Authorization"));
+            assert!(!serialized.contains("api_key"));
+            assert!(!serialized.contains("raw_prompt"));
+        }
+
+        assert_eq!(
+            chat.provider.protocol,
+            ContextProviderProtocol::ChatCompletions
+        );
+        assert_eq!(
+            responses.provider.protocol,
+            ContextProviderProtocol::Responses
+        );
+        assert_eq!(
+            responses.prompt_projection.protocol_projection,
+            ContextProtocolProjection::Responses {
+                chain_strategy: Some("previous-response-chain".to_string()),
+                replay_item_count: Some(12),
+                response_lineage_fingerprint: Some("fixture-response-lineage".to_string()),
+            }
+        );
+        assert!(chat
+            .prompt_projection
+            .segments
+            .iter()
+            .any(|segment| segment.name == "tool_schemas"));
+        assert_eq!(
+            chat.provider_usage.logical_wake.input_tokens.tokens,
+            Some(2500)
+        );
+        assert_eq!(chat.prompt_projection.input_tokens.tokens, Some(1200));
+        assert!(
+            chat.provider_usage.logical_wake.input_tokens.tokens
+                > chat.prompt_projection.input_tokens.tokens
+        );
+        assert_eq!(
+            unavailable.prompt_projection.input_tokens.quality,
+            ContextMeasurementQuality::Unavailable
+        );
+        assert_eq!(unavailable.prompt_projection.input_tokens.tokens, None);
+    }
+
     #[test]
     fn validates_full_snapshot_and_keeps_usage_dimensions_separate() {
         let value = snapshot();

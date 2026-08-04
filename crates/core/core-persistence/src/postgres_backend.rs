@@ -17268,6 +17268,83 @@ mod tests {
         assert!(!error.message.contains("SELECT *"));
     }
 
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_context_compaction_artifact_persists_and_reloads() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("rusty_crew_context_compaction");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let artifact = ContextCompactionArtifact {
+            artifact_id: "fixture-postgres-context-compaction".to_string(),
+            session_id: SessionId::new("fixture-postgres-session"),
+            branch_id: None,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            source_refs_json: json!({
+                "projection": "fixture-postgres-projection",
+                "safe_boundary": "tool_round_4"
+            }),
+            provider_metadata_json: json!({
+                "provider_alias": "fixture-provider",
+                "model_id": "fixture-model"
+            }),
+            estimate_before_json: json!({
+                "input_tokens": 90000,
+                "source": "provider"
+            }),
+            estimate_after_json: Some(json!({
+                "input_tokens": 24000,
+                "source": "serialized_estimate"
+            })),
+            summary_text: "Postgres fixture preserves a validated compaction artifact.".into(),
+            enters_future_context: true,
+            context_policy: "summary_context".into(),
+            metadata_json: json!({"fixture": true}),
+            created_at: "2026-08-04T00:00:00Z".into(),
+            updated_at: "2026-08-04T00:00:00Z".into(),
+        };
+
+        assert_eq!(
+            store.save_context_compaction_artifact(&artifact).unwrap(),
+            artifact
+        );
+        assert_eq!(
+            store.save_context_compaction_artifact(&artifact).unwrap(),
+            artifact
+        );
+        assert_eq!(
+            store
+                .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+                    session_id: Some(artifact.session_id.clone()),
+                    branch_id: None,
+                    strategy_id: None,
+                    enters_future_context: Some(true),
+                    latest_only: true,
+                    limit: None,
+                    offset: None,
+                })
+                .unwrap(),
+            vec![artifact.clone()]
+        );
+
+        drop(store);
+        let reopened = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let hydrated = reopened
+            .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+                session_id: Some(artifact.session_id.clone()),
+                branch_id: None,
+                strategy_id: None,
+                enters_future_context: None,
+                latest_only: true,
+                limit: None,
+                offset: None,
+            })
+            .unwrap();
+        assert_eq!(hydrated, vec![artifact]);
+        reopened.drop_schema_for_test().unwrap();
+    }
+
     fn postgres_test_database_url() -> Option<String> {
         for key in [
             "RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL",
