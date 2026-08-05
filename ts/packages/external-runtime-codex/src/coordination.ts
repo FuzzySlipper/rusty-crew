@@ -129,13 +129,18 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
         type: "function",
         name: "complete_routed_review",
         description:
-          "Complete the currently routed Den review with a structured verdict; Crew finalizes Den and sends one receipt-based reply.",
+          "Complete the currently routed Den review with a structured verdict; Crew finalizes Den and sends one receipt-based reply. If several queued reviews share the reviewer session, include taskId and commitSha from the review envelope to explicitly select the target.",
         inputSchema: {
           type: "object",
           properties: {
             verdict: {
               type: "string",
               enum: ["looks_good", "changes_requested"],
+            },
+            taskId: { type: "integer", minimum: 1 },
+            commitSha: {
+              type: "string",
+              pattern: "^[0-9a-fA-F]{40}$",
             },
             notes: { type: "string", maxLength: 4096 },
             evidence: {

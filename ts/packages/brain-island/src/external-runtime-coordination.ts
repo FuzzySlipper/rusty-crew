@@ -343,6 +343,24 @@ function parseReviewCompletionArguments(
   ) {
     return "verdict must be looks_good or changes_requested";
   }
+  if (
+    record.taskId !== undefined &&
+    (typeof record.taskId !== "number" ||
+      !Number.isSafeInteger(record.taskId) ||
+      record.taskId <= 0)
+  ) {
+    return "taskId must be a positive integer when supplied";
+  }
+  if (
+    record.commitSha !== undefined &&
+    (typeof record.commitSha !== "string" ||
+      !/^[0-9a-fA-F]{40}$/.test(record.commitSha))
+  ) {
+    return "commitSha must be an exact 40-character SHA when supplied";
+  }
+  if ((record.taskId === undefined) !== (record.commitSha === undefined)) {
+    return "taskId and commitSha must be supplied together when overriding review selection";
+  }
   if (record.notes !== undefined && typeof record.notes !== "string") {
     return "notes must be a string when supplied";
   }

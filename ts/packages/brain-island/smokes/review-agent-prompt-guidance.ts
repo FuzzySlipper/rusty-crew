@@ -87,6 +87,20 @@ assertSchema(
   ["recipient", "body"],
   false,
 );
+assertSchema(
+  codexSchema("complete_routed_review"),
+  [
+    "verdict",
+    "taskId",
+    "commitSha",
+    "notes",
+    "evidence",
+    "priorFindingResolutions",
+    "newFindings",
+  ],
+  ["verdict"],
+  false,
+);
 
 assertSchema(schemaOf(listAgentsTool({})), [], [], false);
 assertSchema(
@@ -139,6 +153,7 @@ assert.match(guidance, /agent_message_recipient_session_changed/);
 assert.match(guidance, /<reviewer-route>/);
 assert.match(guidance, /@reviewer/);
 assert.match(guidance, /does not return\n?durable message or delivery IDs/);
+assert.match(guidance, /taskId[\s\S]*commitSha[\s\S]*explicitly/);
 
 const codexSendResult = await resolveCodexCoordinationToolCall({
   params: {

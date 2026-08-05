@@ -226,7 +226,7 @@
     },
     {
       "name": "complete_routed_review",
-      "description": "Complete the currently routed Den review with a structured verdict and let Rusty Crew finalize in Den and deliver one receipt-based reply.",
+      "description": "Complete the currently routed Den review with a structured verdict and let Rusty Crew finalize in Den and deliver one receipt-based reply. If queued reviews share a reviewer session, provide taskId and commitSha from the review envelope to select the target explicitly.",
       "category": "coordination",
       "toolsets": ["review_readonly"],
       "surfaces": ["brain"],

@@ -96,6 +96,8 @@ assert.ok(completionTool.executeWithContext);
 const completionResult = await completionTool.executeWithContext!(
   {
     verdict: "looks_good",
+    taskId: 6574,
+    commitSha: "a".repeat(40),
     notes: "Focused checks passed.",
     evidence: ["npm test", "git diff --check"],
   },
@@ -124,6 +126,8 @@ assert.equal(completionResult.details.replyStatus, "accepted");
 assert.deepEqual(completionCalls, [
   {
     verdict: "looks_good",
+    taskId: 6574,
+    commitSha: "a".repeat(40),
     notes: "Focused checks passed.",
     evidence: ["npm test", "git diff --check"],
     caller: {

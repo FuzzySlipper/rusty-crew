@@ -121,7 +121,11 @@ test("Codex review completion carries persisted routed correlation", async () =>
       callId: "call-review-complete",
       namespace: "rusty_crew",
       tool: "complete_routed_review",
-      arguments: { verdict: "looks_good" },
+      arguments: {
+        verdict: "looks_good",
+        taskId: 6574,
+        commitSha: "a".repeat(40),
+      },
     },
     binding: {
       runtimeId: "codex-local",
@@ -148,7 +152,40 @@ test("Codex review completion carries persisted routed correlation", async () =>
     (calls[0] as { correlationId?: string }).correlationId,
     `review:6574:${"a".repeat(40)}`,
   );
+  assert.equal((calls[0] as { taskId?: number }).taskId, 6574);
+  assert.equal((calls[0] as { commitSha?: string }).commitSha, "a".repeat(40));
   assert.equal("correlationId" in (calls[0] as Record<string, unknown>), true);
+});
+
+test("Codex review completion rejects only half of an explicit target", async () => {
+  const result = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-review-invalid",
+      turnId: "turn-review-invalid",
+      callId: "call-review-invalid",
+      namespace: "rusty_crew",
+      tool: "complete_routed_review",
+      arguments: { verdict: "looks_good", taskId: 6574 },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-review-invalid",
+      controllerInstanceId: "controller-review-invalid",
+      controllerGeneration: 11,
+      reviewerSessionId: "reviewer-session",
+    },
+    port: new RecordingPort(),
+    onReviewCompletion: async () => {
+      throw new Error("completion should not be called");
+    },
+  });
+  assert.equal(result?.success, false);
+  assert.match(
+    result?.contentItems[0]?.type === "inputText"
+      ? result.contentItems[0].text
+      : "",
+    /taskId and commitSha must be supplied together/,
+  );
 });
 
 test("Codex coordination lists routes separately from raw same-service diagnostics", async () => {

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { ReviewSubmissionRecord } from "@rusty-crew/contracts";
 import {
+  createServiceReviewSubmissionRuntime,
   parseExternalReviewSubmissionRequest,
   selectRoutedReviewRecord,
 } from "../src/service-review-submission.js";
@@ -51,6 +52,77 @@ test("multiple terminal reviews remain ambiguous without persisted routed contex
   const result = selectRoutedReviewRecord([first, second]);
   assert.equal(result.record, undefined);
   assert.equal(result.ambiguous, true);
+});
+
+test("explicit task and SHA select a queued review over stale wake correlation", () => {
+  const firstSha = "a".repeat(40);
+  const secondSha = "b".repeat(40);
+  const first = record("review-first", "6600", firstSha, "reviewer_dispatched");
+  const second = record(
+    "review-second",
+    "6601",
+    secondSha,
+    "reviewer_dispatched",
+  );
+
+  const selected = selectRoutedReviewRecord(
+    [first, second],
+    `review:6600:${firstSha}`,
+    { taskId: 6601, commitSha: secondSha },
+  );
+  assert.equal(selected.ambiguous, false);
+  assert.equal(selected.notFound, undefined);
+  assert.equal(selected.record?.submissionId, "review-second");
+});
+
+test("explicit review target cannot cross-select a different task or SHA", () => {
+  const sha = "a".repeat(40);
+  const review = record("review-one", "6600", sha, "reviewer_dispatched");
+
+  const wrongTask = selectRoutedReviewRecord([review], undefined, {
+    taskId: 6601,
+    commitSha: sha,
+  });
+  assert.equal(wrongTask.record, undefined);
+  assert.equal(wrongTask.ambiguous, false);
+  assert.equal(wrongTask.notFound, true);
+
+  const wrongSha = selectRoutedReviewRecord([review], undefined, {
+    taskId: 6600,
+    commitSha: "b".repeat(40),
+  });
+  assert.equal(wrongSha.record, undefined);
+  assert.equal(wrongSha.ambiguous, false);
+  assert.equal(wrongSha.notFound, true);
+});
+
+test("managed closeout uses the explicit target within a reused reviewer session", async () => {
+  const firstSha = "a".repeat(40);
+  const secondSha = "b".repeat(40);
+  const first = record("review-first", "6600", firstSha, "reply_terminal");
+  const second = record("review-second", "6601", secondSha, "reply_terminal");
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [first, second],
+    } as never,
+    projectId: "rusty-crew",
+    runtimeConfig: { sessions: [] } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-05T00:00:00.000Z",
+    applyCoordinationDelivery: async (receipt) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "looks_good",
+    taskId: 6601,
+    commitSha: secondSha,
+    caller: { type: "review_submission", submissionId: "context-resolved" },
+    reviewerSessionId: "reviewer-session",
+  });
+  assert.equal(result.submissionId, "review-second");
+  assert.equal(result.taskId, 6601);
+  assert.equal(result.commitSha, secondSha);
+  assert.equal(result.reasonCode, "review_reply_terminal");
 });
 
 test("external review submission parser does not expose a reviewer override", () => {

@@ -24,11 +24,13 @@ next unexpired request in a separate turn.
 
 Report one clear outcome: approved, changes requested, blocked, or review
 failed because a required tool/runtime was unavailable. Before ending the turn,
-call `rusty_crew.reply_agent_message` exactly once with the envelope's
-`message_id` as `messageId` and the complete outcome as `body`. Never guess or
-provide a recipient, session ID, or correlation ID. Never claim the reply was
-sent unless the tool returns an accepted receipt. If review work cannot be
-completed, send the blocked or failure outcome through the same reply tool.
+call `rusty_crew.complete_routed_review` with the structured verdict and
+findings. If several requests are queued on the same reviewer session, include
+the envelope's task ID as `taskId` and exact SHA as `commitSha`; that explicitly
+selects this review instead of relying on wake inference. Never use a task ID or
+SHA that did not come from the review envelope. Crew keeps the selection scoped
+to this reviewer session, finalizes Den, and sends the receipt-based reply. Do
+not call `rusty_crew.reply_agent_message` for a managed review closeout.
 
 Queued work is Crew-owned. Expired and failed requests are terminal and are not
 silently retried. Do not manually start another queued review in this turn.
@@ -92,6 +94,7 @@ Managed Codex app-server sessions receive namespaced dynamic tools:
 | `rusty_crew.send_agent_message` | `recipient`, `body` | `correlationId`, `ttlSeconds` |
 | `rusty_crew.reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
 | `rusty_crew.agent_round` | `recipient`, `body` | `correlationId`, `timeoutMs` |
+| `rusty_crew.complete_routed_review` | `verdict` | `taskId`, `commitSha`, `notes`, `evidence`, `priorFindingResolutions`, `newFindings` |
 
 Built-in Crew brains receive the same capabilities without the namespace:
 
@@ -101,6 +104,7 @@ Built-in Crew brains receive the same capabilities without the namespace:
 | `send_agent_message` | `toAddress`, `body` | `correlationId`, `requireWake`, `ttlSeconds` |
 | `reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
 | `agent_round` | `toAddress`, `body` | `correlationId`, `timeoutMs` |
+| `complete_routed_review` | `verdict` | `taskId`, `commitSha`, `notes`, `evidence`, `priorFindingResolutions`, `newFindings` |
 
 Both message tools default to a 300-second TTL and accept integer `ttlSeconds`
 values from 1 through 86,400. Review requesters should set the TTL explicitly

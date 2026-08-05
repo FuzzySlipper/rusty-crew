@@ -411,12 +411,34 @@ async function completeReview(
     correlationId?: string;
   },
 ): Promise<CompleteRoutedReviewToolReceipt> {
+  if ((input.taskId === undefined) !== (input.commitSha === undefined)) {
+    return {
+      ok: false,
+      reasonCode: "review_target_incomplete",
+      summary:
+        "Explicit review selection requires both taskId and the exact commitSha from the routed review envelope.",
+    };
+  }
   const records = await context.bridge.listReviewSubmissions({
     pendingOnly: false,
     reviewerSessionId: input.reviewerSessionId,
+    ...(input.taskId === undefined ? {} : { taskId: String(input.taskId) }),
   });
-  const selection = selectRoutedReviewRecord(records, input.correlationId);
+  const selection =
+    input.taskId === undefined
+      ? selectRoutedReviewRecord(records, input.correlationId)
+      : selectRoutedReviewRecord(records, input.correlationId, {
+          taskId: input.taskId,
+          commitSha: input.commitSha as string,
+        });
   const result = canonicalReviewResult(input);
+  if (selection.notFound) {
+    return {
+      ok: false,
+      reasonCode: "review_target_not_found",
+      summary: `No routed review for task #${input.taskId} at ${input.commitSha} is attached to this reviewer session.`,
+    };
+  }
   if (selection.ambiguous) {
     return {
       ok: false,
@@ -494,10 +516,31 @@ const TERMINAL_ROUTED_REVIEW_PHASES = new Set<ReviewSubmissionRecord["phase"]>([
 export function selectRoutedReviewRecord(
   records: readonly ReviewSubmissionRecord[],
   correlationId?: string,
-): { readonly record?: ReviewSubmissionRecord; readonly ambiguous: boolean } {
+  explicitTarget?: {
+    readonly taskId: number;
+    readonly commitSha: string;
+  },
+): {
+  readonly record?: ReviewSubmissionRecord;
+  readonly ambiguous: boolean;
+  readonly notFound?: boolean;
+} {
   const eligible = records.filter((record) =>
     ROUTED_REVIEW_PHASES.has(record.phase),
   );
+  if (explicitTarget !== undefined) {
+    const candidates = eligible.filter(
+      (record) =>
+        record.taskId === String(explicitTarget.taskId) &&
+        record.commitSha.toLowerCase() ===
+          explicitTarget.commitSha.toLowerCase(),
+    );
+    return {
+      ...(candidates.length === 1 ? { record: candidates[0] } : {}),
+      ambiguous: candidates.length > 1,
+      ...(candidates.length === 0 ? { notFound: true } : {}),
+    };
+  }
   const correlated =
     correlationId === undefined
       ? eligible
@@ -1234,12 +1277,13 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
     `Repository: ${record.repository}`,
     `Ref: ${record.gitRef}`,
     `Review round: ${record.reviewRoundId ?? "unknown"}`,
+    `If this reviewer session has multiple queued reviews, call complete_routed_review with taskId ${record.taskId} and commitSha ${record.commitSha} to select this review explicitly.`,
     "",
     record.reviewSummaryMd,
     "",
     isExternalCliSubmission(record)
       ? "Record findings and the verdict in Den, then call complete_routed_review. This was submitted by an external CLI; do not attempt a requester reply."
-      : "Record findings and the verdict in Den, then reply once to this routed message.",
+      : "Record findings and the verdict in Den, then call complete_routed_review. Crew sends the one receipt-based reply to the requester.",
   ].join("\n");
 }
 

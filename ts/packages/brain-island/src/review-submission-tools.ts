@@ -45,6 +45,8 @@ const completeRoutedReviewParameters = Type.Object(
       Type.Literal("looks_good"),
       Type.Literal("changes_requested"),
     ]),
+    taskId: Type.Optional(Type.Integer({ minimum: 1 })),
+    commitSha: Type.Optional(Type.String({ pattern: "^[0-9a-fA-F]{40}$" })),
     notes: Type.Optional(Type.String({ maxLength: 4096 })),
     evidence: Type.Optional(
       Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
@@ -172,7 +174,7 @@ export function completeRoutedReviewTool(
     name: "complete_routed_review",
     label: "Complete routed review",
     description:
-      "Complete the currently routed Den review using only a structured verdict, finding resolutions, new findings, and notes. Den finalizes the authoritative round; Rusty Crew then sends exactly one receipt-based reply to the requester.",
+      "Complete the currently routed Den review using a structured verdict, finding resolutions, new findings, and notes. If queued reviews share this reviewer session, include taskId and commitSha from the review envelope to explicitly select the target. Den finalizes the authoritative round; Rusty Crew then sends exactly one receipt-based reply to the requester.",
     parameters: completeRoutedReviewParameters,
     executeWithContext: async (params, context) => {
       if (runtime === undefined) {
