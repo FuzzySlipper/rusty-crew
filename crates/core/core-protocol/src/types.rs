@@ -585,7 +585,7 @@ pub struct ReviewSubmissionRecord {
     pub review_summary_md: String,
     pub reviewer: String,
     pub submitter_agent_id: AgentId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub submitter_session_id: Option<SessionId>,
     pub caller: AgentCoordinationCaller,
     pub phase: ReviewSubmissionPhase,

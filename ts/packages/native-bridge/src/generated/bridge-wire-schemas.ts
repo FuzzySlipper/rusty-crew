@@ -5773,6 +5773,26 @@ export const bridgeWireSchemaArtifact = {
               },
               {
                 "properties": {
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "external_cli",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "clientId",
+                  "idempotencyKey"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
                   "submissionId": {
                     "type": "string"
                   },
@@ -5997,7 +6017,10 @@ export const bridgeWireSchemaArtifact = {
             "type": "string"
           },
           "submitterSessionId": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "taskId": {
             "type": "string"
@@ -6023,7 +6046,6 @@ export const bridgeWireSchemaArtifact = {
           "reviewSummaryMd",
           "reviewer",
           "submitterAgentId",
-          "submitterSessionId",
           "caller",
           "phase",
           "createdAt",
@@ -24374,6 +24396,26 @@ export const bridgeWireSchemaArtifact = {
             },
             {
               "properties": {
+                "clientId": {
+                  "type": "string"
+                },
+                "idempotencyKey": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "external_cli",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "clientId",
+                "idempotencyKey"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "submissionId": {
                   "type": "string"
                 },
@@ -24598,7 +24640,10 @@ export const bridgeWireSchemaArtifact = {
           "type": "string"
         },
         "submitterSessionId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "taskId": {
           "type": "string"
@@ -24624,7 +24669,6 @@ export const bridgeWireSchemaArtifact = {
         "reviewSummaryMd",
         "reviewer",
         "submitterAgentId",
-        "submitterSessionId",
         "caller",
         "phase",
         "createdAt",

@@ -128,7 +128,7 @@ Exit codes:
 | --- | --- |
 | `0` | Accepted, or terminal `looks_good` review |
 | `2` | Still pending, including an explicit wait timeout |
-| `3` | GitHub gate failed, timed out, or was superseded by gate policy |
+| `3` | GitHub gate failed, timed out, or was superseded by gate policy; inspect `gateStatus` and `terminalReason` |
 | `4` | Reviewer requested changes or the reply path was terminal |
 | `5` | This submission was superseded by a newer SHA for the task |
 | `64` | CLI usage or input error |
@@ -165,8 +165,10 @@ capability inventory and generated OpenAPI artifact expose these routes as
 - `den_mcp_binding_unavailable` means the selected service is missing the
   configured active binding or that binding does not expose a server named
   `den`.
-- `gate_failed` means no reviewer request was sent. Fix the commit/check issue,
-  push a new exact SHA, and submit a new idempotency key.
+- A non-`passed` `gateStatus` means no reviewer request was sent. The durable
+  record may settle into `review_terminal` after the task is reset; use
+  `gateStatus` and `terminalReason`, not only `phase`, to classify that outcome.
+  Fix the commit/check issue, push a new exact SHA, and submit a new idempotency key.
 - A pending reviewer phase means the deterministic service workflow is waiting
   on the reviewer. Poll the same submission; do not create a second submission
   for the same exact work.

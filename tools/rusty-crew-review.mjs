@@ -133,6 +133,9 @@ function acceptedExitCode(data) {
 }
 
 function terminalExitCode(data) {
+  if (data?.gateStatus && data.gateStatus !== "passed") {
+    return EXIT.GATE_FAILED;
+  }
   switch (data?.phase) {
     case "gate_failed":
       return EXIT.GATE_FAILED;
