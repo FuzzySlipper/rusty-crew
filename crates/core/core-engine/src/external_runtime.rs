@@ -946,6 +946,15 @@ impl CoreEngine {
             .query_external_runtime_events(runtime_id, after_sequence, limit)
     }
 
+    pub fn query_external_runtime_event_tail(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        self.store
+            .query_external_runtime_event_tail(runtime_id, limit)
+    }
+
     pub fn register_external_runtime(
         &self,
         registration: &ExternalRuntimeRegistration,

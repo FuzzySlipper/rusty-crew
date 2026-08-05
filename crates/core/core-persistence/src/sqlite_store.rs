@@ -1028,6 +1028,18 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn query_external_runtime_event_tail(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        match self {
+            Self::Sqlite(store) => store.query_external_runtime_event_tail(runtime_id, limit),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.query_external_runtime_event_tail(runtime_id, limit),
+        }
+    }
+
     pub fn create_agent_correlated_round(
         &self,
         record: &AgentCorrelatedRound,

@@ -1954,6 +1954,24 @@ impl CoordinationStore {
         )
     }
 
+    pub fn query_external_runtime_event_tail(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        let conn = self.conn()?;
+        let mut events = load_json_list(
+            &conn,
+            "SELECT record_json FROM external_runtime_events
+             WHERE runtime_id = ?1
+             ORDER BY sequence_id DESC LIMIT ?2",
+            params![runtime_id.0.as_str(), limit.clamp(1, 1_000)],
+            "query external runtime event tail",
+        )?;
+        events.reverse();
+        Ok(events)
+    }
+
     pub fn create_agent_correlated_round(
         &self,
         record: &AgentCorrelatedRound,
@@ -2774,11 +2792,40 @@ mod tests {
         assert!(store
             .append_external_runtime_event(&conflicting_event)
             .is_err());
+        for sequence_id in [2, 3] {
+            let mut later_event = event.clone();
+            later_event.event_id = format!("event-{sequence_id}");
+            later_event.sequence_id = sequence_id;
+            store.append_external_runtime_event(&later_event).unwrap();
+        }
         assert_eq!(
             store
                 .query_external_runtime_events(&ExternalRuntimeId::new("codex-local"), 0, 10)
                 .unwrap(),
-            vec![event]
+            vec![
+                event.clone(),
+                {
+                    let mut later = event.clone();
+                    later.event_id = "event-2".into();
+                    later.sequence_id = 2;
+                    later
+                },
+                {
+                    let mut later = event.clone();
+                    later.event_id = "event-3".into();
+                    later.sequence_id = 3;
+                    later
+                },
+            ]
+        );
+        assert_eq!(
+            store
+                .query_external_runtime_event_tail(&ExternalRuntimeId::new("codex-local"), 2)
+                .unwrap()
+                .into_iter()
+                .map(|event| event.sequence_id)
+                .collect::<Vec<_>>(),
+            vec![2, 3]
         );
         remove_temp_db(&path);
     }

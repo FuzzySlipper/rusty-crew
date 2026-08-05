@@ -118,6 +118,8 @@ struct RuntimeEventQuery {
     runtime_id: ExternalRuntimeId,
     after_sequence: u64,
     limit: u32,
+    #[serde(default)]
+    tail: bool,
 }
 
 #[napi_derive::napi]
@@ -608,14 +610,18 @@ impl NativeBridgeBinding {
     #[napi]
     pub fn query_external_runtime_events_json(&self, input_json: String) -> napi::Result<String> {
         let input = parse_json::<RuntimeEventQuery>(&input_json)?;
-        serialize_json(
-            &self
-                .bridge()?
-                .engine()
+        let bridge = self.bridge()?;
+        let engine = bridge.engine().map_err(to_napi_error)?;
+        let events = if input.tail {
+            engine
+                .query_external_runtime_event_tail(&input.runtime_id, input.limit)
                 .map_err(to_napi_error)?
+        } else {
+            engine
                 .query_external_runtime_events(&input.runtime_id, input.after_sequence, input.limit)
-                .map_err(to_napi_error)?,
-        )
+                .map_err(to_napi_error)?
+        };
+        serialize_json(&events)
     }
 }
 

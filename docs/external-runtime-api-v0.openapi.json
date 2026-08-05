@@ -791,6 +791,51 @@
         "x-rusty-crew-contract-detail": "wire"
       }
     },
+    "/v1/external-runtimes/{runtime_id}/events/head": {
+      "get": {
+        "operationId": "readExternalRuntimeEventHead",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalRuntimeEventHead"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "external.runtimes.events.head",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
     "/v1/external-runtimes/{runtime_id}/stream": {
       "get": {
         "operationId": "streamExternalRuntimeEvents",
@@ -7417,6 +7462,19 @@
         },
         "additionalProperties": false
       },
+      "ExternalRuntimeEventHead": {
+        "type": "object",
+        "required": ["event"],
+        "properties": {
+          "event": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/NormalizedExternalRuntimeEvent" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ExternalRuntimeRawDetail": {
         "type": "object",
         "required": [
@@ -7662,7 +7720,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 32,
+    "operation_count": 33,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

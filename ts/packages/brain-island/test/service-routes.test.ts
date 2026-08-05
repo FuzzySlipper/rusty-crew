@@ -773,6 +773,40 @@ test("external thread lifecycle routes expose archive, delete, restore, and arch
   );
 });
 
+test("external runtime event head reads one indexed tail cursor", async () => {
+  let query: Record<string, unknown> | undefined;
+  const latestEvent = { eventId: "event-latest", sequenceId: 1_000_000 };
+  const context = {
+    bridge: {
+      async getExternalRuntime(runtimeId: string) {
+        return { runtimeId };
+      },
+      async queryExternalRuntimeEvents(input: Record<string, unknown>) {
+        query = input;
+        return [latestEvent];
+      },
+    },
+    controller: {},
+    requestId: () => "req-external-event-head",
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL("http://local/v1/external-runtimes/runtime-1/events/head"),
+    context,
+  );
+
+  assert.deepEqual(okData(result as AdminRouteResult), {
+    event: latestEvent,
+  });
+  assert.deepEqual(query, {
+    runtimeId: "runtime-1",
+    afterSequence: 0,
+    limit: 1,
+    tail: true,
+  });
+});
+
 test("external command routes are typed and recognized commands cannot leak to messages", async () => {
   let body: Record<string, unknown> = {};
   let delivered = false;

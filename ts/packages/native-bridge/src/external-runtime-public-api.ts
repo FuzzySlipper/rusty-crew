@@ -119,5 +119,6 @@ export interface NativeExternalRuntimeBridgeMethods
     runtimeId: string;
     afterSequence: number;
     limit: number;
+    tail?: boolean;
   }): Promise<NormalizedExternalRuntimeEvent[]>;
 }

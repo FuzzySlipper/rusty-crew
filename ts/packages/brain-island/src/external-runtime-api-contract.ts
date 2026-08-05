@@ -77,6 +77,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   threadUnarchive:
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive",
   events: "/v1/external-runtimes/{runtime_id}/events",
+  eventHead: "/v1/external-runtimes/{runtime_id}/events/head",
   stream: "/v1/external-runtimes/{runtime_id}/stream",
   rawDetail: "/v1/external-runtimes/{runtime_id}/raw-details/{detail_id}",
   bindings: "/v1/external-bindings",
@@ -484,6 +485,13 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
         schema: { type: "integer", minimum: 1, maximum: 1000, default: 200 },
       },
     ],
+  ),
+  operation(
+    "external.runtimes.events.head",
+    "readExternalRuntimeEventHead",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.eventHead,
+    "ExternalRuntimeEventHead",
   ),
   {
     ...operation(
@@ -1641,6 +1649,19 @@ function routeSchemas(): Record<string, JsonSchema> {
           items: {
             $ref: "#/components/schemas/NormalizedExternalRuntimeEvent",
           },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalRuntimeEventHead: {
+      type: "object",
+      required: ["event"],
+      properties: {
+        event: {
+          anyOf: [
+            { $ref: "#/components/schemas/NormalizedExternalRuntimeEvent" },
+            { type: "null" },
+          ],
         },
       },
       additionalProperties: false,

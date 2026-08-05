@@ -670,6 +670,16 @@ export async function handleExternalRuntimeRequest(
         return methodNotAllowed(requestId);
       case "events":
         if (method !== "GET") return methodNotAllowed(requestId);
+        if (parts.length === 5 && parts[4] === "head") {
+          const events = await context.bridge.queryExternalRuntimeEvents({
+            runtimeId,
+            afterSequence: 0,
+            limit: 1,
+            tail: true,
+          });
+          return successRoute(requestId, { event: events.at(-1) ?? null });
+        }
+        if (parts.length !== 4) return methodNotAllowed(requestId);
         return successRoute(requestId, {
           events: await context.bridge.queryExternalRuntimeEvents({
             runtimeId,

@@ -755,6 +755,14 @@ export const API_CAPABILITIES = [
     ["session", "diagnostics"],
   ),
   readCapability(
+    "external.runtimes.events.head",
+    "GET",
+    "/v1/external-runtimes/{runtime_id}/events/head",
+    "Read the latest normalized external runtime event cursor without replaying history.",
+    "admin",
+    ["session", "diagnostics"],
+  ),
+  readCapability(
     "external.runtimes.events.stream",
     "GET",
     "/v1/external-runtimes/{runtime_id}/stream",

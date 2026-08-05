@@ -1482,6 +1482,26 @@ impl PostgresBackendStore {
         )
     }
 
+    pub fn query_external_runtime_event_tail(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        let schema = self.quoted_schema();
+        let mut events = load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_events
+                 WHERE runtime_id = $1
+                 ORDER BY sequence_id DESC LIMIT $2"
+            ),
+            &[&runtime_id.0, &(limit.clamp(1, 1_000) as i64)],
+            "query PostgreSQL external runtime event tail",
+        )?;
+        events.reverse();
+        Ok(events)
+    }
+
     pub fn create_agent_correlated_round(
         &self,
         record: &AgentCorrelatedRound,

@@ -423,6 +423,17 @@
         "public": true
       },
       {
+        "id": "external.runtimes.events.head",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/events/head",
+        "description": "Read the latest normalized external runtime event cursor without replaying history.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["session", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "external.runtimes.events.stream",
         "method": "GET",
         "path_template": "/v1/external-runtimes/{runtime_id}/stream",
@@ -2867,6 +2878,13 @@
         "capability_id": "external.runtimes.events.list",
         "method": "GET",
         "path_template": "/v1/external-runtimes/{runtime_id}/events",
+        "route_id": "external_runtime",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "external.runtimes.events.head",
+        "method": "GET",
+        "path_template": "/v1/external-runtimes/{runtime_id}/events/head",
         "route_id": "external_runtime",
         "auth_phase": "after_auth"
       },
