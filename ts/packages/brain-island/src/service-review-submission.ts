@@ -25,12 +25,304 @@ import {
 export interface ServiceReviewSubmissionContext {
   readonly bridge: NativeBridgeModule;
   readonly projectId?: string;
+  readonly reviewDenBindingId?: string;
   readonly runtimeConfig: RustyCrewRuntimeConfig;
   readonly serviceConfig: RustyCrewServiceConfig;
   now(): string;
   applyCoordinationDelivery(
     receipt: AgentMessageDeliveryReceipt,
   ): Promise<AgentMessageDeliveryReceipt>;
+}
+
+export interface ExternalReviewSubmissionRequest {
+  readonly taskId: number;
+  readonly repository: string;
+  readonly commitSha: string;
+  readonly ref: string;
+  readonly requiredChecks: readonly string[];
+  readonly baseCommit?: string;
+  readonly reviewSummaryMd: string;
+  readonly clientId: string;
+  readonly idempotencyKey: string;
+  readonly expectedDeploymentRole?: "production" | "debug";
+}
+
+export interface ExternalReviewSubmissionReceipt {
+  readonly submissionId: string;
+  readonly projectId: string;
+  readonly taskId: number;
+  readonly repository: string;
+  readonly commitSha: string;
+  readonly ref: string;
+  readonly requiredChecks: string[];
+  readonly baseCommit?: string;
+  readonly reviewer: string;
+  readonly clientId: string;
+  readonly idempotencyKey: string;
+  readonly deploymentRole: "production" | "debug";
+  readonly phase: ReviewSubmissionRecord["phase"];
+  readonly revision: number;
+  readonly reviewRoundId?: number;
+  readonly gateId?: number;
+  readonly gateStatus?: string;
+  readonly reviewFinalizationId?: number;
+  readonly reviewPacketId?: number;
+  readonly reviewPacketMessageId?: number;
+  readonly reviewExactHeadCommit?: string;
+  readonly reviewVerdict?: string;
+  readonly reviewTaskStatus?: string;
+  readonly terminalReason?: string;
+  readonly lastAdapterError?: string;
+}
+
+export async function submitExternalReview(
+  context: ServiceReviewSubmissionContext,
+  input: ExternalReviewSubmissionRequest,
+): Promise<ExternalReviewSubmissionReceipt> {
+  validateExternalReviewInput(context, input);
+  const projectId = context.projectId?.trim();
+  if (!projectId) {
+    throw new ReviewSubmissionAdapterError(
+      "review_project_not_configured",
+      "Rusty Crew Review project integration is not configured.",
+    );
+  }
+  let record = await context.bridge.beginReviewSubmission({
+    caller: {
+      type: "external_cli",
+      clientId: input.clientId,
+      idempotencyKey: input.idempotencyKey,
+    },
+    projectId,
+    taskId: String(input.taskId),
+    repository: input.repository,
+    commitSha: input.commitSha,
+    gitRef: input.ref,
+    requiredChecks: [...new Set(input.requiredChecks)],
+    baseCommit: input.baseCommit,
+    reviewSummaryMd: input.reviewSummaryMd,
+    reviewer: "@reviewer",
+    now: context.now(),
+  });
+  if (record.phase === "submitted" || record.phase === "den_handoff_recorded") {
+    await advanceDenHandoff(context, record);
+    record = await getReviewSubmissionRecord(context, record.submissionId);
+  }
+  return externalReviewReceipt(context, record);
+}
+
+export async function getExternalReviewStatus(
+  context: ServiceReviewSubmissionContext,
+  submissionId: string,
+): Promise<ExternalReviewSubmissionReceipt> {
+  const record = await getReviewSubmissionRecord(context, submissionId);
+  if (record.caller.type !== "external_cli") {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_submission_not_found",
+      "The requested submission is not owned by the external review CLI.",
+    );
+  }
+  return externalReviewReceipt(context, record);
+}
+
+export function assertExpectedDeploymentRole(
+  context: ServiceReviewSubmissionContext,
+  expectedDeploymentRole: string | undefined,
+): void {
+  if (
+    expectedDeploymentRole !== undefined &&
+    expectedDeploymentRole !== "production" &&
+    expectedDeploymentRole !== "debug"
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_submission",
+      "expectedDeploymentRole must be production or debug.",
+    );
+  }
+  if (
+    expectedDeploymentRole !== undefined &&
+    expectedDeploymentRole !== context.serviceConfig.deploymentRole
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "deployment_role_mismatch",
+      `Expected ${expectedDeploymentRole} service, connected to ${context.serviceConfig.deploymentRole}.`,
+    );
+  }
+}
+
+export function parseExternalReviewSubmissionRequest(
+  body: unknown,
+): ExternalReviewSubmissionRequest {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_submission",
+      "External review submission body must be a JSON object.",
+    );
+  }
+  const value = body as Record<string, unknown>;
+  const taskId = value.taskId;
+  const repository = stringField(value, "repository");
+  const commitSha = stringField(value, "commitSha");
+  const ref = stringField(value, "ref");
+  const requiredChecks = value.requiredChecks;
+  const baseCommit = optionalStringField(value, "baseCommit");
+  const reviewSummaryMd = stringField(value, "reviewSummaryMd");
+  const clientId = stringField(value, "clientId");
+  const idempotencyKey = stringField(value, "idempotencyKey");
+  const expectedDeploymentRole = optionalStringField(
+    value,
+    "expectedDeploymentRole",
+  );
+  if (Object.hasOwn(value, "reviewer")) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_submission",
+      "External review submissions always route to @reviewer; reviewer cannot be overridden.",
+    );
+  }
+  if (
+    typeof taskId !== "number" ||
+    !Array.isArray(requiredChecks) ||
+    requiredChecks.some((check) => typeof check !== "string") ||
+    (expectedDeploymentRole !== undefined &&
+      expectedDeploymentRole !== "production" &&
+      expectedDeploymentRole !== "debug")
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_submission",
+      "External review submission has an invalid task id, required checks, or deployment role.",
+    );
+  }
+  return {
+    taskId,
+    repository,
+    commitSha,
+    ref,
+    requiredChecks,
+    ...(baseCommit === undefined ? {} : { baseCommit }),
+    reviewSummaryMd,
+    clientId,
+    idempotencyKey,
+    ...(expectedDeploymentRole === undefined ? {} : { expectedDeploymentRole }),
+  };
+}
+
+function externalReviewReceipt(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): ExternalReviewSubmissionReceipt {
+  if (record.caller.type !== "external_cli") {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_submission_not_found",
+      "The requested submission is not owned by the external review CLI.",
+    );
+  }
+  return {
+    submissionId: record.submissionId,
+    projectId: String(record.projectId),
+    taskId: Number(record.taskId),
+    repository: record.repository,
+    commitSha: record.commitSha,
+    ref: record.gitRef,
+    requiredChecks: [...record.requiredChecks],
+    ...(record.baseCommit === undefined || record.baseCommit === null
+      ? {}
+      : { baseCommit: record.baseCommit }),
+    reviewer: record.reviewer,
+    clientId: record.caller.clientId,
+    idempotencyKey: record.caller.idempotencyKey,
+    deploymentRole: context.serviceConfig.deploymentRole,
+    phase: record.phase,
+    revision: record.revision,
+    ...(record.reviewRoundId === undefined || record.reviewRoundId === null
+      ? {}
+      : { reviewRoundId: record.reviewRoundId }),
+    ...(record.gateId === undefined || record.gateId === null
+      ? {}
+      : { gateId: record.gateId }),
+    ...(record.gateStatus === undefined || record.gateStatus === null
+      ? {}
+      : { gateStatus: record.gateStatus }),
+    ...(record.reviewFinalizationId === undefined ||
+    record.reviewFinalizationId === null
+      ? {}
+      : { reviewFinalizationId: record.reviewFinalizationId }),
+    ...(record.reviewPacketId === undefined || record.reviewPacketId === null
+      ? {}
+      : { reviewPacketId: record.reviewPacketId }),
+    ...(record.reviewPacketMessageId === undefined ||
+    record.reviewPacketMessageId === null
+      ? {}
+      : { reviewPacketMessageId: record.reviewPacketMessageId }),
+    ...(record.reviewExactHeadCommit === undefined ||
+    record.reviewExactHeadCommit === null
+      ? {}
+      : { reviewExactHeadCommit: record.reviewExactHeadCommit }),
+    ...(record.reviewVerdict === undefined || record.reviewVerdict === null
+      ? {}
+      : { reviewVerdict: record.reviewVerdict }),
+    ...(record.reviewTaskStatus === undefined ||
+    record.reviewTaskStatus === null
+      ? {}
+      : { reviewTaskStatus: record.reviewTaskStatus }),
+    ...(record.terminalReason === undefined || record.terminalReason === null
+      ? {}
+      : { terminalReason: record.terminalReason }),
+    ...(record.lastAdapterError === undefined ||
+    record.lastAdapterError === null
+      ? {}
+      : { lastAdapterError: record.lastAdapterError }),
+  };
+}
+
+async function getReviewSubmissionRecord(
+  context: ServiceReviewSubmissionContext,
+  submissionId: string,
+): Promise<ReviewSubmissionRecord> {
+  if (!/^review-submission:[0-9a-f]{64}$/.test(submissionId)) {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_submission_not_found",
+      "Submission id must be a Rusty Crew review submission id.",
+    );
+  }
+  const records = await context.bridge.listReviewSubmissions({
+    submissionId,
+    pendingOnly: false,
+  });
+  const record = records[0];
+  if (record === undefined) {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_submission_not_found",
+      `Review submission ${submissionId} was not found.`,
+    );
+  }
+  return record;
+}
+
+function validateExternalReviewInput(
+  context: ServiceReviewSubmissionContext,
+  input: ExternalReviewSubmissionRequest,
+): void {
+  if (
+    !Number.isSafeInteger(input.taskId) ||
+    input.taskId <= 0 ||
+    input.repository.trim() === "" ||
+    input.commitSha.trim() === "" ||
+    input.ref.trim() === "" ||
+    input.requiredChecks.length === 0 ||
+    input.requiredChecks.some((check) => check.trim() === "") ||
+    input.reviewSummaryMd.trim() === "" ||
+    input.reviewSummaryMd.length > 64 * 1024 ||
+    input.clientId.trim() === "" ||
+    input.clientId.length > 128 ||
+    input.idempotencyKey.trim() === "" ||
+    input.idempotencyKey.length > 256
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_submission",
+      "External review submission fields are missing, empty, or exceed their bounds.",
+    );
+  }
+  assertExpectedDeploymentRole(context, input.expectedDeploymentRole);
 }
 
 export function createServiceReviewSubmissionRuntime(
@@ -324,7 +616,9 @@ async function resumeRoutedReview(
           context,
           record,
           "den_mcp_binding_unavailable",
-          "Submitting session has no active Den MCP binding.",
+          isExternalCliSubmission(record)
+            ? "The configured service Den MCP binding is unavailable."
+            : "Submitting session has no active Den MCP binding.",
         );
       }
       const payload = await denCall(context, binding, "finalize_review", {
@@ -365,6 +659,18 @@ async function resumeRoutedReview(
           findingStatuses: receipt.findingStatuses,
           taskStatus: receipt.taskStatus,
           materialDigest: receipt.materialDigest,
+        },
+        now: context.now(),
+      });
+    }
+
+    if (record.phase === "den_finalized" && isExternalCliSubmission(record)) {
+      record = await context.bridge.transitionReviewSubmission({
+        submissionId: record.submissionId,
+        expectedRevision: record.revision,
+        transition: {
+          type: "review_terminal",
+          terminalReason: "external_cli_review_complete",
         },
         now: context.now(),
       });
@@ -645,7 +951,9 @@ async function advanceDenHandoff(
       context,
       record,
       "den_mcp_binding_unavailable",
-      "Submitting session has no active Den MCP binding.",
+      isExternalCliSubmission(record)
+        ? "The configured service Den MCP binding is unavailable."
+        : "Submitting session has no active Den MCP binding.",
     );
     return failed(record, "den_mcp_binding_unavailable");
   }
@@ -695,7 +1003,9 @@ async function advanceDenHandoff(
       ref: record.gitRef,
       required_checks: record.requiredChecks,
       requested_by: record.submitterAgentId,
-      session_key: record.submitterSessionId,
+      ...(record.submitterSessionId === undefined
+        ? {}
+        : { session_key: record.submitterSessionId }),
       agent_profile: record.submitterAgentId,
     });
     const gateId = requiredNumericId(gate, ["gate_id", "gateId", "id"]);
@@ -806,18 +1116,28 @@ async function dispatchReviewer(
 
 function denBinding(
   context: ServiceReviewSubmissionContext,
-  sessionId: string,
+  sessionId?: string | null,
 ): McpBindingRecord | undefined {
-  const session = context.runtimeConfig.sessions.find(
-    (candidate) => candidate.sessionId === sessionId,
-  );
-  if (session === undefined) return undefined;
+  if (sessionId !== undefined && sessionId !== null) {
+    const session = context.runtimeConfig.sessions.find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (session === undefined) return undefined;
+    return context.runtimeConfig.mcpBindings.find(
+      (binding) =>
+        binding.status === "active" &&
+        binding.profileId === session.profileId &&
+        binding.agentId === session.agentId &&
+        (binding.sessionId === undefined || binding.sessionId === sessionId) &&
+        binding.serverNames.includes("den"),
+    );
+  }
+  const configuredBindingId = context.reviewDenBindingId?.trim();
+  if (!configuredBindingId) return undefined;
   return context.runtimeConfig.mcpBindings.find(
     (binding) =>
       binding.status === "active" &&
-      binding.profileId === session.profileId &&
-      binding.agentId === session.agentId &&
-      (binding.sessionId === undefined || binding.sessionId === sessionId) &&
+      binding.bindingId === configuredBindingId &&
       binding.serverNames.includes("den"),
   );
 }
@@ -917,8 +1237,14 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
     "",
     record.reviewSummaryMd,
     "",
-    "Record findings and the verdict in Den, then reply once to this routed message.",
+    isExternalCliSubmission(record)
+      ? "Record findings and the verdict in Den, then call complete_routed_review. This was submitted by an external CLI; do not attempt a requester reply."
+      : "Record findings and the verdict in Den, then reply once to this routed message.",
   ].join("\n");
+}
+
+function isExternalCliSubmission(record: ReviewSubmissionRecord): boolean {
+  return record.caller.type === "external_cli";
 }
 
 function accepted(record: ReviewSubmissionRecord): ReviewSubmissionToolReceipt {
@@ -1046,11 +1372,28 @@ function retryDue(record: ReviewSubmissionRecord): boolean {
   return Date.now() - Date.parse(record.updatedAt) >= 30_000;
 }
 
-class ReviewSubmissionAdapterError extends Error {
+export class ReviewSubmissionAdapterError extends Error {
   constructor(
     readonly reasonCode: string,
     message: string,
   ) {
     super(message);
   }
+}
+
+function stringField(value: Record<string, unknown>, key: string): string {
+  const candidate = value[key];
+  return typeof candidate === "string" ? candidate : "";
+}
+
+function optionalStringField(
+  value: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const candidate = value[key];
+  return candidate === undefined || candidate === null
+    ? undefined
+    : typeof candidate === "string"
+      ? candidate
+      : "";
 }

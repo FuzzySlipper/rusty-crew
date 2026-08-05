@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ReviewSubmissionRecord } from "@rusty-crew/contracts";
-import { selectRoutedReviewRecord } from "../src/service-review-submission.js";
+import {
+  parseExternalReviewSubmissionRequest,
+  selectRoutedReviewRecord,
+} from "../src/service-review-submission.js";
 
 function record(
   submissionId: string,
@@ -48,4 +51,26 @@ test("multiple terminal reviews remain ambiguous without persisted routed contex
   const result = selectRoutedReviewRecord([first, second]);
   assert.equal(result.record, undefined);
   assert.equal(result.ambiguous, true);
+});
+
+test("external review submission parser does not expose a reviewer override", () => {
+  const input = {
+    taskId: 6644,
+    repository: "earendil-works/rusty-crew",
+    commitSha: "a".repeat(40),
+    ref: "main",
+    requiredChecks: ["Verify Offline", "Verify Postgres Backend"],
+    baseCommit: "0".repeat(40),
+    reviewSummaryMd: "Ready for exact-SHA review.",
+    clientId: "external-agent",
+    idempotencyKey: "6644-a",
+    expectedDeploymentRole: "debug",
+    reviewer: "@untrusted-recipient",
+  };
+  assert.throws(() => parseExternalReviewSubmissionRequest(input));
+  const { reviewer: _reviewer, ...withoutReviewer } = input;
+  const request = parseExternalReviewSubmissionRequest(withoutReviewer);
+  assert.equal(request.taskId, 6644);
+  assert.equal(request.clientId, "external-agent");
+  assert.equal("reviewer" in request, false);
 });

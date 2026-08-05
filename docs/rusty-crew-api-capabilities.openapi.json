@@ -2538,6 +2538,50 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/review-submissions": {
+      "post": {
+        "operationId": "reviewSubmissionsExternalCreate",
+        "summary": "Submit an exact-SHA review from an unmanaged external agent; the service owns gates and routes only to @reviewer.",
+        "tags": ["service", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.submissions.external.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/review-submissions/{submission_id}": {
+      "get": {
+        "operationId": "reviewSubmissionsExternalRead",
+        "summary": "Read the bounded receipt for an external exact-SHA review submission.",
+        "tags": ["service", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "submission_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.submissions.external.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/roleplay/mechanic-diagnostics": {
       "get": {
         "operationId": "adminRoleplayMechanicDiagnosticsList",
@@ -5652,7 +5696,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 227,
+    "capability_count": 229,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

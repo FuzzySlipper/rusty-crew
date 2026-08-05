@@ -1164,6 +1164,10 @@ pub enum AgentCoordinationCaller {
         native_turn_id: String,
         native_request_id: String,
     },
+    ExternalCli {
+        client_id: String,
+        idempotency_key: String,
+    },
     ReviewSubmission {
         submission_id: String,
     },

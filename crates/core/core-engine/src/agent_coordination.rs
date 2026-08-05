@@ -1209,10 +1209,14 @@ impl CoreEngine {
                     Some(turn.request.request_id),
                 ))
             }
+            AgentCoordinationCaller::ExternalCli { .. } => Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external_cli_caller_is_review_submission_only",
+            )),
             AgentCoordinationCaller::ReviewSubmission { submission_id } => {
                 let (agent_id, session_id) =
                     self.resolve_review_submission_caller(submission_id)?;
-                Ok((agent_id, Some(session_id), None))
+                Ok((agent_id, session_id, None))
             }
         }
     }

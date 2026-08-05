@@ -118,6 +118,10 @@ export type AgentCoordinationCaller = {
   runtimeId: string;
   type: "external_agent";
 } | {
+  clientId: string;
+  idempotencyKey: string;
+  type: "external_cli";
+} | {
   submissionId: string;
   type: "review_submission";
 };
@@ -1678,7 +1682,7 @@ export type ReviewSubmissionRecord = {
   revision: number;
   submissionId: string;
   submitterAgentId: string;
-  submitterSessionId: string;
+  submitterSessionId?: string | null;
   taskId: string;
   terminalReason?: string | null;
   updatedAt: string;

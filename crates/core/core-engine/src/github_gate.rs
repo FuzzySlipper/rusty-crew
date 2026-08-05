@@ -70,13 +70,20 @@ impl CoreEngine {
                     && wait.commit_sha.eq_ignore_ascii_case(&event.commit_sha)
             });
         let Some(mut wait) = matching else {
+            let review_submission = self.apply_review_gate_terminal(&event)?;
             save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
             return Ok(GitHubGateTerminalReceipt {
                 event_id: event.event_id,
                 cursor: event.event_id,
                 duplicate: false,
                 wake_scheduled: false,
-                ignored_reason: Some("no_current_wait_for_gate_and_sha".to_string()),
+                ignored_reason: Some(if review_submission.is_some() && event.status == "passed" {
+                    "review_submission_dispatch_pending".to_string()
+                } else if review_submission.is_some() {
+                    "review_submission_gate_failed".to_string()
+                } else {
+                    "no_current_wait_for_gate_and_sha".to_string()
+                }),
                 wait: None,
             });
         };

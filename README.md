@@ -38,6 +38,9 @@ changes when that produces a cleaner long-term path.
   boundary used to diagnose detached or apparently idle agent work.
 - [Review-agent inbox guidance](docs/review-agent-inbox-and-prompt-guidance.md)
   provides copy-ready prompts and the durable serial review contract.
+- [External agent review CLI](docs/external-agent-review-cli.md) documents the
+  authenticated exact-SHA review path for unmanaged agents, including explicit
+  production/debug selection and polling.
 - [Built-in Rusty Crew help skill](docs/skills-list-view-tools.md) documents the
   immutable help surface available to every native Crew brain, its compact
   prompt pointer, and its queryable diagnostics.

@@ -29,6 +29,7 @@ export type ServiceApiRouteId =
   | "admin.service_credentials"
   | "admin.profile_registry.write"
   | "admin.memory"
+  | "admin.review_submissions.external"
   | "admin.diagnostics";
 
 export type ServiceApiRouteAuthPhase =
@@ -186,6 +187,15 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
   ),
   route("admin.memory", 230, "after_auth", "Memory admin routes", (path) =>
     path.startsWith("/v1/admin/memory/"),
+  ),
+  route(
+    "admin.review_submissions.external",
+    240,
+    "after_auth",
+    "External review submission and status routes",
+    (path) =>
+      path === "/v1/admin/review-submissions" ||
+      path.startsWith("/v1/admin/review-submissions/"),
   ),
   route(
     "admin.diagnostics",

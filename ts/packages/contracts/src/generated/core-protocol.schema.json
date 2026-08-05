@@ -251,6 +251,26 @@
         },
         {
           "properties": {
+            "clientId": {
+              "type": "string"
+            },
+            "idempotencyKey": {
+              "type": "string"
+            },
+            "type": {
+              "const": "external_cli",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "clientId",
+            "idempotencyKey"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "submissionId": {
               "type": "string"
             },
@@ -7121,7 +7141,10 @@
           "type": "string"
         },
         "submitterSessionId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "taskId": {
           "type": "string"
@@ -7147,7 +7170,6 @@
         "reviewSummaryMd",
         "reviewer",
         "submitterAgentId",
-        "submitterSessionId",
         "caller",
         "phase",
         "createdAt",

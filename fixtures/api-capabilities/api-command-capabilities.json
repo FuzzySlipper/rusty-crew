@@ -764,6 +764,28 @@
         "public": true
       },
       {
+        "id": "review.submissions.external.create",
+        "method": "POST",
+        "path_template": "/v1/admin/review-submissions",
+        "description": "Submit an exact-SHA review from an unmanaged external agent; the service owns gates and routes only to @reviewer.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "governance"],
+        "public": true
+      },
+      {
+        "id": "review.submissions.external.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-submissions/{submission_id}",
+        "description": "Read the bounded receipt for an external exact-SHA review submission.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "governance"],
+        "public": true
+      },
+      {
         "id": "coordination.debug.agents.list",
         "method": "GET",
         "path_template": "/v1/debug/coordination/agents",
@@ -3096,6 +3118,20 @@
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/review-submissions",
         "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.submissions.external.create",
+        "method": "POST",
+        "path_template": "/v1/admin/review-submissions",
+        "route_id": "admin.review_submissions.external",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.submissions.external.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-submissions/{submission_id}",
+        "route_id": "admin.review_submissions.external",
         "auth_phase": "after_auth"
       },
       {

@@ -9,7 +9,7 @@ impl CoreEngine {
     pub(crate) fn resolve_review_submission_caller(
         &self,
         submission_id: &str,
-    ) -> CoreResult<(AgentId, SessionId)> {
+    ) -> CoreResult<(AgentId, Option<SessionId>)> {
         let record =
             load_review_submission_record(&self.store, submission_id)?.ok_or_else(|| {
                 CoreError::new(
@@ -19,14 +19,16 @@ impl CoreEngine {
             })?;
         match record.phase {
             ReviewSubmissionPhase::ReviewerDispatchPending => {
-                let session = self.sessions.get_session(&record.submitter_session_id)?;
-                if session.status == SessionStatus::Archived
-                    || session.agent_id != record.submitter_agent_id
-                {
-                    return Err(CoreError::new(
-                        CoreErrorKind::SessionExpired,
-                        "review_submission_submitter_session_changed",
-                    ));
+                if let Some(session_id) = record.submitter_session_id.as_ref() {
+                    let session = self.sessions.get_session(session_id)?;
+                    if session.status == SessionStatus::Archived
+                        || session.agent_id != record.submitter_agent_id
+                    {
+                        return Err(CoreError::new(
+                            CoreErrorKind::SessionExpired,
+                            "review_submission_submitter_session_changed",
+                        ));
+                    }
                 }
                 Ok((record.submitter_agent_id, record.submitter_session_id))
             }
@@ -47,7 +49,7 @@ impl CoreEngine {
                         "review_submission_reviewer_session_archived",
                     ));
                 }
-                Ok((session.agent_id, reviewer_session_id))
+                Ok((session.agent_id, Some(reviewer_session_id)))
             }
             _ => Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
@@ -67,16 +69,24 @@ impl CoreEngine {
             )
         })?;
         validate_review_submission_request(&request)?;
-        let (submitter_agent_id, submitter_session_id, _) =
-            self.resolve_coordination_caller(&request.caller)?;
-        let submitter_session_id = submitter_session_id.ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::ActionRejected,
-                "review_submission_requires_session_caller",
-            )
-        })?;
+        let (submitter_agent_id, submitter_session_id) = match &request.caller {
+            AgentCoordinationCaller::ExternalCli { client_id, .. } => {
+                (AgentId::new(format!("external-cli:{client_id}")), None)
+            }
+            _ => {
+                let (agent_id, session_id, _) =
+                    self.resolve_coordination_caller(&request.caller)?;
+                let session_id = session_id.ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        "review_submission_requires_session_caller",
+                    )
+                })?;
+                (agent_id, Some(session_id))
+            }
+        };
         let submission_id =
-            review_submission_id(&request.task_id, &request.commit_sha, &submitter_session_id);
+            review_submission_id(&request.task_id, &request.commit_sha, &request.caller);
         if let Some(mut existing) = load_review_submission_record(&self.store, &submission_id)? {
             validate_duplicate_review_submission(&existing, &request)?;
             if existing.base_commit.is_none() && request.base_commit.is_some() {
@@ -195,22 +205,24 @@ impl CoreEngine {
                 record.gate_id = Some(gate_id);
                 record.phase = ReviewSubmissionPhase::GatePending;
                 record.last_adapter_error = None;
-                save_github_gate_wait(
-                    &self.store,
-                    &GitHubGateWaitRecord {
-                        session_id: record.submitter_session_id.clone(),
-                        run_id: None,
-                        provider_thread_id: provider_thread_id(&record.caller),
-                        project_id: record.project_id.clone(),
-                        task_id: record.task_id.clone(),
-                        gate_id,
-                        commit_sha: record.commit_sha.clone(),
-                        phase: GitHubGateWaitPhase::Waiting,
-                        terminal_event_id: None,
-                        created_at: request.now.clone(),
-                        updated_at: request.now.clone(),
-                    },
-                )?;
+                if let Some(session_id) = record.submitter_session_id.clone() {
+                    save_github_gate_wait(
+                        &self.store,
+                        &GitHubGateWaitRecord {
+                            session_id,
+                            run_id: None,
+                            provider_thread_id: provider_thread_id(&record.caller),
+                            project_id: record.project_id.clone(),
+                            task_id: record.task_id.clone(),
+                            gate_id,
+                            commit_sha: record.commit_sha.clone(),
+                            phase: GitHubGateWaitPhase::Waiting,
+                            terminal_event_id: None,
+                            created_at: request.now.clone(),
+                            updated_at: request.now.clone(),
+                        },
+                    )?;
+                }
             }
             ReviewSubmissionTransition::AdapterFailed {
                 reason_code,
@@ -376,7 +388,9 @@ impl CoreEngine {
                 && query
                     .submitter_session_id
                     .as_ref()
-                    .is_none_or(|session_id| record.submitter_session_id == *session_id)
+                    .is_none_or(|session_id| {
+                        record.submitter_session_id.as_ref() == Some(session_id)
+                    })
                 && query.reviewer_session_id.as_ref().is_none_or(|session_id| {
                     record.reviewer_session_id.as_ref() == Some(session_id)
                 })
@@ -452,13 +466,16 @@ impl CoreEngine {
         summary: &str,
         now: &IsoTimestamp,
     ) -> CoreResult<()> {
-        let session = self.sessions.get_session(&record.submitter_session_id)?;
+        let Some(submitter_session_id) = record.submitter_session_id.as_ref() else {
+            return Ok(());
+        };
+        let session = self.sessions.get_session(submitter_session_id)?;
         if session.status == SessionStatus::Archived
             || session.agent_id != record.submitter_agent_id
         {
             return Ok(());
         }
-        let state = self.body_projector.project(&record.submitter_session_id)?;
+        let state = self.body_projector.project(submitter_session_id)?;
         let ttl_ms = state.delta_policy.queued_message_ttl_ms;
         let body = serde_json::to_string(&serde_json::json!({
             "type": "review_submission_failure",
@@ -476,7 +493,7 @@ impl CoreEngine {
         })?;
         self.store.save_queued_message(&QueuedMessageRecord {
             message_id: format!("review-submission-failure:{}", record.submission_id),
-            owner_session_id: Some(record.submitter_session_id.clone()),
+            owner_session_id: Some(submitter_session_id.clone()),
             owner_agent_id: record.submitter_agent_id.clone(),
             message: AgentMessage {
                 from: AgentId::new("rusty-crew:review-submission"),
@@ -495,7 +512,7 @@ impl CoreEngine {
             state_reason: None,
         })?;
         self.bus.publish(CoreEvent::BrainWakeRequested {
-            session_id: record.submitter_session_id.clone(),
+            session_id: submitter_session_id.clone(),
         })?;
         Ok(())
     }
@@ -543,6 +560,7 @@ fn validate_review_submission_request(request: &ReviewSubmissionRequest) -> Core
             .iter()
             .any(|check| check.trim().is_empty())
         || request.review_summary_md.trim().is_empty()
+        || request.review_summary_md.len() > 64 * 1024
         || !request.reviewer.starts_with('@')
     {
         return Err(CoreError::new(
@@ -559,6 +577,23 @@ fn validate_review_submission_request(request: &ReviewSubmissionRequest) -> Core
             CoreErrorKind::InvalidInput,
             "review submission base_commit must be an exact SHA",
         ));
+    }
+    if let AgentCoordinationCaller::ExternalCli {
+        client_id,
+        idempotency_key,
+    } = &request.caller
+    {
+        if client_id.trim().is_empty()
+            || idempotency_key.trim().is_empty()
+            || client_id.len() > 128
+            || idempotency_key.len() > 256
+            || request.reviewer != "@reviewer"
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external CLI review submissions require bounded client identity, idempotency key, and fixed @reviewer recipient",
+            ));
+        }
     }
     Ok(())
 }
@@ -590,13 +625,25 @@ fn review_submission_terminal(phase: ReviewSubmissionPhase) -> bool {
     )
 }
 
-fn review_submission_id(task_id: &TaskId, commit_sha: &str, session_id: &SessionId) -> String {
+fn review_submission_id(
+    task_id: &TaskId,
+    commit_sha: &str,
+    caller: &AgentCoordinationCaller,
+) -> String {
+    let caller_identity = match caller {
+        AgentCoordinationCaller::DirectBrain { session_id, .. } => session_id.0.clone(),
+        AgentCoordinationCaller::ExternalCli {
+            client_id,
+            idempotency_key,
+        } => format!("external-cli|{client_id}|{idempotency_key}"),
+        _ => "unsupported".to_string(),
+    };
     let digest = Sha256::digest(
         format!(
             "{}|{}|{}",
             task_id.0,
             commit_sha.to_ascii_lowercase(),
-            session_id.0
+            caller_identity,
         )
         .as_bytes(),
     );

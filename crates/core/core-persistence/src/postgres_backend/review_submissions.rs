@@ -28,6 +28,17 @@ pub(super) fn apply_postgres_review_submissions(
     .map_err(|error| postgres_error("create PostgreSQL review submissions table", error))
 }
 
+pub(super) fn allow_external_review_submitters(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.review_submissions
+            ALTER COLUMN submitter_session_id DROP NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("allow external PostgreSQL review submitters", error))
+}
+
 impl PostgresBackendStore {
     pub fn get_review_submission(
         &self,
@@ -69,6 +80,10 @@ impl PostgresBackendStore {
         let phase = review_submission_phase_as_str(record.phase);
         let revision = record.revision as i64;
         let record_json = to_json_text(record)?;
+        let submitter_session_id = record
+            .submitter_session_id
+            .as_ref()
+            .map(|session| session.0.as_str());
         self.client()?
             .execute(
                 &format!(
@@ -82,7 +97,7 @@ impl PostgresBackendStore {
                     &record.project_id.0,
                     &record.task_id.0,
                     &record.commit_sha,
-                    &record.submitter_session_id.0,
+                    &submitter_session_id,
                     &phase,
                     &revision,
                     &record.created_at,

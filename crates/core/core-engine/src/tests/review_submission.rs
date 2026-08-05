@@ -72,7 +72,7 @@ fn passing_review_gate_is_restart_durable_and_does_not_wake_submitter() {
         pending[0].phase,
         ReviewSubmissionPhase::ReviewerDispatchPending
     );
-    assert_eq!(pending[0].submitter_session_id, session.session_id);
+    assert_eq!(pending[0].submitter_session_id, Some(session.session_id));
 }
 
 #[test]
@@ -112,6 +112,90 @@ fn newer_sha_supersedes_old_workflow_and_duplicate_submit_is_idempotent() {
             .phase,
         ReviewSubmissionPhase::Superseded
     );
+}
+
+#[test]
+fn external_cli_review_is_sessionless_and_gate_terminal_event_advances_it() {
+    let engine = test_engine();
+    let commit_sha = exact_sha('e');
+    let mut record = engine
+        .begin_review_submission(ReviewSubmissionRequest {
+            caller: AgentCoordinationCaller::ExternalCli {
+                client_id: "unmanaged-codex".to_string(),
+                idempotency_key: "review-6644-e".to_string(),
+            },
+            project_id: ProjectId::new("rusty-crew"),
+            task_id: TaskId::new("6644"),
+            repository: "earendil-works/rusty-crew".to_string(),
+            commit_sha: commit_sha.clone(),
+            git_ref: "main".to_string(),
+            required_checks: vec!["Verify Offline".to_string()],
+            base_commit: Some(exact_sha('0')),
+            review_summary_md: "Submitted by an external CLI.".to_string(),
+            reviewer: "@reviewer".to_string(),
+            now: "2026-08-04T00:00:00Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(record.submitter_session_id, None);
+    assert!(matches!(
+        record.caller,
+        AgentCoordinationCaller::ExternalCli { .. }
+    ));
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenHandoffRecorded {
+                review_round_id: 664401,
+            },
+            now: "2026-08-04T00:01:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::GateRegistered { gate_id: 664402 },
+            now: "2026-08-04T00:02:00Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(record.phase, ReviewSubmissionPhase::GatePending);
+    assert!(engine
+        .github_gate_wait(&SessionId::new("never-created"))
+        .unwrap()
+        .is_none());
+
+    let receipt = engine
+        .consume_github_gate_terminal_event(GitHubGateTerminalEvent {
+            event_id: 664403,
+            gate_id: 664402,
+            project_id: ProjectId::new("rusty-crew"),
+            task_id: TaskId::new("6644"),
+            commit_sha,
+            status: "passed".to_string(),
+            terminal_reason: "checks_passed".to_string(),
+            summary: Some("checks passed".to_string()),
+            failure_summary: None,
+            completed_at: "2026-08-04T00:03:00Z".to_string(),
+        })
+        .unwrap();
+    assert!(!receipt.wake_scheduled);
+    assert_eq!(
+        receipt.ignored_reason.as_deref(),
+        Some("review_submission_dispatch_pending")
+    );
+    let pending = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            submission_id: Some(record.submission_id),
+            pending_only: true,
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap();
+    assert_eq!(
+        pending[0].phase,
+        ReviewSubmissionPhase::ReviewerDispatchPending
+    );
+    assert_eq!(pending[0].submitter_session_id, None);
 }
 
 #[test]
@@ -282,6 +366,7 @@ fn routed_completion_checkpoints_are_restart_durable_and_reply_terminal_is_stabl
 }
 
 #[test]
+#[cfg(feature = "postgres")]
 #[ignore = "requires local PostgreSQL dev database env"]
 fn postgres_review_submission_matches_restart_and_revision_contract() {
     let database_url = std::env::var("RUSTY_CREW_DATABASE_URL")

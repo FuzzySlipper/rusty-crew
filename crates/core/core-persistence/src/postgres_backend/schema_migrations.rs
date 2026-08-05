@@ -1,11 +1,13 @@
 //! PostgreSQL schema migration catalog and application logic.
 
 use super::logical_turns::apply_postgres_logical_turns;
-use super::review_submissions::apply_postgres_review_submissions;
+use super::review_submissions::{
+    allow_external_review_submitters, apply_postgres_review_submissions,
+};
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 45;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 46;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -242,6 +244,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 45,
         description: "add durable review submission workflows",
         apply: Some(apply_postgres_review_submissions),
+    },
+    PostgresSchemaMigration {
+        version: 46,
+        description: "allow external CLI review submissions without sessions",
+        apply: Some(allow_external_review_submitters),
     },
 ];
 

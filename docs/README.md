@@ -56,6 +56,8 @@ Operator setup references:
   durable continuation campaign, with browser closure tracked separately.
 - `review-agent-inbox-and-prompt-guidance.md` — copy-ready reviewer and
   requester prompts plus the durable serial inbox contract.
+- `external-agent-review-cli.md` — the explicit production/debug CLI path for
+  unmanaged agents to submit exact-SHA reviews and poll durable outcomes.
 - `skills-list-view-tools.md` — immutable built-in Rusty Crew help, filesystem
   skill catalog behavior, mandatory native tool selection, and diagnostics.
 

@@ -409,7 +409,12 @@ import {
 } from "./curator-observation.js";
 import {
   createServiceReviewSubmissionRuntime,
+  assertExpectedDeploymentRole,
+  getExternalReviewStatus,
+  parseExternalReviewSubmissionRequest,
   reconcileReviewSubmissions,
+  ReviewSubmissionAdapterError,
+  submitExternalReview,
   type ServiceReviewSubmissionContext,
 } from "./service-review-submission.js";
 
@@ -438,6 +443,7 @@ export interface RustyCrewServiceApp {
 interface ServiceState {
   readonly config: RustyCrewServiceConfig;
   readonly reviewProjectId?: string;
+  readonly reviewDenBindingId?: string;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
   readonly lock: RustyCrewServiceLock;
@@ -1090,6 +1096,7 @@ export async function createRustyCrewServiceApp(
     const state: ServiceState = {
       config,
       reviewProjectId: options.env?.RUSTY_CREW_REVIEW_PROJECT_ID?.trim(),
+      reviewDenBindingId: options.env?.RUSTY_CREW_REVIEW_DEN_BINDING_ID?.trim(),
       bridge,
       engine,
       lock,
@@ -1370,6 +1377,61 @@ async function handleHttpRequest(
       requestId(request),
       await state.bridge.listReviewSubmissions({ pendingOnly: false }),
     );
+  }
+
+  if (route?.id === "admin.review_submissions.external") {
+    const method = (request.method ?? "GET").toUpperCase();
+    try {
+      if (
+        method === "POST" &&
+        url.pathname === "/v1/admin/review-submissions"
+      ) {
+        const input = parseExternalReviewSubmissionRequest(
+          await readJsonBody(request),
+        );
+        const receipt = await submitExternalReview(
+          reviewSubmissionContext(state),
+          input,
+        );
+        return successRoute(requestId(request), receipt);
+      }
+      if (
+        method === "GET" &&
+        url.pathname.startsWith("/v1/admin/review-submissions/")
+      ) {
+        assertExpectedDeploymentRole(
+          reviewSubmissionContext(state),
+          url.searchParams.get("expectedDeploymentRole") ?? undefined,
+        );
+        const submissionId = decodeURIComponent(
+          url.pathname.slice("/v1/admin/review-submissions/".length),
+        );
+        if (!submissionId) {
+          return failure(404, requestId(request), {
+            code: "not_found",
+            reason_code: "external_review_submission_not_found",
+            message: "A review submission id is required.",
+            retryable: false,
+          });
+        }
+        return successRoute(
+          requestId(request),
+          await getExternalReviewStatus(
+            reviewSubmissionContext(state),
+            submissionId,
+          ),
+        );
+      }
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "external_review_submission_method_not_allowed",
+        message:
+          "External review submissions support POST collection and GET by submission id.",
+        retryable: false,
+      });
+    } catch (error) {
+      return externalReviewApiFailure(requestId(request), error);
+    }
   }
 
   if (route?.id === "logical_turns") {
@@ -5789,12 +5851,47 @@ function reviewSubmissionContext(
   return {
     bridge: state.bridge,
     projectId: state.reviewProjectId,
+    reviewDenBindingId: state.reviewDenBindingId,
     runtimeConfig: state.runtimeConfig,
     serviceConfig: state.config,
     now: state.now,
     applyCoordinationDelivery: (receipt) =>
       state.externalRuntimeController.applyCoordinationDelivery(receipt),
   };
+}
+
+function externalReviewApiFailure(
+  requestIdValue: string,
+  error: unknown,
+): ServiceRouteResult {
+  const reasonCode =
+    error instanceof ReviewSubmissionAdapterError
+      ? error.reasonCode
+      : "external_review_submission_failed";
+  const message = error instanceof Error ? error.message : String(error);
+  const status =
+    reasonCode === "external_review_submission_not_found"
+      ? 404
+      : reasonCode === "deployment_role_mismatch" ||
+          reasonCode === "review_submission_duplicate_payload_mismatch"
+        ? 409
+        : reasonCode.startsWith("invalid_") ||
+            reasonCode === "review_project_not_configured"
+          ? 400
+          : 500;
+  return failure(status, requestIdValue, {
+    code:
+      status === 404
+        ? "not_found"
+        : status === 409
+          ? "conflict"
+          : status === 400
+            ? "invalid_input"
+            : "internal_error",
+    reason_code: reasonCode,
+    message,
+    retryable: status >= 500,
+  });
 }
 
 function configuredSessionForDeliveryIntent(

@@ -997,6 +997,22 @@ export const API_CAPABILITIES = [
     "admin",
     ["service", "diagnostics"],
   ),
+  writeCapability(
+    "review.submissions.external.create",
+    "POST",
+    "/v1/admin/review-submissions",
+    "Submit an exact-SHA review from an unmanaged external agent; the service owns gates and routes only to @reviewer.",
+    "admin",
+    ["service", "governance"],
+  ),
+  readCapability(
+    "review.submissions.external.read",
+    "GET",
+    "/v1/admin/review-submissions/{submission_id}",
+    "Read the bounded receipt for an external exact-SHA review submission.",
+    "admin",
+    ["service", "governance"],
+  ),
   readCapability(
     "coordination.debug.agents.list",
     "GET",

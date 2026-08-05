@@ -24,6 +24,41 @@ pub(crate) fn migrate_v61_add_review_submissions(tx: &rusqlite::Transaction<'_>)
     .map_err(|error| persistence_error("apply schema migration 61", error))
 }
 
+pub(crate) fn migrate_v62_allow_external_review_submitters(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "DROP INDEX IF EXISTS idx_review_submissions_task_sha_session;
+         DROP INDEX IF EXISTS idx_review_submissions_session_phase;
+         ALTER TABLE review_submissions RENAME TO review_submissions_v61;
+         CREATE TABLE review_submissions (
+            submission_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            commit_sha TEXT NOT NULL,
+            submitter_session_id TEXT,
+            phase TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            record_json TEXT NOT NULL
+         );
+         INSERT INTO review_submissions (
+            submission_id, project_id, task_id, commit_sha, submitter_session_id,
+            phase, revision, created_at, updated_at, record_json
+         )
+         SELECT submission_id, project_id, task_id, commit_sha, submitter_session_id,
+                phase, revision, created_at, updated_at, record_json
+           FROM review_submissions_v61;
+         DROP TABLE review_submissions_v61;
+         CREATE UNIQUE INDEX idx_review_submissions_task_sha_session
+            ON review_submissions(task_id, commit_sha, submitter_session_id);
+         CREATE INDEX idx_review_submissions_session_phase
+            ON review_submissions(submitter_session_id, phase, updated_at DESC);",
+    )
+    .map_err(|error| persistence_error("apply schema migration 62", error))
+}
+
 impl CoordinationStore {
     pub fn get_review_submission(
         &self,
@@ -75,7 +110,10 @@ impl CoordinationStore {
                 record.project_id.0,
                 record.task_id.0,
                 record.commit_sha,
-                record.submitter_session_id.0,
+                record
+                    .submitter_session_id
+                    .as_ref()
+                    .map(|session| session.0.as_str()),
                 review_submission_phase_as_str(record.phase),
                 record.revision as i64,
                 record.created_at,
