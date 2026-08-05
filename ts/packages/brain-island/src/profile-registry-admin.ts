@@ -5,13 +5,18 @@ import type {
   NativeBridgeModule,
   NativeProfileRegistryRecord,
 } from "@rusty-crew/native-bridge";
-import type { McpBindingRecord, ProfileId } from "@rusty-crew/contracts";
+import type {
+  ExternalMessageDeliveryPolicy,
+  McpBindingRecord,
+  ProfileId,
+} from "@rusty-crew/contracts";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { NativeRuntimeConfigDiagnostic } from "@rusty-crew/native-bridge";
 import {
   contextStrategyPolicyFromUnknown,
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
+import { parseExternalMessageDeliveryPolicy } from "./profile-loading.js";
 
 export type AdminProfileRegistrySource = "registry";
 export type AdminProfileAssetStatus =
@@ -39,6 +44,7 @@ export interface AdminProfileRegistryRecord {
   agentId?: string;
   ownerId?: string;
   providerAlias?: string;
+  externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
   toolPolicy?: {
     requestedToolsets?: string[];
@@ -169,6 +175,7 @@ async function registryAdminRecord(
     agentId: record.agentId,
     ownerId: record.ownerId,
     providerAlias: runtime.providerAlias,
+    externalMessageDeliveryPolicy: runtime.externalMessageDeliveryPolicy,
     localToolProfileId: runtime.localToolProfileId,
     toolPolicy: runtime.toolPolicy,
     contextPolicy: runtime.contextPolicy,
@@ -193,6 +200,7 @@ function runtimeConfigReadbackFromRegistry(
   runtimeConfig: RustyCrewRuntimeConfig,
 ): {
   providerAlias?: string;
+  externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
   toolPolicy?: AdminProfileRegistryRecord["toolPolicy"];
   contextPolicy?: ContextStrategyPolicy;
@@ -204,6 +212,10 @@ function runtimeConfigReadbackFromRegistry(
     .filter((binding) => String(binding.profileId) === record.profileId)
     .map(adminMcpBindingFromRuntime);
   return {
+    externalMessageDeliveryPolicy: parseExternalMessageDeliveryPolicy(
+      settings.externalMessageDeliveryPolicy ??
+        settingsProfile.externalMessageDeliveryPolicy,
+    ),
     providerAlias:
       stringValue(settings.providerAlias) ??
       stringValue(settings.provider_alias) ??
@@ -230,6 +242,7 @@ function runtimeConfigReadbackFromRegistry(
 
 function profileConfigFromRegistrySettings(settings: Record<string, unknown>): {
   providerAlias?: string;
+  externalMessageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
   toolPolicy?: AdminProfileRegistryRecord["toolPolicy"];
   contextPolicy?: ContextStrategyPolicy;
@@ -237,6 +250,12 @@ function profileConfigFromRegistrySettings(settings: Record<string, unknown>): {
   const profile = recordValue(settings.profile);
   return {
     providerAlias: stringValue(profile.providerAlias),
+    externalMessageDeliveryPolicy:
+      profile.externalMessageDeliveryPolicy === undefined
+        ? undefined
+        : parseExternalMessageDeliveryPolicy(
+            profile.externalMessageDeliveryPolicy,
+          ),
     localToolProfileId: stringValue(profile.localToolProfileId),
     toolPolicy: toolPolicyFromUnknown(profile.toolPolicy),
     contextPolicy: contextStrategyPolicyFromUnknown(profile.contextPolicy),

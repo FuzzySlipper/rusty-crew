@@ -61,6 +61,7 @@ export const coreConfigFacadeArtifact = {
       "request.brain.module",
       "request.brain.strategy",
       "request.display_name",
+      "request.external_message_delivery_policy",
       "request.implementation_id",
       "request.kind",
       "request.mcp_bindings",

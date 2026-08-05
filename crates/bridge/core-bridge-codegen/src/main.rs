@@ -2461,6 +2461,7 @@ fn sample_create_profile_plan_input() -> CreateProfilePlanInput {
             implementation_id: Some("field-created-brain".to_owned()),
             kind: Some(SessionKind::Full),
             provider_alias: Some("field-provider".to_owned()),
+            external_message_delivery_policy: None,
             model_config: Some(ProfileModelConfigSeed {
                 provider: "local".to_owned(),
                 model_name: "deterministic".to_owned(),

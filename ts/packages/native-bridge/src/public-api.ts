@@ -33,6 +33,7 @@ import type {
   EventReceipt,
   EventSubscription,
   ExternalEvent,
+  ExternalMessageDeliveryPolicy,
   GitHubGateSuspendRequest,
   GitHubGateTerminalEvent,
   GitHubGateTerminalReceipt,
@@ -1718,6 +1719,7 @@ export interface NativeCreateProfileRequest {
   implementationId?: string;
   kind?: "full" | "worker" | "delegated";
   providerAlias?: string;
+  externalMessageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   modelConfig?: NativeProfileModelConfigSeed;
   brain?: {
     module?: string;
@@ -1852,6 +1854,7 @@ export interface NativeCreateProfileSeedMetadata {
     module?: string;
     strategy?: string;
   };
+  externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   skillsMode: string;
 }
 

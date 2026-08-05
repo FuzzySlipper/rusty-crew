@@ -194,6 +194,11 @@ backgroundReview:
     "object",
   );
   assert.equal(
+    runnerPlan.registryWrite.activeRuntimeSettingsJson
+      .externalMessageDeliveryPolicy,
+    "immediate_steer",
+  );
+  assert.equal(
     runnerPlan.registryWrite.derivedRuntimeRefs.some(
       (ref) => ref.refKind === "session",
     ),

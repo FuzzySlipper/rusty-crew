@@ -382,9 +382,10 @@
       },
       "ProfileRegistryRuntimeConfigEdit": {
         "type": "object",
-        "required": ["providerAlias", "contextPolicy", "mcpBindings"],
+        "required": ["providerAlias", "externalMessageDeliveryPolicy", "contextPolicy", "mcpBindings"],
         "properties": {
           "providerAlias": { "type": "string" },
+          "externalMessageDeliveryPolicy": { "type": "string", "enum": ["immediate_steer", "serial_next_turn"] },
           "brain": { "$ref": "#/components/schemas/ProfileRegistryBrainConfig" },
           "localToolProfileId": { "type": ["string", "null"] },
           "toolPolicy": { "$ref": "#/components/schemas/ProfileRegistryToolPolicy" },
@@ -402,6 +403,7 @@
         "properties": {
           "expectedRevision": { "type": "integer", "minimum": 1 },
           "providerAlias": { "type": "string" },
+          "externalMessageDeliveryPolicy": { "type": "string", "enum": ["immediate_steer", "serial_next_turn"] },
           "brain": { "$ref": "#/components/schemas/ProfileRegistryBrainConfig" },
           "localToolProfileId": { "type": ["string", "null"] },
           "toolPolicy": { "$ref": "#/components/schemas/ProfileRegistryToolPolicy" },
@@ -470,7 +472,8 @@
           "serviceConfigWillChange",
           "configReloadRequired",
           "runtimeRebuildRecommended",
-          "mcpRefreshRecommended"
+          "mcpRefreshRecommended",
+          "externalBindingRebuildRecommended"
         ],
         "properties": {
           "registryRevisionWillIncrement": { "type": "boolean" },
@@ -478,7 +481,8 @@
           "serviceConfigWillChange": { "type": "boolean" },
           "configReloadRequired": { "type": "boolean" },
           "runtimeRebuildRecommended": { "type": "boolean" },
-          "mcpRefreshRecommended": { "type": "boolean" }
+          "mcpRefreshRecommended": { "type": "boolean" },
+          "externalBindingRebuildRecommended": { "type": "boolean" }
         },
         "additionalProperties": false
       },
@@ -507,7 +511,7 @@
       },
       "ProfileRegistryRuntimeConfigEffects": {
         "type": "object",
-        "required": ["profilePath", "runtimeConfigPath", "mcpBindings", "applyResult"],
+        "required": ["profilePath", "runtimeConfigPath", "mcpBindings", "applyResult", "externalBindingRebuildRecommended"],
         "properties": {
           "profilePath": { "type": "string" },
           "runtimeConfigPath": { "type": "string" },
@@ -519,6 +523,7 @@
               "added": { "type": "integer" }
             }
           },
+          "externalBindingRebuildRecommended": { "type": "boolean" },
           "applyResult": { "type": "object", "additionalProperties": true }
         },
         "additionalProperties": true

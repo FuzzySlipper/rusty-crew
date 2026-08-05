@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   BrainModelConfig,
+  ExternalMessageDeliveryPolicy,
   ProfileId,
   ResourceLimits,
 } from "@rusty-crew/contracts";
@@ -18,6 +19,26 @@ import {
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
 import { isReservedBuiltInSkillSlug } from "./built-in-skills.js";
+
+export const DEFAULT_EXTERNAL_MESSAGE_DELIVERY_POLICY: ExternalMessageDeliveryPolicy =
+  "immediate_steer";
+
+export function isExternalMessageDeliveryPolicy(
+  value: unknown,
+): value is ExternalMessageDeliveryPolicy {
+  return value === "immediate_steer" || value === "serial_next_turn";
+}
+
+export function parseExternalMessageDeliveryPolicy(
+  value: unknown,
+  fallback: ExternalMessageDeliveryPolicy = DEFAULT_EXTERNAL_MESSAGE_DELIVERY_POLICY,
+): ExternalMessageDeliveryPolicy {
+  if (value === undefined) return fallback;
+  if (isExternalMessageDeliveryPolicy(value)) return value;
+  throw new Error(
+    "externalMessageDeliveryPolicy must be immediate_steer or serial_next_turn",
+  );
+}
 
 export type ProfileLoadErrorCode =
   | "profile_not_found"
@@ -152,6 +173,7 @@ export interface ProfileConfig {
   profileSkillsDir?: string;
   displayName?: string;
   providerAlias?: string;
+  externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   modelConfig: BrainModelConfig;
   brain?: ProfileBrainConfig;
   runtime?: ProfileRuntimeConfig;
@@ -811,6 +833,11 @@ function validateProfileConfig(
         : join(fragments.profileDir, "skills"),
     displayName: optionalString(parsed.displayName),
     providerAlias,
+    externalMessageDeliveryPolicy: profileExternalMessageDeliveryPolicy(
+      parsed.externalMessageDeliveryPolicy,
+      profileId,
+      profilePath,
+    ),
     modelConfig: resolvedModelConfig,
     brain: isRecord(parsed.brain)
       ? {
@@ -912,6 +939,20 @@ function validateProfileConfig(
         }
       : undefined,
   };
+}
+
+function profileExternalMessageDeliveryPolicy(
+  value: unknown,
+  profileId: ProfileId,
+  profilePath: string,
+): ExternalMessageDeliveryPolicy {
+  if (value === undefined) return DEFAULT_EXTERNAL_MESSAGE_DELIVERY_POLICY;
+  if (isExternalMessageDeliveryPolicy(value)) return value;
+  throw invalidProfile(
+    profileId,
+    profilePath,
+    "externalMessageDeliveryPolicy must be immediate_steer or serial_next_turn",
+  );
 }
 
 function brainModuleId(

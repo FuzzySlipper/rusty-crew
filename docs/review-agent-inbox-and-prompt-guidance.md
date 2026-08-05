@@ -5,6 +5,11 @@ Use this guide for a dedicated review agent whose profile sets
 owns the durable FIFO inbox, claim, expiry, reply correlation, and restart
 behavior.
 
+The profile setting is persisted in the profile registry and profile runtime
+config. It is used when a new managed external binding is created. Changing the
+profile setting does not mutate an existing binding in place; the binding must
+be explicitly rebuilt or replaced before its concrete delivery policy changes.
+
 ## Reviewer Profile Prompt
 
 Copy this block into the review profile's soul/developer guidance. Add the

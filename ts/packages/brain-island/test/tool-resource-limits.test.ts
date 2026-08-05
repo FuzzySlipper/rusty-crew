@@ -95,6 +95,7 @@ test("effective tool context reports delegation unavailable and keeps local edit
     profile: {
       profileId: "zero-delegation-profile" as ProfileId,
       modelConfig: { provider: "test", modelName: "test-model" },
+      externalMessageDeliveryPolicy: "immediate_steer",
     },
     skills: [],
     toolSelection: selection,

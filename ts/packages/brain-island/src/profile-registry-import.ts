@@ -152,6 +152,7 @@ function activeRuntimeSettingsJson(
   return stripUndefined({
     schemaVersion: 1,
     modelConfig: profile.modelConfig,
+    externalMessageDeliveryPolicy: profile.externalMessageDeliveryPolicy,
     brain: profile.brain,
     runtime: profile.runtime,
     toolPolicy: profile.toolPolicy,
@@ -554,6 +555,7 @@ const PROFILE_SCHEMA = schema(
     "name",
     "displayName",
     "modelConfig",
+    "externalMessageDeliveryPolicy",
     "brain",
     "runtime",
     "runtimeConfig",

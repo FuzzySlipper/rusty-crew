@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { readFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { McpBindingRecord } from "@rusty-crew/contracts";
+import type {
+  ExternalMessageDeliveryPolicy,
+  McpBindingRecord,
+} from "@rusty-crew/contracts";
 import type {
   NativeBridgeModule,
   NativeModelProviderRecord,
@@ -19,7 +22,10 @@ import {
   LocalToolProfileError,
 } from "./local-tool-profiles.js";
 import type { ProfileConfig } from "./profile-loading.js";
-import { loadProfileConfig } from "./profile-loading.js";
+import {
+  loadProfileConfig,
+  parseExternalMessageDeliveryPolicy,
+} from "./profile-loading.js";
 import type { ProfileRegistryWriteRoute } from "./service-profile-registry-routes.js";
 import type {
   RustyCrewRuntimeConfig,
@@ -69,11 +75,13 @@ export interface ProfileRegistryRuntimeConfigPlan {
     configReloadRequired: true;
     runtimeRebuildRecommended: boolean;
     mcpRefreshRecommended: boolean;
+    externalBindingRebuildRecommended: boolean;
   };
 }
 
 interface EditableProfileRuntimeConfig {
   providerAlias: string;
+  externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   brain?: { module?: string; strategy?: string };
   localToolProfileId?: string;
   toolPolicy?: {
@@ -191,6 +199,9 @@ export async function planProfileRegistryRuntimeConfigWrite(
       mcpRefreshRecommended:
         JSON.stringify(existing.mcpBindings) !==
         JSON.stringify(runtimeConfig.mcpBindings),
+      externalBindingRebuildRecommended:
+        existing.runtimeConfig.externalMessageDeliveryPolicy !==
+        runtimeConfig.externalMessageDeliveryPolicy,
     },
   };
 }
@@ -205,6 +216,7 @@ export async function applyProfileRegistryRuntimeConfigEffects(
   mcpBindings: { removed: number; added: number };
   applyResult: RustyCrewRuntimeConfigApplyResult;
   brainRebuilt: boolean;
+  externalBindingRebuildRecommended: boolean;
 }> {
   const profilePath = safeProfileConfigPath(
     context.runtimeConfig.profilesDir,
@@ -251,6 +263,8 @@ export async function applyProfileRegistryRuntimeConfigEffects(
     mcpBindings: { removed, added: runtimeMcpBindings.length },
     applyResult,
     brainRebuilt: plan.implications.runtimeRebuildRecommended,
+    externalBindingRebuildRecommended:
+      plan.implications.externalBindingRebuildRecommended,
   };
 }
 
@@ -328,11 +342,16 @@ async function editableRuntimeConfigForProfile(
     optionalString(settings.provider_alias) ??
     profile?.providerAlias ??
     "default";
+  const externalMessageDeliveryPolicy = parseExternalMessageDeliveryPolicy(
+    settings.externalMessageDeliveryPolicy ??
+      profile?.externalMessageDeliveryPolicy,
+  );
   const mcpBindings = context.runtimeConfig.mcpBindings
     .filter((binding) => String(binding.profileId) === record.profileId)
     .map(editableMcpBindingFromRuntime);
   const runtimeConfig: EditableProfileRuntimeConfig = {
     providerAlias,
+    externalMessageDeliveryPolicy,
     brain:
       profile?.brain ??
       brainMetadataFromUnknown(settings.brain) ??
@@ -374,6 +393,22 @@ async function editableRuntimeConfigFromBody(
   const providerAlias = Object.hasOwn(body, "providerAlias")
     ? requiredString(body.providerAlias, "providerAlias")
     : existing.runtimeConfig.providerAlias;
+  let externalMessageDeliveryPolicy =
+    existing.runtimeConfig.externalMessageDeliveryPolicy;
+  if (Object.hasOwn(body, "externalMessageDeliveryPolicy")) {
+    try {
+      externalMessageDeliveryPolicy = parseExternalMessageDeliveryPolicy(
+        body.externalMessageDeliveryPolicy,
+      );
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "external_message_delivery_policy_invalid",
+        path: "externalMessageDeliveryPolicy",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   const modelProvider = await context.bridge.getModelProvider(providerAlias);
   if (modelProvider === undefined) {
     diagnostics.push({
@@ -469,6 +504,7 @@ async function editableRuntimeConfigFromBody(
 
   return {
     providerAlias,
+    externalMessageDeliveryPolicy,
     brain,
     localToolProfileId,
     toolPolicy,
@@ -485,6 +521,7 @@ function profileRuntimeSettingsJson(
   return compactRecord({
     provider_alias: runtimeConfig.providerAlias,
     providerAlias: runtimeConfig.providerAlias,
+    externalMessageDeliveryPolicy: runtimeConfig.externalMessageDeliveryPolicy,
     brain: runtimeConfig.brain,
     skills_mode: "all",
     localToolProfileId: runtimeConfig.localToolProfileId,
@@ -509,6 +546,7 @@ function profileFileRuntimeConfig(
 ): Record<string, unknown> {
   return compactRecord({
     providerAlias: runtimeConfig.providerAlias,
+    externalMessageDeliveryPolicy: runtimeConfig.externalMessageDeliveryPolicy,
     brain: runtimeConfig.brain,
     localToolProfileId: runtimeConfig.localToolProfileId,
     toolPolicy: runtimeConfig.toolPolicy,
@@ -521,6 +559,8 @@ function applyEditableRuntimeConfigToProfileJson(
   runtimeConfig: EditableProfileRuntimeConfig,
 ): void {
   profileConfig.providerAlias = runtimeConfig.providerAlias;
+  profileConfig.externalMessageDeliveryPolicy =
+    runtimeConfig.externalMessageDeliveryPolicy;
   delete profileConfig.modelConfig;
   if (runtimeConfig.brain === undefined) {
     delete profileConfig.brain;

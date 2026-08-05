@@ -9207,6 +9207,13 @@ export const bridgeWireSchemaArtifact = {
                 "null"
               ]
             },
+            "external_message_delivery_policy": {
+              "enum": [
+                "immediate_steer",
+                "serial_next_turn"
+              ],
+              "type": "string"
+            },
             "model_config": {
               "properties": {
                 "api": {
@@ -9271,6 +9278,7 @@ export const bridgeWireSchemaArtifact = {
             "provider_alias",
             "model_config",
             "brain",
+            "external_message_delivery_policy",
             "skills_mode"
           ],
           "type": [

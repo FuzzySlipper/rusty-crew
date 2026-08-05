@@ -18,6 +18,7 @@ import type { AdminControlCommand } from "./admin-control-api.js";
 import { createLocalToolProfileStore } from "./local-tool-profiles.js";
 import {
   loadProfileConfig,
+  parseExternalMessageDeliveryPolicy,
   parseProfileConfigDraft,
   type ProfileConfig,
 } from "./profile-loading.js";
@@ -516,6 +517,9 @@ export async function createServiceProfile(
   const memoryMarkdown = optionalBodyMarkdown(command, "memoryMarkdown");
   const providerAlias =
     optionalBodyString(command, "providerAlias") ?? "default";
+  const externalMessageDeliveryPolicy = parseExternalMessageDeliveryPolicy(
+    command.body.externalMessageDeliveryPolicy,
+  );
   const modelProvider = await context.bridge.getModelProvider(providerAlias);
   if (modelProvider === undefined) {
     throw new Error(`model provider alias ${providerAlias} was not found`);
@@ -558,6 +562,7 @@ export async function createServiceProfile(
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
       providerAlias,
+      externalMessageDeliveryPolicy,
       brain: {
         module: brainSelection.module_id,
         strategy: brainSelection.selected_strategy_id,
@@ -641,6 +646,7 @@ export async function createServiceProfile(
         ? {}
         : { displayName: profileSeed.displayName }),
       providerAlias: profileSeed.providerAlias,
+      externalMessageDeliveryPolicy: profileSeed.externalMessageDeliveryPolicy,
       brain: profileSeed.brain,
       ...(profileMcpConfig === undefined
         ? {}

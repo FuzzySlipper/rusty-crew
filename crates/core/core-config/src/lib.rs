@@ -5,8 +5,8 @@
 //! render prompts, discover tools, call providers, or mutate runtime state.
 
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, IsoTimestamp, ProfileId,
-    ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
+    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ExternalMessageDeliveryPolicy,
+    IsoTimestamp, ProfileId, ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
     ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
     ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind, TaskId,
     MAX_RESOURCE_DELEGATION_DEPTH, MAX_RESOURCE_DURATION_MS,
@@ -405,6 +405,8 @@ pub struct CreateProfileRequest {
     pub implementation_id: Option<String>,
     pub kind: Option<SessionKind>,
     pub provider_alias: Option<String>,
+    #[serde(default)]
+    pub external_message_delivery_policy: Option<ExternalMessageDeliveryPolicy>,
     pub model_config: Option<ProfileModelConfigSeed>,
     pub brain: Option<ProfileBrainMetadata>,
     #[serde(default)]
@@ -531,6 +533,7 @@ pub struct CreateProfileSeedMetadata {
     pub provider_alias: String,
     pub model_config: ProfileModelConfigSeed,
     pub brain: ProfileBrainMetadata,
+    pub external_message_delivery_policy: ExternalMessageDeliveryPolicy,
     pub skills_mode: String,
 }
 
@@ -1320,6 +1323,10 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         .filter(|value| !value.is_empty())
         .unwrap_or("default")
         .to_string();
+    let external_message_delivery_policy = input
+        .request
+        .external_message_delivery_policy
+        .unwrap_or_default();
     let model_config = input
         .request
         .model_config
@@ -1688,6 +1695,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         active_runtime_settings_json: create_profile_runtime_settings_json(
             &provider_alias,
             &brain,
+            external_message_delivery_policy,
             profile_mcp_config.as_ref(),
             &runtime_mcp_bindings,
             input.request.source.as_ref(),
@@ -1837,6 +1845,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             provider_alias,
             model_config,
             brain,
+            external_message_delivery_policy,
             skills_mode: "all".to_string(),
         }),
         runtime_brain: Some(runtime_brain),
@@ -2746,6 +2755,7 @@ fn derived_runtime_ref_status_for_lifecycle(
 fn create_profile_runtime_settings_json(
     provider_alias: &str,
     brain: &ProfileBrainMetadata,
+    external_message_delivery_policy: ExternalMessageDeliveryPolicy,
     mcp_config: Option<&ProfileMcpConfig>,
     mcp_bindings: &[McpBindingConfigDraft],
     source: Option<&CreateProfileSourceRequest>,
@@ -2753,6 +2763,7 @@ fn create_profile_runtime_settings_json(
     json!({
         "provider_alias": provider_alias,
         "brain": brain,
+        "externalMessageDeliveryPolicy": external_message_delivery_policy,
         "skills_mode": "all",
         "mcp_config": mcp_config,
         "mcp_bindings": mcp_bindings,
@@ -4487,6 +4498,7 @@ mod tests {
                 implementation_id: None,
                 kind: None,
                 provider_alias: None,
+                external_message_delivery_policy: None,
                 model_config: None,
                 brain: None,
                 mcp_bindings: Vec::new(),
@@ -4510,6 +4522,10 @@ mod tests {
         assert_eq!(seed.model_config.provider, "local");
         assert_eq!(seed.model_config.model_name, "deterministic");
         assert_eq!(seed.brain.module.as_deref(), Some("local"));
+        assert_eq!(
+            seed.external_message_delivery_policy,
+            ExternalMessageDeliveryPolicy::ImmediateSteer
+        );
         assert_eq!(seed.skills_mode, "all");
         assert_eq!(
             plan.runtime_brain.expect("brain should be planned"),
@@ -4551,6 +4567,10 @@ mod tests {
         assert_eq!(
             registry_write.prompt_memory_markdown.as_deref(),
             Some("# Field memory\n")
+        );
+        assert_eq!(
+            registry_write.active_runtime_settings_json["externalMessageDeliveryPolicy"],
+            "immediate_steer"
         );
         assert_eq!(
             registry_write.import_export.imported_from.as_deref(),
@@ -4598,6 +4618,9 @@ mod tests {
                 implementation_id: None,
                 kind: None,
                 provider_alias: None,
+                external_message_delivery_policy: Some(
+                    ExternalMessageDeliveryPolicy::SerialNextTurn,
+                ),
                 model_config: None,
                 brain: None,
                 mcp_bindings: vec![
@@ -4628,12 +4651,23 @@ mod tests {
         let plan = plan_create_profile(&input);
         assert!(plan.ok(), "{:?}", plan.diagnostics);
         assert_eq!(plan.profile_mcp_config, None);
+        assert_eq!(
+            plan.profile_seed
+                .as_ref()
+                .expect("profile seed should be planned")
+                .external_message_delivery_policy,
+            ExternalMessageDeliveryPolicy::SerialNextTurn
+        );
         let registry_write = plan
             .registry_write
             .as_ref()
             .expect("registry write should be planned");
         assert_eq!(registry_write.prompt_soul_markdown, None);
         assert_eq!(registry_write.prompt_memory_markdown, None);
+        assert_eq!(
+            registry_write.active_runtime_settings_json["externalMessageDeliveryPolicy"],
+            "serial_next_turn"
+        );
         assert_eq!(plan.runtime_mcp_bindings.len(), 2);
         assert_eq!(
             plan.runtime_mcp_bindings[0],
@@ -4687,6 +4721,7 @@ mod tests {
                 implementation_id: Some("runner-brain".to_string()),
                 kind: Some(SessionKind::Full),
                 provider_alias: None,
+                external_message_delivery_policy: None,
                 model_config: None,
                 brain: None,
                 mcp_bindings: Vec::new(),
@@ -4733,6 +4768,7 @@ mod tests {
                 implementation_id: None,
                 kind: None,
                 provider_alias: None,
+                external_message_delivery_policy: None,
                 model_config: Some(ProfileModelConfigSeed {
                     provider: "".to_string(),
                     model_name: "".to_string(),

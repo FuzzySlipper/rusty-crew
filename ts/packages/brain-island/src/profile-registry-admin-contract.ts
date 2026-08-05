@@ -87,6 +87,7 @@ export const PROFILE_REGISTRY_MUTATION_PLAN_REQUIRED_FIELDS = [
 
 export const PROFILE_REGISTRY_RUNTIME_CONFIG_REQUIRED_FIELDS = [
   "providerAlias",
+  "externalMessageDeliveryPolicy",
   "contextPolicy",
   "mcpBindings",
 ] as const;

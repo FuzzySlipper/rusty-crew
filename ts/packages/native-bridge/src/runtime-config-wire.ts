@@ -6,6 +6,7 @@ import {
 import type {
   AgentId,
   ChannelBindingRecord,
+  ExternalMessageDeliveryPolicy,
   ResourceLimits,
   SessionId,
 } from "@rusty-crew/contracts";
@@ -403,6 +404,8 @@ export function toNativeCreateProfilePlan(
             module: plan.profile_seed.brain.module ?? undefined,
             strategy: plan.profile_seed.brain.strategy ?? undefined,
           },
+          externalMessageDeliveryPolicy:
+            plan.profile_seed.external_message_delivery_policy,
           skillsMode: plan.profile_seed.skills_mode,
         }
       : undefined,
@@ -584,6 +587,7 @@ export interface RawCreateProfilePlan {
       module?: string;
       strategy?: string;
     };
+    external_message_delivery_policy: ExternalMessageDeliveryPolicy;
     skills_mode: string;
   };
   runtime_brain?: {

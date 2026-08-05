@@ -57,6 +57,7 @@ test("runtime config effects rebuild the active brain when the plan requires it"
       nextWrite: {} as never,
       runtimeConfig: {
         providerAlias: "provider-next",
+        externalMessageDeliveryPolicy: "serial_next_turn",
         brain: { module: "chat-completions" },
         contextPolicy: {
           enabled: true,
@@ -79,6 +80,7 @@ test("runtime config effects rebuild the active brain when the plan requires it"
         configReloadRequired: true,
         runtimeRebuildRecommended: true,
         mcpRefreshRecommended: false,
+        externalBindingRebuildRecommended: true,
       },
     } as unknown as ProfileRegistryRuntimeConfigPlan;
 
@@ -92,10 +94,13 @@ test("runtime config effects rebuild the active brain when the plan requires it"
     assert.equal(result.brainRebuilt, true);
     const saved = JSON.parse(await readFile(profilePath, "utf8")) as {
       providerAlias?: string;
+      externalMessageDeliveryPolicy?: string;
       contextPolicy?: { strategyId?: string };
     };
     assert.equal(saved.providerAlias, "provider-next");
+    assert.equal(saved.externalMessageDeliveryPolicy, "serial_next_turn");
     assert.equal(saved.contextPolicy?.strategyId, "rolling_summary_compaction");
+    assert.equal(result.externalBindingRebuildRecommended, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
