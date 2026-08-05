@@ -70,6 +70,8 @@ const RAW_DETAIL_LIMIT = 256;
 const DEFAULT_RECOVERY_BASE_DELAY_MS = 5_000;
 const DEFAULT_RECOVERY_MAX_DELAY_MS = 60_000;
 const DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES = 256 * 1024;
+const DYNAMIC_TOOL_REFRESH_LINEAGE_EVENT_LIMIT = 1_000;
+const DYNAMIC_TOOL_REFRESH_LINEAGE_MAX_DEPTH = 64;
 const DYNAMIC_TOOL_REFRESH_HANDOFF_TAG =
   "RUSTY_CREW_DYNAMIC_TOOL_REFRESH_HANDOFF";
 export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
@@ -603,14 +605,121 @@ export class ServiceExternalRuntimeController {
         throw error;
       });
     const bindingsByThread = await this.#bindingsByThread(runtimeId);
+    const binding = bindingsByThread.get(result.thread.id);
+    const projected = await this.#projectExternalThread(
+      controlled,
+      result.thread,
+      false,
+      binding,
+    );
     return {
-      thread: await this.#projectExternalThread(
+      thread: await this.#restoreDynamicToolRefreshHistory(
         controlled,
-        result.thread,
-        false,
-        bindingsByThread.get(result.thread.id),
+        projected,
+        binding,
       ),
     };
+  }
+
+  /**
+   * Dynamic-tool refreshes must replace the native Codex thread because the
+   * app-server tool catalog is immutable. The replacement receives a bounded
+   * developer-instruction handoff, but that handoff is intentionally not a
+   * visible native transcript. Reattach the durable predecessor turns when a
+   * browser reads the managed replacement so a refresh does not look like a
+   * blank session.
+   */
+  async #restoreDynamicToolRefreshHistory(
+    controlled: ControlledRuntime,
+    thread: ExternalThreadProjection,
+    binding: ExternalAgentBinding | undefined,
+  ): Promise<ExternalThreadProjection> {
+    if (binding === undefined) return thread;
+
+    let predecessorIds: string[];
+    try {
+      predecessorIds = await this.#dynamicToolRefreshLineage(
+        controlled,
+        binding,
+        thread.threadId,
+      );
+    } catch {
+      // Transcript recovery is an additive projection. A temporary event
+      // store failure must not make the native thread unreadable.
+      return thread;
+    }
+    if (predecessorIds.length === 0) return thread;
+
+    const historicalTurns: ExternalThreadTurnProjection[] = [];
+    let historicalPreview = thread.preview;
+    for (const predecessorId of predecessorIds) {
+      try {
+        const predecessor = await controlled.driver.threadRead({
+          threadId: predecessorId,
+          includeTurns: true,
+        });
+        const projected = projectExternalThread(predecessor.thread, null);
+        if (historicalPreview.length === 0 && projected.preview.length > 0) {
+          historicalPreview = projected.preview;
+        }
+        historicalTurns.push(...projected.turns);
+      } catch {
+        // A deleted or unavailable predecessor should not hide newer native
+        // turns that are still readable.
+      }
+    }
+    if (historicalTurns.length === 0) return thread;
+
+    const currentTurnIds = new Set(thread.turns.map((turn) => turn.turnId));
+    return {
+      ...thread,
+      preview: historicalPreview,
+      turns: [
+        ...historicalTurns.filter((turn) => !currentTurnIds.has(turn.turnId)),
+        ...thread.turns,
+      ],
+    };
+  }
+
+  async #dynamicToolRefreshLineage(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding,
+    currentThreadId: string,
+  ): Promise<string[]> {
+    const events = await this.#bridge.queryExternalRuntimeEvents({
+      runtimeId: controlled.registration.runtimeId,
+      afterSequence: 0,
+      limit: DYNAMIC_TOOL_REFRESH_LINEAGE_EVENT_LIMIT,
+      tail: true,
+    });
+    const predecessorByReplacement = new Map<string, string>();
+    for (const event of events) {
+      if (event.kind !== "dynamic_tool_catalog_refreshed") continue;
+      if (!isRecord(event.payload)) continue;
+      if (event.payload.bindingId !== binding.bindingId) continue;
+      const replacementId = stringValue(event.payload.nativeThreadId);
+      const predecessorId = stringValue(event.payload.previousNativeThreadId);
+      if (replacementId === undefined || predecessorId === undefined) {
+        continue;
+      }
+      predecessorByReplacement.set(replacementId, predecessorId);
+    }
+
+    const lineage: string[] = [];
+    const seen = new Set([currentThreadId]);
+    let replacementId = currentThreadId;
+    for (
+      let depth = 0;
+      depth < DYNAMIC_TOOL_REFRESH_LINEAGE_MAX_DEPTH;
+      depth += 1
+    ) {
+      const predecessorId = predecessorByReplacement.get(replacementId);
+      if (predecessorId === undefined || seen.has(predecessorId)) break;
+      lineage.push(predecessorId);
+      seen.add(predecessorId);
+      replacementId = predecessorId;
+    }
+    return lineage.reverse();
   }
 
   async updateBindingMetadata(input: {
