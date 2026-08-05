@@ -68,7 +68,7 @@ rusty-crew-review submit \
   --service-url http://127.0.0.1:9347 \
   --deployment-role production \
   --task 6644 \
-  --repository earendil-works/rusty-crew \
+  --repository FuzzySlipper/rusty-crew \
   --sha 0123456789abcdef0123456789abcdef01234567 \
   --ref main \
   --check 'Verify Offline' \

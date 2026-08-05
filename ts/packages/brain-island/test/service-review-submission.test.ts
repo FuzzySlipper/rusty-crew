@@ -56,7 +56,7 @@ test("multiple terminal reviews remain ambiguous without persisted routed contex
 test("external review submission parser does not expose a reviewer override", () => {
   const input = {
     taskId: 6644,
-    repository: "earendil-works/rusty-crew",
+    repository: "FuzzySlipper/rusty-crew",
     commitSha: "a".repeat(40),
     ref: "main",
     requiredChecks: ["Verify Offline", "Verify Postgres Backend"],

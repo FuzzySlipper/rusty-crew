@@ -27,7 +27,7 @@ assert.ok(tool.executeWithContext);
 const result = await tool.executeWithContext!(
   {
     taskId: 6574,
-    repository: "earendil-works/rusty-crew",
+    repository: "FuzzySlipper/rusty-crew",
     commitSha: "a".repeat(40),
     ref: "main",
     requiredChecks: ["Verify Offline", "Verify Postgres Backend"],
@@ -51,7 +51,7 @@ assert.equal(result.details.phase, "gate_pending");
 assert.deepEqual(calls, [
   {
     taskId: 6574,
-    repository: "earendil-works/rusty-crew",
+    repository: "FuzzySlipper/rusty-crew",
     commitSha: "a".repeat(40),
     ref: "main",
     requiredChecks: ["Verify Offline", "Verify Postgres Backend"],

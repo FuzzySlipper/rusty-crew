@@ -65,7 +65,7 @@ test("Codex review submission derives external caller and returns without pollin
       tool: "submit_task_for_review",
       arguments: {
         taskId: 6574,
-        repository: "earendil-works/rusty-crew",
+        repository: "FuzzySlipper/rusty-crew",
         commitSha: "a".repeat(40),
         ref: "main",
         requiredChecks: ["Verify Offline"],
