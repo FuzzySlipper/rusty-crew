@@ -32,6 +32,13 @@ SHA that did not come from the review envelope. Crew keeps the selection scoped
 to this reviewer session, finalizes Den, and sends the receipt-based reply. Do
 not call `rusty_crew.reply_agent_message` for a managed review closeout.
 
+Only use `complete_routed_review` when the envelope says it is a Rusty Crew
+managed review submission. A plain Den `request_review` packet or an ordinary
+`send_agent_message` to `@reviewer` is a direct/unmanaged review: use Den's
+`finalize_review` path and do not expect a Crew submission attachment or receipt
+reply. A routable `@reviewer` address alone does not create a managed review
+submission.
+
 Queued work is Crew-owned. Expired and failed requests are terminal and are not
 silently retried. Do not manually start another queued review in this turn.
 ```

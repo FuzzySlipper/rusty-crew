@@ -125,6 +125,32 @@ test("managed closeout uses the explicit target within a reused reviewer session
   assert.equal(result.reasonCode, "review_reply_terminal");
 });
 
+test("managed closeout explains when a direct Den review has no Crew attachment", async () => {
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [],
+    } as never,
+    projectId: "rusty-crew",
+    runtimeConfig: { sessions: [] } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-05T00:00:00.000Z",
+    applyCoordinationDelivery: async (receipt) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "looks_good",
+    taskId: 6651,
+    commitSha: "c".repeat(40),
+    caller: { type: "review_submission", submissionId: "context-resolved" },
+    reviewerSessionId: "reviewer-session",
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reasonCode, "review_target_not_found");
+  assert.match(result.summary, /requested directly through Den/);
+  assert.match(result.summary, /finalize_review/);
+});
+
 test("external review submission parser does not expose a reviewer override", () => {
   const input = {
     taskId: 6644,

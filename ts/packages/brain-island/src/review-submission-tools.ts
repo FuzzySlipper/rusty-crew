@@ -174,7 +174,7 @@ export function completeRoutedReviewTool(
     name: "complete_routed_review",
     label: "Complete routed review",
     description:
-      "Complete the currently routed Den review using a structured verdict, finding resolutions, new findings, and notes. If queued reviews share this reviewer session, include taskId and commitSha from the review envelope to explicitly select the target. Den finalizes the authoritative round; Rusty Crew then sends exactly one receipt-based reply to the requester.",
+      "Complete a Rusty Crew managed review submission using a structured verdict, finding resolutions, new findings, and notes. Use this only when the current wake came from submit_task_for_review or the external Rusty Crew review CLI and its envelope is attached to this reviewer session. A plain Den request_review or send_agent_message is not a managed submission; finalize that review with Den finalize_review instead. If queued managed reviews share this reviewer session, include taskId and commitSha from the review envelope to explicitly select the target. Den finalizes the authoritative round; Rusty Crew then sends exactly one receipt-based reply to the requester.",
     parameters: completeRoutedReviewParameters,
     executeWithContext: async (params, context) => {
       if (runtime === undefined) {

@@ -436,7 +436,7 @@ async function completeReview(
     return {
       ok: false,
       reasonCode: "review_target_not_found",
-      summary: `No routed review for task #${input.taskId} at ${input.commitSha} is attached to this reviewer session.`,
+      summary: `No Rusty Crew managed review submission for task #${input.taskId} at ${input.commitSha} is attached to this reviewer session. This usually means the review was requested directly through Den or send_agent_message; finalize that Den round with finalize_review, or resubmit through submit_task_for_review/the external Rusty Crew review CLI for managed closeout.`,
     };
   }
   if (selection.ambiguous) {
@@ -1273,6 +1273,7 @@ async function recordAdapterFailure(
 
 function reviewerRequestBody(record: ReviewSubmissionRecord): string {
   return [
+    `Rusty Crew managed review submission: ${record.submissionId}.`,
     `Review Den task #${record.taskId} at exact SHA ${record.commitSha}.`,
     `Repository: ${record.repository}`,
     `Ref: ${record.gitRef}`,
