@@ -2777,8 +2777,8 @@ impl PostgresBackendStore {
                    FROM pg_class relation
                    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
                    LEFT JOIN pg_stat_all_tables stat ON stat.relid = relation.oid
-                  WHERE namespace.nspname = $1
-                    AND relation.relname = $2
+                  WHERE namespace.nspname = $1::TEXT
+                    AND relation.relname = $2::TEXT
                     AND relation.relkind IN ('r', 'm', 'p')",
                 &[&self.schema, &table],
             )
@@ -2811,8 +2811,8 @@ impl PostgresBackendStore {
                 "SELECT pg_table_size(relation.oid)::BIGINT
                    FROM pg_class relation
                    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
-                  WHERE namespace.nspname = $1
-                    AND relation.relname = $2
+                  WHERE namespace.nspname = $1::TEXT
+                    AND relation.relname = $2::TEXT
                     AND relation.relkind IN ('r', 'm', 'p')",
                 &[&self.schema, &table],
             )
@@ -9387,7 +9387,15 @@ fn validate_counter_amount(amount: u64) -> CoreResult<()> {
     Ok(())
 }
 
+const POSTGRES_MAX_IDENTIFIER_BYTES: usize = 63;
+
 fn validate_postgres_identifier(label: &str, value: &str) -> CoreResult<()> {
+    if value.len() > POSTGRES_MAX_IDENTIFIER_BYTES {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be at most {POSTGRES_MAX_IDENTIFIER_BYTES} bytes"),
+        ));
+    }
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
         return Err(CoreError::new(
@@ -11173,6 +11181,16 @@ mod tests {
                 Ok(_) => panic!("invalid schema unexpectedly connected"),
                 Err(error) => error,
             };
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+
+        let overlong_schema = format!("a{}", "b".repeat(POSTGRES_MAX_IDENTIFIER_BYTES));
+        let error = match PostgresBackendStore::connect(
+            "postgres://example.invalid/db",
+            &overlong_schema,
+        ) {
+            Ok(_) => panic!("overlong schema unexpectedly connected"),
+            Err(error) => error,
+        };
         assert_eq!(error.kind, CoreErrorKind::InvalidInput);
     }
 
@@ -17413,6 +17431,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system clock after unix epoch")
             .as_nanos();
+        let prefix = prefix.chars().take(24).collect::<String>();
         format!("{prefix}_{}_{}", std::process::id(), nanos)
     }
 
