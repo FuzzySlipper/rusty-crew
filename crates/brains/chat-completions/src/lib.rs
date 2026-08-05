@@ -928,9 +928,12 @@ pub struct ChatTokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
-    pub cached_prompt_tokens: u64,
-    pub cache_write_prompt_tokens: u64,
-    pub reasoning_completion_tokens: u64,
+    #[serde(default)]
+    pub cached_prompt_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_prompt_tokens: Option<u64>,
+    #[serde(default)]
+    pub reasoning_completion_tokens: Option<u64>,
 }
 
 impl ChatTokenUsage {
@@ -940,16 +943,21 @@ impl ChatTokenUsage {
             .completion_tokens
             .saturating_add(usage.completion_tokens);
         self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
-        self.cached_prompt_tokens = self
-            .cached_prompt_tokens
-            .saturating_add(usage.cached_prompt_tokens);
-        self.cache_write_prompt_tokens = self
-            .cache_write_prompt_tokens
-            .saturating_add(usage.cache_write_prompt_tokens);
-        self.reasoning_completion_tokens = self
-            .reasoning_completion_tokens
-            .saturating_add(usage.reasoning_completion_tokens);
+        self.cached_prompt_tokens =
+            add_optional_usage(self.cached_prompt_tokens, usage.cached_prompt_tokens);
+        self.cache_write_prompt_tokens = add_optional_usage(
+            self.cache_write_prompt_tokens,
+            usage.cache_write_prompt_tokens,
+        );
+        self.reasoning_completion_tokens = add_optional_usage(
+            self.reasoning_completion_tokens,
+            usage.reasoning_completion_tokens,
+        );
     }
+}
+
+fn add_optional_usage(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    Some(left?.saturating_add(right?))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1559,7 +1567,10 @@ where
                     current_usage = Some(usage.clone());
                     context_compaction.last_provider_input_tokens = Some(usage.prompt_tokens);
                     context_compaction.last_usage = Some(usage.clone());
-                    context_compaction.logical_wake_usage.add_assign(usage);
+                    match context_compaction.logical_wake_usage.as_mut() {
+                        Some(total) => total.add_assign(usage),
+                        None => context_compaction.logical_wake_usage = Some(usage.clone()),
+                    }
                     context_compaction.usage_event_count =
                         context_compaction.usage_event_count.saturating_add(1);
                     record_provider_usage_totals(&mut provider_event_counts, usage);
@@ -2431,14 +2442,25 @@ fn serialized_context_size<T: Serialize>(value: &T) -> ContextSizeMeasurement {
 }
 
 fn chat_context_usage_totals(usage: &ChatTokenUsage) -> ContextTokenUsageTotals {
-    ContextTokenUsageTotals::provider(
-        usage.prompt_tokens,
-        usage.cached_prompt_tokens,
-        usage.cache_write_prompt_tokens,
-        usage.completion_tokens,
-        usage.reasoning_completion_tokens,
-        None,
-    )
+    ContextTokenUsageTotals {
+        input_tokens: ContextTokenMeasurement::provider(usage.prompt_tokens, None),
+        cached_input_tokens: usage
+            .cached_prompt_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
+        cache_write_input_tokens: usage
+            .cache_write_prompt_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
+        output_tokens: ContextTokenMeasurement::provider(usage.completion_tokens, None),
+        reasoning_tokens: usage
+            .reasoning_completion_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
+    }
 }
 
 struct ChatContextAccountingInput<'a> {
@@ -2652,11 +2674,14 @@ fn chat_context_accounting_snapshot(
                 output_tokens: ContextTokenMeasurement::unavailable(),
                 reasoning_tokens: ContextTokenMeasurement::unavailable(),
             }),
-        logical_wake: if state.usage_event_count > 0 {
-            chat_context_usage_totals(&state.logical_wake_usage)
-        } else {
-            ContextTokenUsageTotals::unavailable()
-        },
+        logical_wake: state
+            .logical_wake_usage
+            .as_ref()
+            .filter(|_| state.usage_event_count > 0)
+            .map_or_else(
+                ContextTokenUsageTotals::unavailable,
+                chat_context_usage_totals,
+            ),
         request_count: state.usage_event_count,
     };
     snapshot.durable_transcript = ContextDurableTranscript {
@@ -3649,7 +3674,7 @@ struct ChatCompletionsContextCompactionState {
     #[serde(default)]
     last_usage: Option<ChatTokenUsage>,
     #[serde(default)]
-    logical_wake_usage: ChatTokenUsage,
+    logical_wake_usage: Option<ChatTokenUsage>,
     #[serde(default)]
     usage_event_count: u64,
     last_compacted_tool_round: usize,
@@ -3818,8 +3843,15 @@ fn chat_completions_provider_state_output(
     // reaches its first tool round. Continuation checkpoints retain the
     // counter separately while the same wake is being resumed.
     let context_compaction = ChatCompletionsContextCompactionState {
+        // Usage and the last provider request belong to one logical wake. Keep
+        // compaction artifacts across wakes, but never report an older wake's
+        // provider totals as current usage for the next wake.
+        last_provider_input_tokens: None,
+        last_usage: None,
+        logical_wake_usage: None,
+        usage_event_count: 0,
         last_compacted_tool_round: 0,
-        ..context_compaction
+        artifacts: context_compaction.artifacts,
     };
     let payload = ChatCompletionsProviderStateV1 {
         kind: MODULE_ID.to_string(),
@@ -4719,36 +4751,34 @@ fn token_usage_from_provider_value(value: &Value) -> Option<ChatTokenUsage> {
         cached_prompt_tokens: value
             .get("prompt_tokens_details")
             .and_then(|details| details.get("cached_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+            .and_then(Value::as_u64),
         cache_write_prompt_tokens: value
             .get("prompt_tokens_details")
             .and_then(|details| details.get("cache_write_tokens"))
             .or_else(|| value.get("cache_write_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+            .and_then(Value::as_u64),
         reasoning_completion_tokens: value
             .get("completion_tokens_details")
             .and_then(|details| details.get("reasoning_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+            .and_then(Value::as_u64),
     })
 }
 
 fn record_provider_usage_totals(counts: &mut BTreeMap<String, usize>, usage: &ChatTokenUsage) {
-    for (key, value) in [
+    let mut totals = vec![
         ("usage_prompt_tokens", usage.prompt_tokens),
-        ("usage_cached_prompt_tokens", usage.cached_prompt_tokens),
-        (
-            "usage_cache_write_prompt_tokens",
-            usage.cache_write_prompt_tokens,
-        ),
         ("usage_completion_tokens", usage.completion_tokens),
-        (
-            "usage_reasoning_completion_tokens",
-            usage.reasoning_completion_tokens,
-        ),
-    ] {
+    ];
+    if let Some(value) = usage.cached_prompt_tokens {
+        totals.push(("usage_cached_prompt_tokens", value));
+    }
+    if let Some(value) = usage.cache_write_prompt_tokens {
+        totals.push(("usage_cache_write_prompt_tokens", value));
+    }
+    if let Some(value) = usage.reasoning_completion_tokens {
+        totals.push(("usage_reasoning_completion_tokens", value));
+    }
+    for (key, value) in totals {
         let value = usize::try_from(value).unwrap_or(usize::MAX);
         let total = counts.entry(key.to_string()).or_default();
         *total = total.saturating_add(value);
@@ -5639,9 +5669,9 @@ mod tests {
                 prompt_tokens: 10,
                 completion_tokens: 4,
                 total_tokens: 14,
-                cached_prompt_tokens: 2,
-                cache_write_prompt_tokens: 8,
-                reasoning_completion_tokens: 1,
+                cached_prompt_tokens: Some(2),
+                cache_write_prompt_tokens: Some(8),
+                reasoning_completion_tokens: Some(1),
             }))
         );
         assert!(matches!(
@@ -6854,9 +6884,9 @@ mod tests {
                     prompt_tokens: 123,
                     completion_tokens: 17,
                     total_tokens: 140,
-                    cached_prompt_tokens: 11,
-                    cache_write_prompt_tokens: 3,
-                    reasoning_completion_tokens: 5,
+                    cached_prompt_tokens: Some(11),
+                    cache_write_prompt_tokens: Some(3),
+                    reasoning_completion_tokens: Some(5),
                 }),
                 ChatCompletionsEvent::ContentDelta("accounted".to_string()),
                 ChatCompletionsEvent::Finished {
@@ -6910,6 +6940,23 @@ mod tests {
             .iter()
             .any(|segment| segment.name == "tool_schemas" && segment.included));
         assert_eq!(snapshot.durable_transcript.message_count, Some(1));
+    }
+
+    #[test]
+    fn omitted_provider_usage_dimensions_remain_unknown() {
+        let usage = token_usage_from_provider_value(&json!({
+            "prompt_tokens": 120,
+            "completion_tokens": 8,
+            "total_tokens": 128,
+        }))
+        .expect("required provider usage fields");
+
+        let totals = chat_context_usage_totals(&usage);
+        assert_eq!(totals.input_tokens.tokens, Some(120));
+        assert_eq!(totals.output_tokens.tokens, Some(8));
+        assert_eq!(totals.cached_input_tokens.tokens, None);
+        assert_eq!(totals.cache_write_input_tokens.tokens, None);
+        assert_eq!(totals.reasoning_tokens.tokens, None);
     }
 
     #[test]
@@ -7852,9 +7899,9 @@ mod tests {
                         prompt_tokens: if round >= 5 { 20_000 } else { 100 },
                         completion_tokens: 10,
                         total_tokens: if round >= 5 { 20_010 } else { 110 },
-                        cached_prompt_tokens: 0,
-                        cache_write_prompt_tokens: 0,
-                        reasoning_completion_tokens: 0,
+                        cached_prompt_tokens: Some(0),
+                        cache_write_prompt_tokens: Some(0),
+                        reasoning_completion_tokens: Some(0),
                     }),
                     ChatCompletionsEvent::Finished {
                         finish_reason: Some("tool_calls".to_string()),
@@ -7940,9 +7987,9 @@ mod tests {
                         prompt_tokens: 20_000,
                         completion_tokens: 10,
                         total_tokens: 20_010,
-                        cached_prompt_tokens: 0,
-                        cache_write_prompt_tokens: 0,
-                        reasoning_completion_tokens: 0,
+                        cached_prompt_tokens: Some(0),
+                        cache_write_prompt_tokens: Some(0),
+                        reasoning_completion_tokens: Some(0),
                     }),
                     ChatCompletionsEvent::Finished {
                         finish_reason: Some("tool_calls".to_string()),
@@ -8041,9 +8088,9 @@ mod tests {
                         prompt_tokens: if round >= 5 { 20_000 } else { 100 },
                         completion_tokens: 10,
                         total_tokens: if round >= 5 { 20_010 } else { 110 },
-                        cached_prompt_tokens: 0,
-                        cache_write_prompt_tokens: 0,
-                        reasoning_completion_tokens: 0,
+                        cached_prompt_tokens: Some(0),
+                        cache_write_prompt_tokens: Some(0),
+                        reasoning_completion_tokens: Some(0),
                     }),
                     ChatCompletionsEvent::Finished {
                         finish_reason: Some("tool_calls".to_string()),
@@ -8113,6 +8160,8 @@ mod tests {
             payload.context_compaction.last_compacted_tool_round, 0,
             "completed provider state must reset the wake-local compaction counter"
         );
+        assert_eq!(payload.context_compaction.usage_event_count, 0);
+        assert!(payload.context_compaction.logical_wake_usage.is_none());
         assert!(
             payload.messages.len() < 12,
             "restartable provider state must contain the compacted model projection, not the raw transcript"
@@ -8139,9 +8188,9 @@ mod tests {
                         prompt_tokens: 20_000,
                         completion_tokens: 10,
                         total_tokens: 20_010,
-                        cached_prompt_tokens: 0,
-                        cache_write_prompt_tokens: 0,
-                        reasoning_completion_tokens: 0,
+                        cached_prompt_tokens: Some(0),
+                        cache_write_prompt_tokens: Some(0),
+                        reasoning_completion_tokens: Some(0),
                     }),
                     ChatCompletionsEvent::Finished {
                         finish_reason: Some("tool_calls".to_string()),
