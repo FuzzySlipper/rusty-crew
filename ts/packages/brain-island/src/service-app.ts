@@ -1323,6 +1323,9 @@ async function handleHttpRequest(
       },
       await buildDiagnosticsContext(state, {
         includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
+        includeStorageDiagnostics: includeStorageDiagnosticsForAdminPath(
+          url.pathname,
+        ),
         curatorUrl: isCuratorAdminReadRoute(url.pathname) ? url : undefined,
       }),
     );
@@ -1880,6 +1883,9 @@ async function handleHttpRequest(
       },
       await buildDiagnosticsContext(state, {
         includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
+        includeStorageDiagnostics: includeStorageDiagnosticsForAdminPath(
+          url.pathname,
+        ),
         curatorUrl: isCuratorAdminReadRoute(url.pathname) ? url : undefined,
       }),
     );
@@ -2085,6 +2091,7 @@ async function buildDiagnosticsContext(
   state: ServiceState,
   options: {
     includeProfileRegistry?: boolean;
+    includeStorageDiagnostics?: boolean;
     curatorUrl?: URL;
   } = {},
 ): Promise<AdminDiagnosticsContext> {
@@ -2114,18 +2121,29 @@ async function buildDiagnosticsContext(
 
 function diagnosticsContextCacheKey(options: {
   includeProfileRegistry?: boolean;
+  includeStorageDiagnostics?: boolean;
   curatorUrl?: URL;
 }): string {
   return JSON.stringify({
     includeProfileRegistry: options.includeProfileRegistry === true,
+    includeStorageDiagnostics: options.includeStorageDiagnostics !== false,
     curatorUrl: options.curatorUrl?.pathname ?? null,
   });
+}
+
+function includeStorageDiagnosticsForAdminPath(pathname: string): boolean {
+  return (
+    pathname === "/v1/admin/diagnostics" ||
+    pathname === "/v1/admin/diagnostics/persistence" ||
+    pathname === "/v1/admin/diagnostics/storage"
+  );
 }
 
 async function buildDiagnosticsContextUncached(
   state: ServiceState,
   options: {
     includeProfileRegistry?: boolean;
+    includeStorageDiagnostics?: boolean;
     curatorUrl?: URL;
   } = {},
 ): Promise<AdminDiagnosticsContext> {
@@ -2143,15 +2161,17 @@ async function buildDiagnosticsContextUncached(
       .runtimeSummary({ scopeType: "runtime" })
       .catch(() => undefined),
     listProjectedServiceSessions(state).catch(() => []),
-    state.bridge
-      .storageDiagnostics()
-      .then((diagnostics) =>
-        storageDiagnosticsProjection(
-          diagnostics,
-          state.runtimeConfig.storage ?? state.config.storage,
-        ),
-      )
-      .catch(() => undefined),
+    options.includeStorageDiagnostics === false
+      ? Promise.resolve(undefined)
+      : state.bridge
+          .storageDiagnostics()
+          .then((diagnostics) =>
+            storageDiagnosticsProjection(
+              diagnostics,
+              state.runtimeConfig.storage ?? state.config.storage,
+            ),
+          )
+          .catch(() => undefined),
     state.bridge.providerStateDiagnostics().catch(() => []),
     state.bridge.bufferedBrainRunDiagnostics().catch(() => undefined),
     state.bridge.runtimeActivityCensus({}).catch(() => undefined),

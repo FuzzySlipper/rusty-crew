@@ -1468,7 +1468,7 @@ impl PostgresBackendStore {
             )
             .map_err(|error| postgres_error("read PostgreSQL external event diagnostics", error))?;
         Ok(RuntimeExternalEventStorageDiagnostics {
-            event_rows: self.table_rows("external_runtime_events")?,
+            event_rows: self.estimated_table_rows("external_runtime_events")?,
             // pg_table_size is catalog-backed and avoids scanning every JSON
             // payload on every admin diagnostics request.
             estimated_event_bytes: self.table_storage_bytes("external_runtime_events")?,
@@ -1814,7 +1814,9 @@ impl PostgresBackendStore {
                 },
                 RuntimeStorageTableCount {
                     table: "external_runtime_events".to_string(),
-                    rows: self.table_rows("external_runtime_events")?,
+                    // Keep the diagnostics projection non-blocking; count_rows
+                    // remains the explicit exact-count path for this table.
+                    rows: self.estimated_table_rows("external_runtime_events")?,
                 },
                 RuntimeStorageTableCount {
                     table: "external_runtime_event_cursors".to_string(),
@@ -2760,6 +2762,10 @@ impl PostgresBackendStore {
     }
 
     fn table_rows(&self, table: &str) -> CoreResult<u64> {
+        self.exact_table_rows(table)
+    }
+
+    fn estimated_table_rows(&self, table: &str) -> CoreResult<u64> {
         validate_postgres_identifier("postgres table", table)?;
         let row = self
             .client()?
