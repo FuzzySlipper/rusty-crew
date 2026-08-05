@@ -8,6 +8,7 @@
   "implementation_id": "parity-created-brain",
   "kind": "full",
   "provider_alias": "parity-provider",
+  "external_message_delivery_policy": "immediate_steer",
   "model_config": {
     "provider": "den-router",
     "model_name": "local-deterministic",

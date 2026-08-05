@@ -113,12 +113,16 @@ rusty-crew-review status \
   --deployment-role debug \
   --submission-id review-submission:<sha256-id> \
   --wait \
-  --poll-ms 5000
+  --poll-ms 5000 \
+  --timeout-ms 600000
 ```
 
-`--timeout-ms` is optional. With no timeout, `--wait` continues until the
-operator interrupts it; a pending review is not treated as a failed review.
-Use `--json` for automation-friendly output. Human output includes the
+The example bounds the wait at ten minutes. On expiry the CLI reports the
+review as still pending and exits with code `2`; that is not a failed review.
+Choose a larger finite timeout when the repository's gate duration requires
+it. `--timeout-ms` is optional, but unbounded `--wait` should be reserved for
+an intentional operator session. Use `--json` for automation-friendly output.
+Human output includes the
 submission id, selected deployment, exact SHA, phase, gate state, verdict, and
 durable adapter/terminal reasons when present.
 
