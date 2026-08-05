@@ -1028,9 +1028,9 @@ fn fake_responses_client_for_body(
 fn fake_responses_usage(cached: bool) -> ResponsesTokenUsage {
     ResponsesTokenUsage {
         input_tokens: 1,
-        cached_input_tokens: u64::from(cached),
+        cached_input_tokens: Some(u64::from(cached)),
         output_tokens: 1,
-        reasoning_output_tokens: 0,
+        reasoning_output_tokens: Some(0),
         total_tokens: 2,
     }
 }

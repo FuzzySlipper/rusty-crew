@@ -29,6 +29,8 @@
       },
       "testRefs": [
         "crates/brains/openai-responses/src/lib.rs::context_accounting_snapshot_reports_responses_chain_and_provider_usage",
+        "crates/brains/openai-responses/src/lib.rs::responses_context_accounting_keeps_omitted_usage_dimensions_unknown",
+        "crates/brains/openai-responses/src/lib.rs::responses_context_accounting_separates_current_request_from_logical_wake",
         "crates/brains/openai-responses/src/lib.rs::provider_state_replays_typed_reasoning_function_call_and_output_items"
       ]
     },

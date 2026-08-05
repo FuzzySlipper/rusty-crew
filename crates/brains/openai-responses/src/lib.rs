@@ -1158,10 +1158,16 @@ pub enum ResponsesOutputItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponsesTokenUsage {
     pub input_tokens: u64,
-    pub cached_input_tokens: u64,
+    #[serde(default)]
+    pub cached_input_tokens: Option<u64>,
     pub output_tokens: u64,
-    pub reasoning_output_tokens: u64,
+    #[serde(default)]
+    pub reasoning_output_tokens: Option<u64>,
     pub total_tokens: u64,
+}
+
+fn add_optional_usage(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    Some(left?.saturating_add(right?))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1619,9 +1625,11 @@ struct ResponsesContinuationMetrics {
     provider_request_debug_samples: Vec<Value>,
     provider_event_counts: HashMap<String, u64>,
     input_tokens: u64,
-    cached_input_tokens: u64,
+    #[serde(default)]
+    cached_input_tokens: Option<u64>,
     output_tokens: u64,
-    reasoning_output_tokens: u64,
+    #[serde(default)]
+    reasoning_output_tokens: Option<u64>,
     total_tokens: u64,
     #[serde(default)]
     usage_event_count: u64,
@@ -1790,9 +1798,11 @@ pub struct ResponsesTransportMetrics {
     pub provider_request_debug_samples: Vec<Value>,
     pub provider_event_counts: HashMap<String, u64>,
     pub input_tokens: u64,
-    pub cached_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
     pub output_tokens: u64,
-    pub reasoning_output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_output_tokens: Option<u64>,
     pub total_tokens: u64,
     pub usage_event_count: u64,
     pub first_text_delta_latency_ms: Option<u64>,
@@ -1812,9 +1822,9 @@ struct ResponsesTransportMetricsBuilder {
     provider_request_debug_samples: Vec<Value>,
     provider_event_counts: HashMap<String, u64>,
     input_tokens: u64,
-    cached_input_tokens: u64,
+    cached_input_tokens: Option<u64>,
     output_tokens: u64,
-    reasoning_output_tokens: u64,
+    reasoning_output_tokens: Option<u64>,
     total_tokens: u64,
     usage_event_count: u64,
     first_text_delta_latency_ms: Option<u64>,
@@ -1836,9 +1846,9 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_debug_samples: Vec::new(),
             provider_event_counts: HashMap::new(),
             input_tokens: 0,
-            cached_input_tokens: 0,
+            cached_input_tokens: None,
             output_tokens: 0,
-            reasoning_output_tokens: 0,
+            reasoning_output_tokens: None,
             total_tokens: 0,
             usage_event_count: 0,
             first_text_delta_latency_ms: None,
@@ -1902,15 +1912,20 @@ impl ResponsesTransportMetricsBuilder {
                 usage: Some(usage), ..
             } = event
             {
+                let had_usage = self.usage_event_count > 0;
                 self.usage_event_count = self.usage_event_count.saturating_add(1);
                 self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
-                self.cached_input_tokens = self
-                    .cached_input_tokens
-                    .saturating_add(usage.cached_input_tokens);
+                self.cached_input_tokens = if had_usage {
+                    add_optional_usage(self.cached_input_tokens, usage.cached_input_tokens)
+                } else {
+                    usage.cached_input_tokens
+                };
                 self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
-                self.reasoning_output_tokens = self
-                    .reasoning_output_tokens
-                    .saturating_add(usage.reasoning_output_tokens);
+                self.reasoning_output_tokens = if had_usage {
+                    add_optional_usage(self.reasoning_output_tokens, usage.reasoning_output_tokens)
+                } else {
+                    usage.reasoning_output_tokens
+                };
                 self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
             }
         }
@@ -2003,10 +2018,18 @@ fn serialized_context_size<T: Serialize>(value: &T) -> ContextSizeMeasurement {
 fn responses_context_usage_totals(usage: &ResponsesTokenUsage) -> ContextTokenUsageTotals {
     ContextTokenUsageTotals {
         input_tokens: ContextTokenMeasurement::provider(usage.input_tokens, None),
-        cached_input_tokens: ContextTokenMeasurement::provider(usage.cached_input_tokens, None),
+        cached_input_tokens: usage
+            .cached_input_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
         cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
         output_tokens: ContextTokenMeasurement::provider(usage.output_tokens, None),
-        reasoning_tokens: ContextTokenMeasurement::provider(usage.reasoning_output_tokens, None),
+        reasoning_tokens: usage
+            .reasoning_output_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
     }
 }
 
@@ -2015,10 +2038,18 @@ fn responses_aggregate_context_usage(
 ) -> ContextTokenUsageTotals {
     ContextTokenUsageTotals {
         input_tokens: ContextTokenMeasurement::provider(metrics.input_tokens, None),
-        cached_input_tokens: ContextTokenMeasurement::provider(metrics.cached_input_tokens, None),
+        cached_input_tokens: metrics
+            .cached_input_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
         cache_write_input_tokens: ContextTokenMeasurement::unavailable(),
         output_tokens: ContextTokenMeasurement::provider(metrics.output_tokens, None),
-        reasoning_tokens: ContextTokenMeasurement::provider(metrics.reasoning_output_tokens, None),
+        reasoning_tokens: metrics
+            .reasoning_output_tokens
+            .map_or_else(ContextTokenMeasurement::unavailable, |tokens| {
+                ContextTokenMeasurement::provider(tokens, None)
+            }),
     }
 }
 
@@ -2227,10 +2258,19 @@ fn responses_context_accounting_snapshot(
         .saturating_add(base_history.replay_hints.len())
         .saturating_add(continuation_items.len())
         .saturating_add(committed_output_items.len());
+    // The fingerprint is intentionally a digest: it distinguishes provider
+    // lineage and persisted replay state without placing prompt/tool payloads
+    // in the externally visible snapshot.
     let provider_state_fingerprint = responses_json_fingerprint(&json!({
         "previous_response_id": provider_request.previous_response_id,
         "response_id": response_id,
-        "provider_state": provider_state.map(|state| (&state.module_id, &state.payload_version)),
+        "provider_state": provider_state.map(|state| json!({
+            "module_id": state.module_id,
+            "payload_version": state.payload_version,
+            "profile_fingerprint": state.profile_fingerprint,
+            "provider_fingerprint": state.provider_fingerprint,
+            "payload": state.payload,
+        })),
     }))
     .ok();
     let mut snapshot = ContextAccountingSnapshot::unavailable(ContextProviderDescriptor {
@@ -2812,14 +2852,12 @@ fn token_usage_from_provider_value(value: &Value) -> Option<ResponsesTokenUsage>
         cached_input_tokens: value
             .get("input_tokens_details")
             .and_then(|details| details.get("cached_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+            .and_then(Value::as_u64),
         output_tokens: value.get("output_tokens")?.as_u64()?,
         reasoning_output_tokens: value
             .get("output_tokens_details")
             .and_then(|details| details.get("reasoning_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+            .and_then(Value::as_u64),
         total_tokens: value.get("total_tokens")?.as_u64()?,
     })
 }
@@ -5588,9 +5626,9 @@ mod tests {
                 response_id: "resp-1".to_string(),
                 usage: Some(ResponsesTokenUsage {
                     input_tokens: 100,
-                    cached_input_tokens: 80,
+                    cached_input_tokens: Some(80),
                     output_tokens: 20,
-                    reasoning_output_tokens: 12,
+                    reasoning_output_tokens: Some(12),
                     total_tokens: 120,
                 })
             })
@@ -6169,9 +6207,9 @@ mod tests {
             Some(&1)
         );
         assert_eq!(result.transport_metrics.input_tokens, 10);
-        assert_eq!(result.transport_metrics.cached_input_tokens, 2);
+        assert_eq!(result.transport_metrics.cached_input_tokens, Some(2));
         assert_eq!(result.transport_metrics.output_tokens, 5);
-        assert_eq!(result.transport_metrics.reasoning_output_tokens, 1);
+        assert_eq!(result.transport_metrics.reasoning_output_tokens, Some(1));
         assert_eq!(result.transport_metrics.total_tokens, 15);
         assert_eq!(result.transport_metrics.usage_event_count, 1);
         assert!(result
@@ -6209,9 +6247,9 @@ mod tests {
                     response_id: "resp-accounted".to_string(),
                     usage: Some(ResponsesTokenUsage {
                         input_tokens: 120,
-                        cached_input_tokens: 12,
+                        cached_input_tokens: Some(12),
                         output_tokens: 18,
-                        reasoning_output_tokens: 6,
+                        reasoning_output_tokens: Some(6),
                         total_tokens: 138,
                     }),
                 },
@@ -6287,6 +6325,190 @@ mod tests {
             .iter()
             .any(|segment| segment.name == "tool_schemas" && segment.included));
         assert_eq!(snapshot.compaction.phase, ContextCompactionPhase::Idle);
+    }
+
+    #[test]
+    fn responses_context_accounting_keeps_omitted_usage_dimensions_unknown() {
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-unknown-usage".to_string(),
+                usage: Some(ResponsesTokenUsage {
+                    input_tokens: 120,
+                    cached_input_tokens: None,
+                    output_tokens: 18,
+                    reasoning_output_tokens: None,
+                    total_tokens: 138,
+                }),
+            }])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::replay("deepseek-reasoner"),
+        );
+
+        let result = brain
+            .wake_with_history(
+                wake_request(None, None),
+                ResponsesReplayProjection {
+                    input_items: vec![ResponsesInputItem::UserMessage {
+                        content: "measure this request".to_string(),
+                    }],
+                    replay_hints: Vec::new(),
+                },
+            )
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+        let snapshot: ContextAccountingSnapshot = items
+            .iter()
+            .find_map(|item| match item {
+                BrainWakeStreamItem::Event { event } => match &event.event {
+                    BrainEvent::ProviderStatus {
+                        metadata_json: Some(metadata),
+                        ..
+                    } => serde_json::from_str::<Value>(metadata)
+                        .ok()
+                        .filter(|value| {
+                            value.get("kind").and_then(Value::as_str)
+                                == Some("context_accounting_snapshot")
+                        })
+                        .and_then(|value| serde_json::from_value(value["snapshot"].clone()).ok()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("Responses context accounting snapshot");
+
+        snapshot
+            .validate()
+            .expect("unknown provider usage dimensions still form a valid snapshot");
+        assert_eq!(snapshot.prompt_projection.input_tokens.tokens, Some(120));
+        assert_eq!(
+            snapshot
+                .provider_usage
+                .current_request
+                .cached_input_tokens
+                .tokens,
+            None
+        );
+        assert_eq!(
+            snapshot
+                .provider_usage
+                .current_request
+                .reasoning_tokens
+                .tokens,
+            None
+        );
+        assert_eq!(
+            snapshot.provider_usage.logical_wake.output_tokens.tokens,
+            Some(18)
+        );
+        assert_eq!(
+            snapshot
+                .provider_usage
+                .logical_wake
+                .cached_input_tokens
+                .tokens,
+            None
+        );
+        assert_eq!(result.transport_metrics.cached_input_tokens, None);
+        assert_eq!(result.transport_metrics.reasoning_output_tokens, None);
+    }
+
+    #[test]
+    fn responses_context_accounting_separates_current_request_from_logical_wake() {
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![
+                Ok(vec![
+                    ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                        id: Some("item-accounting".to_string()),
+                        call_id: "call-accounting".to_string(),
+                        name: "lookup".to_string(),
+                        arguments: "{}".to_string(),
+                    }),
+                    ResponsesEvent::Completed {
+                        response_id: "resp-accounting-tool".to_string(),
+                        usage: Some(ResponsesTokenUsage {
+                            input_tokens: 100,
+                            cached_input_tokens: Some(10),
+                            output_tokens: 5,
+                            reasoning_output_tokens: Some(2),
+                            total_tokens: 105,
+                        }),
+                    },
+                ]),
+                Ok(vec![
+                    ResponsesEvent::TextDelta("done".to_string()),
+                    ResponsesEvent::Completed {
+                        response_id: "resp-accounting-final".to_string(),
+                        usage: Some(ResponsesTokenUsage {
+                            input_tokens: 140,
+                            cached_input_tokens: None,
+                            output_tokens: 8,
+                            reasoning_output_tokens: None,
+                            total_tokens: 148,
+                        }),
+                    },
+                ]),
+            ])
+            .expect_function_output("call-accounting"),
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "found".to_string(),
+                    is_error: false,
+                    state_fingerprint: String::new(),
+                    turn_disposition: None,
+                },
+            )]),
+            ResponsesBrainConfig::replay("responses-accounting"),
+        );
+
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+        let snapshots = items
+            .iter()
+            .filter_map(|item| match item {
+                BrainWakeStreamItem::Event { event } => match &event.event {
+                    BrainEvent::ProviderStatus {
+                        metadata_json: Some(metadata),
+                        ..
+                    } => serde_json::from_str::<Value>(metadata)
+                        .ok()
+                        .filter(|value| {
+                            value.get("kind").and_then(Value::as_str)
+                                == Some("context_accounting_snapshot")
+                        })
+                        .and_then(|value| serde_json::from_value(value["snapshot"].clone()).ok()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<ContextAccountingSnapshot>>();
+        let snapshot = snapshots
+            .last()
+            .expect("final Responses accounting snapshot");
+
+        assert_eq!(snapshot.provider_usage.request_count, 2);
+        assert_eq!(
+            snapshot.provider_usage.current_request.input_tokens.tokens,
+            Some(140)
+        );
+        assert_eq!(
+            snapshot.provider_usage.logical_wake.input_tokens.tokens,
+            Some(240)
+        );
+        assert_eq!(
+            snapshot
+                .provider_usage
+                .logical_wake
+                .cached_input_tokens
+                .tokens,
+            None,
+            "an omitted dimension in one provider response cannot be summed as zero"
+        );
+        assert_eq!(
+            snapshot.provider_usage.logical_wake.reasoning_tokens.tokens,
+            None
+        );
+        assert_eq!(result.transport_metrics.input_tokens, 240);
     }
 
     #[test]
@@ -6738,9 +6960,9 @@ mod tests {
                     response_id: "response-final".to_string(),
                     usage: Some(ResponsesTokenUsage {
                         input_tokens: 30,
-                        cached_input_tokens: 10,
+                        cached_input_tokens: Some(10),
                         output_tokens: 5,
-                        reasoning_output_tokens: 2,
+                        reasoning_output_tokens: Some(2),
                         total_tokens: 35,
                     }),
                 },
@@ -7173,9 +7395,9 @@ mod tests {
                         response_id: format!("response-{round}"),
                         usage: Some(ResponsesTokenUsage {
                             input_tokens: if round >= 5 { 20_000 } else { 100 },
-                            cached_input_tokens: 0,
+                            cached_input_tokens: Some(0),
                             output_tokens: 10,
-                            reasoning_output_tokens: 0,
+                            reasoning_output_tokens: Some(0),
                             total_tokens: if round >= 5 { 20_010 } else { 110 },
                         }),
                     },
@@ -7675,9 +7897,9 @@ mod tests {
     fn usage() -> ResponsesTokenUsage {
         ResponsesTokenUsage {
             input_tokens: 10,
-            cached_input_tokens: 2,
+            cached_input_tokens: Some(2),
             output_tokens: 5,
-            reasoning_output_tokens: 1,
+            reasoning_output_tokens: Some(1),
             total_tokens: 15,
         }
     }
