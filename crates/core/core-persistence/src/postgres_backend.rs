@@ -1446,25 +1446,41 @@ impl PostgresBackendStore {
             .client()?
             .query_one(
                 &format!(
-                    "SELECT COUNT(*), COALESCE(SUM(OCTET_LENGTH(record_json)), 0),
-                            MIN(sequence_id), MIN(created_at), MAX(sequence_id), MAX(created_at)
-                       FROM {schema}.external_runtime_events"
+                    "SELECT MIN(oldest.sequence_id), MIN(oldest.created_at),
+                            MAX(newest.sequence_id), MAX(newest.created_at)
+                       FROM {schema}.external_runtime_registrations registration
+                       LEFT JOIN LATERAL (
+                           SELECT sequence_id, created_at
+                             FROM {schema}.external_runtime_events event
+                            WHERE event.runtime_id = registration.runtime_id
+                            ORDER BY sequence_id ASC
+                            LIMIT 1
+                       ) oldest ON TRUE
+                       LEFT JOIN LATERAL (
+                           SELECT sequence_id, created_at
+                             FROM {schema}.external_runtime_events event
+                            WHERE event.runtime_id = registration.runtime_id
+                            ORDER BY sequence_id DESC
+                            LIMIT 1
+                       ) newest ON TRUE"
                 ),
                 &[],
             )
             .map_err(|error| postgres_error("read PostgreSQL external event diagnostics", error))?;
         Ok(RuntimeExternalEventStorageDiagnostics {
-            event_rows: row.get::<_, i64>(0).max(0) as u64,
-            estimated_event_bytes: row.get::<_, i64>(1).max(0) as u64,
+            event_rows: self.table_rows("external_runtime_events")?,
+            // pg_table_size is catalog-backed and avoids scanning every JSON
+            // payload on every admin diagnostics request.
+            estimated_event_bytes: self.table_storage_bytes("external_runtime_events")?,
             checkpoint_rows: self.table_rows("external_runtime_event_checkpoints")?,
             oldest_sequence: row
+                .get::<_, Option<i64>>(0)
+                .map(|value| value.max(0) as u64),
+            oldest_created_at: row.get(1),
+            newest_sequence: row
                 .get::<_, Option<i64>>(2)
                 .map(|value| value.max(0) as u64),
-            oldest_created_at: row.get(3),
-            newest_sequence: row
-                .get::<_, Option<i64>>(4)
-                .map(|value| value.max(0) as u64),
-            newest_created_at: row.get(5),
+            newest_created_at: row.get(3),
         })
     }
 
@@ -2732,29 +2748,11 @@ impl PostgresBackendStore {
     }
 
     fn simple_kv_rows(&self) -> CoreResult<u64> {
-        let schema = self.quoted_schema();
-        let row = self
-            .client()?
-            .query_one(
-                &format!("SELECT COUNT(*) FROM {schema}.module_simple_kv_entries"),
-                &[],
-            )
-            .map_err(|error| postgres_error("count PostgreSQL simple_kv entries", error))?;
-        let rows: i64 = row.get(0);
-        Ok(rows as u64)
+        self.table_rows("module_simple_kv_entries")
     }
 
     fn runtime_search_rows(&self) -> CoreResult<u64> {
-        let schema = self.quoted_schema();
-        let row = self
-            .client()?
-            .query_one(
-                &format!("SELECT COUNT(*) FROM {schema}.runtime_search_entries"),
-                &[],
-            )
-            .map_err(|error| postgres_error("count PostgreSQL runtime search entries", error))?;
-        let rows: i64 = row.get(0);
-        Ok(rows as u64)
+        self.table_rows("runtime_search_entries")
     }
 
     fn provider_wire_state_rows(&self) -> CoreResult<u64> {
@@ -2762,6 +2760,30 @@ impl PostgresBackendStore {
     }
 
     fn table_rows(&self, table: &str) -> CoreResult<u64> {
+        validate_postgres_identifier("postgres table", table)?;
+        let row = self
+            .client()?
+            .query_one(
+                "SELECT GREATEST(
+                            COALESCE(stat.n_live_tup, relation.reltuples::double precision),
+                            0
+                        )::BIGINT
+                   FROM pg_class relation
+                   JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                   LEFT JOIN pg_stat_all_tables stat ON stat.relid = relation.oid
+                  WHERE namespace.nspname = $1
+                    AND relation.relname = $2
+                    AND relation.relkind IN ('r', 'm', 'p')",
+                &[&self.schema, &table],
+            )
+            .map_err(|error| {
+                postgres_error("estimate PostgreSQL durable backend table rows", error)
+            })?;
+        let rows: i64 = row.get(0);
+        Ok(rows as u64)
+    }
+
+    pub(crate) fn exact_table_rows(&self, table: &str) -> CoreResult<u64> {
         validate_postgres_identifier("postgres table", table)?;
         let schema = self.quoted_schema();
         let table = quote_postgres_identifier(table);
@@ -2773,6 +2795,24 @@ impl PostgresBackendStore {
             })?;
         let rows: i64 = row.get(0);
         Ok(rows as u64)
+    }
+
+    fn table_storage_bytes(&self, table: &str) -> CoreResult<u64> {
+        validate_postgres_identifier("postgres table", table)?;
+        let row = self
+            .client()?
+            .query_one(
+                "SELECT pg_table_size(relation.oid)::BIGINT
+                   FROM pg_class relation
+                   JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                  WHERE namespace.nspname = $1
+                    AND relation.relname = $2
+                    AND relation.relkind IN ('r', 'm', 'p')",
+                &[&self.schema, &table],
+            )
+            .map_err(|error| postgres_error("read PostgreSQL table storage bytes", error))?;
+        let bytes: i64 = row.get(0);
+        Ok(bytes.max(0) as u64)
     }
 
     fn quoted_schema(&self) -> String {

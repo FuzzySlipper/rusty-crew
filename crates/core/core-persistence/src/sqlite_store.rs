@@ -1305,18 +1305,7 @@ impl CoreCoordinationStore {
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => {
                 let table = DiagnosticTable::parse(table)?.as_str().to_string();
-                postgres
-                    .storage_diagnostics()?
-                    .table_counts
-                    .into_iter()
-                    .find(|count| count.table == table)
-                    .map(|count| count.rows)
-                    .ok_or_else(|| {
-                        CoreError::new(
-                            CoreErrorKind::InvalidInput,
-                            format!("unsupported PostgreSQL diagnostic table {table}"),
-                        )
-                    })
+                postgres.exact_table_rows(&table)
             }
         }
     }

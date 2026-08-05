@@ -486,6 +486,14 @@ interface ServiceState {
   readonly toolMediaAttachments: ToolMediaAttachmentStore;
   readonly browserResources: ServiceBrowserResources;
   readonly externalRuntimeController: ServiceExternalRuntimeController;
+  readonly diagnosticsContextCache: Map<
+    string,
+    { readonly expiresAt: number; readonly value: AdminDiagnosticsContext }
+  >;
+  readonly diagnosticsContextInFlight: Map<
+    string,
+    Promise<AdminDiagnosticsContext>
+  >;
   readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
@@ -1123,6 +1131,8 @@ export async function createRustyCrewServiceApp(
       toolMediaAttachments,
       browserResources,
       externalRuntimeController,
+      diagnosticsContextCache: new Map(),
+      diagnosticsContextInFlight: new Map(),
       responsesWakeMetrics: [],
       suppressedWakeEvents: new Map(),
       recentEvents: [],
@@ -2069,7 +2079,50 @@ function modelProviderRefreshCommandName(
   throw new Error(`unknown model-provider refresh command ${value}`);
 }
 
+const DIAGNOSTICS_CONTEXT_CACHE_TTL_MS = 1_000;
+
 async function buildDiagnosticsContext(
+  state: ServiceState,
+  options: {
+    includeProfileRegistry?: boolean;
+    curatorUrl?: URL;
+  } = {},
+): Promise<AdminDiagnosticsContext> {
+  const key = diagnosticsContextCacheKey(options);
+  const cached = state.diagnosticsContextCache.get(key);
+  if (cached !== undefined && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const inFlight = state.diagnosticsContextInFlight.get(key);
+  if (inFlight !== undefined) return inFlight;
+
+  const build = buildDiagnosticsContextUncached(state, options);
+  state.diagnosticsContextInFlight.set(key, build);
+  try {
+    const value = await build;
+    state.diagnosticsContextCache.set(key, {
+      expiresAt: Date.now() + DIAGNOSTICS_CONTEXT_CACHE_TTL_MS,
+      value,
+    });
+    return value;
+  } finally {
+    if (state.diagnosticsContextInFlight.get(key) === build) {
+      state.diagnosticsContextInFlight.delete(key);
+    }
+  }
+}
+
+function diagnosticsContextCacheKey(options: {
+  includeProfileRegistry?: boolean;
+  curatorUrl?: URL;
+}): string {
+  return JSON.stringify({
+    includeProfileRegistry: options.includeProfileRegistry === true,
+    curatorUrl: options.curatorUrl?.pathname ?? null,
+  });
+}
+
+async function buildDiagnosticsContextUncached(
   state: ServiceState,
   options: {
     includeProfileRegistry?: boolean;
