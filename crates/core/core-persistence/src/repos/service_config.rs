@@ -2424,6 +2424,7 @@ fn responses_provider_dialect_as_str(dialect: ResponsesProviderDialect) -> &'sta
         ResponsesProviderDialect::OpenaiStateless => "openai_stateless",
         ResponsesProviderDialect::GenericStateless => "generic_stateless",
         ResponsesProviderDialect::Deepseek => "deepseek",
+        ResponsesProviderDialect::Meta => "meta",
     }
 }
 
@@ -2433,6 +2434,7 @@ fn responses_provider_dialect_from_str(raw: &str) -> rusqlite::Result<ResponsesP
         "openai_stateless" => Ok(ResponsesProviderDialect::OpenaiStateless),
         "generic_stateless" => Ok(ResponsesProviderDialect::GenericStateless),
         "deepseek" => Ok(ResponsesProviderDialect::Deepseek),
+        "meta" => Ok(ResponsesProviderDialect::Meta),
         other => Err(model_provider_text_conversion_error(
             13,
             format!("unknown Responses provider dialect {other}"),

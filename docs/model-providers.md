@@ -85,7 +85,7 @@ can cancel the turn explicitly if the outage should not be waited out.
 | `temperatureMilli` | Integer storage form, `temperature * 1000` |
 | `reasoningEffort` | Provider-specific reasoning effort string |
 | `reasoningFormat` | Provider-specific reasoning/output format string |
-| `responsesDialect` | Required Responses wire dialect: `openai_stateful`, `openai_stateless`, `generic_stateless`, or `deepseek` |
+| `responsesDialect` | Required Responses wire dialect: `openai_stateful`, `openai_stateless`, `generic_stateless`, `deepseek`, or `meta` |
 | `chatCompletionsDialect` | Typed Chat Completions wire dialect: `standard`, `kimi`, `glm`, `qwen`, or `deepseek` |
 | `thinkingMode` | `provider_default`, `enabled`, or `disabled` |
 | `reasoningHistory` | `provider_default`, `discard`, `preserve_all`, or `tool_calls_only` |
@@ -122,8 +122,9 @@ it from the provider alias, URL, model ID, or `providerKind`.
 | `openai_stateless` | Replays complete provider state | Uses the OpenAI request/event shape without server-side chaining |
 | `generic_stateless` | Replays complete provider state | Omits provider-specific state and request extensions |
 | `deepseek` | Replays complete provider state | Preserves plain-text reasoning items and accepts DeepSeek reasoning/tool SSE events |
+| `meta` | Replays complete provider state or may use `previous_response_id` | Uses the Meta Responses wire dialect, includes `summary: []` for reasoning replay, and requests encrypted reasoning for stateless replay |
 
-Only `openai_stateful` may use the `previous-response-chain` brain strategy.
+`openai_stateful` and `meta` may use the `previous-response-chain` brain strategy.
 Stateless dialects retain ordinary messages, reasoning, tool calls, and tool
 outputs in Crew provider state and replay that state on each request. A write
 with `protocol: "responses"` must include `responsesDialect`; a Chat Completions

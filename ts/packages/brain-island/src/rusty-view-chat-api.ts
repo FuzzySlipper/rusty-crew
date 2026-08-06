@@ -421,7 +421,8 @@ export interface SessionContextUsageResult {
       | "openai_stateful"
       | "openai_stateless"
       | "generic_stateless"
-      | "deepseek";
+      | "deepseek"
+      | "meta";
     chat_completions_dialect?: ChatCompletionsDialect;
     thinking_mode?: ChatCompletionsThinkingMode;
     reasoning_history?: ChatCompletionsReasoningHistory;

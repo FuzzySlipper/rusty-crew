@@ -298,7 +298,8 @@ export interface RuntimeResponsesWakeMetrics {
     | "openai_stateful"
     | "openai_stateless"
     | "generic_stateless"
-    | "deepseek";
+    | "deepseek"
+    | "meta";
   selectedStrategyId: string;
   effectiveStrategyId: string;
   fallbackReason?: string | null;

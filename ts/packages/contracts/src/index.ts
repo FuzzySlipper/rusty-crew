@@ -596,7 +596,8 @@ export interface BrainModelConfig {
     | "openai_stateful"
     | "openai_stateless"
     | "generic_stateless"
-    | "deepseek";
+    | "deepseek"
+    | "meta";
   chatCompletionsDialect?: "standard" | "kimi" | "glm" | "qwen" | "deepseek";
   thinkingMode?: "provider_default" | "enabled" | "disabled";
   reasoningHistory?:

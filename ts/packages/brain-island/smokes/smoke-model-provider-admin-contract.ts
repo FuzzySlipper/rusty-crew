@@ -82,6 +82,7 @@ assert.deepEqual(schema("ResponsesProviderDialect").enum, [
   "openai_stateless",
   "generic_stateless",
   "deepseek",
+  "meta",
 ]);
 assert.deepEqual(schema("ModelProviderRecord").properties?.responsesDialect, {
   $ref: "#/components/schemas/ResponsesProviderDialect",

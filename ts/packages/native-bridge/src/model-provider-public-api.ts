@@ -4,7 +4,8 @@ export type NativeResponsesProviderDialect =
   | "openai_stateful"
   | "openai_stateless"
   | "generic_stateless"
-  | "deepseek";
+  | "deepseek"
+  | "meta";
 export interface NativeResponsesTokenUsage {
   inputTokens?: number;
   cachedInputTokens?: number;

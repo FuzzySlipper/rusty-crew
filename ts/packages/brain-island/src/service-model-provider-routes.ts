@@ -544,12 +544,13 @@ function responsesProviderDialect(
     dialect === "openai_stateful" ||
     dialect === "openai_stateless" ||
     dialect === "generic_stateless" ||
-    dialect === "deepseek"
+    dialect === "deepseek" ||
+    dialect === "meta"
   ) {
     return dialect;
   }
   throw new Error(
-    "model provider responsesDialect must be openai_stateful, openai_stateless, generic_stateless, or deepseek",
+    "model provider responsesDialect must be openai_stateful, openai_stateless, generic_stateless, deepseek, or meta",
   );
 }
 

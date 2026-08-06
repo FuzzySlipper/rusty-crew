@@ -108,7 +108,10 @@ impl ResponsesBrainConfig {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.strategy == ResponsesBrainStrategy::PreviousResponseChain
-            && self.dialect != ResponsesProviderDialect::OpenaiStateful
+            && !matches!(
+                self.dialect,
+                ResponsesProviderDialect::OpenaiStateful | ResponsesProviderDialect::Meta
+            )
         {
             return Err(format!(
                 "Responses dialect {:?} does not support previous_response_id chaining",
@@ -279,10 +282,14 @@ impl Serialize for ResponsesInputItem {
                     map.serialize_entry("content", content)?;
                 }
                 if let Some(summary) = summary {
-                    map.serialize_entry(
-                        "summary",
-                        &json!([{"type": "summary_text", "text": summary}]),
-                    )?;
+                    if summary.is_empty() {
+                        map.serialize_entry("summary", &Vec::<Value>::new())?;
+                    } else {
+                        map.serialize_entry(
+                            "summary",
+                            &json!([{"type": "summary_text", "text": summary}]),
+                        )?;
+                    }
                 }
                 if let Some(encrypted_content) = encrypted_content {
                     map.serialize_entry("encrypted_content", encrypted_content)?;
@@ -399,9 +406,25 @@ impl ResponsesRequestBuilder {
         });
         let openai_extensions = matches!(
             self.config.dialect,
-            ResponsesProviderDialect::OpenaiStateful | ResponsesProviderDialect::OpenaiStateless
+            ResponsesProviderDialect::OpenaiStateful
+                | ResponsesProviderDialect::OpenaiStateless
+                | ResponsesProviderDialect::Meta
         );
+        let meta = self.config.dialect == ResponsesProviderDialect::Meta;
         let deepseek = self.config.dialect == ResponsesProviderDialect::Deepseek;
+        if meta {
+            for item in &mut input {
+                let ResponsesInputItem::Reasoning { summary, .. } = item else {
+                    continue;
+                };
+                // Meta validates the presence of summary on every reasoning
+                // input item, including reasoning-only turns. An empty
+                // internal summary serializes to the required summary: [].
+                if summary.is_none() {
+                    *summary = Some(String::new());
+                }
+            }
+        }
         if deepseek {
             for item in &mut input {
                 let ResponsesInputItem::Reasoning {
@@ -438,7 +461,18 @@ impl ResponsesRequestBuilder {
                 ResponsesBrainStrategy::PreviousResponseChain
             )),
             stream: true,
-            include: openai_extensions.then(|| self.config.include.clone()),
+            include: openai_extensions.then(|| {
+                let mut include = self.config.include.clone();
+                if meta
+                    && self.config.strategy == ResponsesBrainStrategy::Replay
+                    && !include
+                        .iter()
+                        .any(|value| value == "reasoning.encrypted_content")
+                {
+                    include.push("reasoning.encrypted_content".to_string());
+                }
+                include
+            }),
             service_tier: openai_extensions
                 .then(|| self.config.service_tier.clone())
                 .flatten(),
@@ -5090,6 +5124,40 @@ mod tests {
     }
 
     #[test]
+    fn meta_replay_requests_encrypted_reasoning_and_empty_summaries() {
+        let mut config = ResponsesBrainConfig::replay("muse-spark-1.2");
+        config.dialect = ResponsesProviderDialect::Meta;
+        let request = ResponsesRequestBuilder::new(config).build(
+            &wake_request(None, None),
+            None,
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::Reasoning {
+                    id: None,
+                    content: None,
+                    summary: None,
+                    encrypted_content: Some("opaque-reasoning".to_string()),
+                }],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+        let wire = serde_json::to_value(&request).expect("Meta request JSON");
+
+        assert_eq!(wire["model"], "muse-spark-1.2");
+        assert_eq!(wire["store"], false);
+        assert_eq!(wire["include"], json!(["reasoning.encrypted_content"]));
+        assert_eq!(wire["input"][0]["summary"], json!([]));
+        assert_eq!(wire["input"][0]["encrypted_content"], "opaque-reasoning");
+    }
+
+    #[test]
+    fn meta_stateful_requests_allow_previous_response_chain() {
+        let mut config = ResponsesBrainConfig::previous_response_chain("muse-spark-1.2");
+        config.dialect = ResponsesProviderDialect::Meta;
+        config.validate().expect("Meta supports stateful chaining");
+    }
+
+    #[test]
     fn zero_tool_basic_chat_request_omits_tool_choice() {
         for configured_choice in [
             ResponsesToolChoice::Auto,
@@ -5560,6 +5628,9 @@ mod tests {
         assert!(ResponsesBrainConfig::previous_response_chain("gpt-5")
             .validate()
             .is_ok());
+        let mut meta = ResponsesBrainConfig::previous_response_chain("muse-spark-1.2");
+        meta.dialect = ResponsesProviderDialect::Meta;
+        assert!(meta.validate().is_ok());
     }
 
     #[test]

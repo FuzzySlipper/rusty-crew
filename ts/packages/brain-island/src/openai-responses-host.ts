@@ -230,7 +230,7 @@ export async function createOpenAiResponsesBrainHost(
   }
   if (
     strategyId === "previous-response-chain" &&
-    responsesDialect !== "openai_stateful"
+    responsesDialect !== "openai_stateful" && responsesDialect !== "meta"
   ) {
     throw new Error(
       `Responses dialect ${responsesDialect} does not support previous-response-chain`,

@@ -763,6 +763,7 @@ export const rawModelProviderRecordSchema = Type.Object(
         Type.Literal("openai_stateless"),
         Type.Literal("generic_stateless"),
         Type.Literal("deepseek"),
+        Type.Literal("meta"),
         Type.Null(),
       ]),
     ),
@@ -1144,6 +1145,7 @@ const openAiResponsesTransportMetricsSchema = Type.Object(
         Type.Literal("openai_stateless"),
         Type.Literal("generic_stateless"),
         Type.Literal("deepseek"),
+        Type.Literal("meta"),
       ]),
     ),
     selectedStrategyId: Type.String(),
@@ -1209,6 +1211,7 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
           Type.Literal("openai_stateless"),
           Type.Literal("generic_stateless"),
           Type.Literal("deepseek"),
+          Type.Literal("meta"),
         ]),
         strategyId: Type.Optional(
           Type.Union([
