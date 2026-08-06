@@ -1570,6 +1570,24 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/diagnostics/review-submission-scope": {
+      "get": {
+        "operationId": "reviewSubmissionsDiagnosticsScope",
+        "summary": "Read managed review project allowlist and distinguish Crew-managed records from direct Den reviews.",
+        "tags": ["service", "diagnostics", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.submissions.diagnostics.scope",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/diagnostics/review-submissions": {
       "get": {
         "operationId": "reviewSubmissionsDiagnosticsList",
@@ -5696,7 +5714,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 229,
+    "capability_count": 230,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

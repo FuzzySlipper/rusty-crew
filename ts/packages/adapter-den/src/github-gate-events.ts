@@ -49,7 +49,10 @@ export class ReviewGitHubGateEventConsumer {
     this.#projectIds = [
       ...new Set(options.projectIds.map((projectId) => projectId.trim())),
     ];
-    if (this.#projectIds.length === 0 || this.#projectIds.some((id) => id === "")) {
+    if (
+      this.#projectIds.length === 0 ||
+      this.#projectIds.some((id) => id === "")
+    ) {
       throw new Error("Review GitHub gate consumer requires project ids");
     }
     this.#bridge = options.bridge;

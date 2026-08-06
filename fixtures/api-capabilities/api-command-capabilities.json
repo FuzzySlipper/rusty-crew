@@ -764,6 +764,17 @@
         "public": true
       },
       {
+        "id": "review.submissions.diagnostics.scope",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/review-submission-scope",
+        "description": "Read managed review project allowlist and distinguish Crew-managed records from direct Den reviews.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics", "governance"],
+        "public": true
+      },
+      {
         "id": "review.submissions.external.create",
         "method": "POST",
         "path_template": "/v1/admin/review-submissions",
@@ -3117,6 +3128,13 @@
         "capability_id": "review.submissions.diagnostics.list",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/review-submissions",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.submissions.diagnostics.scope",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/review-submission-scope",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

@@ -68,3 +68,35 @@ test("Review terminal-event polling omits authorization for loopback deployments
 
   assert.equal(request?.headers.get("authorization"), null);
 });
+
+test("Review terminal-event polling visits every configured project scope", async () => {
+  const requestedProjects: string[] = [];
+  const consumer = new ReviewGitHubGateEventConsumer({
+    baseUrl: new URL("http://den-gateway.test"),
+    projectIds: ["rusty-crew", "den-services"],
+    waitMs: 0,
+    bridge: {
+      async consumeGitHubGateTerminalEvent() {
+        throw new Error("no events expected");
+      },
+      async gitHubGateEventCursor() {
+        return 0;
+      },
+      async recoverGitHubGateWakes() {
+        return 0;
+      },
+    },
+    fetch: async (input) => {
+      requestedProjects.push(new URL(input.toString()).pathname);
+      return Response.json({ events: [], next_cursor: 0 });
+    },
+  });
+
+  await consumer.hydrate();
+  await consumer.pollOnce();
+
+  assert.deepEqual(requestedProjects, [
+    "/v1/projects/rusty-crew/review/github-check-gate-events",
+    "/v1/projects/den-services/review/github-check-gate-events",
+  ]);
+});

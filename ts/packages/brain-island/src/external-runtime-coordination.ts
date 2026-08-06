@@ -270,10 +270,7 @@ function parseReviewSubmissionArguments(
   ) {
     return "taskId must be a positive integer";
   }
-  if (
-    typeof record.projectId !== "string" ||
-    record.projectId.trim() === ""
-  ) {
+  if (typeof record.projectId !== "string" || record.projectId.trim() === "") {
     return "projectId must be a non-empty Den project id";
   }
   if (

@@ -5853,6 +5853,15 @@
           },
           {
             "properties": {
+              "gateStatus": { "type": "string" },
+              "terminalReason": { "type": "string" },
+              "type": { "const": "gate_terminal", "type": "string" }
+            },
+            "required": ["type", "gateStatus", "terminalReason"],
+            "type": "object"
+          },
+          {
+            "properties": {
               "reasonCode": { "type": "string" },
               "summary": { "type": "string" },
               "type": { "const": "adapter_failed", "type": "string" }

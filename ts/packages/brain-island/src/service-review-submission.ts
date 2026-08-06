@@ -1087,7 +1087,11 @@ async function advanceDenHandoff(
         : { session_key: record.submitterSessionId }),
       agent_profile: record.submitterAgentId,
     });
-    assertDenProjectScope(gate, String(record.projectId), "watch_github_checks");
+    assertDenProjectScope(
+      gate,
+      String(record.projectId),
+      "watch_github_checks",
+    );
     const gateId = requiredNumericId(gate, ["gate_id", "gateId", "id"]);
     record = await context.bridge.transitionReviewSubmission({
       submissionId: record.submissionId,
@@ -1289,7 +1293,12 @@ async function denCall(
   return result.details;
 }
 
-type ExistingGateStatus = "pending" | "passed" | "failed" | "timed_out" | "superseded";
+type ExistingGateStatus =
+  | "pending"
+  | "passed"
+  | "failed"
+  | "timed_out"
+  | "superseded";
 
 function existingGateState(
   payload: unknown,
@@ -1365,7 +1374,9 @@ function assertDenProjectScope(
       ? [candidate.trim()]
       : [];
   });
-  const mismatch = explicitProjects.find((candidate) => candidate !== projectId);
+  const mismatch = explicitProjects.find(
+    (candidate) => candidate !== projectId,
+  );
   if (mismatch === undefined) return;
   throw new ReviewSubmissionAdapterError(
     "review_project_scope_mismatch",
