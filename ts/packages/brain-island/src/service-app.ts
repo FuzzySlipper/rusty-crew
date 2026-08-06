@@ -412,6 +412,7 @@ import {
   assertExpectedDeploymentRole,
   getExternalReviewStatus,
   parseExternalReviewSubmissionRequest,
+  parseReviewProjectIds,
   reconcileReviewSubmissions,
   ReviewSubmissionAdapterError,
   submitExternalReview,
@@ -442,7 +443,7 @@ export interface RustyCrewServiceApp {
 
 interface ServiceState {
   readonly config: RustyCrewServiceConfig;
-  readonly reviewProjectId?: string;
+  readonly reviewProjectIds: readonly string[];
   readonly reviewDenBindingId?: string;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
@@ -1095,7 +1096,9 @@ export async function createRustyCrewServiceApp(
 
     const state: ServiceState = {
       config,
-      reviewProjectId: options.env?.RUSTY_CREW_REVIEW_PROJECT_ID?.trim(),
+      reviewProjectIds: parseReviewProjectIds(
+        options.env?.RUSTY_CREW_REVIEW_PROJECT_IDS,
+      ),
       reviewDenBindingId: options.env?.RUSTY_CREW_REVIEW_DEN_BINDING_ID?.trim(),
       bridge,
       engine,
@@ -1377,6 +1380,32 @@ async function handleHttpRequest(
       requestId(request),
       await state.bridge.listReviewSubmissions({ pendingOnly: false }),
     );
+  }
+
+  if (url.pathname === "/v1/admin/diagnostics/review-submission-scope") {
+    if ((request.method ?? "GET").toUpperCase() !== "GET") {
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "review_submission_scope_method_not_allowed",
+        message: "review submission scope diagnostics support GET only",
+        retryable: false,
+      });
+    }
+    const submissions = await state.bridge.listReviewSubmissions({
+      pendingOnly: false,
+    });
+    return successRoute(requestId(request), {
+      management: "rusty_crew_managed",
+      configuredProjectIds: [...state.reviewProjectIds],
+      directDenReviews: "not_tracked_by_rusty_crew",
+      submissions: submissions.map((record) => ({
+        submissionId: record.submissionId,
+        projectId: String(record.projectId),
+        taskId: Number(record.taskId),
+        phase: record.phase,
+        callerType: record.caller.type,
+      })),
+    });
   }
 
   if (route?.id === "admin.review_submissions.external") {
@@ -5850,7 +5879,7 @@ function reviewSubmissionContext(
 ): ServiceReviewSubmissionContext {
   return {
     bridge: state.bridge,
-    projectId: state.reviewProjectId,
+    reviewProjectIds: state.reviewProjectIds,
     reviewDenBindingId: state.reviewDenBindingId,
     runtimeConfig: state.runtimeConfig,
     serviceConfig: state.config,
@@ -5876,7 +5905,8 @@ function externalReviewApiFailure(
           reasonCode === "review_submission_duplicate_payload_mismatch"
         ? 409
         : reasonCode.startsWith("invalid_") ||
-            reasonCode === "review_project_not_configured"
+            reasonCode === "review_project_not_configured" ||
+            reasonCode === "review_project_not_allowed"
           ? 400
           : 500;
   return failure(status, requestIdValue, {

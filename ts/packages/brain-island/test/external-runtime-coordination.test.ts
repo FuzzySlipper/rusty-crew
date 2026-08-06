@@ -64,6 +64,7 @@ test("Codex review submission derives external caller and returns without pollin
       namespace: "rusty_crew",
       tool: "submit_task_for_review",
       arguments: {
+        projectId: "rusty-crew",
         taskId: 6574,
         repository: "FuzzySlipper/rusty-crew",
         commitSha: "a".repeat(40),
@@ -86,6 +87,7 @@ test("Codex review submission derives external caller and returns without pollin
         ok: true,
         submissionId: "review-submission:test",
         phase: "gate_pending",
+        projectId: input.projectId,
         taskId: input.taskId,
         commitSha: input.commitSha,
         summary: "accepted without polling",

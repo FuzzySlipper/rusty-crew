@@ -5,6 +5,7 @@ import type { BrainToolResolver } from "./tool-session-selection.js";
 
 const submitTaskForReviewParameters = Type.Object(
   {
+    projectId: Type.String({ minLength: 1 }),
     taskId: Type.Integer({ minimum: 1 }),
     repository: Type.String({ minLength: 3 }),
     commitSha: Type.String({ pattern: "^[0-9a-fA-F]{40}$" }),
@@ -70,6 +71,7 @@ export interface ReviewSubmissionToolReceipt {
   ok: boolean;
   submissionId?: string;
   phase?: string;
+  projectId: string;
   taskId: number;
   commitSha: string;
   reasonCode?: string;
@@ -135,6 +137,7 @@ export function submitTaskForReviewTool(
       if (runtime === undefined) {
         return result({
           ok: false,
+          projectId: params.projectId,
           taskId: params.taskId,
           commitSha: params.commitSha,
           reasonCode: "review_submission_runtime_unavailable",
@@ -156,6 +159,7 @@ export function submitTaskForReviewTool(
     execute: async (_callId, params) =>
       result({
         ok: false,
+        projectId: params.projectId,
         taskId: params.taskId,
         commitSha: params.commitSha,
         reasonCode: "tool_context_required",

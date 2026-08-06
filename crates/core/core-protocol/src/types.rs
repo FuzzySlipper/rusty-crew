@@ -630,6 +630,10 @@ pub enum ReviewSubmissionTransition {
     GateRegistered {
         gate_id: u64,
     },
+    GateTerminal {
+        gate_status: String,
+        terminal_reason: String,
+    },
     AdapterFailed {
         reason_code: String,
         summary: String,

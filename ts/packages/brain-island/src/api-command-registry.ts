@@ -997,6 +997,14 @@ export const API_CAPABILITIES = [
     "admin",
     ["service", "diagnostics"],
   ),
+  readCapability(
+    "review.submissions.diagnostics.scope",
+    "GET",
+    "/v1/admin/diagnostics/review-submission-scope",
+    "Read managed review project allowlist and distinguish Crew-managed records from direct Den reviews.",
+    "admin",
+    ["service", "diagnostics", "governance"],
+  ),
   writeCapability(
     "review.submissions.external.create",
     "POST",

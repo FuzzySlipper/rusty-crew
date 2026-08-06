@@ -51,7 +51,7 @@ try {
   });
   const consumer = new ReviewGitHubGateEventConsumer({
     baseUrl: reviewUrl,
-    projectId: "den-services",
+    projectIds: ["den-services"],
     bridge: native,
     waitMs: 0,
   });
@@ -113,7 +113,7 @@ async function seedWait(root: string): Promise<void> {
   });
   const consumer = new ReviewGitHubGateEventConsumer({
     baseUrl: reviewUrl,
-    projectId: "den-services",
+    projectIds: ["den-services"],
     bridge: native,
     waitMs: 0,
   });

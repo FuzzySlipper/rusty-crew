@@ -66,6 +66,7 @@ async function submit(client, options, deploymentRole) {
     throw new CliError("submit requires at least one --check", EXIT.USAGE);
   }
   const data = await client.request("POST", "/v1/admin/review-submissions", {
+    projectId: requiredOption(options, "project-id"),
     taskId: positiveInteger(options, "task"),
     repository: requiredOption(options, "repository"),
     commitSha: requiredOption(options, "sha"),
@@ -213,6 +214,7 @@ function parseArgs(argv) {
   const valueOptions = new Set([
     "service-url",
     "deployment-role",
+    "project-id",
     "service-role",
     "check",
     "task",
@@ -331,6 +333,7 @@ function printData(data, json) {
   const lines = [
     `submission: ${data.submissionId}`,
     `service: ${data.deploymentRole}`,
+    `project: ${data.projectId}`,
     `task: #${data.taskId}`,
     `commit: ${data.commitSha}`,
     `phase: ${data.phase}`,
@@ -346,7 +349,7 @@ function printData(data, json) {
 
 function printUsage() {
   process.stdout.write(
-    `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --task ID --repository OWNER/REPO --sha SHA --ref REF --check NAME \\\n    --base-sha SHA --summary TEXT|--summary-file PATH --client-id ID \\\n    --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
+    `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
   );
 }
 

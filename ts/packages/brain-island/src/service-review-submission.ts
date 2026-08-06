@@ -24,10 +24,15 @@ import {
 
 export interface ServiceReviewSubmissionContext {
   readonly bridge: NativeBridgeModule;
-  readonly projectId?: string;
+  readonly reviewProjectIds: readonly string[];
   readonly reviewDenBindingId?: string;
   readonly runtimeConfig: RustyCrewRuntimeConfig;
   readonly serviceConfig: RustyCrewServiceConfig;
+  readonly callDenTool?: (
+    binding: McpBindingRecord,
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<unknown>;
   now(): string;
   applyCoordinationDelivery(
     receipt: AgentMessageDeliveryReceipt,
@@ -35,6 +40,7 @@ export interface ServiceReviewSubmissionContext {
 }
 
 export interface ExternalReviewSubmissionRequest {
+  readonly projectId: string;
   readonly taskId: number;
   readonly repository: string;
   readonly commitSha: string;
@@ -75,18 +81,37 @@ export interface ExternalReviewSubmissionReceipt {
   readonly lastAdapterError?: string;
 }
 
+const REVIEW_PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function parseReviewProjectIds(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === "") return [];
+  const ids = [...new Set(raw.split(",").map((value) => value.trim()))];
+  if (ids.some((id) => !REVIEW_PROJECT_ID_PATTERN.test(id))) {
+    throw new Error(
+      "RUSTY_CREW_REVIEW_PROJECT_IDS must contain only comma-separated Den project ids",
+    );
+  }
+  return ids;
+}
+
 export async function submitExternalReview(
   context: ServiceReviewSubmissionContext,
   input: ExternalReviewSubmissionRequest,
 ): Promise<ExternalReviewSubmissionReceipt> {
   validateExternalReviewInput(context, input);
-  const projectId = context.projectId?.trim();
-  if (!projectId) {
+  const projectSelection = selectConfiguredReviewProject(
+    context,
+    input.projectId,
+  );
+  if (!projectSelection.ok) {
     throw new ReviewSubmissionAdapterError(
-      "review_project_not_configured",
-      "Rusty Crew Review project integration is not configured.",
+      projectSelection.reasonCode,
+      projectSelection.reasonCode === "review_project_not_allowed"
+        ? `Den project ${input.projectId} is not enabled for managed Rusty Crew reviews.`
+        : "Rusty Crew managed review project integration is not configured.",
     );
   }
+  const projectId = projectSelection.projectId;
   let record = await context.bridge.beginReviewSubmission({
     caller: {
       type: "external_cli",
@@ -161,6 +186,7 @@ export function parseExternalReviewSubmissionRequest(
   }
   const value = body as Record<string, unknown>;
   const taskId = value.taskId;
+  const projectId = stringField(value, "projectId");
   const repository = stringField(value, "repository");
   const commitSha = stringField(value, "commitSha");
   const ref = stringField(value, "ref");
@@ -193,6 +219,7 @@ export function parseExternalReviewSubmissionRequest(
     );
   }
   return {
+    projectId,
     taskId,
     repository,
     commitSha,
@@ -305,6 +332,7 @@ function validateExternalReviewInput(
   if (
     !Number.isSafeInteger(input.taskId) ||
     input.taskId <= 0 ||
+    !REVIEW_PROJECT_ID_PATTERN.test(input.projectId.trim()) ||
     input.repository.trim() === "" ||
     input.commitSha.trim() === "" ||
     input.ref.trim() === "" ||
@@ -361,6 +389,8 @@ export async function reconcileReviewSubmissions(
       await advanceDenHandoff(context, record);
     } else if (record.phase === "gate_failed") {
       await settleFailedGate(context, record);
+    } else if (record.phase === "gate_pending" && retryDue(record)) {
+      await reconcilePendingGate(context, record);
     } else if (record.phase === "reviewer_dispatch_pending") {
       await dispatchReviewer(context, record);
     } else if (
@@ -379,10 +409,14 @@ async function submitReview(
     caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
   },
 ): Promise<ReviewSubmissionToolReceipt> {
-  const projectId = context.projectId?.trim();
-  if (!projectId) {
-    return rejected(input, "review_project_not_configured");
+  const projectSelection = selectConfiguredReviewProject(
+    context,
+    input.projectId,
+  );
+  if (!projectSelection.ok) {
+    return rejected(input, projectSelection.reasonCode);
   }
+  const projectId = projectSelection.projectId;
   let record = await context.bridge.beginReviewSubmission({
     caller: input.caller,
     projectId,
@@ -775,6 +809,7 @@ function parseFinalizationReceipt(
   taskStatus: string;
   materialDigest?: string;
 } {
+  assertDenProjectScope(payload, String(record.projectId), "finalize_review");
   const response = allObjects(payload).find(
     (value) =>
       numericValue(value, ["id", "finalization_id"]) !== undefined &&
@@ -1007,6 +1042,7 @@ async function advanceDenHandoff(
         context,
         binding,
         Number(record.taskId),
+        String(record.projectId),
       );
       const existingRound = exactHeadRound(rounds, record.commitSha);
       const baseCommit =
@@ -1028,7 +1064,7 @@ async function advanceDenHandoff(
             base_commit: baseCommit,
             head_commit: record.commitSha,
             tests_run: JSON.stringify([]),
-            notes: record.reviewSummaryMd,
+            notes: reviewRequestNotes(record),
           }),
           ["review_round_id", "reviewRoundId", "id"],
         );
@@ -1051,6 +1087,7 @@ async function advanceDenHandoff(
         : { session_key: record.submitterSessionId }),
       agent_profile: record.submitterAgentId,
     });
+    assertDenProjectScope(gate, String(record.projectId), "watch_github_checks");
     const gateId = requiredNumericId(gate, ["gate_id", "gateId", "id"]);
     record = await context.bridge.transitionReviewSubmission({
       submissionId: record.submissionId,
@@ -1100,6 +1137,41 @@ async function settleFailedGate(
       context,
       record,
       "den_task_reset_failed",
+      errorMessage(error),
+    );
+  }
+}
+
+async function reconcilePendingGate(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): Promise<void> {
+  const binding = denBinding(context, record.submitterSessionId);
+  if (binding === undefined || record.gateId === undefined) return;
+  try {
+    const gate = await denCall(context, binding, "get_github_check_gate", {
+      task_id: Number(record.taskId),
+      commit_sha: record.commitSha,
+    });
+    const state = existingGateState(gate, record);
+    if (state.status === "pending") return;
+    await context.bridge.transitionReviewSubmission({
+      submissionId: record.submissionId,
+      expectedRevision: record.revision,
+      transition: {
+        type: "gate_terminal",
+        gateStatus: state.status,
+        terminalReason: state.terminalReason,
+      },
+      now: context.now(),
+    });
+  } catch (error) {
+    await recordAdapterFailure(
+      context,
+      record,
+      error instanceof ReviewSubmissionAdapterError
+        ? error.reasonCode
+        : "github_gate_reconciliation_failed",
       errorMessage(error),
     );
   }
@@ -1191,6 +1263,9 @@ async function denCall(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  if (context.callDenTool !== undefined) {
+    return context.callDenTool(binding, toolName, args);
+  }
   const result = await callConfiguredMcpTool({
     binding,
     config: buildServiceMcpEndpointConfig({
@@ -1214,15 +1289,88 @@ async function denCall(
   return result.details;
 }
 
+type ExistingGateStatus = "pending" | "passed" | "failed" | "timed_out" | "superseded";
+
+function existingGateState(
+  payload: unknown,
+  record: ReviewSubmissionRecord,
+): { status: ExistingGateStatus; terminalReason: string } {
+  const gate = allObjects(payload).find((candidate) => {
+    const gateId = numericValue(candidate, ["id", "gate_id", "gateId"]);
+    const taskId = numericValue(candidate, ["task_id", "taskId"]);
+    const commitSha = stringValue(candidate, ["commit_sha", "commitSha"]);
+    return (
+      gateId === record.gateId &&
+      taskId === Number(record.taskId) &&
+      commitSha?.toLowerCase() === record.commitSha.toLowerCase()
+    );
+  });
+  if (gate === undefined) {
+    throw new ReviewSubmissionAdapterError(
+      "github_gate_scope_mismatch",
+      `Den did not return gate ${record.gateId} for task #${record.taskId} at ${record.commitSha}.`,
+    );
+  }
+  const status = stringValue(gate, ["status"]);
+  if (
+    status !== "pending" &&
+    status !== "passed" &&
+    status !== "failed" &&
+    status !== "timed_out" &&
+    status !== "superseded"
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "github_gate_status_invalid",
+      `Den returned an unsupported GitHub gate status for gate ${record.gateId}.`,
+    );
+  }
+  return {
+    status,
+    terminalReason:
+      stringValue(gate, ["terminal_reason", "terminalReason"]) ??
+      (status === "passed" ? "checks_passed" : "github_gate_failed"),
+  };
+}
+
 async function reviewRounds(
   context: ServiceReviewSubmissionContext,
   binding: McpBindingRecord,
   taskId: number,
+  projectId: string,
 ): Promise<Record<string, unknown>[]> {
   const payload = await denCall(context, binding, "list_review_rounds", {
     task_id: taskId,
   });
+  assertDenProjectScope(payload, projectId, "list_review_rounds");
   return allObjects(payload);
+}
+
+function reviewRequestNotes(record: ReviewSubmissionRecord): string {
+  return [
+    `Rusty Crew managed review project: ${record.projectId}.`,
+    "The task id is the Den project-scoped review identity; do not substitute a direct or unrelated project review.",
+    "",
+    record.reviewSummaryMd,
+  ].join("\n");
+}
+
+function assertDenProjectScope(
+  payload: unknown,
+  projectId: string,
+  operation: string,
+): void {
+  const explicitProjects = allObjects(payload).flatMap((value) => {
+    const candidate = value.project_id ?? value.projectId;
+    return typeof candidate === "string" && candidate.trim() !== ""
+      ? [candidate.trim()]
+      : [];
+  });
+  const mismatch = explicitProjects.find((candidate) => candidate !== projectId);
+  if (mismatch === undefined) return;
+  throw new ReviewSubmissionAdapterError(
+    "review_project_scope_mismatch",
+    `${operation} returned project ${mismatch}, expected ${projectId}.`,
+  );
 }
 
 function priorReviewedHead(
@@ -1275,6 +1423,7 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
   return [
     `Rusty Crew managed review submission: ${record.submissionId}.`,
     `Review Den task #${record.taskId} at exact SHA ${record.commitSha}.`,
+    `Den project: ${record.projectId}. This is a Rusty Crew managed review submission; direct Den reviews are not attached to this workflow.`,
     `Repository: ${record.repository}`,
     `Ref: ${record.gitRef}`,
     `Review round: ${record.reviewRoundId ?? "unknown"}`,
@@ -1297,6 +1446,7 @@ function accepted(record: ReviewSubmissionRecord): ReviewSubmissionToolReceipt {
     ok: true,
     submissionId: record.submissionId,
     phase: record.phase,
+    projectId: String(record.projectId),
     taskId: Number(record.taskId),
     commitSha: record.commitSha,
     summary: `Task #${record.taskId} review submission accepted at ${record.commitSha}; phase=${record.phase}. GitHub checks continue durably without holding this model turn.`,
@@ -1311,6 +1461,7 @@ function failed(
     ok: false,
     submissionId: record.submissionId,
     phase: record.phase,
+    projectId: String(record.projectId),
     taskId: Number(record.taskId),
     commitSha: record.commitSha,
     reasonCode,
@@ -1324,11 +1475,38 @@ function rejected(
 ): ReviewSubmissionToolReceipt {
   return {
     ok: false,
+    projectId: input.projectId,
     taskId: input.taskId,
     commitSha: input.commitSha,
     reasonCode,
-    summary: "Rusty Crew Review project integration is not configured.",
+    summary:
+      reasonCode === "review_project_not_allowed"
+        ? `Den project ${input.projectId} is not enabled for managed Rusty Crew reviews.`
+        : "Rusty Crew managed review project integration is not configured.",
   };
+}
+
+type ReviewProjectSelection =
+  | { readonly ok: true; readonly projectId: string }
+  | {
+      readonly ok: false;
+      readonly reasonCode:
+        | "review_project_not_configured"
+        | "review_project_not_allowed";
+    };
+
+function selectConfiguredReviewProject(
+  context: ServiceReviewSubmissionContext,
+  requestedProjectId: string,
+): ReviewProjectSelection {
+  const projectId = requestedProjectId.trim();
+  if (context.reviewProjectIds.length === 0) {
+    return { ok: false, reasonCode: "review_project_not_configured" };
+  }
+  if (!context.reviewProjectIds.includes(projectId)) {
+    return { ok: false, reasonCode: "review_project_not_allowed" };
+  }
+  return { ok: true, projectId };
 }
 
 function requiredNumericId(value: unknown, keys: string[]): number {

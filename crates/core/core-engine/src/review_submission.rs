@@ -1,7 +1,8 @@
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentCoordinationCaller, ReviewSubmissionPhase, ReviewSubmissionQuery, ReviewSubmissionRecord,
-    ReviewSubmissionRequest, ReviewSubmissionTransition, ReviewSubmissionTransitionRequest, TaskId,
+    AgentCoordinationCaller, ProjectId, ReviewSubmissionPhase, ReviewSubmissionQuery,
+    ReviewSubmissionRecord, ReviewSubmissionRequest, ReviewSubmissionTransition,
+    ReviewSubmissionTransitionRequest, TaskId,
 };
 use sha2::{Digest, Sha256};
 
@@ -85,8 +86,12 @@ impl CoreEngine {
                 (agent_id, Some(session_id))
             }
         };
-        let submission_id =
-            review_submission_id(&request.task_id, &request.commit_sha, &request.caller);
+        let submission_id = review_submission_id(
+            &request.project_id,
+            &request.task_id,
+            &request.commit_sha,
+            &request.caller,
+        );
         if let Some(mut existing) = load_review_submission_record(&self.store, &submission_id)? {
             validate_duplicate_review_submission(&existing, &request)?;
             if existing.base_commit.is_none() && request.base_commit.is_some() {
@@ -223,6 +228,30 @@ impl CoreEngine {
                         },
                     )?;
                 }
+            }
+            ReviewSubmissionTransition::GateTerminal {
+                gate_status,
+                terminal_reason,
+            } => {
+                require_review_phase(&record, ReviewSubmissionPhase::GatePending)?;
+                if !matches!(
+                    gate_status.as_str(),
+                    "passed" | "failed" | "timed_out" | "superseded"
+                ) || terminal_reason.trim().is_empty()
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "invalid Review GitHub gate terminal state",
+                    ));
+                }
+                record.gate_status = Some(gate_status.clone());
+                record.terminal_reason = Some(terminal_reason.clone());
+                record.phase = if gate_status == "passed" {
+                    ReviewSubmissionPhase::ReviewerDispatchPending
+                } else {
+                    ReviewSubmissionPhase::GateFailed
+                };
+                record.last_adapter_error = None;
             }
             ReviewSubmissionTransition::AdapterFailed {
                 reason_code,
@@ -626,6 +655,7 @@ fn review_submission_terminal(phase: ReviewSubmissionPhase) -> bool {
 }
 
 fn review_submission_id(
+    project_id: &ProjectId,
     task_id: &TaskId,
     commit_sha: &str,
     caller: &AgentCoordinationCaller,
@@ -640,7 +670,8 @@ fn review_submission_id(
     };
     let digest = Sha256::digest(
         format!(
-            "{}|{}|{}",
+            "{}|{}|{}|{}",
+            project_id.0,
             task_id.0,
             commit_sha.to_ascii_lowercase(),
             caller_identity,

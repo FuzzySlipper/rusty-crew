@@ -1709,6 +1709,10 @@ export type ReviewSubmissionTransition = {
   gateId: number;
   type: "gate_registered";
 } | {
+  gateStatus: string;
+  terminalReason: string;
+  type: "gate_terminal";
+} | {
   reasonCode: string;
   summary: string;
   type: "adapter_failed";

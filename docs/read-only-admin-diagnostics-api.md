@@ -45,10 +45,17 @@ Implemented read-only route families:
 - `GET /v1/admin/diagnostics/observation`
 - `GET /v1/admin/diagnostics/background`
 - `GET /v1/admin/diagnostics/config`
+- `GET /v1/admin/diagnostics/review-submission-scope`
 - `GET /v1/admin/diagnostics/metrics`
 - `GET /v1/admin/events/recent`
 
 Unknown routes return a stable `not_found` error envelope. Non-GET methods return `method_not_allowed`.
+
+`GET /v1/admin/diagnostics/review-submission-scope` reports the configured
+managed-review project allowlist and the Rust-owned managed submission
+projection. Direct Den `request_review` calls are intentionally reported as
+`not_tracked_by_rusty_crew`; a routable reviewer address alone does not create
+a managed submission attachment.
 
 ## Memory Surface Catalog
 

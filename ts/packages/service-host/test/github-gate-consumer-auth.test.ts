@@ -7,7 +7,7 @@ test("Review terminal-event polling authenticates through a remote Gateway", asy
   let request: Request | undefined;
   const consumer = new ReviewGitHubGateEventConsumer({
     baseUrl: new URL("http://den-gateway.test"),
-    projectId: "rusty-crew",
+    projectIds: ["rusty-crew"],
     bearerToken: "gateway-review-token",
     waitMs: 0,
     bridge: {
@@ -44,7 +44,7 @@ test("Review terminal-event polling omits authorization for loopback deployments
   let request: Request | undefined;
   const consumer = new ReviewGitHubGateEventConsumer({
     baseUrl: new URL("http://127.0.0.1:8096"),
-    projectId: "rusty-crew",
+    projectIds: ["rusty-crew"],
     waitMs: 0,
     bridge: {
       async consumeGitHubGateTerminalEvent() {

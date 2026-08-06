@@ -23,7 +23,7 @@ CLI does not infer a deployment from a port, hostname, or a mutable profile.
 The selected service must have these review settings:
 
 ```dotenv
-RUSTY_CREW_REVIEW_PROJECT_ID=rusty-crew
+RUSTY_CREW_REVIEW_PROJECT_IDS=rusty-crew,den-services
 RUSTY_CREW_REVIEW_DEN_BINDING_ID=<active MCP binding containing server name den>
 ```
 
@@ -67,6 +67,7 @@ export RUSTY_CREW_ADMIN_TOKEN='...'
 rusty-crew-review submit \
   --service-url http://127.0.0.1:9347 \
   --deployment-role production \
+  --project-id rusty-crew \
   --task 6644 \
   --repository FuzzySlipper/rusty-crew \
   --sha 0123456789abcdef0123456789abcdef01234567 \
@@ -80,8 +81,9 @@ rusty-crew-review submit \
 ```
 
 Use `--summary` for a short inline summary or `--summary-file` for the normal
-markdown handoff. The service bounds the summary and validates the repository,
-SHA, task, checks, and idempotency identity.
+markdown handoff. The service bounds the summary and validates the selected
+project against the deployment allowlist, repository, SHA, task, checks, and
+idempotency identity.
 
 The receiver is always `@reviewer`. There is deliberately no `--reviewer`
 option and the HTTP API rejects a reviewer field in the external request.

@@ -16,6 +16,7 @@ export type {
   RustyCrewServicePaths,
 } from "../service-config.js";
 export { createRustyCrewServiceApp } from "../service-app.js";
+export { parseReviewProjectIds } from "../service-review-submission.js";
 export type {
   RustyCrewServiceApp,
   RustyCrewServiceAppOptions,

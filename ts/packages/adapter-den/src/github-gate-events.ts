@@ -23,7 +23,7 @@ export interface ReviewGitHubGateEventConsumerStatus {
 
 export class ReviewGitHubGateEventConsumer {
   readonly #baseUrl: URL;
-  readonly #projectId: string;
+  readonly #projectIds: readonly string[];
   readonly #bridge: ReviewGitHubGateBridge;
   readonly #fetch: typeof fetch;
   readonly #bearerToken?: string;
@@ -39,14 +39,19 @@ export class ReviewGitHubGateEventConsumer {
 
   constructor(options: {
     baseUrl: URL;
-    projectId: string;
+    projectIds: readonly string[];
     bridge: ReviewGitHubGateBridge;
     fetch?: typeof fetch;
     bearerToken?: string;
     waitMs?: number;
   }) {
     this.#baseUrl = options.baseUrl;
-    this.#projectId = options.projectId.trim();
+    this.#projectIds = [
+      ...new Set(options.projectIds.map((projectId) => projectId.trim())),
+    ];
+    if (this.#projectIds.length === 0 || this.#projectIds.some((id) => id === "")) {
+      throw new Error("Review GitHub gate consumer requires project ids");
+    }
     this.#bridge = options.bridge;
     this.#fetch = options.fetch ?? fetch;
     const bearerToken = options.bearerToken?.trim();
@@ -67,39 +72,41 @@ export class ReviewGitHubGateEventConsumer {
   }
 
   async pollOnce(signal?: AbortSignal): Promise<GitHubGateTerminalReceipt[]> {
-    const url = new URL(
-      `/v1/projects/${encodeURIComponent(this.#projectId)}/review/github-check-gate-events`,
-      this.#baseUrl,
-    );
-    url.searchParams.set("after_id", String(this.#status.cursor));
-    url.searchParams.set("limit", "100");
-    url.searchParams.set("wait_ms", String(this.#waitMs));
     try {
-      const response = await this.#fetch(url, {
-        signal,
-        ...(this.#bearerToken === undefined
-          ? {}
-          : { headers: { authorization: `Bearer ${this.#bearerToken}` } }),
-      });
-      if (!response.ok) {
-        throw new Error(
-          `Review terminal events returned HTTP ${response.status}`,
-        );
-      }
-      const page = parseEventPage(await response.json());
       const receipts: GitHubGateTerminalReceipt[] = [];
-      for (const event of page.events) {
-        const receipt =
-          await this.#bridge.consumeGitHubGateTerminalEvent(event);
-        receipts.push(receipt);
-        this.#status.cursor = Math.max(this.#status.cursor, receipt.cursor);
-        this.#status.acceptedEvents += 1;
-        if (receipt.wakeScheduled) this.#status.scheduledWakes += 1;
-        if (receipt.duplicate) this.#status.duplicateEvents += 1;
-        if (receipt.ignoredReason !== undefined)
-          this.#status.ignoredEvents += 1;
+      for (const projectId of this.#projectIds) {
+        const url = new URL(
+          `/v1/projects/${encodeURIComponent(projectId)}/review/github-check-gate-events`,
+          this.#baseUrl,
+        );
+        url.searchParams.set("after_id", String(this.#status.cursor));
+        url.searchParams.set("limit", "100");
+        url.searchParams.set("wait_ms", String(this.#waitMs));
+        const response = await this.#fetch(url, {
+          signal,
+          ...(this.#bearerToken === undefined
+            ? {}
+            : { headers: { authorization: `Bearer ${this.#bearerToken}` } }),
+        });
+        if (!response.ok) {
+          throw new Error(
+            `Review terminal events for ${projectId} returned HTTP ${response.status}`,
+          );
+        }
+        const page = parseEventPage(await response.json());
+        for (const event of page.events) {
+          const receipt =
+            await this.#bridge.consumeGitHubGateTerminalEvent(event);
+          receipts.push(receipt);
+          this.#status.cursor = Math.max(this.#status.cursor, receipt.cursor);
+          this.#status.acceptedEvents += 1;
+          if (receipt.wakeScheduled) this.#status.scheduledWakes += 1;
+          if (receipt.duplicate) this.#status.duplicateEvents += 1;
+          if (receipt.ignoredReason !== undefined)
+            this.#status.ignoredEvents += 1;
+        }
+        this.#status.cursor = Math.max(this.#status.cursor, page.nextCursor);
       }
-      this.#status.cursor = Math.max(this.#status.cursor, page.nextCursor);
       this.#status.state = "connected";
       delete this.#status.lastError;
       return receipts;

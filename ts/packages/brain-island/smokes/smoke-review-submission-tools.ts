@@ -14,6 +14,7 @@ const tool = submitTaskForReviewTool({
       ok: true,
       submissionId: "review-submission:test",
       phase: "gate_pending",
+      projectId: input.projectId,
       taskId: input.taskId,
       commitSha: input.commitSha,
       summary: "accepted without waiting",
@@ -26,6 +27,7 @@ assert.match(tool.description, /lower-level Den review and GitHub-gate tools/i);
 assert.ok(tool.executeWithContext);
 const result = await tool.executeWithContext!(
   {
+    projectId: "rusty-crew",
     taskId: 6574,
     repository: "FuzzySlipper/rusty-crew",
     commitSha: "a".repeat(40),
@@ -50,6 +52,7 @@ assert.equal(result.turnDisposition, "complete_turn");
 assert.equal(result.details.phase, "gate_pending");
 assert.deepEqual(calls, [
   {
+    projectId: "rusty-crew",
     taskId: 6574,
     repository: "FuzzySlipper/rusty-crew",
     commitSha: "a".repeat(40),

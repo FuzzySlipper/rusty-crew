@@ -271,6 +271,12 @@ function parseReviewSubmissionArguments(
     return "taskId must be a positive integer";
   }
   if (
+    typeof record.projectId !== "string" ||
+    record.projectId.trim() === ""
+  ) {
+    return "projectId must be a non-empty Den project id";
+  }
+  if (
     typeof record.repository !== "string" ||
     !/^[^/\s]+\/[^/\s]+$/.test(record.repository)
   ) {
@@ -315,6 +321,7 @@ function parseReviewSubmissionArguments(
     return "reviewer must be a switchboard @address when supplied";
   }
   return {
+    projectId: record.projectId,
     taskId: record.taskId,
     repository: record.repository,
     commitSha: record.commitSha,
