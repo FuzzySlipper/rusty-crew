@@ -32,6 +32,21 @@ fn passing_review_gate_is_restart_durable_and_does_not_wake_submitter() {
         })
         .unwrap();
     assert_eq!(record.phase, ReviewSubmissionPhase::GatePending);
+    let persisted_pending = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            submission_id: Some(record.submission_id.clone()),
+            pending_only: true,
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap();
+    assert_eq!(persisted_pending.len(), 1);
+    assert_eq!(
+        persisted_pending[0].phase,
+        ReviewSubmissionPhase::GatePending
+    );
+    assert_eq!(persisted_pending[0].task_id, TaskId::new("6574"));
+    assert_eq!(persisted_pending[0].commit_sha, exact_sha('a'));
+
     let (_, receiver) = engine
         .subscribe_events(EventSubscription {
             event_kinds: vec![CoreEventKind::BrainWakeRequested],

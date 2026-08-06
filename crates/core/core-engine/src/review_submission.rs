@@ -428,6 +428,7 @@ impl CoreEngine {
                         record.phase,
                         ReviewSubmissionPhase::Submitted
                             | ReviewSubmissionPhase::DenHandoffRecorded
+                            | ReviewSubmissionPhase::GatePending
                             | ReviewSubmissionPhase::GateFailed
                             | ReviewSubmissionPhase::ReviewerDispatchPending
                             | ReviewSubmissionPhase::ReviewerDispatched
