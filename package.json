@@ -141,7 +141,6 @@
     "smoke:brain-tool-chat-completions-adapter": "npm run smoke:brain-tool-chat-completions-adapter -w @rusty-crew/brain-island",
     "smoke:brain-catalog": "npm run smoke:brain-catalog -w @rusty-crew/brain-island",
     "smoke:openai-responses-tool-bridge": "npm run smoke:openai-responses-tool-bridge -w @rusty-crew/brain-island",
-    "smoke:responses-event-loop": "npm run smoke:responses-event-loop -w @rusty-crew/brain-island",
     "smoke:responses-concurrency-capacity": "npm run smoke:responses-concurrency-capacity -w @rusty-crew/brain-island",
     "smoke:responses-service-live-field-test": "npm run smoke:responses-service-live-field-test -w @rusty-crew/brain-island",
     "smoke:local-code-tools": "npm run smoke:local-code-tools -w @rusty-crew/brain-island",

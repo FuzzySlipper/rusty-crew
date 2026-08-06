@@ -159,7 +159,6 @@
     "smoke:chat-completions-rust-bridge": "tsx smokes/smoke-chat-completions-rust-bridge.ts",
     "smoke:chat-completions-silent-upstream": "tsx smokes/smoke-chat-completions-silent-upstream.ts",
     "smoke:openai-responses-cancellation": "tsx smokes/smoke-openai-responses-cancellation.ts",
-    "smoke:responses-event-loop": "tsx ../../smokes/brain-island/smoke-responses-event-loop.ts",
     "smoke:responses-concurrency-capacity": "tsx ../../smokes/brain-island/smoke-responses-concurrency-capacity.ts",
     "smoke:responses-service-live-field-test": "tsx ../../smokes/brain-island/smoke-responses-service-field-test.ts",
     "smoke:deepseek-responses-live-debug-service": "tsx smokes/deepseek-responses-live-debug-service.ts",
