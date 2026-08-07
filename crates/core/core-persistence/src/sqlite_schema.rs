@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 62;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 63;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -329,7 +329,86 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "allow external CLI review submissions without sessions",
         apply: repos::review_submissions::migrate_v62_allow_external_review_submitters,
     },
+    SchemaMigration {
+        version: 63,
+        description: "add context compaction provenance and intent lineage",
+        apply: migrate_v63_add_context_compaction_provenance,
+    },
 ];
+
+fn migrate_v63_add_context_compaction_provenance(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "strategy_revision",
+        "TEXT",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "logical_turn_id",
+        "TEXT",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "execution_epoch_id",
+        "TEXT",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "source_projection_fingerprint",
+        "TEXT",
+    )?;
+    add_missing_column_tx(tx, "context_compaction_artifacts", "trigger", "TEXT")?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "before_tokens",
+        "INTEGER",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "after_tokens",
+        "INTEGER",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "preserved_item_count",
+        "INTEGER",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "excised_item_count",
+        "INTEGER",
+    )?;
+    add_missing_column_tx(tx, "context_compaction_artifacts", "intent_key", "TEXT")?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "terminal_status",
+        "TEXT",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "context_compaction_artifacts",
+        "provider_chain_action",
+        "TEXT",
+    )?;
+    tx.execute_batch(
+        "
+            CREATE INDEX IF NOT EXISTS idx_context_compaction_intent
+                ON context_compaction_artifacts(intent_key, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_context_compaction_logical_turn
+                ON context_compaction_artifacts(logical_turn_id, created_at DESC);
+        ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 63", error))
+}
 
 fn migrate_v60_add_responses_provider_dialect(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(
