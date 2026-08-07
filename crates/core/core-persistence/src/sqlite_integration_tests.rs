@@ -5607,6 +5607,112 @@ fn context_compaction_artifacts_are_idempotent_under_concurrent_conflicting_writ
 }
 
 #[test]
+fn context_compaction_artifacts_persist_provenance_and_intent_lineage() {
+    let db_path = temp_db_path("context-compaction-provenance");
+    let store = CoordinationStore::open_file(&db_path).unwrap();
+    let artifact = ContextCompactionArtifact {
+        artifact_id: "artifact_provenance".to_string(),
+        session_id: SessionId::new("session-provenance"),
+        branch_id: None,
+        strategy_id: "rolling_summary_compaction".to_string(),
+        strategy_revision: Some("2".to_string()),
+        logical_turn_id: Some("turn-provenance-1".to_string()),
+        execution_epoch_id: Some("epoch-99".to_string()),
+        source_projection_fingerprint: Some("fp-provenance-abc".to_string()),
+        trigger: Some("manual_intent".to_string()),
+        before_tokens: Some(100000),
+        after_tokens: Some(25000),
+        preserved_item_count: Some(12),
+        excised_item_count: Some(8),
+        intent_key: Some("intent-manual-1".to_string()),
+        terminal_status: Some("completed".to_string()),
+        provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+        source_refs_json: json!({"slot": "s1"}),
+        provider_metadata_json: json!({"provider_alias": "deepseek-flash"}),
+        estimate_before_json: json!({"input_tokens": 100000}),
+        estimate_after_json: Some(json!({"input_tokens": 25000})),
+        summary_text: "provenance lineage preserved".to_string(),
+        enters_future_context: true,
+        context_policy: "summary_context".to_string(),
+        metadata_json: json!({"test": "provenance"}),
+        created_at: "2026-06-30T00:00:00Z".to_string(),
+        updated_at: "2026-06-30T00:00:01Z".to_string(),
+    };
+    store.save_context_compaction_artifact(&artifact).unwrap();
+    let reloaded = store
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(SessionId::new("session-provenance")),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: true,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(reloaded.len(), 1);
+    let loaded = &reloaded[0];
+    assert_eq!(loaded.artifact_id, "artifact_provenance");
+    assert_eq!(loaded.strategy_revision.as_deref(), Some("2"));
+    assert_eq!(loaded.logical_turn_id.as_deref(), Some("turn-provenance-1"));
+    assert_eq!(loaded.execution_epoch_id.as_deref(), Some("epoch-99"));
+    assert_eq!(
+        loaded.source_projection_fingerprint.as_deref(),
+        Some("fp-provenance-abc")
+    );
+    assert_eq!(loaded.trigger.as_deref(), Some("manual_intent"));
+    assert_eq!(loaded.before_tokens, Some(100000));
+    assert_eq!(loaded.after_tokens, Some(25000));
+    assert_eq!(loaded.preserved_item_count, Some(12));
+    assert_eq!(loaded.excised_item_count, Some(8));
+    assert_eq!(loaded.intent_key.as_deref(), Some("intent-manual-1"));
+    assert_eq!(loaded.terminal_status.as_deref(), Some("completed"));
+    assert_eq!(
+        loaded.provider_chain_action.as_deref(),
+        Some("rebuild_replay_after_compaction")
+    );
+    // intent_key idempotent: second write with same artifact_id but different summary updates in place, not duplicate
+    let mut second = artifact.clone();
+    second.summary_text = "second write same intent".to_string();
+    second.updated_at = "2026-06-30T00:00:02Z".to_string();
+    store.save_context_compaction_artifact(&second).unwrap();
+    let after_second = store
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(SessionId::new("session-provenance")),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: false,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(
+        after_second.len(),
+        1,
+        "same artifact_id must remain one row"
+    );
+    assert_eq!(after_second[0].summary_text, "second write same intent");
+    drop(store);
+    // reopen proves restart hydration survives
+    let reopened = CoordinationStore::open_file(&db_path).unwrap();
+    let hydrated = reopened
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(SessionId::new("session-provenance")),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: true,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(hydrated.len(), 1);
+    assert_eq!(hydrated[0].intent_key.as_deref(), Some("intent-manual-1"));
+    remove_temp_db(&db_path);
+}
+
+#[test]
 fn message_slots_persist_variants_and_active_selection_conflicts() {
     let db_path = temp_db_path("message-slots");
     let store = CoordinationStore::open_file(&db_path).unwrap();
