@@ -850,8 +850,20 @@ type CompactionMetadata = {
 };
 
 type CompactionRuntimeArtifact = {
+  artifactId?: unknown;
   sequence?: unknown;
   strategyId?: unknown;
+  strategyRevision?: unknown;
+  logicalTurnId?: unknown;
+  executionEpochId?: unknown;
+  sourceProjectionFingerprint?: unknown;
+  trigger?: unknown;
+  beforeTokens?: unknown;
+  afterTokens?: unknown;
+  preservedItemCount?: unknown;
+  excisedItemCount?: unknown;
+  intentKey?: unknown;
+  terminalStatus?: unknown;
   reasonCode?: unknown;
   usageBefore?: unknown;
   estimatedTokensAfter?: unknown;
@@ -907,16 +919,44 @@ function contextCompactionArtifactFromMetadata(
     runtimeArtifact.providerChainAction === null
       ? null
       : nonEmptyString(runtimeArtifact.providerChainAction);
+  const artifactId = nonEmptyString(runtimeArtifact.artifactId);
+  const strategyRevision = nonEmptyString(runtimeArtifact.strategyRevision);
+  const logicalTurnId = nonEmptyString(runtimeArtifact.logicalTurnId);
+  const executionEpochId = nonEmptyString(runtimeArtifact.executionEpochId);
+  const sourceProjectionFingerprint = nonEmptyString(
+    runtimeArtifact.sourceProjectionFingerprint,
+  );
+  const trigger = nonEmptyString(runtimeArtifact.trigger);
+  const beforeTokens = nonNegativeInteger(runtimeArtifact.beforeTokens);
+  const afterTokens = nonNegativeInteger(runtimeArtifact.afterTokens);
+  const preservedItemCount = nonNegativeInteger(
+    runtimeArtifact.preservedItemCount,
+  );
+  const excisedItemCount = nonNegativeInteger(runtimeArtifact.excisedItemCount);
+  const intentKey = nonEmptyString(runtimeArtifact.intentKey);
+  const terminalStatus = nonEmptyString(runtimeArtifact.terminalStatus);
   const identity = [sessionId, wakeId ?? "unknown_wake", sequence].join(":");
   const digest = createHash("sha256")
     .update(identity)
     .digest("hex")
     .slice(0, 32);
   return {
-    artifact_id: `context_compaction_${digest}`,
+    artifact_id: artifactId ?? `context_compaction_${digest}`,
     session_id: sessionId,
     branch_id: undefined,
     strategy_id: strategyId,
+    strategy_revision: strategyRevision,
+    logical_turn_id: logicalTurnId,
+    execution_epoch_id: executionEpochId,
+    source_projection_fingerprint: sourceProjectionFingerprint,
+    trigger: trigger,
+    before_tokens: beforeTokens,
+    after_tokens: afterTokens,
+    preserved_item_count: preservedItemCount,
+    excised_item_count: excisedItemCount,
+    intent_key: intentKey,
+    terminal_status: terminalStatus,
+    provider_chain_action: providerChainAction,
     source_refs_json: {
       source: "native_brain_stream",
       wake_id: wakeId,
