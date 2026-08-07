@@ -1,7 +1,7 @@
 /target/
 /node_modules/
 /temp
-
+.agents/
 *.tsbuildinfo
 ts/packages/native-bridge/native/*.d.ts
 !ts/packages/native-bridge/native/index.d.ts
