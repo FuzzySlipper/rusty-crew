@@ -2649,7 +2649,7 @@ fn brain_runtime_context_compaction_failed_artifact(
     let fingerprint = intent
         .source_projection_fingerprint
         .clone()
-        .or_else(|| Some(format!("manual_{}", intent.intent_key.replace('-', "_"))));
+        .or_else(|| Some(format!("manual-{}", intent.intent_key)));
     let strategy_id = intent
         .strategy_id
         .clone()
@@ -2701,7 +2701,12 @@ fn context_compaction_status(
     // intent.intent_key explicitly; auto paths pass None and we fall back to fingerprint derive.
     let derived_intent = artifact
         .and_then(|a| a.source_projection_fingerprint.clone())
-        .map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string());
+        .map(|s| {
+            s.strip_prefix("manual-")
+                .or_else(|| s.strip_prefix("manual_"))
+                .unwrap_or(&s)
+                .to_string()
+        });
     let authoritative = intent_key.map(|s| s.to_string()).or(derived_intent);
     brain_event_item(
         context,

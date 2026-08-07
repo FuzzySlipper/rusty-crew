@@ -4466,7 +4466,7 @@ fn responses_failed_compaction_artifact(
     let fingerprint = intent
         .source_projection_fingerprint
         .clone()
-        .or_else(|| Some(format!("manual_{}", intent.intent_key.replace('-', "_"))));
+        .or_else(|| Some(format!("manual-{}", intent.intent_key)));
     let strategy_id = intent
         .strategy_id
         .clone()
