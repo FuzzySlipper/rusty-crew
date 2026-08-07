@@ -2382,6 +2382,7 @@ export interface NativeBridgeModule
   listContextCompactionArtifacts(
     query: ContextCompactionArtifactQuery,
   ): Promise<ContextCompactionArtifact[]>;
+  manualContextCompaction(request: unknown): Promise<unknown>;
   recordMemoryGovernanceDecision(
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;

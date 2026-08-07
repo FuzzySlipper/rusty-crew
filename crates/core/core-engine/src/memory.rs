@@ -175,8 +175,66 @@ impl CoreEngine {
         // makes the HTTP control idempotent and revision-checked without
         // requiring a live provider call.
         let now = self.now();
+        let sanitized_intent = {
+            let mut out = String::new();
+            let mut prev_underscore = false;
+            for ch in intent_key.chars() {
+                let lower = ch.to_ascii_lowercase();
+                let is_valid = lower.is_ascii_lowercase() || lower.is_ascii_digit();
+                let c = if is_valid { lower } else { '_' };
+                if c == '_' {
+                    if out.is_empty() || prev_underscore {
+                        continue;
+                    }
+                    out.push('_');
+                    prev_underscore = true;
+                } else {
+                    out.push(c);
+                    prev_underscore = false;
+                }
+            }
+            let trimmed = out.trim_matches('_').to_string();
+            if trimmed.is_empty() {
+                "manual".to_string()
+            } else {
+                trimmed
+            }
+        };
+        let sanitized_now = {
+            let mut out = String::new();
+            let mut prev_underscore = false;
+            for ch in now.chars() {
+                let lower = ch.to_ascii_lowercase();
+                let is_valid = lower.is_ascii_lowercase() || lower.is_ascii_digit();
+                let c = if is_valid { lower } else { '_' };
+                if c == '_' {
+                    if out.is_empty() || prev_underscore {
+                        continue;
+                    }
+                    out.push('_');
+                    prev_underscore = true;
+                } else {
+                    out.push(c);
+                    prev_underscore = false;
+                }
+            }
+            let trimmed = out.trim_matches('_').to_string();
+            if trimmed.is_empty() {
+                "now".to_string()
+            } else {
+                trimmed
+            }
+        };
+        let artifact_id = {
+            let base = format!("manual_{}_{}", sanitized_intent, sanitized_now);
+            if base.len() > 64 {
+                base[..64].trim_end_matches('_').to_string()
+            } else {
+                base
+            }
+        };
         let artifact = ContextCompactionArtifact {
-            artifact_id: format!("manual-{}-{}", intent_key, now),
+            artifact_id,
             session_id: request.session_id.clone(),
             branch_id: None,
             strategy_id: request

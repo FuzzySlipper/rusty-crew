@@ -168,6 +168,7 @@ export interface NativeBridgeBinding {
   listSessionActivityDigestsJson(inputJson: string): string
   saveContextCompactionArtifactJson(inputJson: string): string
   listContextCompactionArtifactsJson(inputJson: string): string
+  manualContextCompactionJson(inputJson: string): string
   recordMemoryGovernanceDecisionJson(inputJson: string): string
   getProfileMemory(profileId: string, targetType: string, targetId: string | undefined | null, key: string): JsProfileMemoryRecord | null
   addProfileMemory(write: JsProfileMemoryWrite): JsProfileMemoryRecord
@@ -884,7 +885,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 289,
+  "manifestOperationCount": 290,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -2197,6 +2198,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "list_context_compaction_artifacts"
+    },
+    {
+      "name": "manualContextCompactionJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "manual_context_compaction"
     },
     {
       "name": "recordMemoryGovernanceDecisionJson",

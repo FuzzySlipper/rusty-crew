@@ -238,6 +238,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn manual_context_compaction_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<ManualContextCompactionRequest>(
+            &input_json,
+            "manual context compaction request",
+        )?;
+        let response = bridge
+            .manual_context_compaction(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&response, "manual context compaction response")
+    }
+
+    #[napi]
     pub fn record_memory_governance_decision_json(
         &self,
         input_json: String,

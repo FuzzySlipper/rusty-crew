@@ -1629,17 +1629,14 @@ async function handleHttpRequest(
               throw new Error(`revision_conflict: expected ${input.expectRevision} but found ${latestRevision}`);
             }
           }
-          const result = await (state.bridge as unknown as {
-            manualContextCompaction: (req: unknown) => Promise<unknown>;
-          }).manualContextCompaction({
+          const typed = (await state.bridge.manualContextCompaction({
             session_id: input.session.sessionId,
             intent_key: input.intentKey,
             strategy_id: input.strategyId,
             strategy_revision: input.strategyRevision,
             source_projection_fingerprint: input.sourceProjectionFingerprint,
             expect_revision: input.expectRevision ?? null,
-          });
-          const typed = result as {
+          } as unknown as never)) as unknown as {
             artifact: {
               artifact_id: string;
               session_id: string;

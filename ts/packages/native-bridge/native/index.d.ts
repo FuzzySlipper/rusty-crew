@@ -168,6 +168,7 @@ export declare class NativeBridgeBinding {
   listSessionActivityDigestsJson(inputJson: string): string
   saveContextCompactionArtifactJson(inputJson: string): string
   listContextCompactionArtifactsJson(inputJson: string): string
+  manualContextCompactionJson(inputJson: string): string
   recordMemoryGovernanceDecisionJson(inputJson: string): string
   getProfileMemory(profileId: string, targetType: string, targetId: string | undefined | null, key: string): JsProfileMemoryRecord | null
   addProfileMemory(write: JsProfileMemoryWrite): JsProfileMemoryRecord

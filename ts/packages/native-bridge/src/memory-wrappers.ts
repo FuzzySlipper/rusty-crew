@@ -57,6 +57,7 @@ interface NativeBridgeMemoryBinding {
   listSessionActivityDigestsJson(inputJson: string): string;
   saveContextCompactionArtifactJson(inputJson: string): string;
   listContextCompactionArtifactsJson(inputJson: string): string;
+  manualContextCompactionJson(inputJson: string): string;
   recordMemoryGovernanceDecisionJson(inputJson: string): string;
 }
 
@@ -75,6 +76,7 @@ type NativeBridgeMemoryMethods = Pick<
   | "listSessionActivityDigests"
   | "saveContextCompactionArtifact"
   | "listContextCompactionArtifacts"
+  | "manualContextCompaction"
   | "recordMemoryGovernanceDecision"
   | "listProfileMemory"
   | "getProfileMemory"
@@ -202,6 +204,10 @@ export function createNativeBridgeMemoryMethods(
         ),
       });
     },
+    manualContextCompaction: async (request: unknown) =>
+      JSON.parse(
+        binding.manualContextCompactionJson(JSON.stringify(request)),
+      ) as unknown,
     recordMemoryGovernanceDecision: async (
       decision: MemoryGovernanceDecisionInput,
     ) =>

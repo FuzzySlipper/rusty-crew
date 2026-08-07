@@ -862,6 +862,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listSessionActivityDigests: unavailable("initialize_engine"),
     saveContextCompactionArtifact: unavailable("initialize_engine"),
     listContextCompactionArtifacts: unavailable("initialize_engine"),
+    manualContextCompaction: unavailable("initialize_engine"),
     recordMemoryGovernanceDecision: unavailable("initialize_engine"),
     planRoleplayAssistantAlternative: unavailable(
       "plan_roleplay_assistant_alternative",
