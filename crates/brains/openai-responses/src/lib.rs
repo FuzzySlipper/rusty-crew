@@ -4272,15 +4272,27 @@ fn compact_responses_items(
         );
     }
     let artifact = BrainContextCompactionArtifact {
+        artifact_id: format!("ctx-{}-{}-{}", policy.strategy_id, sequence, usage_before.input_tokens),
         sequence,
+        session_id: None,
+        logical_turn_id: None,
+        execution_epoch_id: None,
+        source_projection_fingerprint: None,
         strategy_id: policy.strategy_id.clone(),
+        strategy_revision: Some("1".to_string()),
         reason_code: "context_fill_threshold_exceeded".to_string(),
-        usage_before,
+        trigger: Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::AutoThreshold),
+        usage_before: usage_before.clone(),
         estimated_tokens_after,
+        before_tokens: Some(usage_before.input_tokens),
+        after_tokens: Some(estimated_tokens_after),
+        preserved_item_count: Some(replacement.len() as u64),
+        excised_item_count: Some(compacted.len() as u64),
         compacted_item_count: compacted.len() as u64,
         retained_item_count: replacement.len() as u64,
         summary_text: summary.clone(),
         provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+        terminal_status: Some(rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed),
     };
     *items = replacement;
     Ok((artifact, summary))

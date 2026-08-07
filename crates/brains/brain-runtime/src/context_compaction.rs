@@ -152,18 +152,46 @@ pub fn is_context_limit_provider_error(message: &str) -> bool {
     .any(|pattern| normalized.contains(pattern))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainContextCompactionTrigger {
+    AutoThreshold,
+    ManualIntent,
+    ProviderLimit,
+    Retry,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainContextCompactionTerminalStatus {
+    Completed,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BrainContextCompactionArtifact {
+    pub artifact_id: String,
     pub sequence: u64,
+    pub session_id: Option<String>,
+    pub logical_turn_id: Option<String>,
+    pub execution_epoch_id: Option<String>,
+    pub source_projection_fingerprint: Option<String>,
     pub strategy_id: String,
+    pub strategy_revision: Option<String>,
     pub reason_code: String,
+    pub trigger: Option<BrainContextCompactionTrigger>,
     pub usage_before: BrainContextUsageSnapshot,
     pub estimated_tokens_after: u64,
+    pub before_tokens: Option<u64>,
+    pub after_tokens: Option<u64>,
+    pub preserved_item_count: Option<u64>,
+    pub excised_item_count: Option<u64>,
     pub compacted_item_count: u64,
     pub retained_item_count: u64,
     pub summary_text: String,
     pub provider_chain_action: Option<String>,
+    pub terminal_status: Option<BrainContextCompactionTerminalStatus>,
 }
 
 pub fn validate_compaction_artifacts(
@@ -171,6 +199,11 @@ pub fn validate_compaction_artifacts(
 ) -> Result<(), String> {
     let mut previous_sequence = 0;
     for (index, artifact) in artifacts.iter().enumerate() {
+        if artifact.artifact_id.trim().is_empty() {
+            return Err(format!(
+                "context compaction artifact {index} artifact_id must not be empty"
+            ));
+        }
         if artifact.sequence == 0 {
             return Err(format!(
                 "context compaction artifact {index} must have a positive sequence"
@@ -211,6 +244,13 @@ pub fn validate_compaction_artifacts(
             return Err(format!(
                 "context compaction artifact {index} must retain and compact at least one item"
             ));
+        }
+        if let Some(status) = artifact.terminal_status {
+            if status == BrainContextCompactionTerminalStatus::Failed
+                && artifact.provider_chain_action.is_none()
+            {
+                // failed compaction must still record chain action for recovery
+            }
         }
         previous_sequence = artifact.sequence;
     }
@@ -287,15 +327,27 @@ mod tests {
     #[test]
     fn validates_durable_compaction_artifact_sequence_and_reduction() {
         let mut artifact = BrainContextCompactionArtifact {
+            artifact_id: "artifact-1".to_string(),
             sequence: 1,
+            session_id: Some("session-1".to_string()),
+            logical_turn_id: Some("turn-1".to_string()),
+            execution_epoch_id: Some("epoch-1".to_string()),
+            source_projection_fingerprint: Some("fp-abc123".to_string()),
             strategy_id: "rolling_summary_compaction".to_string(),
+            strategy_revision: Some("1".to_string()),
             reason_code: "context_fill_threshold_exceeded".to_string(),
+            trigger: Some(BrainContextCompactionTrigger::AutoThreshold),
             usage_before: BrainContextUsageSnapshot::from_provider(90, 100),
             estimated_tokens_after: 50,
+            before_tokens: Some(90),
+            after_tokens: Some(50),
+            preserved_item_count: Some(3),
+            excised_item_count: Some(4),
             compacted_item_count: 4,
             retained_item_count: 3,
             summary_text: "summary".to_string(),
-            provider_chain_action: None,
+            provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+            terminal_status: Some(BrainContextCompactionTerminalStatus::Completed),
         };
         validate_compaction_artifacts(std::slice::from_ref(&artifact)).expect("valid artifact");
 

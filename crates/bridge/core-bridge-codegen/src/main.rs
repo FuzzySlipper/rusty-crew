@@ -5562,6 +5562,18 @@ fn sample_context_compaction_artifact() -> ContextCompactionArtifact {
         session_id: sample_session_id(),
         branch_id: None,
         strategy_id: "rolling_summary".to_owned(),
+        strategy_revision: Some("1".to_owned()),
+        logical_turn_id: Some("turn-1".to_owned()),
+        execution_epoch_id: Some("epoch-1".to_owned()),
+        source_projection_fingerprint: Some("fp-fixture".to_owned()),
+        trigger: Some("auto_threshold".to_owned()),
+        before_tokens: Some(78000),
+        after_tokens: Some(18000),
+        preserved_item_count: Some(10),
+        excised_item_count: Some(8),
+        intent_key: Some("intent-fixture-1".to_owned()),
+        terminal_status: Some("completed".to_owned()),
+        provider_chain_action: Some("rebuild_replay_after_compaction".to_owned()),
         source_refs_json: json!([
             {
                 "kind": "message_range",

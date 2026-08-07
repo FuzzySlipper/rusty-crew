@@ -17347,6 +17347,18 @@ mod tests {
             session_id: SessionId::new("fixture-postgres-session"),
             branch_id: None,
             strategy_id: "rolling_summary_compaction".to_string(),
+            strategy_revision: Some("1".to_string()),
+            logical_turn_id: Some("turn-postgres".to_string()),
+            execution_epoch_id: Some("epoch-1".to_string()),
+            source_projection_fingerprint: Some("fp-postgres".to_string()),
+            trigger: Some("auto_threshold".to_string()),
+            before_tokens: Some(90000),
+            after_tokens: Some(24000),
+            preserved_item_count: Some(5),
+            excised_item_count: Some(5),
+            intent_key: Some("intent-postgres".to_string()),
+            terminal_status: Some("completed".to_string()),
+            provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
             source_refs_json: json!({
                 "projection": "fixture-postgres-projection",
                 "safe_boundary": "tool_round_4"
