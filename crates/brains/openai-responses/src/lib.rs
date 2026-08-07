@@ -3164,6 +3164,301 @@ where
                 })?;
         let mut epoch_continuation_round_count = 0usize;
 
+        if let Some(intent) = &request.compaction_intent {
+            if let Err(message) = intent.validate() {
+                let failure = BrainWakeFailure {
+                    wake_id: request.wake_id.clone(),
+                    session_id: request.session_id.clone(),
+                    kind: CoreErrorKind::InvalidInput,
+                    reason_code: Some("responses_compaction_intent_invalid".to_string()),
+                    message: message.clone(),
+                };
+                push_stream_item(
+                    &mut items,
+                    BrainWakeStreamItem::wake_failed(failure),
+                    &mut sink,
+                );
+                let metrics = metrics.finish();
+                return Ok(failed_result(
+                    &request,
+                    items,
+                    ResponsesStreamError::ContinuationStateInvalid(message),
+                    metrics,
+                    &mut sink,
+                ));
+            }
+            let policy = match self.request_builder.config.context_compaction.as_ref() {
+                Some(policy) => policy,
+                None => {
+                    let usage =
+                        rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_serialized_bytes(
+                            serde_json::to_vec(&(
+                                &base_history,
+                                &continuation_items,
+                                &output_continuation.compaction_guidance,
+                            ))
+                            .map(|v| v.len())
+                            .unwrap_or(usize::MAX),
+                            1,
+                        );
+                    push_stream_item(
+                        &mut items,
+                        responses_context_compaction_event(
+                            &request,
+                            "context_compaction_failed",
+                            BrainProviderStatusLevel::Error,
+                            "compaction_policy_disabled",
+                            &usage,
+                            None,
+                        ),
+                        &mut sink,
+                    );
+                    let attention = BrainWakeAttention {
+                        reason: LogicalTurnAttentionReason::NoProgress,
+                        reason_code: "compaction_policy_disabled".to_string(),
+                        summary: "manual compaction requested but policy is disabled".to_string(),
+                        evidence_refs: vec![],
+                        resolution_actions: vec![LogicalTurnResolutionAction::RetryUnchanged],
+                        retry_unchanged_safe: true,
+                        consecutive_no_progress_samples: 0,
+                    };
+                    return Ok(attention_responses_wake(
+                        &request,
+                        &self.request_builder.config,
+                        items,
+                        &mut sink,
+                        &base_history,
+                        continuation_items,
+                        committed_output_items,
+                        last_response_id,
+                        last_usage,
+                        no_progress_state,
+                        output_continuation,
+                        provider_state,
+                        provider_state_absence,
+                        metrics,
+                        attention,
+                    ));
+                }
+            };
+            let serialized_bytes = serde_json::to_vec(&(
+                &base_history,
+                &continuation_items,
+                &output_continuation.compaction_guidance,
+            ))
+            .map(|v| v.len())
+            .unwrap_or(usize::MAX);
+            let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_serialized_bytes(
+                serialized_bytes,
+                policy.context_window_tokens,
+            );
+            let sequence = output_continuation.context_compaction.artifacts.len() as u64 + 1;
+            // Idempotency: if an artifact for this intent_key already exists, return it.
+            if let Some(existing) = output_continuation
+                .context_compaction
+                .artifacts
+                .iter()
+                .find(|a| {
+                    a.source_projection_fingerprint == Some(format!("manual-{}", intent.intent_key))
+                        || a.artifact_id == format!("manual-{}-{}", intent.intent_key, sequence)
+                })
+            {
+                push_stream_item(
+                    &mut items,
+                    responses_context_compaction_event(
+                        &request,
+                        "context_compaction_started",
+                        BrainProviderStatusLevel::Info,
+                        "manual_intent_duplicate",
+                        &usage,
+                        None,
+                    ),
+                    &mut sink,
+                );
+                push_stream_item(
+                    &mut items,
+                    responses_context_compaction_event(
+                        &request,
+                        "context_compaction_completed",
+                        BrainProviderStatusLevel::Info,
+                        "manual_intent_duplicate",
+                        &usage,
+                        Some(existing),
+                    ),
+                    &mut sink,
+                );
+                let continuation_state = ResponsesContinuationStateV1 {
+                    strategy: self.request_builder.config.strategy,
+                    base_history: ResponsesContinuationProjection::from(&base_history),
+                    continuation_items: continuation_items
+                        .iter()
+                        .map(ResponsesContinuationInputItem::from)
+                        .collect(),
+                    committed_output_items: committed_output_items.clone(),
+                    last_response_id: last_response_id.clone(),
+                    last_usage: last_usage.clone(),
+                    no_progress_state: no_progress_state.clone(),
+                    output_continuation: output_continuation.clone(),
+                    provider_state: provider_state.clone(),
+                    provider_state_absence: provider_state_absence.clone(),
+                    metrics: metrics.checkpoint(),
+                };
+                let continuation_state = match responses_continuation_output(continuation_state) {
+                    Ok(state) => state,
+                    Err(error) => {
+                        return Ok(failed_result(
+                            &request,
+                            items,
+                            error,
+                            metrics.finish(),
+                            &mut sink,
+                        ));
+                    }
+                };
+                return Ok(ResponsesBrainWakeResult {
+                    stream: BrainWakeStream::from_items(items),
+                    provider_state: None,
+                    transport_metrics: metrics.finish(),
+                    yielded: false,
+                    attention: None,
+                    continuation_state: Some(continuation_state),
+                });
+            }
+            push_stream_item(
+                &mut items,
+                responses_context_compaction_event(
+                    &request,
+                    "context_compaction_started",
+                    BrainProviderStatusLevel::Info,
+                    "manual_intent",
+                    &usage,
+                    None,
+                ),
+                &mut sink,
+            );
+            match compact_responses_items(
+                &mut continuation_items,
+                policy,
+                usage.clone(),
+                sequence,
+                output_continuation.compaction_guidance.as_deref(),
+            ) {
+                Ok((mut artifact, guidance)) => {
+                    artifact.artifact_id = format!("manual-{}-{}", intent.intent_key, sequence);
+                    artifact.session_id = Some(request.session_id.0.clone());
+                    artifact.logical_turn_id = Some(request.wake_id.clone());
+                    artifact.trigger =
+                        Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::ManualIntent);
+                    artifact.terminal_status = Some(
+                        rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed,
+                    );
+                    artifact.source_projection_fingerprint = intent
+                        .source_projection_fingerprint
+                        .clone()
+                        .or(Some(format!("manual-{}", intent.intent_key)));
+                    output_continuation.compaction_guidance = Some(guidance);
+                    output_continuation
+                        .context_compaction
+                        .artifacts
+                        .push(artifact.clone());
+                    output_continuation
+                        .context_compaction
+                        .last_compacted_item_count = continuation_items.len();
+                    provider_state = None;
+                    provider_state_absence = Some(ProviderStateAbsenceReason::Invalidated);
+                    push_stream_item(
+                        &mut items,
+                        responses_context_compaction_event(
+                            &request,
+                            "context_compaction_completed",
+                            BrainProviderStatusLevel::Info,
+                            "manual_intent_completed",
+                            &usage,
+                            Some(&artifact),
+                        ),
+                        &mut sink,
+                    );
+                    let continuation_state = ResponsesContinuationStateV1 {
+                        strategy: self.request_builder.config.strategy,
+                        base_history: ResponsesContinuationProjection::from(&base_history),
+                        continuation_items: continuation_items
+                            .iter()
+                            .map(ResponsesContinuationInputItem::from)
+                            .collect(),
+                        committed_output_items: committed_output_items.clone(),
+                        last_response_id: last_response_id.clone(),
+                        last_usage: last_usage.clone(),
+                        no_progress_state: no_progress_state.clone(),
+                        output_continuation: output_continuation.clone(),
+                        provider_state: provider_state.clone(),
+                        provider_state_absence: provider_state_absence.clone(),
+                        metrics: metrics.checkpoint(),
+                    };
+                    let continuation_state = match responses_continuation_output(continuation_state)
+                    {
+                        Ok(state) => state,
+                        Err(error) => {
+                            return Ok(failed_result(
+                                &request,
+                                items,
+                                error,
+                                metrics.finish(),
+                                &mut sink,
+                            ));
+                        }
+                    };
+                    return Ok(ResponsesBrainWakeResult {
+                        stream: BrainWakeStream::from_items(items),
+                        provider_state: None,
+                        transport_metrics: metrics.finish(),
+                        yielded: false,
+                        attention: None,
+                        continuation_state: Some(continuation_state),
+                    });
+                }
+                Err(message) => {
+                    push_stream_item(
+                        &mut items,
+                        responses_context_compaction_event(
+                            &request,
+                            "context_compaction_failed",
+                            BrainProviderStatusLevel::Error,
+                            "manual_intent_failed",
+                            &usage,
+                            None,
+                        ),
+                        &mut sink,
+                    );
+                    let attention = BrainWakeAttention {
+                        reason: LogicalTurnAttentionReason::NoProgress,
+                        reason_code: "manual_intent_failed".to_string(),
+                        summary: message,
+                        evidence_refs: vec![],
+                        resolution_actions: vec![LogicalTurnResolutionAction::RetryUnchanged],
+                        retry_unchanged_safe: true,
+                        consecutive_no_progress_samples: 0,
+                    };
+                    return Ok(attention_responses_wake(
+                        &request,
+                        &self.request_builder.config,
+                        items,
+                        &mut sink,
+                        &base_history,
+                        continuation_items,
+                        committed_output_items,
+                        last_response_id,
+                        last_usage,
+                        no_progress_state,
+                        output_continuation,
+                        provider_state,
+                        provider_state_absence,
+                        metrics,
+                        attention,
+                    ));
+                }
+            }
+        }
+
         loop {
             macro_rules! pause_on_provider_context_limit {
                 ($error:expr) => {
@@ -7890,6 +8185,7 @@ mod tests {
             continuation_state: None,
             provider_state,
             provider_state_absence: absence,
+            compaction_intent: None,
         }
     }
 
