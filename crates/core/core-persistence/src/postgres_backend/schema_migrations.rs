@@ -1911,7 +1911,12 @@ fn apply_postgres_context_compaction_intent_unique(
             ON {schema}.context_compaction_artifacts(session_id, (record_json->>'intent_key'))
             WHERE record_json->>'intent_key' IS NOT NULL;"
     ))
-    .map_err(|error| postgres_error("add PostgreSQL context compaction intent unique index", error))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL context compaction intent unique index",
+            error,
+        )
+    })
 }
 
 fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {

@@ -17401,7 +17401,7 @@ mod tests {
                     strategy_id: None,
                     enters_future_context: Some(true),
                     latest_only: true,
-            terminal_status: None,
+                    terminal_status: None,
                     limit: None,
                     offset: None,
                 })
@@ -17418,7 +17418,7 @@ mod tests {
                 strategy_id: None,
                 enters_future_context: None,
                 latest_only: true,
-            terminal_status: None,
+                terminal_status: None,
                 limit: None,
                 offset: None,
             })

@@ -291,7 +291,8 @@ impl CoreEngine {
             created_at: now.clone(),
             updated_at: now.clone(),
         };
-        let saved = match CrewMemoryStore::save_context_compaction_artifact(&self.store, &artifact) {
+        let saved = match CrewMemoryStore::save_context_compaction_artifact(&self.store, &artifact)
+        {
             Ok(saved) => saved,
             Err(error) if is_intent_key_conflict(&error) => {
                 // Race: another writer inserted same (session_id, intent_key) concurrently.
@@ -324,7 +325,9 @@ impl CoreEngine {
                         if revision != expect {
                             return Err(CoreError::new(
                                 CoreErrorKind::AlreadyExists,
-                                format!("revision_conflict: expected {expect} but found {revision}"),
+                                format!(
+                                    "revision_conflict: expected {expect} but found {revision}"
+                                ),
                             ));
                         }
                     }
