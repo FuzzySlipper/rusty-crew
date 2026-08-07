@@ -1019,6 +1019,42 @@ pub enum DeltaQueueOwner {
     Body,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainWakeCompactionIntentKind {
+    Manual,
+    Auto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BrainWakeCompactionIntent {
+    pub intent_key: String,
+    pub kind: BrainWakeCompactionIntentKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_projection_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+}
+
+impl BrainWakeCompactionIntent {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.intent_key.trim().is_empty() {
+            return Err("compaction intent_key must not be empty".to_string());
+        }
+        if let Some(strategy_id) = &self.strategy_id {
+            if strategy_id.trim().is_empty() {
+                return Err("compaction strategy_id must not be empty".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainWakeRequest {
     pub brain: BrainImplementationHandle,
@@ -1033,6 +1069,8 @@ pub struct BrainWakeRequest {
     pub provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state_absence: Option<ProviderStateAbsenceReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_intent: Option<BrainWakeCompactionIntent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -207,6 +207,7 @@ impl RuntimeBufferStore {
                 provider_state_absence: Some(
                     crate::ProviderStateAbsenceReason::ModuleDoesNotUseState,
                 ),
+                compaction_intent: None,
             },
             leases,
         })

@@ -874,6 +874,7 @@ where
             .map(parse_provider_state_absence_reason)
             .transpose()
             .map_err(to_napi_error)?,
+        compaction_intent: None,
     };
     let mut credential_secret_update = None;
     let result = match input.client {

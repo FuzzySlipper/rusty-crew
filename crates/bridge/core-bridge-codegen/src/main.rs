@@ -3417,6 +3417,7 @@ fn sample_brain_wake_request() -> BrainWakeRequest {
         continuation_state: None,
         provider_state: Some(sample_brain_provider_state_input()),
         provider_state_absence: None,
+        compaction_intent: None,
     }
 }
 

@@ -201,6 +201,7 @@ mod tests {
                 provider_state_absence: Some(
                     rusty_crew_core_protocol::ProviderStateAbsenceReason::ModuleDoesNotUseState,
                 ),
+                compaction_intent: None,
             })
             .expect("wake stream");
 
