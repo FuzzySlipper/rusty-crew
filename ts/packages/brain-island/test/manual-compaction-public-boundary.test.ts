@@ -9,7 +9,9 @@ import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
 import {
   isManualCompactionDuplicate,
   manualCompactionEffectiveFingerprint,
-} from "../src/service-app.js";
+  runManualContextCompaction,
+  type ManualCompactionDeps,
+} from "../src/manual-compaction.js";
 import type { SessionState } from "@rusty-crew/contracts";
 import type { CoreEvent } from "@rusty-crew/contracts";
 
@@ -182,142 +184,220 @@ test("production helper manualCompactionEffectiveFingerprint uses hyphen fallbac
   );
 });
 
-// ---- Service/API route + idempotent HTTP retry for no-fingerprint manual compaction ----
+// ---- Authoritative service/API boundary through the PRODUCTION callback ----
+//
+// These tests drive the same exported `runManualContextCompaction` that
+// service-app.ts wires as `manualContextCompaction`, through the real HTTP
+// route handler. The bridge double owns one in-memory artifact array: save
+// appends, list reads — a single authoritative store with no test-local
+// idempotency or fingerprint logic (R6624-11/12). Breaking the production
+// callback or its bridge persistence/readback fails these tests by
+// construction; the negative control proves the fail-closed path explicitly.
 
-test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprint is durable, hyphen-fallback, and idempotent on HTTP retry", async () => {
-  const artifacts: Array<Record<string, unknown>> = [];
-  const sessionId = "sess-http-no-fp-6624-9";
+interface AuthoritativeStoreOptions {
+  sessionId: string;
+  artifacts: Array<Record<string, unknown>>;
+  saveArtifact: (
+    artifact: Record<string, unknown>,
+  ) => Promise<unknown> | unknown;
+  listArtifacts: () => Promise<Array<Record<string, unknown>>>;
+  onSyntheticFallback?: () => void;
+}
+
+function failedCompactionBrainEvent(
+  sessionId: string,
+  wakeId: string,
+  intent: { intentKey: string; sourceProjectionFingerprint?: string | null },
+): CoreEvent {
+  // No sourceProjectionFingerprint on purpose for the no-fp case: the
+  // production mapper and callback must agree on the manual-{intentKey} hyphen
+  // fallback. When the caller supplied an explicit fingerprint the fake brain
+  // echoes it back (as the real Rust brain does via the compaction intent).
+  const metadata: Record<string, unknown> = {
+    kind: "context_compaction_failed",
+    intentKey: intent.intentKey,
+    intent_key: intent.intentKey,
+    usage: { prompt_tokens: 12345, total_tokens: 12345 },
+    reasonCode: "manual_intent_failed",
+    strategyId: "rolling_summary_compaction",
+  };
+  if (intent.sourceProjectionFingerprint) {
+    metadata["sourceProjectionFingerprint"] =
+      intent.sourceProjectionFingerprint;
+    metadata["source_projection_fingerprint"] =
+      intent.sourceProjectionFingerprint;
+  }
+  return {
+    type: "brain_event_observed",
+    sessionId,
+    wakeId,
+    event: {
+      type: "provider_status",
+      level: "error",
+      message: "manual_intent_failed",
+      metadataJson: JSON.stringify(metadata),
+    },
+  } as unknown as CoreEvent;
+}
+
+function makeManualCompactionDeps(
+  options: AuthoritativeStoreOptions,
+): ManualCompactionDeps {
+  const queuedEvents: CoreEvent[] = [];
+  let wakeSequence = 0;
+  const wakeBridge = {
+    async saveContextCompactionArtifact(artifact: Record<string, unknown>) {
+      return options.saveArtifact(artifact);
+    },
+    async subscribeEvents() {
+      return { subscriptionId: "sub-manual-compact" };
+    },
+    async drainSubscriptionEvents() {
+      return queuedEvents.splice(0);
+    },
+    async unsubscribeEvents() {
+      return undefined;
+    },
+    async wakeBrain(request: unknown) {
+      const intent =
+        (request as { compaction_intent?: Record<string, unknown> })
+          ?.compaction_intent ??
+        (request as { compactionIntent?: Record<string, unknown> })
+          ?.compactionIntent ??
+        {};
+      wakeSequence++;
+      queuedEvents.push(
+        failedCompactionBrainEvent(
+          options.sessionId,
+          `wake-authoritative-${wakeSequence}`,
+          {
+            intentKey: String(intent.intentKey ?? "authority-failed-no-fp"),
+            sourceProjectionFingerprint:
+              typeof intent.sourceProjectionFingerprint === "string"
+                ? intent.sourceProjectionFingerprint
+                : null,
+          },
+        ),
+      );
+      return { accepted: true };
+    },
+    async buildBrainWakeRequestForSession() {
+      return {};
+    },
+  };
+  const dispatch = {
+    now: () => "2026-08-07T00:00:00.000Z",
+    bridge: wakeBridge,
+    brainForProfile: () => ({}),
+    loadProfileContext: async () => ({
+      profile: {
+        profileId: "profile-manual-compact",
+        displayName: "Manual Compact Test",
+        modelConfig: { provider: "openai", modelName: "gpt-test" },
+        prompt: { system: "test system prompt", instructions: [] },
+      },
+      skills: [],
+      toolSelection: {
+        inventory: {
+          selectedTools: [],
+          selectedBindings: [],
+          selectedDescriptors: [],
+          items: [],
+        },
+        toolProfile: { tools: [] },
+      },
+    }),
+    configuredSessionForRuntimeSession: () => undefined,
+    prepareContextStrategy: async () => ({
+      additionalInstructions: [],
+      sessionMemoryContext: undefined,
+    }),
+    roleplayPromptContextForSession: async () => undefined,
+    appendChatEvent: async (_sessionId: string, event: unknown) => event,
+    recordEvent: () => {},
+    nextWakeId: () => "wake-test",
+  } as unknown as ServiceWakeDispatchContext;
+
+  return {
+    bridge: {
+      async listContextCompactionArtifacts() {
+        return options.listArtifacts();
+      },
+      async manualContextCompaction() {
+        options.onSyntheticFallback?.();
+        throw new Error(
+          "synthetic CoreEngine fallback must never be reached when the real brain wake persists",
+        );
+      },
+    } as unknown as ManualCompactionDeps["bridge"],
+    dispatch,
+  };
+}
+
+function makeCompactContext(
+  deps: ManualCompactionDeps,
+  sessionId = "sess-http-authority-6624-12",
+) {
   const session = {
     sessionId,
     status: "active",
-    session: { sessionId, status: "active" },
-  } as unknown as SessionState & { session: SessionState };
-
-  // Mock bridge list/save that the service-app manualContextCompaction would delegate to.
-  // Here we emulate the CoreEngine idempotency contract at the route layer: effectiveFingerprint = fp ?? manual-{intentKey}
-  const fakeBridge = {
-    async listContextCompactionArtifacts() {
-      return artifacts as unknown as never;
-    },
-  };
-
-  // Use the production helpers so the proof fails if service-app's matching regresses (R6624-11).
-  let callCount = 0;
-  const manualContextCompaction = async (input: {
-    session: SessionState;
-    requestId: string;
-    intentKey: string;
-    strategyId: string | null;
-    strategyRevision: string | null;
-    sourceProjectionFingerprint: string | null;
-    expectRevision: number | null;
-  }) => {
-    callCount++;
-    const effectiveFingerprint = manualCompactionEffectiveFingerprint(input);
-    const existing = artifacts.find((a) =>
-      isManualCompactionDuplicate(
-        a as unknown as {
-          intent_key?: string | null;
-          source_projection_fingerprint?: string | null;
-          session_id: string;
-        },
-        {
-          intentKey: input.intentKey,
-          sessionId,
-          sourceProjectionFingerprint: input.sourceProjectionFingerprint,
-        },
-        effectiveFingerprint,
-      ),
-    );
-    if (existing) {
-      return {
-        ok: true as const,
-        session_id: sessionId,
-        artifact: existing as unknown as { artifact_id: string },
-        terminal_status: existing["terminal_status"] as string,
-        idempotent: true,
-        revision: Number(existing["strategy_revision"] as string) || 0,
-      };
-    }
-    const sanitized = input.intentKey
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    const artifact = {
-      artifact_id: `manual_${sanitized}_test`,
-      session_id: sessionId,
-      branch_id: null,
-      strategy_id: "rolling_summary_compaction",
-      strategy_revision: "1",
-      logical_turn_id: `manual-compact-test-${callCount}`,
-      execution_epoch_id: null,
-      source_projection_fingerprint: effectiveFingerprint,
-      trigger: "manual_intent",
-      before_tokens: 10000,
-      after_tokens: 3200,
-      preserved_item_count: 5,
-      excised_item_count: 5,
-      intent_key: input.intentKey,
-      terminal_status: "completed",
-      provider_chain_action: "rebuild_replay_after_compaction",
-      source_refs_json: {},
-      provider_metadata_json: {},
-      estimate_before_json: {},
-      estimate_after_json: {},
-      summary_text: `manual compaction ${input.intentKey}`,
-      enters_future_context: true,
-      context_policy: "rolling_summary_compaction",
-      metadata_json: {},
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    artifacts.push(artifact as unknown as Record<string, unknown>);
-    return {
-      ok: true as const,
-      session_id: sessionId,
-      artifact: artifact as unknown as { artifact_id: string },
-      terminal_status: "completed",
-      idempotent: false,
-      revision: 1,
-    };
-  };
-
-  const context = {
-    // chatSessionFromParts will call listSessions or readSession; mock both
-    listSessions: async () => [session as unknown as SessionState],
-    readSession: async () =>
-      ({ sessionId, status: "active" }) as unknown as SessionState,
-    // For manual compaction, the api layer calls context.manualContextCompaction
-    manualContextCompaction,
-    // required for session lookup in handleRustyViewChatRequest
-    effectiveSessionDefaults: async () => undefined,
-  } as unknown as Parameters<typeof handleRustyViewChatRequest>[1];
-
-  // Ensure session lookup works for both listSessions and direct read
-  (context as unknown as Record<string, unknown>).listSessions = async () => [
+    profileId: "profile-manual-compact",
+  } as unknown as SessionState;
+  return {
     session,
-  ];
-  // Provide a minimal readSession that satisfies chatSessionFromParts (it tries several lookups)
-  (context as unknown as Record<string, unknown>).readSession = async () =>
-    session;
-  // Also provide session state via bridge fallback if needed
-  (context as unknown as Record<string, unknown> & { bridge: unknown }).bridge =
-    fakeBridge;
+    context: {
+      listSessions: async () => [session as unknown as SessionState],
+      manualContextCompaction: (
+        input: Parameters<typeof runManualContextCompaction>[1],
+      ) => runManualContextCompaction(deps, input),
+    } as unknown as Parameters<typeof handleRustyViewChatRequest>[1],
+  };
+}
 
-  const makeRequest = (body: unknown) => ({
+function makeCompactRequest(
+  sessionId: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
+  return {
     method: "POST",
     url: `http://rusty-crew.local/v1/chat/sessions/${sessionId}/context/compact`,
-    headers: {},
+    headers,
     body,
-    requestId: `req-test-${Math.random()}`,
-  });
+    requestId: `req-authority-${Math.random()}`,
+  };
+}
 
-  // First POST with no fingerprint → should create with hyphen fallback, 201, idempotent false
+test("public boundary: production callback via HTTP persists failed no-fingerprint artifact, readback 201, idempotent 200, revision conflict 409", async () => {
+  const sessionId = "sess-http-authority-6624-12";
+  const artifacts: Array<Record<string, unknown>> = [];
+  let syntheticFallbackCalls = 0;
+  const deps = makeManualCompactionDeps({
+    sessionId,
+    artifacts,
+    saveArtifact: async (artifact) => {
+      const existing = artifacts.findIndex(
+        (a) => a["artifact_id"] === artifact["artifact_id"],
+      );
+      if (existing >= 0) artifacts[existing] = artifact;
+      else artifacts.push(artifact);
+      return artifact;
+    },
+    listArtifacts: async () => [...artifacts],
+    onSyntheticFallback: () => {
+      syntheticFallbackCalls++;
+    },
+  });
+  const { session, context } = makeCompactContext(deps, sessionId);
+  const request = (body: unknown, headers?: Record<string, string>) =>
+    makeCompactRequest(session.sessionId, body, headers);
+
+  // First POST: failed compaction, no caller fingerprint → 201, idempotent=false.
   const first = await handleRustyViewChatRequest(
-    makeRequest({ intentKey: "verify-no-fp-retry-8" }),
+    request({ intentKey: "authority-failed-no-fp" }),
     context,
   );
-  assert.equal(first.status, 201, "first no-fp create should be 201");
+  assert.equal(first.status, 201, "first create should be 201");
   const firstBody = (
     first as unknown as {
       body: {
@@ -326,25 +406,32 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     }
   ).body;
   assert.equal(firstBody.data.idempotent, false);
-  assert.equal(firstBody.data.artifact["intent_key"], "verify-no-fp-retry-8");
+  assert.equal(firstBody.data.artifact["terminal_status"], "failed");
+  assert.equal(firstBody.data.artifact["intent_key"], "authority-failed-no-fp");
   assert.equal(
     firstBody.data.artifact["source_projection_fingerprint"],
-    "manual-verify-no-fp-retry-8",
-    "HTTP no-fp must fallback to manual- hyphen",
-  );
-  assert.match(
-    String(firstBody.data.artifact["artifact_id"]),
-    /^manual_verify_no_fp_retry_8/,
+    "manual-authority-failed-no-fp",
+    "production callback must fall back to manual- hyphen when the caller omits the fingerprint",
   );
   assert.equal(
     artifacts.length,
     1,
-    "persistence readback: one artifact after first",
+    "persisted row must be readable back through the authoritative store",
+  );
+  assert.equal(
+    artifacts[0]["artifact_id"],
+    firstBody.data.artifact["artifact_id"],
+    "readback row must be the same artifact the route returned",
+  );
+  assert.equal(
+    syntheticFallbackCalls,
+    0,
+    "the real brain wake persisted the artifact; synthetic CoreEngine fallback must not run",
   );
 
-  // Second POST identical (no fingerprint) → must be idempotent HTTP retry, 200, same artifact
+  // Identical retry (no fingerprint) → idempotent 200, same artifact, still one row.
   const second = await handleRustyViewChatRequest(
-    makeRequest({ intentKey: "verify-no-fp-retry-8" }),
+    request({ intentKey: "authority-failed-no-fp" }),
     context,
   );
   assert.equal(second.status, 200, "idempotent retry should be 200");
@@ -360,13 +447,30 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     secondBody.data.artifact["artifact_id"],
     firstBody.data.artifact["artifact_id"],
   );
-  assert.equal(artifacts.length, 1, "retry must not create duplicate row");
+  assert.equal(
+    artifacts.length,
+    1,
+    "retry must not create a duplicate row in the authoritative store",
+  );
 
-  // POST with explicit different fingerprint but same intentKey would be distinct, but with no-fingerprint the hyphen fallback must be consistent
-  // Verify that explicit fp is considered distinct (projection-aware)
+  // If-Match revision conflict against the persisted failed artifact → 409.
+  const conflict = await handleRustyViewChatRequest(
+    request({ intentKey: "authority-failed-no-fp" }, { "if-match": "2" }),
+    context,
+  );
+  assert.equal(conflict.status, 409, "revision mismatch should be 409");
+  const conflictBody = (
+    conflict as unknown as {
+      body: { error: { reason_code: string; message: string } };
+    }
+  ).body;
+  assert.equal(conflictBody.error.reason_code, "revision_conflict");
+  assert.match(conflictBody.error.message, /revision_conflict/);
+
+  // Explicit caller fingerprint is projection-distinct from the no-fp row.
   const explicit = await handleRustyViewChatRequest(
-    makeRequest({
-      intentKey: "verify-no-fp-retry-8",
+    request({
+      intentKey: "authority-failed-no-fp",
       sourceProjectionFingerprint: "fp-caller-explicit",
     }),
     context,
@@ -384,66 +488,49 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
   assert.equal(
     artifacts.length,
     2,
-    "different fingerprint must not reuse no-fp row",
+    "different fingerprint must not reuse the no-fp row",
   );
+});
 
-  // Failure scenario: no-fingerprint failed compaction should also be idempotent via the same hyphen fallback
-  // Simulate a failed artifact for a different intent
-  const failedIntent = "verify-no-fp-failure-retry-8";
-  const failedArtifact = {
-    artifact_id: "manual_verify_no_fp_failure_retry_8_test",
-    session_id: sessionId,
-    branch_id: null,
-    strategy_id: "rolling_summary_compaction",
-    strategy_revision: "1",
-    logical_turn_id: null,
-    execution_epoch_id: null,
-    source_projection_fingerprint: `manual-${failedIntent}`,
-    trigger: "manual_intent",
-    before_tokens: 10000,
-    after_tokens: 10000,
-    preserved_item_count: 0,
-    excised_item_count: 0,
-    intent_key: failedIntent,
-    terminal_status: "failed",
-    provider_chain_action: "preserve_prior_valid_projection",
-    source_refs_json: {},
-    provider_metadata_json: {},
-    estimate_before_json: {},
-    estimate_after_json: {},
-    summary_text: `manual compaction ${failedIntent} failed`,
-    enters_future_context: false,
-    context_policy: "rolling_summary_compaction",
-    metadata_json: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-  artifacts.push(failedArtifact as unknown as Record<string, unknown>);
+test("public boundary: broken persistence fails closed (500 manual_compaction_failed), never synthetic success", async () => {
+  const sessionId = "sess-http-authority-6624-12";
+  const artifacts: Array<Record<string, unknown>> = [];
+  let syntheticFallbackCalls = 0;
+  const deps = makeManualCompactionDeps({
+    sessionId,
+    artifacts,
+    // Authoritative store that never accepts writes: the wake persists nothing,
+    // so the production callback must fail closed instead of reporting success.
+    saveArtifact: async () => undefined,
+    listArtifacts: async () => [...artifacts],
+    onSyntheticFallback: () => {
+      syntheticFallbackCalls++;
+    },
+  });
+  const { session, context } = makeCompactContext(deps, sessionId);
 
-  const failedRetry = await handleRustyViewChatRequest(
-    makeRequest({ intentKey: failedIntent }),
+  const result = await handleRustyViewChatRequest(
+    makeCompactRequest(session.sessionId, {
+      intentKey: "failclosed-no-fp",
+    }),
     context,
   );
   assert.equal(
-    failedRetry.status,
-    200,
-    "failed no-fp retry must be idempotent 200",
+    result.status,
+    500,
+    "no durable brain artifact must fail closed, not return a synthetic success",
   );
-  const failedBody = (
-    failedRetry as unknown as {
-      body: {
-        data: {
-          artifact: Record<string, unknown>;
-          idempotent: boolean;
-          terminal_status: string;
-        };
-      };
+  const body = (
+    result as unknown as {
+      body: { error: { reason_code: string; message: string } };
     }
   ).body;
-  assert.equal(failedBody.data.idempotent, true);
-  assert.equal(failedBody.data.terminal_status, "failed");
+  assert.equal(body.error.reason_code, "manual_compaction_failed");
+  assert.match(body.error.message, /did not produce a durable brain artifact/);
+  assert.equal(syntheticFallbackCalls, 0);
   assert.equal(
-    failedBody.data.artifact["source_projection_fingerprint"],
-    `manual-${failedIntent}`,
+    artifacts.length,
+    0,
+    "broken persistence must not fabricate a row",
   );
 });
