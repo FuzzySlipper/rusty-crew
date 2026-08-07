@@ -203,6 +203,69 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/context/compact": {
+      "post": {
+        "operationId": "compactChatSessionContext",
+        "summary": "Trigger a Rust-owned manual context compaction at a safe provider boundary without transcript or provider call, idempotent via intent_key",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ManualContextCompactionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Manual compaction created a new terminal artifact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ManualContextCompactionResponse" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Duplicate intent_key returned existing terminal artifact (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ManualContextCompactionResponse" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision conflict for expect_revision"
+          },
+          "412": {
+            "description": "Compaction disabled by policy or unavailable measurement"
+          },
+          "404": {
+            "description": "The session was not found"
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/stream": {
       "get": {
         "operationId": "streamChatSessionEvents",
