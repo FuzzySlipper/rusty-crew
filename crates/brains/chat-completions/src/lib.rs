@@ -2828,7 +2828,10 @@ fn compact_chat_messages(
         );
     }
     let artifact = BrainContextCompactionArtifact {
-        artifact_id: format!("ctx-{}-{}-{}", policy.strategy_id, sequence, usage_before.input_tokens),
+        artifact_id: format!(
+            "ctx-{}-{}-{}",
+            policy.strategy_id, sequence, usage_before.input_tokens
+        ),
         sequence,
         session_id: None,
         logical_turn_id: None,
@@ -2848,7 +2851,9 @@ fn compact_chat_messages(
         retained_item_count: replacement.len() as u64,
         summary_text: summary,
         provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
-        terminal_status: Some(rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed),
+        terminal_status: Some(
+            rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed,
+        ),
     };
     *messages = replacement;
     Ok(artifact)
