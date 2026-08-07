@@ -639,6 +639,7 @@ export type ContextCompactionArtifactQuery = {
   offset?: number | null;
   session_id?: SessionId;
   strategy_id?: string | null;
+  terminal_status?: string | null;
 };
 
 export type ContinuationYieldReason = "initial_admission" | "work_quantum_reached" | "scheduler_fairness" | "provider_retry" | "buffer_pressure" | "restart_recovery" | "operator_requested";

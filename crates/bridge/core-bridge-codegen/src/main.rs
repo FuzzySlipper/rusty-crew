@@ -5552,6 +5552,7 @@ fn sample_context_compaction_artifact_query() -> ContextCompactionArtifactQuery 
         strategy_id: Some("rolling_summary".to_owned()),
         enters_future_context: Some(true),
         latest_only: true,
+        terminal_status: Some("completed".to_owned()),
         limit: Some(25),
         offset: Some(5),
     }

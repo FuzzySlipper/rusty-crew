@@ -674,6 +674,7 @@ export async function rustyViewSessionContextUsage(
     .listContextCompactionArtifacts({
       session_id: input.session.sessionId,
       latest_only: true,
+      terminal_status: "completed",
       limit: 1,
       offset: 0,
     })

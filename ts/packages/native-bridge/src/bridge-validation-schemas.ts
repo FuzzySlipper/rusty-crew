@@ -1120,6 +1120,7 @@ export const rawContextCompactionArtifactQuerySchema = Type.Object(
     strategy_id: Type.Optional(Type.String()),
     enters_future_context: Type.Optional(Type.Boolean()),
     latest_only: Type.Boolean(),
+    terminal_status: Type.Optional(Type.String()),
     limit: Type.Optional(Type.Number()),
     offset: Type.Optional(Type.Number()),
   },

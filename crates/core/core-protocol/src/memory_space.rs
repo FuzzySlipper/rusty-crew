@@ -1045,6 +1045,7 @@ pub struct ContextCompactionArtifactQuery {
     pub strategy_id: Option<String>,
     pub enters_future_context: Option<bool>,
     pub latest_only: bool,
+    pub terminal_status: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }

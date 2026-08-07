@@ -7170,14 +7170,16 @@ fn list_context_compaction_artifacts<C: GenericClient>(
                    AND ($2::TEXT IS NULL OR branch_id = $2)
                    AND ($3::TEXT IS NULL OR strategy_id = $3)
                    AND ($4::BOOLEAN IS NULL OR enters_future_context = $4)
+                   AND ($5::TEXT IS NULL OR record_json->>'terminal_status' = $5)
                  ORDER BY created_at DESC, artifact_id ASC
-                 LIMIT $5 OFFSET $6"
+                 LIMIT $6 OFFSET $7"
             ),
             &[
                 &session_id,
                 &branch_id,
                 &strategy_id,
                 &query.enters_future_context,
+                &query.terminal_status.as_deref(),
                 &limit,
                 &offset,
             ],
@@ -17399,6 +17401,7 @@ mod tests {
                     strategy_id: None,
                     enters_future_context: Some(true),
                     latest_only: true,
+            terminal_status: None,
                     limit: None,
                     offset: None,
                 })
@@ -17415,6 +17418,7 @@ mod tests {
                 strategy_id: None,
                 enters_future_context: None,
                 latest_only: true,
+            terminal_status: None,
                 limit: None,
                 offset: None,
             })

@@ -3338,8 +3338,9 @@ fn list_context_compaction_artifacts(
                AND (?2 IS NULL OR branch_id = ?2)
                AND (?3 IS NULL OR strategy_id = ?3)
                AND (?4 IS NULL OR enters_future_context = ?4)
+               AND (?5 IS NULL OR terminal_status = ?5)
              ORDER BY created_at DESC, artifact_id ASC
-             LIMIT ?5 OFFSET ?6",
+             LIMIT ?6 OFFSET ?7",
         )
         .map_err(|error| persistence_error("prepare list context compaction artifacts", error))?;
     let enters_future_context = query
@@ -3352,6 +3353,7 @@ fn list_context_compaction_artifacts(
                 query.branch_id.as_ref().map(|id| id.0.as_str()),
                 query.strategy_id.as_deref(),
                 enters_future_context,
+                query.terminal_status.as_deref(),
                 limit,
                 offset,
             ],

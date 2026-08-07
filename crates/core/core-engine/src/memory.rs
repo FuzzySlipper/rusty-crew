@@ -104,6 +104,7 @@ impl CoreEngine {
                 strategy_id: None,
                 enters_future_context: None,
                 latest_only: false,
+                terminal_status: None,
                 limit: Some(100),
                 offset: None,
             },

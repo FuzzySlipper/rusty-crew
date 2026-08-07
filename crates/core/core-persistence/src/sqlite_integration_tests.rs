@@ -5473,6 +5473,7 @@ fn context_compaction_artifacts_preserve_raw_message_history() {
             strategy_id: Some("rolling_summary_compaction".to_string()),
             enters_future_context: Some(true),
             latest_only: true,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5504,6 +5505,7 @@ fn context_compaction_artifacts_preserve_raw_message_history() {
             strategy_id: None,
             enters_future_context: None,
             latest_only: true,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5587,6 +5589,7 @@ fn context_compaction_artifacts_are_idempotent_under_concurrent_conflicting_writ
             strategy_id: None,
             enters_future_context: None,
             latest_only: false,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5646,6 +5649,7 @@ fn context_compaction_artifacts_persist_provenance_and_intent_lineage() {
             strategy_id: None,
             enters_future_context: None,
             latest_only: true,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5683,6 +5687,7 @@ fn context_compaction_artifacts_persist_provenance_and_intent_lineage() {
             strategy_id: None,
             enters_future_context: None,
             latest_only: false,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5703,6 +5708,7 @@ fn context_compaction_artifacts_persist_provenance_and_intent_lineage() {
             strategy_id: None,
             enters_future_context: None,
             latest_only: true,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5782,6 +5788,7 @@ fn context_compaction_failed_preserves_prior_valid_and_latest_valid_selection() 
             strategy_id: None,
             enters_future_context: None,
             latest_only: false,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5795,6 +5802,7 @@ fn context_compaction_failed_preserves_prior_valid_and_latest_valid_selection() 
             strategy_id: None,
             enters_future_context: None,
             latest_only: true,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5803,6 +5811,24 @@ fn context_compaction_failed_preserves_prior_valid_and_latest_valid_selection() 
     assert_eq!(
         latest[0].artifact_id, "artifact_failed",
         "latest_only returns most recent even if failed"
+    );
+    // latest_valid via DB query returns completed
+    let latest_valid_db = store
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(session_id.clone()),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: true,
+            terminal_status: Some("completed".to_string()),
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(latest_valid_db.len(), 1);
+    assert_eq!(
+        latest_valid_db[0].artifact_id, "artifact_completed",
+        "latest_valid via DB must return completed, not failed"
     );
     // latest valid is the most recent completed, not the failed
     let latest_valid = all
@@ -5823,6 +5849,7 @@ fn context_compaction_failed_preserves_prior_valid_and_latest_valid_selection() 
             strategy_id: None,
             enters_future_context: None,
             latest_only: false,
+            terminal_status: None,
             limit: None,
             offset: None,
         })
@@ -5834,7 +5861,24 @@ fn context_compaction_failed_preserves_prior_valid_and_latest_valid_selection() 
     assert!(reopened_all
         .iter()
         .any(|artifact| artifact.artifact_id == "artifact_failed"));
-    // restart hydration still sees completed as latest valid
+    // restart hydration still sees completed as latest valid via DB query
+    let reopened_valid_db = reopened
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(session_id.clone()),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: true,
+            terminal_status: Some("completed".to_string()),
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(reopened_valid_db.len(), 1);
+    assert_eq!(
+        reopened_valid_db[0].artifact_id, "artifact_completed",
+        "restart DB latest_valid must be completed"
+    );
     let reopened_valid = reopened_all
         .iter()
         .filter(|artifact| artifact.terminal_status.as_deref() == Some("completed"))
