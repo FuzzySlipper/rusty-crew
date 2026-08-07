@@ -421,6 +421,46 @@ import {
   type ServiceReviewSubmissionContext,
 } from "./service-review-submission.js";
 
+export function manualCompactionEffectiveFingerprint(input: {
+  intentKey?: string | null;
+  sourceProjectionFingerprint?: string | null;
+}): string {
+  return (
+    input.sourceProjectionFingerprint ?? `manual-${input.intentKey ?? "manual"}`
+  );
+}
+
+export function manualCompactionArtifactEffectiveFingerprint(artifact: {
+  intent_key?: string | null;
+  source_projection_fingerprint?: string | null;
+}): string | undefined {
+  if (artifact.source_projection_fingerprint)
+    return artifact.source_projection_fingerprint;
+  if (artifact.intent_key) return `manual-${artifact.intent_key}`;
+  return undefined;
+}
+
+export function isManualCompactionDuplicate(
+  artifact: {
+    intent_key?: string | null;
+    source_projection_fingerprint?: string | null;
+    session_id: string;
+  },
+  input: {
+    intentKey?: string | null;
+    sessionId: string;
+    sourceProjectionFingerprint?: string | null;
+  },
+  effectiveFingerprint: string,
+): boolean {
+  return (
+    artifact.intent_key === input.intentKey &&
+    artifact.session_id === input.sessionId &&
+    (artifact.source_projection_fingerprint ??
+      `manual-${artifact.intent_key}`) === effectiveFingerprint
+  );
+}
+
 export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
   config?: RustyCrewServiceConfig;
@@ -1578,7 +1618,7 @@ async function handleHttpRequest(
           rustyViewSessionContextUsage(chatOperations, input),
         manualContextCompaction: async (input) => {
           const effectiveFingerprint =
-            input.sourceProjectionFingerprint ?? `manual-${input.intentKey}`;
+            manualCompactionEffectiveFingerprint(input);
           const existing = await state.bridge.listContextCompactionArtifacts({
             session_id: input.session.sessionId,
             branch_id: undefined,
@@ -1588,12 +1628,16 @@ async function handleHttpRequest(
             limit: 1000,
             offset: 0,
           });
-          const duplicate = existing.find(
-            (artifact) =>
-              artifact.intent_key === input.intentKey &&
-              artifact.session_id === input.session.sessionId &&
-              (artifact.source_projection_fingerprint ??
-                `manual-${artifact.intent_key}`) === effectiveFingerprint,
+          const duplicate = existing.find((artifact) =>
+            isManualCompactionDuplicate(
+              artifact,
+              {
+                intentKey: input.intentKey,
+                sessionId: input.session.sessionId,
+                sourceProjectionFingerprint: input.sourceProjectionFingerprint,
+              },
+              effectiveFingerprint,
+            ),
           );
           if (duplicate) {
             const revision = duplicate.strategy_revision
@@ -1761,11 +1805,17 @@ async function handleHttpRequest(
                 limit: 1000,
                 offset: 0,
               });
-              const match = found.find(
-                (a) =>
-                  a.intent_key === input.intentKey &&
-                  (a.source_projection_fingerprint ??
-                    `manual-${a.intent_key}`) === effectiveFingerprint,
+              const match = found.find((a) =>
+                isManualCompactionDuplicate(
+                  a,
+                  {
+                    intentKey: input.intentKey,
+                    sessionId: input.session.sessionId,
+                    sourceProjectionFingerprint:
+                      input.sourceProjectionFingerprint,
+                  },
+                  effectiveFingerprint,
+                ),
               );
               if (match) {
                 const rev = match.strategy_revision
@@ -1819,11 +1869,17 @@ async function handleHttpRequest(
                     limit: 1000,
                     offset: 0,
                   });
-                const match2 = found2.find(
-                  (a) =>
-                    a.intent_key === input.intentKey &&
-                    (a.source_projection_fingerprint ??
-                      `manual-${a.intent_key}`) === effectiveFingerprint,
+                const match2 = found2.find((a) =>
+                  isManualCompactionDuplicate(
+                    a,
+                    {
+                      intentKey: input.intentKey,
+                      sessionId: input.session.sessionId,
+                      sourceProjectionFingerprint:
+                        input.sourceProjectionFingerprint,
+                    },
+                    effectiveFingerprint,
+                  ),
                 );
                 if (match2) {
                   const rev = match2.strategy_revision

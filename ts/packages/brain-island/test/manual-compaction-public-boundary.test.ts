@@ -6,6 +6,10 @@ import {
   type ServiceWakeDispatchContext,
 } from "../src/service-wake-dispatch.js";
 import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
+import {
+  isManualCompactionDuplicate,
+  manualCompactionEffectiveFingerprint,
+} from "../src/service-app.js";
 import type { SessionState } from "@rusty-crew/contracts";
 import type { CoreEvent } from "@rusty-crew/contracts";
 
@@ -23,7 +27,10 @@ test("public boundary: event mapper synthesizes hyphen fingerprint for no-finger
         return artifact;
       },
     },
-    appendChatEvent: async (_sessionId: string, event: { kind: string; payload: unknown }) => {
+    appendChatEvent: async (
+      _sessionId: string,
+      event: { kind: string; payload: unknown },
+    ) => {
       appended.push(event);
       return event;
     },
@@ -58,7 +65,11 @@ test("public boundary: event mapper synthesizes hyphen fingerprint for no-finger
     } as unknown as CoreEvent,
   ]);
 
-  assert.equal(saved.length, 1, "failed no-fp should persist one synthetic artifact");
+  assert.equal(
+    saved.length,
+    1,
+    "failed no-fp should persist one synthetic artifact",
+  );
   const artifact = saved[0] as Record<string, unknown>;
   assert.equal(artifact["intent_key"], "verify-no-fp-failure-retry-8");
   assert.equal(artifact["session_id"], "sess-public-no-fp-6624-9");
@@ -116,7 +127,59 @@ test("public boundary: contextual compaction success with no-fingerprint also fa
       },
     } as unknown as CoreEvent,
   ]);
-  assert.equal(saved[0]["source_projection_fingerprint"], "manual-verify-no-fp-success-8");
+  assert.equal(
+    saved[0]["source_projection_fingerprint"],
+    "manual-verify-no-fp-success-8",
+  );
+});
+
+test("production helper manualCompactionEffectiveFingerprint uses hyphen fallback, not underscore", () => {
+  assert.equal(
+    manualCompactionEffectiveFingerprint({
+      intentKey: "verify-no-fp-8",
+      sourceProjectionFingerprint: null,
+    }),
+    "manual-verify-no-fp-8",
+  );
+  assert.equal(
+    manualCompactionEffectiveFingerprint({
+      intentKey: "verify-no-fp-8",
+      sourceProjectionFingerprint: "fp-explicit",
+    }),
+    "fp-explicit",
+  );
+  assert.equal(
+    isManualCompactionDuplicate(
+      {
+        intent_key: "verify-no-fp-8",
+        session_id: "sess-1",
+        source_projection_fingerprint: null,
+      },
+      {
+        intentKey: "verify-no-fp-8",
+        sessionId: "sess-1",
+        sourceProjectionFingerprint: null,
+      },
+      "manual-verify-no-fp-8",
+    ),
+    true,
+  );
+  assert.equal(
+    isManualCompactionDuplicate(
+      {
+        intent_key: "verify-no-fp-8",
+        session_id: "sess-1",
+        source_projection_fingerprint: "manual-verify-no-fp-8",
+      },
+      {
+        intentKey: "verify-no-fp-8",
+        sessionId: "sess-1",
+        sourceProjectionFingerprint: null,
+      },
+      "manual-verify-no-fp-8",
+    ),
+    true,
+  );
 });
 
 // ---- Service/API route + idempotent HTTP retry for no-fingerprint manual compaction ----
@@ -138,7 +201,7 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     },
   };
 
-  // Simulate the Rust-owned manualContextCompaction bound to the route: it must be projection-aware and hyphen-fallback.
+  // Use the production helpers so the proof fails if service-app's matching regresses (R6624-11).
   let callCount = 0;
   const manualContextCompaction = async (input: {
     session: SessionState;
@@ -150,13 +213,21 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     expectRevision: number | null;
   }) => {
     callCount++;
-    const effectiveFingerprint = input.sourceProjectionFingerprint ?? `manual-${input.intentKey}`;
-    const existing = artifacts.find(
-      (a) =>
-        a["intent_key"] === input.intentKey &&
-        a["session_id"] === sessionId &&
-        ((a["source_projection_fingerprint"] as string | undefined) ?? `manual-${a["intent_key"]}`) ===
-          effectiveFingerprint,
+    const effectiveFingerprint = manualCompactionEffectiveFingerprint(input);
+    const existing = artifacts.find((a) =>
+      isManualCompactionDuplicate(
+        a as unknown as {
+          intent_key?: string | null;
+          source_projection_fingerprint?: string | null;
+          session_id: string;
+        },
+        {
+          intentKey: input.intentKey,
+          sessionId,
+          sourceProjectionFingerprint: input.sourceProjectionFingerprint,
+        },
+        effectiveFingerprint,
+      ),
     );
     if (existing) {
       return {
@@ -168,7 +239,10 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
         revision: Number(existing["strategy_revision"] as string) || 0,
       };
     }
-    const sanitized = input.intentKey.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    const sanitized = input.intentKey
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
     const artifact = {
       artifact_id: `manual_${sanitized}_test`,
       session_id: sessionId,
@@ -211,7 +285,8 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
   const context = {
     // chatSessionFromParts will call listSessions or readSession; mock both
     listSessions: async () => [session as unknown as SessionState],
-    readSession: async () => ({ sessionId, status: "active" } as unknown as SessionState),
+    readSession: async () =>
+      ({ sessionId, status: "active" }) as unknown as SessionState,
     // For manual compaction, the api layer calls context.manualContextCompaction
     manualContextCompaction,
     // required for session lookup in handleRustyViewChatRequest
@@ -219,11 +294,15 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
   } as unknown as Parameters<typeof handleRustyViewChatRequest>[1];
 
   // Ensure session lookup works for both listSessions and direct read
-  (context as unknown as Record<string, unknown>).listSessions = async () => [session];
+  (context as unknown as Record<string, unknown>).listSessions = async () => [
+    session,
+  ];
   // Provide a minimal readSession that satisfies chatSessionFromParts (it tries several lookups)
-  (context as unknown as Record<string, unknown>).readSession = async () => session;
+  (context as unknown as Record<string, unknown>).readSession = async () =>
+    session;
   // Also provide session state via bridge fallback if needed
-  (context as unknown as Record<string, unknown> & { bridge: unknown }).bridge = fakeBridge;
+  (context as unknown as Record<string, unknown> & { bridge: unknown }).bridge =
+    fakeBridge;
 
   const makeRequest = (body: unknown) => ({
     method: "POST",
@@ -239,7 +318,13 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     context,
   );
   assert.equal(first.status, 201, "first no-fp create should be 201");
-  const firstBody = (first as unknown as { body: { data: { artifact: Record<string, unknown>; idempotent: boolean } } }).body;
+  const firstBody = (
+    first as unknown as {
+      body: {
+        data: { artifact: Record<string, unknown>; idempotent: boolean };
+      };
+    }
+  ).body;
   assert.equal(firstBody.data.idempotent, false);
   assert.equal(firstBody.data.artifact["intent_key"], "verify-no-fp-retry-8");
   assert.equal(
@@ -247,8 +332,15 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     "manual-verify-no-fp-retry-8",
     "HTTP no-fp must fallback to manual- hyphen",
   );
-  assert.match(String(firstBody.data.artifact["artifact_id"]), /^manual_verify_no_fp_retry_8/);
-  assert.equal(artifacts.length, 1, "persistence readback: one artifact after first");
+  assert.match(
+    String(firstBody.data.artifact["artifact_id"]),
+    /^manual_verify_no_fp_retry_8/,
+  );
+  assert.equal(
+    artifacts.length,
+    1,
+    "persistence readback: one artifact after first",
+  );
 
   // Second POST identical (no fingerprint) → must be idempotent HTTP retry, 200, same artifact
   const second = await handleRustyViewChatRequest(
@@ -256,21 +348,44 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     context,
   );
   assert.equal(second.status, 200, "idempotent retry should be 200");
-  const secondBody = (second as unknown as { body: { data: { artifact: Record<string, unknown>; idempotent: boolean } } }).body;
+  const secondBody = (
+    second as unknown as {
+      body: {
+        data: { artifact: Record<string, unknown>; idempotent: boolean };
+      };
+    }
+  ).body;
   assert.equal(secondBody.data.idempotent, true);
-  assert.equal(secondBody.data.artifact["artifact_id"], firstBody.data.artifact["artifact_id"]);
+  assert.equal(
+    secondBody.data.artifact["artifact_id"],
+    firstBody.data.artifact["artifact_id"],
+  );
   assert.equal(artifacts.length, 1, "retry must not create duplicate row");
 
   // POST with explicit different fingerprint but same intentKey would be distinct, but with no-fingerprint the hyphen fallback must be consistent
   // Verify that explicit fp is considered distinct (projection-aware)
   const explicit = await handleRustyViewChatRequest(
-    makeRequest({ intentKey: "verify-no-fp-retry-8", sourceProjectionFingerprint: "fp-caller-explicit" }),
+    makeRequest({
+      intentKey: "verify-no-fp-retry-8",
+      sourceProjectionFingerprint: "fp-caller-explicit",
+    }),
     context,
   );
   assert.equal(explicit.status, 201);
-  const explicitBody = (explicit as unknown as { body: { data: { artifact: Record<string, unknown> } } }).body;
-  assert.equal(explicitBody.data.artifact["source_projection_fingerprint"], "fp-caller-explicit");
-  assert.equal(artifacts.length, 2, "different fingerprint must not reuse no-fp row");
+  const explicitBody = (
+    explicit as unknown as {
+      body: { data: { artifact: Record<string, unknown> } };
+    }
+  ).body;
+  assert.equal(
+    explicitBody.data.artifact["source_projection_fingerprint"],
+    "fp-caller-explicit",
+  );
+  assert.equal(
+    artifacts.length,
+    2,
+    "different fingerprint must not reuse no-fp row",
+  );
 
   // Failure scenario: no-fingerprint failed compaction should also be idempotent via the same hyphen fallback
   // Simulate a failed artifact for a different intent
@@ -309,8 +424,22 @@ test("public boundary: POST /v1/chat/sessions/{id}/context/compact no-fingerprin
     makeRequest({ intentKey: failedIntent }),
     context,
   );
-  assert.equal(failedRetry.status, 200, "failed no-fp retry must be idempotent 200");
-  const failedBody = (failedRetry as unknown as { body: { data: { artifact: Record<string, unknown>; idempotent: boolean; terminal_status: string } } }).body;
+  assert.equal(
+    failedRetry.status,
+    200,
+    "failed no-fp retry must be idempotent 200",
+  );
+  const failedBody = (
+    failedRetry as unknown as {
+      body: {
+        data: {
+          artifact: Record<string, unknown>;
+          idempotent: boolean;
+          terminal_status: string;
+        };
+      };
+    }
+  ).body;
   assert.equal(failedBody.data.idempotent, true);
   assert.equal(failedBody.data.terminal_status, "failed");
   assert.equal(
