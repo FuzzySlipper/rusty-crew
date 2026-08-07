@@ -4,6 +4,14 @@ use rusty_crew_core_protocol::{
     ManualContextCompactionResponse,
 };
 
+fn is_intent_key_conflict(error: &CoreError) -> bool {
+    // SQLite: "UNIQUE constraint failed: context_compaction_artifacts.session_id, context_compaction_artifacts.intent_key"
+    // Postgres: "duplicate key value violates unique constraint \"context_compaction_session_intent_idx\""
+    let message = error.to_string().to_ascii_lowercase();
+    (message.contains("unique") || message.contains("duplicate key"))
+        && (message.contains("session_intent") || message.contains("intent_key"))
+}
+
 impl CoreEngine {
     pub fn list_profile_memory(
         &self,
@@ -268,7 +276,57 @@ impl CoreEngine {
             created_at: now.clone(),
             updated_at: now.clone(),
         };
-        let saved = CrewMemoryStore::save_context_compaction_artifact(&self.store, &artifact)?;
+        let saved = match CrewMemoryStore::save_context_compaction_artifact(&self.store, &artifact) {
+            Ok(saved) => saved,
+            Err(error) if is_intent_key_conflict(&error) => {
+                // Race: another writer inserted same (session_id, intent_key) concurrently.
+                // The DB unique index on (session_id, intent_key) guarantees atomic
+                // idempotency; recover the winner via a filtered read and apply the
+                // same revision-conflict semantics as the pre-insert duplicate path.
+                let existing = CrewMemoryStore::list_context_compaction_artifacts(
+                    &self.store,
+                    &ContextCompactionArtifactQuery {
+                        session_id: Some(request.session_id.clone()),
+                        branch_id: None,
+                        strategy_id: None,
+                        enters_future_context: None,
+                        latest_only: false,
+                        terminal_status: None,
+                        limit: Some(100),
+                        offset: None,
+                    },
+                )?;
+                if let Some(duplicate) = existing.iter().find(|artifact| {
+                    artifact.intent_key.as_deref() == Some(intent_key.as_str())
+                        && artifact.session_id == request.session_id
+                }) {
+                    let revision = duplicate
+                        .strategy_revision
+                        .as_deref()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .unwrap_or(0);
+                    if let Some(expect) = request.expect_revision {
+                        if revision != expect {
+                            return Err(CoreError::new(
+                                CoreErrorKind::AlreadyExists,
+                                format!("revision_conflict: expected {expect} but found {revision}"),
+                            ));
+                        }
+                    }
+                    return Ok(ManualContextCompactionResponse {
+                        artifact: duplicate.clone(),
+                        terminal_status: duplicate
+                            .terminal_status
+                            .clone()
+                            .unwrap_or_else(|| "completed".to_string()),
+                        idempotent: true,
+                        revision,
+                    });
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         let revision = saved
             .strategy_revision
             .as_deref()

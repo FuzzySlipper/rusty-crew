@@ -7,7 +7,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 46;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 47;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -249,6 +249,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 46,
         description: "allow external CLI review submissions without sessions",
         apply: Some(allow_external_review_submitters),
+    },
+    PostgresSchemaMigration {
+        version: 47,
+        description: "add atomic idempotency for manual compaction intent",
+        apply: Some(apply_postgres_context_compaction_intent_unique),
     },
 ];
 
@@ -1886,6 +1891,27 @@ fn apply_postgres_external_agent_session_creations(
             error,
         )
     })
+}
+
+fn apply_postgres_context_compaction_intent_unique(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    // Deduplicate legacy duplicates before adding the unique constraint.
+    tx.batch_execute(&format!(
+        "DELETE FROM {schema}.context_compaction_artifacts
+            WHERE (record_json->>'intent_key') IS NOT NULL
+              AND ctid NOT IN (
+                SELECT MAX(ctid)
+                FROM {schema}.context_compaction_artifacts
+                WHERE (record_json->>'intent_key') IS NOT NULL
+                GROUP BY session_id, (record_json->>'intent_key')
+              );
+         CREATE UNIQUE INDEX IF NOT EXISTS context_compaction_session_intent_idx
+            ON {schema}.context_compaction_artifacts(session_id, (record_json->>'intent_key'))
+            WHERE record_json->>'intent_key' IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL context compaction intent unique index", error))
 }
 
 fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {

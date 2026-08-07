@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 63;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 64;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -334,6 +334,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add context compaction provenance and intent lineage",
         apply: migrate_v63_add_context_compaction_provenance,
     },
+    SchemaMigration {
+        version: 64,
+        description: "add atomic idempotency for manual compaction intent",
+        apply: migrate_v64_add_context_compaction_intent_unique,
+    },
 ];
 
 fn migrate_v63_add_context_compaction_provenance(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -408,6 +413,29 @@ fn migrate_v63_add_context_compaction_provenance(tx: &rusqlite::Transaction<'_>)
         ",
     )
     .map_err(|error| persistence_error("apply schema migration 63", error))
+}
+
+fn migrate_v64_add_context_compaction_intent_unique(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    // Deduplicate any legacy duplicates before enforcing the unique constraint.
+    // Keep the latest row per (session_id, intent_key) by created_at/rowid.
+    tx.execute_batch(
+        "
+            DELETE FROM context_compaction_artifacts
+            WHERE intent_key IS NOT NULL
+              AND rowid NOT IN (
+                SELECT MAX(rowid)
+                FROM context_compaction_artifacts
+                WHERE intent_key IS NOT NULL
+                GROUP BY session_id, intent_key
+              );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_context_compaction_session_intent
+                ON context_compaction_artifacts(session_id, intent_key)
+                WHERE intent_key IS NOT NULL;
+        ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 64", error))
 }
 
 fn migrate_v60_add_responses_provider_dialect(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
