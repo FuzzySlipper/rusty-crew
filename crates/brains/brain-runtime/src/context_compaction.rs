@@ -352,6 +352,70 @@ mod tests {
         validate_compaction_artifacts(std::slice::from_ref(&artifact)).expect("valid artifact");
 
         artifact.sequence = 0;
-        assert!(validate_compaction_artifacts(&[artifact]).is_err());
+        assert!(validate_compaction_artifacts(&[artifact.clone()]).is_err());
+        artifact.sequence = 1;
+        artifact.terminal_status = Some(BrainContextCompactionTerminalStatus::Failed);
+        validate_compaction_artifacts(std::slice::from_ref(&artifact))
+            .expect("failed terminal is still a valid artifact shape");
+        // latest valid is completed, failed preserves prior
+        let completed = BrainContextCompactionArtifact {
+            terminal_status: Some(BrainContextCompactionTerminalStatus::Completed),
+            ..artifact.clone()
+        };
+        let failed = BrainContextCompactionArtifact {
+            artifact_id: "artifact-2".to_string(),
+            sequence: 2,
+            terminal_status: Some(BrainContextCompactionTerminalStatus::Failed),
+            ..artifact.clone()
+        };
+        let artifacts = vec![completed.clone(), failed.clone()];
+        validate_compaction_artifacts(&artifacts).expect("mixed completed+failed valid");
+        let latest_valid = artifacts
+            .iter()
+            .filter(|candidate| {
+                candidate.terminal_status == Some(BrainContextCompactionTerminalStatus::Completed)
+            })
+            .max_by_key(|candidate| candidate.sequence)
+            .expect("completed must exist");
+        assert_eq!(latest_valid.artifact_id, "artifact-1");
+    }
+
+    #[test]
+    fn unsafe_tool_exchange_boundary_is_rejected_at_compaction_layer() {
+        // At the generic artifact layer, sequence and reduction are still enforced.
+        // A would-be unsafe compaction that cannot reduce the projection is
+        // rejected at the brain-specific layer (chat/responses) before an artifact
+        // is ever persisted — see those crate tests. Here we prove a failed
+        // artifact that *does* reduce is still structurally valid and would be
+        // persisted as a failed attempt preserving the prior valid.
+        let artifact = BrainContextCompactionArtifact {
+            artifact_id: "artifact-unsafe".to_string(),
+            sequence: 1,
+            session_id: Some("session-1".to_string()),
+            logical_turn_id: Some("turn-1".to_string()),
+            execution_epoch_id: Some("epoch-1".to_string()),
+            source_projection_fingerprint: Some("fp-unsafe".to_string()),
+            strategy_id: "rolling_summary_compaction".to_string(),
+            strategy_revision: Some("1".to_string()),
+            reason_code: "context_fill_threshold_exceeded".to_string(),
+            trigger: Some(BrainContextCompactionTrigger::AutoThreshold),
+            usage_before: BrainContextUsageSnapshot::from_provider(90, 100),
+            estimated_tokens_after: 50,
+            before_tokens: Some(90),
+            after_tokens: Some(50),
+            preserved_item_count: Some(3),
+            excised_item_count: Some(2),
+            compacted_item_count: 2,
+            retained_item_count: 3,
+            summary_text: "failed but reducing".to_string(),
+            provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+            terminal_status: Some(BrainContextCompactionTerminalStatus::Failed),
+        };
+        validate_compaction_artifacts(std::slice::from_ref(&artifact))
+            .expect("failed reducing artifact is structurally valid");
+        assert!(
+            artifact.estimated_tokens_after < artifact.usage_before.input_tokens,
+            "failed artifact still records a reduction, but brain layer rejected the unsafe boundary before persisting"
+        );
     }
 }

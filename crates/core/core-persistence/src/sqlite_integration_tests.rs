@@ -5713,6 +5713,138 @@ fn context_compaction_artifacts_persist_provenance_and_intent_lineage() {
 }
 
 #[test]
+fn context_compaction_failed_preserves_prior_valid_and_latest_valid_selection() {
+    let db_path = temp_db_path("context-compaction-failed");
+    let store = CoordinationStore::open_file(&db_path).unwrap();
+    let session_id = SessionId::new("session-failed");
+    let completed = ContextCompactionArtifact {
+        artifact_id: "artifact_completed".to_string(),
+        session_id: session_id.clone(),
+        branch_id: None,
+        strategy_id: "rolling_summary_compaction".to_string(),
+        strategy_revision: Some("1".to_string()),
+        logical_turn_id: Some("turn-1".to_string()),
+        execution_epoch_id: Some("epoch-1".to_string()),
+        source_projection_fingerprint: Some("fp-completed".to_string()),
+        trigger: Some("auto_threshold".to_string()),
+        before_tokens: Some(90000),
+        after_tokens: Some(24000),
+        preserved_item_count: Some(5),
+        excised_item_count: Some(5),
+        intent_key: Some("intent-completed".to_string()),
+        terminal_status: Some("completed".to_string()),
+        provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+        source_refs_json: json!({"slot": "completed"}),
+        provider_metadata_json: json!({"provider_alias": "deepseek-flash"}),
+        estimate_before_json: json!({"input_tokens": 90000}),
+        estimate_after_json: Some(json!({"input_tokens": 24000})),
+        summary_text: "completed compaction".to_string(),
+        enters_future_context: true,
+        context_policy: "summary_context".to_string(),
+        metadata_json: json!({"fixture": "completed"}),
+        created_at: "2026-06-30T00:00:00Z".to_string(),
+        updated_at: "2026-06-30T00:00:01Z".to_string(),
+    };
+    let failed = ContextCompactionArtifact {
+        artifact_id: "artifact_failed".to_string(),
+        session_id: session_id.clone(),
+        branch_id: None,
+        strategy_id: "rolling_summary_compaction".to_string(),
+        strategy_revision: Some("1".to_string()),
+        logical_turn_id: Some("turn-2".to_string()),
+        execution_epoch_id: Some("epoch-2".to_string()),
+        source_projection_fingerprint: Some("fp-failed".to_string()),
+        trigger: Some("manual_intent".to_string()),
+        before_tokens: Some(95000),
+        after_tokens: None,
+        preserved_item_count: None,
+        excised_item_count: None,
+        intent_key: Some("intent-failed".to_string()),
+        terminal_status: Some("failed".to_string()),
+        provider_chain_action: None,
+        source_refs_json: json!({"slot": "failed"}),
+        provider_metadata_json: json!({"provider_alias": "deepseek-flash"}),
+        estimate_before_json: json!({"input_tokens": 95000}),
+        estimate_after_json: None,
+        summary_text: "failed compaction preserves prior".to_string(),
+        enters_future_context: true,
+        context_policy: "summary_context".to_string(),
+        metadata_json: json!({"fixture": "failed"}),
+        created_at: "2026-06-30T00:00:02Z".to_string(),
+        updated_at: "2026-06-30T00:00:03Z".to_string(),
+    };
+    store.save_context_compaction_artifact(&completed).unwrap();
+    store.save_context_compaction_artifact(&failed).unwrap();
+    let all = store
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(session_id.clone()),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: false,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(all.len(), 2, "both completed and failed must be persisted");
+    // latest_only returns the most recent by created_at, which is failed
+    let latest = store
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(session_id.clone()),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: true,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(
+        latest[0].artifact_id, "artifact_failed",
+        "latest_only returns most recent even if failed"
+    );
+    // latest valid is the most recent completed, not the failed
+    let latest_valid = all
+        .iter()
+        .filter(|artifact| artifact.terminal_status.as_deref() == Some("completed"))
+        .max_by_key(|artifact| artifact.created_at.clone())
+        .expect("completed artifact must exist");
+    assert_eq!(latest_valid.artifact_id, "artifact_completed");
+    // raw transcript not affected: failed preservation leaves prior valid usable
+    assert_eq!(latest_valid.terminal_status.as_deref(), Some("completed"));
+    assert_eq!(failed.terminal_status.as_deref(), Some("failed"));
+    drop(store);
+    let reopened = CoordinationStore::open_file(&db_path).unwrap();
+    let reopened_all = reopened
+        .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+            session_id: Some(session_id.clone()),
+            branch_id: None,
+            strategy_id: None,
+            enters_future_context: None,
+            latest_only: false,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    assert_eq!(reopened_all.len(), 2);
+    assert!(reopened_all
+        .iter()
+        .any(|artifact| artifact.artifact_id == "artifact_completed"));
+    assert!(reopened_all
+        .iter()
+        .any(|artifact| artifact.artifact_id == "artifact_failed"));
+    // restart hydration still sees completed as latest valid
+    let reopened_valid = reopened_all
+        .iter()
+        .filter(|artifact| artifact.terminal_status.as_deref() == Some("completed"))
+        .max_by_key(|artifact| artifact.created_at.clone())
+        .expect("reopened completed must exist");
+    assert_eq!(reopened_valid.artifact_id, "artifact_completed");
+    remove_temp_db(&db_path);
+}
+
+#[test]
 fn message_slots_persist_variants_and_active_selection_conflicts() {
     let db_path = temp_db_path("message-slots");
     let store = CoordinationStore::open_file(&db_path).unwrap();

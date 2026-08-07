@@ -8324,4 +8324,96 @@ mod tests {
             self
         }
     }
+
+    #[test]
+    fn responses_context_compaction_rejects_unsafe_boundary_with_pending_tool_exchange() {
+        let policy = BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 100,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 50,
+        };
+        let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(90, 100);
+        // Only a single pending function call — no completed exchange to compact.
+        let mut items = vec![ResponsesInputItem::FunctionCall {
+            id: Some("call_pending".to_string()),
+            call_id: "call_pending".to_string(),
+            name: "lookup".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        let original = items.clone();
+        let result = compact_responses_items(&mut items, &policy, usage, 1, None);
+        assert!(
+            result.is_err(),
+            "pending tool exchange must not be compacted across unsafe boundary"
+        );
+        assert_eq!(
+            items, original,
+            "failed compaction must preserve prior valid projection"
+        );
+    }
+
+    #[test]
+    fn responses_context_compaction_failed_preserves_prior_valid_projection() {
+        let policy = BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 1000,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 50,
+        };
+        let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(950, 1000);
+        let mut items = Vec::new();
+        for turn in 0..12 {
+            items.push(ResponsesInputItem::UserMessage {
+                content: format!("user {turn}"),
+            });
+            items.push(ResponsesInputItem::AssistantMessage {
+                content: format!("assistant {turn}"),
+            });
+            items.push(ResponsesInputItem::FunctionCall {
+                id: Some(format!("call_{turn}")),
+                call_id: format!("call_{turn}"),
+                name: "lookup".to_string(),
+                arguments: "{}".to_string(),
+            });
+            items.push(ResponsesInputItem::FunctionCallOutput {
+                call_id: format!("call_{turn}"),
+                output: format!("tool result {turn}"),
+                is_error: false,
+            });
+        }
+        let original = items.clone();
+        let mut compacted = items.clone();
+        let ok = compact_responses_items(&mut compacted, &policy, usage.clone(), 1, None);
+        assert!(
+            ok.is_ok(),
+            "long history should compact at safe boundary: {:?}",
+            ok.err()
+        );
+        let (artifact, _guidance) = ok.unwrap();
+        assert_eq!(
+            artifact.terminal_status,
+            Some(rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed)
+        );
+        // Now force failure with tiny history
+        let mut unsafe_items = vec![ResponsesInputItem::UserMessage {
+            content: "hello".to_string(),
+        }];
+        let unsafe_original = unsafe_items.clone();
+        let unsafe_result = compact_responses_items(&mut unsafe_items, &policy, usage, 2, None);
+        assert!(
+            unsafe_result.is_err(),
+            "unsafe boundary must fail and preserve prior"
+        );
+        assert_eq!(
+            unsafe_items, unsafe_original,
+            "failed compaction must not mutate items"
+        );
+        assert!(!compacted.is_empty());
+        assert_ne!(compacted, original);
+    }
 }

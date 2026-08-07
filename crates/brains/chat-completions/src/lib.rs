@@ -9279,4 +9279,105 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn context_compaction_rejects_unsafe_boundary_with_pending_tool_exchange() {
+        let policy = BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 100,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 50,
+        };
+        let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(90, 100);
+        // Only frozen request + pending tool call — no completed historical exchange to compact.
+        let mut messages = vec![
+            ChatCompletionMessage::system("system"),
+            ChatCompletionMessage::user("hello"),
+            ChatCompletionMessage {
+                role: ChatMessageRole::Assistant,
+                content: None,
+                reasoning_content: None,
+                name: None,
+                tool_call_id: None,
+                tool_calls: vec![ChatAssistantToolCall {
+                    id: "call_pending".to_string(),
+                    kind: "function".to_string(),
+                    function: ChatFunctionCall {
+                        name: "test_tool".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }],
+            },
+        ];
+        let original = messages.clone();
+        let result = compact_chat_messages(&mut messages, &policy, usage, 1);
+        assert!(
+            result.is_err(),
+            "pending tool exchange must not be compacted across unsafe boundary"
+        );
+        assert_eq!(
+            messages, original,
+            "failed compaction must preserve prior valid projection"
+        );
+    }
+
+    #[test]
+    fn context_compaction_failed_preserves_prior_valid_projection() {
+        let policy = BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: true,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 1000,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 50,
+        };
+        // Build a long history that can be compacted, then force a failure by using
+        // a usage that cannot be reduced (estimated_tokens_after >= usage_before).
+        let mut messages = Vec::new();
+        messages.push(ChatCompletionMessage::system("system"));
+        for turn in 0..12 {
+            messages.push(ChatCompletionMessage::user(format!("user {turn}")));
+            messages.push(ChatCompletionMessage::assistant(format!(
+                "assistant {turn}"
+            )));
+            messages.push(ChatCompletionMessage::tool(
+                format!("call_{turn}"),
+                format!("tool result {turn}"),
+            ));
+        }
+        let original = messages.clone();
+        let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(950, 1000);
+        let mut compacted = messages.clone();
+        let ok = compact_chat_messages(&mut compacted, &policy, usage.clone(), 1);
+        assert!(
+            ok.is_ok(),
+            "long history should compact at safe boundary: {:?}",
+            ok.err()
+        );
+        let artifact = ok.unwrap();
+        assert_eq!(
+            artifact.terminal_status,
+            Some(rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed)
+        );
+        // Now force a failure: tiny history where no reduction is possible
+        let mut unsafe_messages = vec![
+            ChatCompletionMessage::system("system"),
+            ChatCompletionMessage::user("hello"),
+        ];
+        let unsafe_original = unsafe_messages.clone();
+        let unsafe_result = compact_chat_messages(&mut unsafe_messages, &policy, usage, 2);
+        assert!(
+            unsafe_result.is_err(),
+            "unsafe boundary must fail and preserve prior"
+        );
+        assert_eq!(
+            unsafe_messages, unsafe_original,
+            "failed compaction must not mutate messages"
+        );
+        // Prior valid projection (the earlier successful compact) remains usable
+        assert!(!compacted.is_empty());
+        assert_ne!(compacted, original);
+    }
 }
