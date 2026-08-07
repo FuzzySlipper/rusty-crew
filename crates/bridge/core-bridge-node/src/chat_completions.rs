@@ -515,6 +515,7 @@ fn run_chat_completions_brain_with_buffered_tools(
         provider_state: input.provider_state,
         continuation_state: input.continuation_state,
         final_message_fallback,
+        compaction_intent: None,
     };
     match input.client {
         JsChatCompletionsClientConfig::Fake => {

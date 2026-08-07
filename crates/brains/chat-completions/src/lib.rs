@@ -1101,6 +1101,7 @@ pub struct ChatCompletionsBrainLoopInput {
     pub provider_state: Option<BrainWakeProviderStateInput>,
     pub continuation_state: Option<BrainContinuationPayload>,
     pub final_message_fallback: Option<ChatCompletionsFinalMessage>,
+    pub compaction_intent: Option<rusty_crew_core_protocol::BrainWakeCompactionIntent>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1183,6 +1184,7 @@ where
             provider_state: None,
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         })
     }
 
@@ -6306,6 +6308,7 @@ mod tests {
                 provider_state: None,
                 continuation_state: None,
                 final_message_fallback: None,
+                compaction_intent: None,
             },
             &mut sink,
         );
@@ -6506,6 +6509,7 @@ mod tests {
             provider_state: Some(provider_state),
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         let messages = second.provider_request_debug_samples[0]["messages"]
             .as_array()
@@ -6627,6 +6631,7 @@ mod tests {
             provider_state: Some(provider_state_input(state)),
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         let second_request = &second.provider_request_debug_samples[0];
         let second_messages = second_request["messages"].as_array().expect("messages");
@@ -6702,6 +6707,7 @@ mod tests {
             }),
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         let request = &second.provider_request_debug_samples[0];
         let messages = request["messages"].as_array().expect("messages");
@@ -6790,6 +6796,7 @@ mod tests {
             provider_state: Some(prior_state),
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
 
         let request = &output.provider_request_debug_samples[0];
@@ -6854,6 +6861,7 @@ mod tests {
             }),
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         let next_messages = next.provider_request_debug_samples[0]["messages"]
             .as_array()
@@ -7006,6 +7014,7 @@ mod tests {
                 provider_state: None,
                 continuation_state,
                 final_message_fallback: None,
+                compaction_intent: None,
             });
             all_events.extend(events(&output.stream));
             final_debug_samples = output.provider_request_debug_samples.clone();
@@ -7093,6 +7102,7 @@ mod tests {
             provider_state: None,
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(first.yielded);
         assert!(!first.completed);
@@ -7106,6 +7116,7 @@ mod tests {
             provider_state: None,
             continuation_state: first.continuation_state,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         all_events.extend(events(&second.stream));
 
@@ -7844,6 +7855,7 @@ mod tests {
             provider_state: None,
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(first.yielded);
         assert!(!first.completed);
@@ -7866,6 +7878,7 @@ mod tests {
             }),
             continuation_state: first.continuation_state,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(second.yielded);
         assert_eq!(second.tool_round_count, 2);
@@ -7884,6 +7897,7 @@ mod tests {
             provider_state: None,
             continuation_state: second.continuation_state,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(
             completed.completed,
@@ -7957,6 +7971,7 @@ mod tests {
             provider_state: None,
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(first.yielded);
         assert_eq!(first.provider_request_count, 5);
@@ -8043,6 +8058,7 @@ mod tests {
             provider_state: None,
             continuation_state: first.continuation_state,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(second.yielded);
         assert_eq!(second.tool_round_count, 6);
@@ -8062,6 +8078,7 @@ mod tests {
             provider_state: None,
             continuation_state: second.continuation_state,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(third.completed);
         assert_eq!(third.tool_round_count, 6);
@@ -8149,6 +8166,7 @@ mod tests {
             provider_state: None,
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(first.yielded);
         let completed = first_brain.wake(ChatCompletionsBrainLoopInput {
@@ -8158,6 +8176,7 @@ mod tests {
             provider_state: None,
             continuation_state: first.continuation_state,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(
             completed.completed,
@@ -8233,6 +8252,7 @@ mod tests {
             provider_state: Some(provider_state_input(state)),
             continuation_state: None,
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(second.yielded);
         assert!(events(&second.stream).iter().any(|event| matches!(
@@ -8253,6 +8273,7 @@ mod tests {
             provider_state: None,
             continuation_state: Some(second_continuation.clone()),
             final_message_fallback: None,
+            compaction_intent: None,
         });
         assert!(completed_second.completed);
         let Some(BrainWakeProviderStateOutput::Replace {
@@ -8398,6 +8419,7 @@ mod tests {
                 provider_state: None,
                 continuation_state,
                 final_message_fallback: None,
+                compaction_intent: None,
             });
             streamed_tool_finishes += events(&output.stream)
                 .iter()
