@@ -1472,6 +1472,7 @@ where
                         ),
                         &mut sink,
                     );
+                    context_compaction.artifacts.push(artifact.clone());
                     let continuation_state = match chat_completions_continuation_output(
                         messages.clone(),
                         durable_messages.clone(),
