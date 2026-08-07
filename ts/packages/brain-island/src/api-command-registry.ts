@@ -1451,6 +1451,18 @@ export const API_CAPABILITIES = [
     ["chat", "session", "diagnostics"],
   ),
   {
+    id: "chat.sessions.context.compact",
+    method: "POST",
+    path_template: RUSTY_VIEW_CHAT_PATHS.contextCompact,
+    description:
+      "Trigger a Rust-owned manual context compaction at a safe provider boundary without creating a transcript message or invoking the provider; idempotent via intent_key, persists artifact, returns terminal status.",
+    auth: "chat",
+    mutation: "control",
+    stability: "experimental",
+    tags: ["chat", "session", "diagnostics"],
+    public: true,
+  },
+  {
     id: "chat.commands.execute",
     method: "POST",
     path_template: RUSTY_VIEW_CHAT_PATHS.sessionCommands,

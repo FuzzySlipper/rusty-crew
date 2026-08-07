@@ -13,6 +13,7 @@ export const RUSTY_VIEW_CHAT_PATHS = {
   resolveLogicalTurn:
     "/v1/chat/sessions/{session_id}/logical-turns/{logical_turn_id}/resolve",
   context: "/v1/chat/sessions/{session_id}/context",
+  contextCompact: "/v1/chat/sessions/{session_id}/context/compact",
   stream: "/v1/chat/sessions/{session_id}/stream",
   toolCallDebug: "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}",
   providerRequestDebug:

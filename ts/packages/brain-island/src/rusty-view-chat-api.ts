@@ -61,6 +61,7 @@ export interface RustyViewChatContext {
   contextUsage?(
     input: SessionContextUsageInput,
   ): Promise<SessionContextUsageResult>;
+  manualContextCompaction?(input: ManualContextCompactionInput): Promise<ManualContextCompactionResult>;
   getToolCallDebugDetail?(
     input: ToolCallDebugDetailInput,
   ): Promise<ToolCallDebugDetail | undefined>;
@@ -532,6 +533,32 @@ export interface NativeContextAccountingSnapshot {
   providerState: Record<string, unknown>;
   compaction: Record<string, unknown>;
   diagnostics: unknown[];
+}
+
+export interface ManualContextCompactionInput {
+  session: SessionState;
+  requestId: string;
+  intentKey?: string | null;
+  strategyId?: string | null;
+  strategyRevision?: string | null;
+  sourceProjectionFingerprint?: string | null;
+  expectRevision?: number | null;
+}
+
+export interface ManualContextCompactionResult {
+  ok: true;
+  session_id: string;
+  artifact: {
+    artifact_id: string;
+    session_id: string;
+    strategy_id: string;
+    terminal_status: string;
+    created_at: string;
+    [key: string]: unknown;
+  };
+  terminal_status: string;
+  idempotent: boolean;
+  revision: number;
 }
 
 export interface ExecuteChatCommandResult {
@@ -1188,6 +1215,19 @@ export async function handleRustyViewChatRequest(
       ])
     ) {
       return handleCreateDataBankScope(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "context",
+        "compact",
+      ])
+    ) {
+      return handleManualContextCompaction(request, context, requestId, url);
     }
     if (
       method === "POST" &&
@@ -2365,6 +2405,79 @@ async function handleCreateDataBankScope(
   );
 }
 
+async function handleManualContextCompaction(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.manualContextCompaction) {
+    return failure(501, requestId, {
+      code: "internal_error",
+      reason_code: "manual_context_compaction_not_wired",
+      message: "manual context compaction is not yet wired to Rust; brain wakes for manual intent are real but the HTTP control is still being connected",
+      retryable: false,
+    });
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  if (session.session.status === "archived") {
+    return failure(412, requestId, {
+      code: "failed_precondition",
+      reason_code: "chat_session_archived",
+      message: `chat session ${session.session.sessionId} is archived`,
+      retryable: false,
+    });
+  }
+  const parsed = parseManualContextCompactionRequest(request.body, request.headers);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  try {
+    const result = await context.manualContextCompaction({
+      session: session.session,
+      requestId,
+      intentKey: parsed.value.intentKey,
+      strategyId: parsed.value.strategyId,
+      strategyRevision: parsed.value.strategyRevision,
+      sourceProjectionFingerprint: parsed.value.sourceProjectionFingerprint,
+      expectRevision: parsed.value.expectRevision,
+    });
+    return success(requestId, result, result.idempotent ? 200 : 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("revision_conflict") || message.includes("Revision conflict")) {
+      return failure(409, requestId, {
+        code: "conflict",
+        reason_code: "revision_conflict",
+        message,
+        retryable: false,
+      });
+    }
+    if (message.includes("compaction_policy_disabled") || message.includes("policy disabled")) {
+      return failure(412, requestId, {
+        code: "failed_precondition",
+        reason_code: "compaction_policy_disabled",
+        message,
+        retryable: false,
+      });
+    }
+    if (message.includes("unsafe") || message.includes("pending tool")) {
+      return failure(409, requestId, {
+        code: "conflict",
+        reason_code: "unsafe_boundary",
+        message,
+        retryable: false,
+      });
+    }
+    return failure(500, requestId, {
+      code: "internal_error",
+      reason_code: "manual_compaction_failed",
+      message,
+      retryable: false,
+    });
+  }
+}
+
 async function handleRemoveDataBankScope(
   request: RustyViewChatRouteRequest,
   context: RustyViewChatContext,
@@ -3103,6 +3216,95 @@ function parseCreateDataBankScopeRequest(
       label: nullableStringValue(value.label),
       description: nullableStringValue(value.description),
       metadata_json: value.metadata_json,
+    },
+  };
+}
+
+function parseManualContextCompactionRequest(
+  value: unknown,
+  headers?: Record<string, string | string[] | undefined>,
+):
+  | {
+      ok: true;
+      value: {
+        intentKey: string;
+        strategyId?: string | null;
+        strategyRevision?: string | null;
+        sourceProjectionFingerprint?: string | null;
+        expectRevision?: number | null;
+      };
+    }
+  | { ok: false; reasonCode: string; message: string } {
+  const headerRevision =
+    headers?.["if-match"] ?? headers?.["If-Match"] ?? headers?.["IF-MATCH"];
+  const headerValue = Array.isArray(headerRevision) ? headerRevision[0] : headerRevision;
+  let expectRevision: number | null = null;
+  if (typeof headerValue === "string" && headerValue.trim() !== "") {
+    const parsed = Number(headerValue.trim());
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return {
+        ok: false,
+        reasonCode: "invalid_if_match",
+        message: "If-Match header must be a non-negative integer revision when provided",
+      };
+    }
+    expectRevision = parsed;
+  }
+  if (value === undefined || value === null) {
+    // allow empty body with intent_key via header or generated
+    value = {};
+  }
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_compaction_body",
+      message: "manual compaction body must be a JSON object when provided",
+    };
+  }
+  const rawIntentKey = nullableStringValue(value.intent_key ?? value.intentKey);
+  const intentKey = rawIntentKey?.trim() ? rawIntentKey.trim() : `manual-${Date.now()}`;
+  if (!intentKey || intentKey.trim() === "") {
+    return {
+      ok: false,
+      reasonCode: "compaction_intent_key_required",
+      message: "compaction intent_key must not be empty",
+    };
+  }
+  const strategyId = nullableStringValue(value.strategy_id ?? value.strategyId);
+  if (strategyId !== null && strategyId !== undefined && strategyId.trim() === "") {
+    return {
+      ok: false,
+      reasonCode: "invalid_strategy_id",
+      message: "strategy_id must not be empty when provided",
+    };
+  }
+  const strategyRevision = nullableStringValue(
+    value.strategy_revision ?? value.strategyRevision,
+  );
+  const sourceProjectionFingerprint = nullableStringValue(
+    value.source_projection_fingerprint ?? value.sourceProjectionFingerprint ?? value.fingerprint,
+  );
+  const bodyExpectRevision =
+    value.expect_revision ?? value.expectRevision ?? value.revision;
+  if (bodyExpectRevision !== undefined && bodyExpectRevision !== null) {
+    const parsed = Number(bodyExpectRevision);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return {
+        ok: false,
+        reasonCode: "invalid_expect_revision",
+        message: "expectRevision must be a non-negative integer when provided",
+      };
+    }
+    expectRevision = parsed;
+  }
+  return {
+    ok: true,
+    value: {
+      intentKey,
+      strategyId: strategyId ?? null,
+      strategyRevision: strategyRevision ?? null,
+      sourceProjectionFingerprint: sourceProjectionFingerprint ?? null,
+      expectRevision,
     },
   };
 }

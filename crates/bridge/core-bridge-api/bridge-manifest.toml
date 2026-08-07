@@ -2644,3 +2644,12 @@ output = "core_protocol::Unit"
 errors = "core_protocol::CoreError"
 summary = "Release a borrowed runtime buffer."
 buffer_contract = "Consumes one active RuntimeBufferHandle lease; double release and leaked leases are bridge test failures."
+
+[[operation]]
+name = "manual_context_compaction"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ManualContextCompactionRequest"
+output = "core_protocol::ManualContextCompactionResponse"
+errors = "core_protocol::CoreError"
+summary = "Trigger a Rust-owned manual context compaction at a safe provider boundary without transcript or provider call, idempotent via intent_key."
