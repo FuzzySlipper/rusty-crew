@@ -103,6 +103,21 @@ impl CoreEngine {
                 "compaction intent_key must not be empty",
             ));
         }
+        // Validate via the same type that real brain wakes use, so manual intent
+        // shares the Rust-owned coordination boundary and invariants with automatic
+        // brain-driven compaction (BrainWakeCompactionIntent). This keeps the
+        // manual control from bypassing the brain's intent validation.
+        let compaction_intent = rusty_crew_core_protocol::BrainWakeCompactionIntent {
+            intent_key: intent_key.clone(),
+            kind: rusty_crew_core_protocol::BrainWakeCompactionIntentKind::Manual,
+            strategy_id: request.strategy_id.clone(),
+            strategy_revision: request.strategy_revision.clone(),
+            source_projection_fingerprint: request.source_projection_fingerprint.clone(),
+            trigger: Some("manual_intent".to_string()),
+        };
+        if let Err(message) = compaction_intent.validate() {
+            return Err(CoreError::new(CoreErrorKind::InvalidInput, message));
+        }
         // Check for duplicate intent_key (idempotency)
         let existing = CrewMemoryStore::list_context_compaction_artifacts(
             &self.store,
