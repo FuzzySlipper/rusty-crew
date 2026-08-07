@@ -3418,7 +3418,7 @@ where
                 }
                 Err(message) => {
                     let failed_artifact =
-                        responses_failed_compaction_artifact(&request, &usage, &intent.intent_key);
+                        responses_failed_compaction_artifact(&request, &usage, intent);
                     push_stream_item(
                         &mut items,
                         responses_context_compaction_event(
@@ -3582,11 +3582,19 @@ where
                                 ));
                             }
                             Err(summary) => {
-                                // Use a failed artifact so TS dispatch can persist the failure durably
+                                // Auto path has no explicit intent; synthesize one with the wake's fingerprint
+                                let auto_intent = rusty_crew_core_protocol::BrainWakeCompactionIntent {
+                                    intent_key: format!("auto-{}", request.wake_id),
+                                    kind: rusty_crew_core_protocol::BrainWakeCompactionIntentKind::Auto,
+                                    strategy_id: None,
+                                    strategy_revision: None,
+                                    source_projection_fingerprint: None,
+                                    trigger: None,
+                                };
                                 let failed_artifact = responses_failed_compaction_artifact(
                                     &request,
                                     &usage,
-                                    &format!("auto-{}", request.wake_id),
+                                    &auto_intent,
                                 );
                                 push_stream_item(
                                     &mut items,
@@ -4441,17 +4449,26 @@ fn responses_continuation_guidance(state: &ResponsesOutputContinuationState) -> 
 fn responses_failed_compaction_artifact(
     request: &BrainWakeRequest,
     usage: &rusty_crew_brain_runtime::BrainContextUsageSnapshot,
-    intent_key: &str,
+    intent: &rusty_crew_core_protocol::BrainWakeCompactionIntent,
 ) -> rusty_crew_brain_runtime::BrainContextCompactionArtifact {
     let before = usage.input_tokens;
+    let fingerprint = intent
+        .source_projection_fingerprint
+        .clone()
+        .or_else(|| Some(format!("manual-{}", intent.intent_key)));
+    let strategy_id = intent
+        .strategy_id
+        .clone()
+        .unwrap_or_else(|| "rolling_summary_compaction".to_string());
+    let strategy_revision = intent.strategy_revision.clone().or(Some("1".to_string()));
     rusty_crew_brain_runtime::BrainContextCompactionArtifact {
-        artifact_id: format!("failed_{}_{}", intent_key, request.wake_id),
+        artifact_id: format!("failed_{}_{}", intent.intent_key, request.wake_id),
         sequence: 1,
-        strategy_id: "rolling_summary_compaction".to_string(),
-        strategy_revision: Some("1".to_string()),
+        strategy_id,
+        strategy_revision,
         logical_turn_id: None,
         execution_epoch_id: None,
-        source_projection_fingerprint: Some(format!("manual-{intent_key}")),
+        source_projection_fingerprint: fingerprint,
         session_id: Some(request.session_id.to_string()),
         trigger: Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::ManualIntent),
         before_tokens: Some(before),
@@ -4460,7 +4477,10 @@ fn responses_failed_compaction_artifact(
         excised_item_count: Some(0),
         compacted_item_count: 1,
         retained_item_count: 1,
-        summary_text: format!("manual compaction {intent_key} failed – prior projection preserved"),
+        summary_text: format!(
+            "manual compaction {} failed – prior projection preserved",
+            intent.intent_key
+        ),
         usage_before: usage.clone(),
         estimated_tokens_after: before,
         reason_code: "manual_intent_failed".to_string(),

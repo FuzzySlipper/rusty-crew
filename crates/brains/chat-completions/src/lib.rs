@@ -1535,7 +1535,7 @@ where
                     let failed_artifact = crate::brain_runtime_context_compaction_failed_artifact(
                         &input.context,
                         &usage,
-                        &intent.intent_key,
+                        intent,
                         &input.context.session_id.to_string(),
                     );
                     push_stream_item(
@@ -2620,22 +2620,31 @@ where
 fn brain_runtime_context_compaction_failed_artifact(
     context: &BrainEventContext,
     usage: &rusty_crew_brain_runtime::BrainContextUsageSnapshot,
-    intent_key: &str,
+    intent: &rusty_crew_core_protocol::BrainWakeCompactionIntent,
     session_id: &str,
 ) -> BrainContextCompactionArtifact {
-    // Construct a minimal failed artifact that the TS persistence layer can validate and
-    // durably store even though no compaction was performed. This preserves the prior valid
-    // projection and satisfies R6613-5/6.
+    // Failed artifacts must preserve the exact caller projection lineage (R6613-7): use the
+    // intent's source_projection_fingerprint and strategy when present, not a fabricated
+    // manual-{intentKey}. This keeps durable lineage and route retry matching correct.
     use rusty_crew_brain_runtime::*;
     let before = usage.input_tokens;
+    let fingerprint = intent
+        .source_projection_fingerprint
+        .clone()
+        .or_else(|| Some(format!("manual-{}", intent.intent_key)));
+    let strategy_id = intent
+        .strategy_id
+        .clone()
+        .unwrap_or_else(|| "rolling_summary_compaction".to_string());
+    let strategy_revision = intent.strategy_revision.clone().or(Some("1".to_string()));
     BrainContextCompactionArtifact {
-        artifact_id: format!("failed_{}_{}", intent_key, context.wake_id),
+        artifact_id: format!("failed_{}_{}", intent.intent_key, context.wake_id),
         sequence: 1,
-        strategy_id: "rolling_summary_compaction".to_string(),
-        strategy_revision: Some("1".to_string()),
+        strategy_id,
+        strategy_revision,
         logical_turn_id: None,
         execution_epoch_id: None,
-        source_projection_fingerprint: Some(format!("manual-{intent_key}")),
+        source_projection_fingerprint: fingerprint,
         session_id: Some(session_id.to_string()),
         trigger: Some(BrainContextCompactionTrigger::ManualIntent),
         before_tokens: Some(before),
@@ -2644,7 +2653,10 @@ fn brain_runtime_context_compaction_failed_artifact(
         excised_item_count: Some(0),
         compacted_item_count: 1,
         retained_item_count: 1,
-        summary_text: format!("manual compaction {intent_key} failed – prior projection preserved"),
+        summary_text: format!(
+            "manual compaction {} failed – prior projection preserved",
+            intent.intent_key
+        ),
         usage_before: usage.clone(),
         estimated_tokens_after: before,
         reason_code: "manual_intent_failed".to_string(),

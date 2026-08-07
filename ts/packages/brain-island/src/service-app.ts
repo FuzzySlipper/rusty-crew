@@ -1804,7 +1804,8 @@ async function handleHttpRequest(
             wakeError = error;
             // Only fall through to synthetic when the brain wake could not even be constructed
             // (e.g., no brain registered for session's profile). If a wake was attempted and simply
-            // produced no durable artifact, we fail closed.
+            // produced no durable artifact, we fail closed per R6624-5: any attempted wake with no
+            // persisted completed/failed artifact must return a typed failure, not synthetic success.
             const msg = error instanceof Error ? error.message : String(error);
             const isNoBrain =
               msg.includes("no brain") ||
@@ -1814,15 +1815,12 @@ async function handleHttpRequest(
               msg.includes("not registered") ||
               msg.includes("Failed to convert napi value Undefined") ||
               msg.includes("Failed to convert napi value") ||
-              msg.includes("napi value Undefined") ||
-              msg.includes("manual compaction did not produce a durable brain artifact");
+              msg.includes("napi value Undefined");
             if (!isNoBrain) {
               throw error;
             }
           }
-          // Synthetic fallback only for no-brain sessions or when the builder is not yet wired for manual intent
-          // (keeps delegated slice working before a brain is wired). This path is explicitly not the
-          // success path for real brain sessions once the wake builder supports compactionIntent.
+          // Synthetic fallback only for explicitly proven no-brain/native fallback boundary (R6624-5).
           if (wakeError !== undefined) {
             const msg2 = wakeError instanceof Error ? wakeError.message : String(wakeError);
             const isNoBrain2 =
@@ -1833,8 +1831,7 @@ async function handleHttpRequest(
               msg2.includes("not registered") ||
               msg2.includes("Failed to convert napi value Undefined") ||
               msg2.includes("Failed to convert napi value") ||
-              msg2.includes("napi value Undefined") ||
-              msg2.includes("manual compaction did not produce a durable brain artifact");
+              msg2.includes("napi value Undefined");
             if (!isNoBrain2) throw wakeError;
           }
           const typed = (await state.bridge.manualContextCompaction({
