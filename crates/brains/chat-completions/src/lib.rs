@@ -1528,6 +1528,16 @@ where
                     };
                 }
                 Err(message) => {
+                    // Emit a failed status that still carries a durable failed artifact payload so
+                    // the TS wake dispatch can persist a failed terminal record and preserve the
+                    // prior valid projection (R6613-5/6). The brain's real failure path previously
+                    // sent artifact: null, which the persistence layer skipped.
+                    let failed_artifact = crate::brain_runtime_context_compaction_failed_artifact(
+                        &input.context,
+                        &usage,
+                        &intent.intent_key,
+                        &input.context.session_id.to_string(),
+                    );
                     push_stream_item(
                         &mut stream,
                         context_compaction_status(
@@ -1536,7 +1546,7 @@ where
                             BrainProviderStatusLevel::Error,
                             "manual_intent_failed",
                             &usage,
-                            None,
+                            Some(&failed_artifact),
                         ),
                         &mut sink,
                     );
@@ -2607,6 +2617,42 @@ where
     }
 }
 
+fn brain_runtime_context_compaction_failed_artifact(
+    context: &BrainEventContext,
+    usage: &rusty_crew_brain_runtime::BrainContextUsageSnapshot,
+    intent_key: &str,
+    session_id: &str,
+) -> BrainContextCompactionArtifact {
+    // Construct a minimal failed artifact that the TS persistence layer can validate and
+    // durably store even though no compaction was performed. This preserves the prior valid
+    // projection and satisfies R6613-5/6.
+    use rusty_crew_brain_runtime::*;
+    let before = usage.input_tokens;
+    BrainContextCompactionArtifact {
+        artifact_id: format!("failed_{}_{}", intent_key, context.wake_id),
+        sequence: 1,
+        strategy_id: "rolling_summary_compaction".to_string(),
+        strategy_revision: Some("1".to_string()),
+        logical_turn_id: None,
+        execution_epoch_id: None,
+        source_projection_fingerprint: Some(format!("manual-{intent_key}")),
+        session_id: Some(session_id.to_string()),
+        trigger: Some(BrainContextCompactionTrigger::ManualIntent),
+        before_tokens: Some(before),
+        after_tokens: Some(before),
+        preserved_item_count: Some(0),
+        excised_item_count: Some(0),
+        compacted_item_count: 1,
+        retained_item_count: 1,
+        summary_text: format!("manual compaction {intent_key} failed – prior projection preserved"),
+        usage_before: usage.clone(),
+        estimated_tokens_after: before,
+        reason_code: "manual_intent_failed".to_string(),
+        provider_chain_action: Some("preserve_prior_valid_projection".to_string()),
+        terminal_status: Some(BrainContextCompactionTerminalStatus::Failed),
+    }
+}
+
 fn context_compaction_status(
     context: &BrainEventContext,
     kind: &str,
@@ -2625,6 +2671,16 @@ fn context_compaction_status(
                     "kind": kind,
                     "usage": usage,
                     "artifact": artifact,
+                    "intentKey": artifact.and_then(|a| a.source_projection_fingerprint.clone()).map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string()),
+                    "intent_key": artifact.and_then(|a| a.source_projection_fingerprint.clone()).map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string()),
+                    "sourceProjectionFingerprint": artifact.and_then(|a| a.source_projection_fingerprint.clone()),
+                    "source_projection_fingerprint": artifact.and_then(|a| a.source_projection_fingerprint.clone()),
+                    "strategyId": artifact.map(|a| a.strategy_id.clone()),
+                    "strategy_id": artifact.map(|a| a.strategy_id.clone()),
+                    "strategyRevision": artifact.and_then(|a| a.strategy_revision.clone()),
+                    "strategy_revision": artifact.and_then(|a| a.strategy_revision.clone()),
+                    "reasonCode": artifact.map(|a| a.reason_code.clone()),
+                    "reason_code": artifact.map(|a| a.reason_code.clone()),
                 })
                 .to_string(),
             ),

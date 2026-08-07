@@ -891,7 +891,89 @@ function contextCompactionArtifactFromMetadata(
   } catch {
     return undefined;
   }
-  if (!isRecord(metadata.artifact)) return undefined;
+  const artifactIsRecord = isRecord(metadata.artifact);
+  const kindRaw = isRecord(metadata)
+    ? (metadata as { kind?: unknown }).kind
+    : undefined;
+  const kindStr = typeof kindRaw === "string" ? kindRaw : undefined;
+  // Failed brain events currently emit artifact:null (see chat-completions manual_intent_failed and
+  // openai-responses compaction paths). For durability we must still persist a failed terminal
+  // artifact that preserves the prior valid projection, even when the runtime did not supply a full artifact.
+  if (!artifactIsRecord) {
+    if (kindStr !== "context_compaction_failed") return undefined;
+    // Synthesize a minimal failed artifact so restart/readback can see a durable failed terminal
+    // record and keep the prior completed projection as latest_valid.
+    const usage = (metadata as { usage?: unknown }).usage;
+    const usageRecord = isRecord(usage) ? (usage as Record<string, unknown>) : {};
+    const promptTokens = typeof usageRecord.prompt_tokens === "number" ? usageRecord.prompt_tokens : undefined;
+    const completionTokens = typeof usageRecord.completion_tokens === "number" ? usageRecord.completion_tokens : undefined;
+    const totalTokens = typeof usageRecord.total_tokens === "number" ? usageRecord.total_tokens : undefined;
+    const beforeTokens = promptTokens ?? totalTokens ?? 0;
+    const intentKeyRaw = (metadata as { intentKey?: unknown; intent_key?: unknown }).intentKey ??
+      (metadata as { intentKey?: unknown; intent_key?: unknown }).intent_key;
+    const intentKey = typeof intentKeyRaw === "string" && intentKeyRaw.trim().length > 0 ? intentKeyRaw.trim() : wakeId ?? "manual";
+    const sourceFingerprintRaw = (metadata as { sourceProjectionFingerprint?: unknown; source_projection_fingerprint?: unknown }).sourceProjectionFingerprint ??
+      (metadata as { sourceProjectionFingerprint?: unknown; source_projection_fingerprint?: unknown }).source_projection_fingerprint;
+    const sourceFingerprint = typeof sourceFingerprintRaw === "string" && sourceFingerprintRaw.trim().length > 0
+      ? sourceFingerprintRaw.trim()
+      : `manual-${intentKey}`;
+    const strategyIdRaw = (metadata as { strategyId?: unknown; strategy_id?: unknown }).strategyId ??
+      (metadata as { strategyId?: unknown; strategy_id?: unknown }).strategy_id;
+    const strategyId = typeof strategyIdRaw === "string" && strategyIdRaw.trim().length > 0
+      ? strategyIdRaw.trim()
+      : "rolling_summary_compaction";
+    const strategyRevisionRaw = (metadata as { strategyRevision?: unknown; strategy_revision?: unknown }).strategyRevision ??
+      (metadata as { strategyRevision?: unknown; strategy_revision?: unknown }).strategy_revision;
+    const strategyRevision = typeof strategyRevisionRaw === "string" && strategyRevisionRaw.trim().length > 0
+      ? strategyRevisionRaw.trim()
+      : "1";
+    const reasonCodeRaw = (metadata as { reasonCode?: unknown; reason_code?: unknown }).reasonCode ??
+      (metadata as { reasonCode?: unknown; reason_code?: unknown }).reason_code;
+    const reasonCode = typeof reasonCodeRaw === "string" && reasonCodeRaw.trim().length > 0
+      ? reasonCodeRaw.trim()
+      : "manual_intent_failed";
+    const digest = createHash("sha256")
+      .update([sessionId, wakeId ?? "unknown_wake", intentKey, now].join(":"))
+      .digest("hex")
+      .slice(0, 32);
+    return {
+      artifact_id: `context_compaction_${digest}`,
+      session_id: sessionId,
+      branch_id: undefined,
+      strategy_id: strategyId,
+      strategy_revision: strategyRevision,
+      logical_turn_id: undefined,
+      execution_epoch_id: undefined,
+      source_projection_fingerprint: sourceFingerprint,
+      trigger: "manual_intent",
+      before_tokens: beforeTokens,
+      after_tokens: beforeTokens,
+      preserved_item_count: 0,
+      excised_item_count: 0,
+      intent_key: intentKey,
+      terminal_status: "failed",
+      provider_chain_action: "preserve_prior_valid_projection",
+      source_refs_json: {
+        source: "native_brain_stream_failed",
+        wake_id: wakeId,
+        reason_code: reasonCode,
+        synthetic_failed_artifact: true,
+      },
+      provider_metadata_json: {
+        provider_chain_action: "preserve_prior_valid_projection",
+        source_event_kind: "context_compaction_failed",
+        reason_code: reasonCode,
+      },
+      estimate_before_json: isRecord(usage) ? usage : { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
+      estimate_after_json: isRecord(usage) ? usage : { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
+      summary_text: `manual compaction ${intentKey} failed (${reasonCode}) – prior projection preserved`,
+      enters_future_context: false,
+      context_policy: strategyId,
+      metadata_json: { schema_version: 1, wake_id: wakeId, reason_code: reasonCode, synthetic_failed_artifact: true },
+      created_at: now,
+      updated_at: now,
+    };
+  }
   const runtimeArtifact = metadata.artifact as CompactionRuntimeArtifact;
   const sequence = positiveInteger(runtimeArtifact.sequence);
   const strategyId = nonEmptyString(runtimeArtifact.strategyId);

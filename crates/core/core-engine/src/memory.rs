@@ -89,6 +89,12 @@ impl CoreEngine {
         CrewMemoryStore::list_context_compaction_artifacts(&self.store, query)
     }
 
+    // Manual compaction is now brain-owned per #6624: the public route must wake the
+    // selected Rust brain via buildBrainWakeRequestForSession/wakeBrain and persist via
+    // the observed dispatch (R6624-4). This direct CoreEngine entry remains only for
+    // native fallback (no-brain sessions) and idempotency testing. It intentionally validates
+    // via BrainWakeCompactionIntent and uses the same safe-boundary invariant as the brain,
+    // but callers that have a real brain should not rely on its synthetic token estimates.
     pub fn manual_context_compaction(
         &self,
         request: &ManualContextCompactionRequest,
