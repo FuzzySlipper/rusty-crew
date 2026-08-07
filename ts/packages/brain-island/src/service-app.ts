@@ -1575,18 +1575,23 @@ async function handleHttpRequest(
         contextUsage: (input) =>
           rustyViewSessionContextUsage(chatOperations, input),
         manualContextCompaction: async (input) => {
+          const effectiveFingerprint =
+            input.sourceProjectionFingerprint ?? `manual-${input.intentKey}`;
           const existing = await state.bridge.listContextCompactionArtifacts({
             session_id: input.session.sessionId,
             branch_id: undefined,
             strategy_id: undefined,
             enters_future_context: undefined,
             latest_only: false,
-            limit: 100,
+            limit: 1000,
             offset: 0,
           });
           const duplicate = existing.find(
             (artifact) =>
-              artifact.intent_key === input.intentKey && artifact.session_id === input.session.sessionId,
+              artifact.intent_key === input.intentKey &&
+              artifact.session_id === input.session.sessionId &&
+              (artifact.source_projection_fingerprint ?? `manual-${artifact.intent_key}`) ===
+                effectiveFingerprint,
           );
           if (duplicate) {
             const revision = duplicate.strategy_revision

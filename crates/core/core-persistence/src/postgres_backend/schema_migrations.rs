@@ -7,7 +7,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 47;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 48;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -254,6 +254,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 47,
         description: "add atomic idempotency for manual compaction intent",
         apply: Some(apply_postgres_context_compaction_intent_unique),
+    },
+    PostgresSchemaMigration {
+        version: 48,
+        description: "make compaction idempotency projection-aware",
+        apply: Some(apply_postgres_context_compaction_intent_projection_aware),
     },
 ];
 
@@ -1914,6 +1919,32 @@ fn apply_postgres_context_compaction_intent_unique(
     .map_err(|error| {
         postgres_error(
             "add PostgreSQL context compaction intent unique index",
+            error,
+        )
+    })
+}
+
+fn apply_postgres_context_compaction_intent_projection_aware(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "DROP INDEX IF EXISTS {schema}.context_compaction_session_intent_idx;
+         DELETE FROM {schema}.context_compaction_artifacts
+            WHERE (record_json->>'intent_key') IS NOT NULL
+              AND ctid NOT IN (
+                SELECT MAX(ctid)
+                FROM {schema}.context_compaction_artifacts
+                WHERE (record_json->>'intent_key') IS NOT NULL
+                GROUP BY session_id, (record_json->>'intent_key'), COALESCE(record_json->>'source_projection_fingerprint','')
+              );
+         CREATE UNIQUE INDEX IF NOT EXISTS context_compaction_session_intent_projection_idx
+            ON {schema}.context_compaction_artifacts(session_id, (record_json->>'intent_key'), COALESCE(record_json->>'source_projection_fingerprint',''))
+            WHERE record_json->>'intent_key' IS NOT NULL;"
+    ))
+    .map_err(|error| {
+        postgres_error(
+            "add PostgreSQL context compaction projection-aware index",
             error,
         )
     })

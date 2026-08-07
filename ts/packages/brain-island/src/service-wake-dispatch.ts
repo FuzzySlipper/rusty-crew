@@ -762,7 +762,10 @@ async function appendBrainEventToChatLog(
             : { metadata_json: event.metadataJson }),
         },
       });
-      if (compactionKind === "context_compaction_completed") {
+      if (
+        compactionKind === "context_compaction_completed" ||
+        compactionKind === "context_compaction_failed"
+      ) {
         const artifact = contextCompactionArtifactFromMetadata(
           session.sessionId,
           wakeId,
@@ -967,7 +970,10 @@ function contextCompactionArtifactFromMetadata(
     },
     provider_metadata_json: {
       provider_chain_action: providerChainAction,
-      source_event_kind: "context_compaction_completed",
+      source_event_kind:
+        terminalStatus === "failed"
+          ? "context_compaction_failed"
+          : "context_compaction_completed",
     },
     estimate_before_json: usageBefore,
     estimate_after_json: {

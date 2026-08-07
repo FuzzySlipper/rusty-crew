@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 64;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 65;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -339,6 +339,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add atomic idempotency for manual compaction intent",
         apply: migrate_v64_add_context_compaction_intent_unique,
     },
+    SchemaMigration {
+        version: 65,
+        description: "make compaction idempotency projection-aware",
+        apply: migrate_v65_make_compaction_idempotency_projection_aware,
+    },
 ];
 
 fn migrate_v63_add_context_compaction_provenance(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -436,6 +441,30 @@ fn migrate_v64_add_context_compaction_intent_unique(
         ",
     )
     .map_err(|error| persistence_error("apply schema migration 64", error))
+}
+
+fn migrate_v65_make_compaction_idempotency_projection_aware(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    // v64 was session+intent only; v65 makes it projection-aware as required by
+    // session+projection+intent idempotency. Rewrite to include source_projection_fingerprint.
+    tx.execute_batch(
+        "
+            DROP INDEX IF EXISTS idx_context_compaction_session_intent;
+            DELETE FROM context_compaction_artifacts
+            WHERE intent_key IS NOT NULL
+              AND rowid NOT IN (
+                SELECT MAX(rowid)
+                FROM context_compaction_artifacts
+                WHERE intent_key IS NOT NULL
+                GROUP BY session_id, intent_key, COALESCE(source_projection_fingerprint, '')
+              );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_context_compaction_session_intent_projection
+                ON context_compaction_artifacts(session_id, intent_key, COALESCE(source_projection_fingerprint, ''))
+                WHERE intent_key IS NOT NULL;
+        ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 65", error))
 }
 
 fn migrate_v60_add_responses_provider_dialect(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
