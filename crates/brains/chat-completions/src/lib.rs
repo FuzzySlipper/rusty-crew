@@ -1355,6 +1355,216 @@ where
             .or(provider_context_compaction)
             .unwrap_or_default();
 
+        if let Some(intent) = &input.compaction_intent {
+            if let Err(message) = intent.validate() {
+                push_stream_item(
+                    &mut stream,
+                    wake_failed_item_with_reason(
+                        &input.context,
+                        CoreErrorKind::InvalidInput,
+                        "chat_completions_compaction_intent_invalid",
+                        message,
+                    ),
+                    &mut sink,
+                );
+                return ChatCompletionsBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    yielded: false,
+                    attention: None,
+                    provider_request_count,
+                    tool_round_count,
+                    provider_event_counts,
+                    provider_request_debug_samples,
+                    provider_state: None,
+                    continuation_state: None,
+                };
+            }
+            let policy = match self.config.context_compaction.as_ref() {
+                Some(policy) => policy,
+                None => {
+                    let usage =
+                        rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_serialized_bytes(
+                            serde_json::to_vec(&messages)
+                                .map(|value| value.len())
+                                .unwrap_or(usize::MAX),
+                            1,
+                        );
+                    push_stream_item(
+                        &mut stream,
+                        context_compaction_status(
+                            &input.context,
+                            "context_compaction_failed",
+                            BrainProviderStatusLevel::Error,
+                            "compaction_policy_disabled",
+                            &usage,
+                            None,
+                        ),
+                        &mut sink,
+                    );
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        attention: Some(BrainWakeAttention {
+                            reason: crate::LogicalTurnAttentionReason::NoProgress,
+                            reason_code: "compaction_policy_disabled".to_string(),
+                            summary: "manual compaction requested but policy is disabled"
+                                .to_string(),
+                            evidence_refs: vec![],
+                            resolution_actions: vec![
+                                crate::LogicalTurnResolutionAction::RetryUnchanged,
+                            ],
+                            retry_unchanged_safe: true,
+                            consecutive_no_progress_samples: 0,
+                        }),
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
+                        continuation_state: None,
+                    };
+                }
+            };
+            let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_serialized_bytes(
+                serde_json::to_vec(&messages)
+                    .map(|value| value.len())
+                    .unwrap_or(usize::MAX),
+                policy.context_window_tokens,
+            );
+            let sequence = context_compaction.artifacts.len() as u64 + 1;
+            push_stream_item(
+                &mut stream,
+                context_compaction_status(
+                    &input.context,
+                    "context_compaction_started",
+                    BrainProviderStatusLevel::Info,
+                    "manual_intent",
+                    &usage,
+                    None,
+                ),
+                &mut sink,
+            );
+            match compact_chat_messages(&mut messages, policy, usage.clone(), sequence) {
+                Ok(mut artifact) => {
+                    artifact.artifact_id = format!("manual-{}-{}", intent.intent_key, sequence);
+                    artifact.session_id = Some(input.context.session_id.0.clone());
+                    artifact.logical_turn_id = Some(input.context.wake_id.clone());
+                    artifact.trigger =
+                        Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::ManualIntent);
+                    artifact.terminal_status = Some(
+                        rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed,
+                    );
+                    artifact.source_projection_fingerprint = intent
+                        .source_projection_fingerprint
+                        .clone()
+                        .or(Some(format!("manual-{}", intent.intent_key)));
+                    push_stream_item(
+                        &mut stream,
+                        context_compaction_status(
+                            &input.context,
+                            "context_compaction_completed",
+                            BrainProviderStatusLevel::Info,
+                            "manual_intent_completed",
+                            &usage,
+                            Some(&artifact),
+                        ),
+                        &mut sink,
+                    );
+                    let continuation_state = match chat_completions_continuation_output(
+                        messages.clone(),
+                        durable_messages.clone(),
+                        input_images.clone(),
+                        no_progress_state.clone(),
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts.clone(),
+                        provider_request_debug_samples.clone(),
+                        output_limit_overlap_text.clone(),
+                        output_limit_overlap_reasoning.clone(),
+                        output_limit_accumulated_text.clone(),
+                        output_limit_accumulated_reasoning.clone(),
+                        context_compaction.clone(),
+                    ) {
+                        Ok(payload) => payload,
+                        Err(message) => {
+                            push_stream_item(
+                                &mut stream,
+                                wake_failed_item_with_reason(
+                                    &input.context,
+                                    CoreErrorKind::InvalidInput,
+                                    "chat_completions_continuation_build_failed",
+                                    message,
+                                ),
+                                &mut sink,
+                            );
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: false,
+                                attention: None,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state: None,
+                            };
+                        }
+                    };
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: true,
+                        yielded: false,
+                        attention: None,
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
+                        continuation_state: Some(continuation_state),
+                    };
+                }
+                Err(message) => {
+                    push_stream_item(
+                        &mut stream,
+                        context_compaction_status(
+                            &input.context,
+                            "context_compaction_failed",
+                            BrainProviderStatusLevel::Error,
+                            "manual_intent_failed",
+                            &usage,
+                            None,
+                        ),
+                        &mut sink,
+                    );
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        attention: Some(BrainWakeAttention {
+                            reason: crate::LogicalTurnAttentionReason::NoProgress,
+                            reason_code: "manual_intent_failed".to_string(),
+                            summary: message,
+                            evidence_refs: vec![],
+                            resolution_actions: vec![
+                                crate::LogicalTurnResolutionAction::RetryUnchanged,
+                            ],
+                            retry_unchanged_safe: true,
+                            consecutive_no_progress_samples: 0,
+                        }),
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
+                        continuation_state: None,
+                    };
+                }
+            }
+        }
+
         loop {
             if tool_round_count > context_compaction.last_compacted_tool_round {
                 let serialized_bytes = serde_json::to_vec(&messages)
@@ -8672,6 +8882,7 @@ mod tests {
                 text: Some("final-only".to_string()),
                 ..ChatCompletionsFinalMessage::default()
             }),
+            compaction_intent: None,
         });
 
         assert!(output.completed);
