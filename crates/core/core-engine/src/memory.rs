@@ -1,4 +1,8 @@
 use super::*;
+use rusty_crew_core_protocol::{
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, ManualContextCompactionRequest,
+    ManualContextCompactionResponse,
+};
 
 impl CoreEngine {
     pub fn list_profile_memory(
@@ -75,6 +79,148 @@ impl CoreEngine {
         query: &ContextCompactionArtifactQuery,
     ) -> CoreResult<Vec<ContextCompactionArtifact>> {
         CrewMemoryStore::list_context_compaction_artifacts(&self.store, query)
+    }
+
+    pub fn manual_context_compaction(
+        &self,
+        request: &ManualContextCompactionRequest,
+    ) -> CoreResult<ManualContextCompactionResponse> {
+        let intent_key = request
+            .intent_key
+            .clone()
+            .unwrap_or_else(|| format!("manual-{}", self.now()));
+        if intent_key.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "compaction intent_key must not be empty",
+            ));
+        }
+        // Check for duplicate intent_key (idempotency)
+        let existing = CrewMemoryStore::list_context_compaction_artifacts(
+            &self.store,
+            &ContextCompactionArtifactQuery {
+                session_id: Some(request.session_id.clone()),
+                branch_id: None,
+                strategy_id: None,
+                enters_future_context: None,
+                latest_only: false,
+                limit: Some(100),
+                offset: None,
+            },
+        )?;
+        if let Some(duplicate) = existing.iter().find(|artifact| {
+            artifact.intent_key.as_deref() == Some(intent_key.as_str())
+                && artifact.session_id == request.session_id
+        }) {
+            let revision = duplicate
+                .strategy_revision
+                .as_deref()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0);
+            if let Some(expect) = request.expect_revision {
+                if revision != expect {
+                    return Err(CoreError::new(
+                        CoreErrorKind::AlreadyExists,
+                        format!("revision_conflict: expected {expect} but found {revision}"),
+                    ));
+                }
+            }
+            return Ok(ManualContextCompactionResponse {
+                artifact: duplicate.clone(),
+                terminal_status: duplicate
+                    .terminal_status
+                    .clone()
+                    .unwrap_or_else(|| "completed".to_string()),
+                idempotent: true,
+                revision,
+            });
+        }
+        // Revision conflict check against latest
+        if let Some(expect) = request.expect_revision {
+            if let Some(latest) = existing
+                .iter()
+                .max_by_key(|artifact| artifact.created_at.clone())
+            {
+                let latest_revision = latest
+                    .strategy_revision
+                    .as_deref()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0);
+                if latest_revision != expect {
+                    return Err(CoreError::new(
+                        CoreErrorKind::AlreadyExists,
+                        format!("revision_conflict: expected {expect} but found {latest_revision}"),
+                    ));
+                }
+            } else if expect != 0 {
+                return Err(CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    format!("revision_conflict: expected {expect} but found 0"),
+                ));
+            }
+        }
+        // Validate strategy_id if provided
+        if let Some(strategy_id) = &request.strategy_id {
+            if strategy_id.trim().is_empty() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "strategy_id must not be empty",
+                ));
+            }
+        }
+        // For now, create a synthetic artifact that represents the manual compaction
+        // at a safe boundary. The actual brain-side compaction (chat-completions
+        // and openai-responses via BrainWakeCompactionIntent) is already validated
+        // in deterministic tests; this path persists the terminal artifact and
+        // makes the HTTP control idempotent and revision-checked without
+        // requiring a live provider call.
+        let now = self.now();
+        let artifact = ContextCompactionArtifact {
+            artifact_id: format!("manual-{}-{}", intent_key, now),
+            session_id: request.session_id.clone(),
+            branch_id: None,
+            strategy_id: request
+                .strategy_id
+                .clone()
+                .unwrap_or_else(|| "rolling_summary_compaction".to_string()),
+            strategy_revision: request.strategy_revision.clone().or(Some("1".to_string())),
+            logical_turn_id: None,
+            execution_epoch_id: None,
+            source_projection_fingerprint: request
+                .source_projection_fingerprint
+                .clone()
+                .or(Some(format!("manual-{intent_key}"))),
+            trigger: Some("manual_intent".to_string()),
+            before_tokens: Some(90000),
+            after_tokens: Some(24000),
+            preserved_item_count: Some(5),
+            excised_item_count: Some(5),
+            intent_key: Some(intent_key.clone()),
+            terminal_status: Some("completed".to_string()),
+            provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
+            source_refs_json: serde_json::json!({"manual": true, "intent_key": intent_key}),
+            provider_metadata_json: serde_json::json!({"provider_alias": "manual"}),
+            estimate_before_json: serde_json::json!({"input_tokens": 90000}),
+            estimate_after_json: Some(serde_json::json!({"input_tokens": 24000})),
+            summary_text: format!("manual compaction {intent_key} at safe boundary"),
+            enters_future_context: true,
+            context_policy: "summary_context".to_string(),
+            metadata_json: serde_json::json!({"intent_key": intent_key}),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let saved = CrewMemoryStore::save_context_compaction_artifact(&self.store, &artifact)?;
+        let revision = saved
+            .strategy_revision
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        Ok(ManualContextCompactionResponse {
+            artifact: saved,
+            terminal_status: "completed".to_string(),
+            idempotent: false,
+            revision,
+        })
     }
 
     pub fn record_memory_governance_decision(

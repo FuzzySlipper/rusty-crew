@@ -1574,6 +1574,94 @@ async function handleHttpRequest(
           ),
         contextUsage: (input) =>
           rustyViewSessionContextUsage(chatOperations, input),
+        manualContextCompaction: async (input) => {
+          const existing = await state.bridge.listContextCompactionArtifacts({
+            session_id: input.session.sessionId,
+            branch_id: undefined,
+            strategy_id: undefined,
+            enters_future_context: undefined,
+            latest_only: false,
+            limit: 100,
+            offset: 0,
+          });
+          const duplicate = existing.find(
+            (artifact) =>
+              artifact.intent_key === input.intentKey && artifact.session_id === input.session.sessionId,
+          );
+          if (duplicate) {
+            const revision = duplicate.strategy_revision
+              ? Number.parseInt(duplicate.strategy_revision, 10)
+              : 0;
+            if (
+              input.expectRevision !== null &&
+              input.expectRevision !== undefined &&
+              Number.isFinite(input.expectRevision) &&
+              revision !== input.expectRevision
+            ) {
+              throw new Error(`revision_conflict: expected ${input.expectRevision} but found ${revision}`);
+            }
+            return {
+              ok: true as const,
+              session_id: duplicate.session_id as unknown as string,
+              artifact: duplicate as unknown as {
+                artifact_id: string;
+                session_id: string;
+                strategy_id: string;
+                terminal_status: string;
+                created_at: string;
+                [key: string]: unknown;
+              },
+              terminal_status: duplicate.terminal_status ?? "completed",
+              idempotent: true,
+              revision,
+            };
+          }
+          if (
+            input.expectRevision !== null &&
+            input.expectRevision !== undefined &&
+            existing.length > 0
+          ) {
+            const latest = [...existing].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+            const latestRevision = latest.strategy_revision
+              ? Number.parseInt(latest.strategy_revision, 10)
+              : 0;
+            if (latestRevision !== input.expectRevision) {
+              throw new Error(`revision_conflict: expected ${input.expectRevision} but found ${latestRevision}`);
+            }
+          }
+          const result = await (state.bridge as unknown as {
+            manualContextCompaction: (req: unknown) => Promise<unknown>;
+          }).manualContextCompaction({
+            session_id: input.session.sessionId,
+            intent_key: input.intentKey,
+            strategy_id: input.strategyId,
+            strategy_revision: input.strategyRevision,
+            source_projection_fingerprint: input.sourceProjectionFingerprint,
+            expect_revision: input.expectRevision ?? null,
+          });
+          const typed = result as {
+            artifact: {
+              artifact_id: string;
+              session_id: string;
+              strategy_id: string;
+              terminal_status: string;
+              created_at: string;
+              strategy_revision?: string | null;
+              [key: string]: unknown;
+            };
+            terminal_status: string;
+            revision: number;
+            idempotent?: boolean;
+          };
+          return {
+            ok: true as const,
+            session_id: typed.artifact.session_id,
+            artifact: typed.artifact,
+            terminal_status: typed.terminal_status,
+            idempotent: typed.idempotent ?? false,
+            revision: typed.revision,
+          };
+        },
         sendMessage: (input) =>
           submitRustyViewChatMessage(chatOperations, input),
         listMessageSlots: (input) =>

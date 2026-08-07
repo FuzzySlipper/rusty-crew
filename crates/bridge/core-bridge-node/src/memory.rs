@@ -1,4 +1,5 @@
 use super::*;
+use rusty_crew_core_protocol::{ManualContextCompactionRequest, ManualContextCompactionResponse};
 
 impl NativeBridge {
     pub fn list_profile_memory(
@@ -66,6 +67,13 @@ impl NativeBridge {
         query: &ContextCompactionArtifactQuery,
     ) -> CoreResult<Vec<ContextCompactionArtifact>> {
         self.engine()?.list_context_compaction_artifacts(query)
+    }
+
+    pub fn manual_context_compaction(
+        &self,
+        request: &ManualContextCompactionRequest,
+    ) -> CoreResult<ManualContextCompactionResponse> {
+        self.engine()?.manual_context_compaction(request)
     }
 
     pub fn record_memory_governance_decision(
