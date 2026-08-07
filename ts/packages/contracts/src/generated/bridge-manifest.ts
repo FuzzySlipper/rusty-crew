@@ -292,6 +292,7 @@ export const bridgeOperations = [
   {"name":"unsubscribe_events","surface":"stable","direction":"ts_to_rust","input":"core_protocol::SubscriptionHandle","output":"core_protocol::Unit","errors":"core_protocol::CoreError","summary":"Cancel an event subscription."},
   {"name":"get_buffer","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeBufferHandle","output":"core_protocol::RuntimeBufferView","errors":"core_protocol::CoreError","summary":"Borrow bridge-owned bytes for a large wake payload."},
   {"name":"release_buffer","surface":"stable","direction":"ts_to_rust","input":"core_protocol::RuntimeBufferHandle","output":"core_protocol::Unit","errors":"core_protocol::CoreError","summary":"Release a borrowed runtime buffer."},
+  {"name":"manual_context_compaction","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ManualContextCompactionRequest","output":"core_protocol::ManualContextCompactionResponse","errors":"core_protocol::CoreError","summary":"Trigger a Rust-owned manual context compaction at a safe provider boundary without transcript or provider call, idempotent via intent_key."},
 ] as const;
 
 export type BridgeOperation = (typeof bridgeOperations)[number];
@@ -301,4 +302,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "68217514aa76f864dbc336628689a63b8107ce2bc74ebcdf46751053f6605fda" as const;
+export const bridgeWireShapeFingerprint = "3316b1a833b5c928f70a64fee02c89c84d1fbe870e341e60ce9e9dafae663a4c" as const;

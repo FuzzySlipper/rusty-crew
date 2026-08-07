@@ -502,6 +502,17 @@ export type BrainWakeAttention = {
   summary: string;
 };
 
+export type BrainWakeCompactionIntent = {
+  intentKey: string;
+  kind: BrainWakeCompactionIntentKind;
+  sourceProjectionFingerprint?: string | null;
+  strategyId?: string | null;
+  strategyRevision?: string | null;
+  trigger?: string | null;
+};
+
+export type BrainWakeCompactionIntentKind = "manual" | "auto";
+
 export type BrainWakeFailure = {
   kind: CoreErrorKind;
   message: string;
@@ -550,6 +561,7 @@ export type BrainWakeProviderStateUpdate = {
 export type BrainWakeRequest = {
   bodyState: RuntimeBufferHandle;
   brain: BrainImplementationHandle;
+  compactionIntent?: BrainWakeCompactionIntent | null;
   continuationState?: BrainContinuationPayload | null;
   providerState?: BrainWakeProviderStateInput | null;
   providerStateAbsence?: ProviderStateAbsenceReason | null;
@@ -591,19 +603,31 @@ export type CompletionPacket = {
 export type CompletionStatus = "completed" | "failed" | "blocked" | "exhausted";
 
 export type ContextCompactionArtifact = {
+  after_tokens?: number | null;
   artifact_id: string;
+  before_tokens?: number | null;
   branch_id?: ConversationBranchId;
   context_policy: string;
   created_at: string;
   enters_future_context: boolean;
   estimate_after_json?: unknown;
   estimate_before_json: unknown;
+  excised_item_count?: number | null;
+  execution_epoch_id?: string | null;
+  intent_key?: string | null;
+  logical_turn_id?: string | null;
   metadata_json: unknown;
+  preserved_item_count?: number | null;
+  provider_chain_action?: string | null;
   provider_metadata_json: unknown;
   session_id: SessionId;
+  source_projection_fingerprint?: string | null;
   source_refs_json: unknown;
   strategy_id: string;
+  strategy_revision?: string | null;
   summary_text: string;
+  terminal_status?: string | null;
+  trigger?: string | null;
   updated_at: string;
 };
 
