@@ -92,6 +92,7 @@ impl NativeBridge {
                 system_prompt,
                 role_assembly_json,
                 wake_id,
+                compaction_intent: None,
             });
         }
         if self.active_logical_wakes.contains_key(&wake_id) {
@@ -114,6 +115,7 @@ impl NativeBridge {
             system_prompt: prepared.system_prompt,
             role_assembly_json: prepared.role_assembly_json,
             wake_id: wake_id.clone(),
+            compaction_intent: None,
         })?;
         buffered.request.continuation_state = prepared.continuation_state;
         self.active_logical_wakes.insert(

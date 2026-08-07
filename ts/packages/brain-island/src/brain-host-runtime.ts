@@ -9,6 +9,7 @@ import type {
   BrainWakeAttention,
   BrainWakeProviderStateInput,
   BrainWakeProviderStateOutput,
+  BrainWakeRequest,
   BrainWakeStreamItem,
   ProviderStateAbsenceReason,
   SessionId,
@@ -49,6 +50,8 @@ export interface BrainWakeInput {
   providerState?: BrainWakeProviderStateInput;
   continuationState?: BrainContinuationPayload;
   providerStateAbsence?: ProviderStateAbsenceReason;
+  compactionIntent?: NonNullable<BrainWakeRequest["compactionIntent"]>;
+  compaction_intent?: NonNullable<BrainWakeRequest["compactionIntent"]>;
 }
 
 export interface BrainWakeOptions {

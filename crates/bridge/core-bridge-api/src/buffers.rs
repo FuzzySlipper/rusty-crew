@@ -43,6 +43,7 @@ pub struct BrainWakeBufferInput {
     pub system_prompt: String,
     pub role_assembly_json: Vec<u8>,
     pub wake_id: String,
+    pub compaction_intent: Option<crate::BrainWakeCompactionIntent>,
 }
 
 #[derive(Debug, Clone)]
@@ -207,7 +208,7 @@ impl RuntimeBufferStore {
                 provider_state_absence: Some(
                     crate::ProviderStateAbsenceReason::ModuleDoesNotUseState,
                 ),
-                compaction_intent: None,
+                compaction_intent: input.compaction_intent,
             },
             leases,
         })
@@ -270,6 +271,7 @@ mod tests {
                 system_prompt: "system prompt ".repeat(16_384),
                 role_assembly_json: role.as_bytes().to_vec(),
                 wake_id: "wake-large".to_string(),
+                compaction_intent: None,
             })
             .unwrap();
 

@@ -183,6 +183,14 @@ function createRustChatCompletionsBrainHostExecutor(
               },
             )
           : undefined;
+      const compactionIntent =
+        (
+          wake as unknown as {
+            compactionIntent?: unknown;
+            compaction_intent?: unknown;
+          }
+        ).compactionIntent ??
+        (wake as unknown as { compaction_intent?: unknown }).compaction_intent;
       const input: ChatCompletionsBrainRunInput = {
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
@@ -192,6 +200,12 @@ function createRustChatCompletionsBrainHostExecutor(
           : {}),
         providerState: wake.providerState,
         continuationState: wake.continuationState,
+        ...(compactionIntent !== undefined
+          ? {
+              compactionIntent:
+                compactionIntent as ChatCompletionsBrainRunInput["compactionIntent"],
+            }
+          : {}),
         config: {
           model: context.profile.profile.modelConfig.modelName,
           ...(requestTimeoutMs === undefined

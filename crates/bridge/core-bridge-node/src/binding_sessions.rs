@@ -57,6 +57,7 @@ impl NativeBridgeBinding {
                 system_prompt,
                 role_assembly_json: role_assembly_json.to_vec(),
                 wake_id,
+                compaction_intent: None,
             })
             .map_err(to_napi_error)?;
         Ok(JsBufferedBrainWakeRequest {

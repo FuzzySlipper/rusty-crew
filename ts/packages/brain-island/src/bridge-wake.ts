@@ -88,6 +88,22 @@ export async function wakeBrainFromBridgeRequest(
         continuationState: request.continuationState ?? undefined,
         providerState: request.providerState ?? undefined,
         providerStateAbsence: request.providerStateAbsence ?? undefined,
+        ...(request.compactionIntent !== undefined ||
+        (request as unknown as { compaction_intent?: unknown })
+          .compaction_intent !== undefined
+          ? {
+              compactionIntent: (request.compactionIntent ??
+                (
+                  request as unknown as {
+                    compaction_intent: NonNullable<
+                      BrainWakeRequest["compactionIntent"]
+                    >;
+                  }
+                ).compaction_intent) as NonNullable<
+                BrainWakeRequest["compactionIntent"]
+              >,
+            }
+          : {}),
       },
       options,
     );

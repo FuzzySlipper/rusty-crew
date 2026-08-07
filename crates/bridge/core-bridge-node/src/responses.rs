@@ -28,6 +28,8 @@ struct JsOpenAiResponsesBrainRunInput {
     config: JsOpenAiResponsesBrainConfig,
     #[serde(default)]
     client: JsOpenAiResponsesClientConfig,
+    #[serde(default, alias = "compaction_intent")]
+    compaction_intent: Option<rusty_crew_core_protocol::BrainWakeCompactionIntent>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -874,7 +876,7 @@ where
             .map(parse_provider_state_absence_reason)
             .transpose()
             .map_err(to_napi_error)?,
-        compaction_intent: None,
+        compaction_intent: input.compaction_intent,
     };
     let mut credential_secret_update = None;
     let result = match input.client {

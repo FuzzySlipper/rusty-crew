@@ -9,6 +9,9 @@ import { toNativeBodyState } from "./event-body-wire.js";
 export function toNativeOpenAiResponsesBrainRunInput(
   input: OpenAiResponsesBrainRunInput,
 ): unknown {
+  const compactionIntent =
+    (input as unknown as { compactionIntent?: unknown }).compactionIntent ??
+    (input as unknown as { compaction_intent?: unknown }).compaction_intent;
   return {
     wakeId: input.wakeId,
     sessionId: input.sessionId,
@@ -27,6 +30,11 @@ export function toNativeOpenAiResponsesBrainRunInput(
       : undefined,
     providerStateAbsence: input.providerStateAbsence,
     continuationState: input.continuationState,
+    ...(compactionIntent !== undefined
+      ? {
+          compactionIntent,
+        }
+      : {}),
     config: input.config,
     client:
       input.client?.mode === "live"

@@ -324,6 +324,8 @@ export interface OpenAiResponsesBrainRunInput {
   providerState?: BrainWakeProviderStateInput;
   providerStateAbsence?: ProviderStateAbsenceReason;
   continuationState?: BrainContinuationPayload;
+  compactionIntent?: BrainWakeRequest["compactionIntent"];
+  compaction_intent?: BrainWakeRequest["compactionIntent"];
   config: {
     model: string;
     responsesDialect: NativeResponsesProviderDialect;
@@ -363,6 +365,8 @@ export interface ChatCompletionsBrainRunInput {
   inputImages?: ChatCompletionsInputImage[];
   providerState?: BrainWakeProviderStateInput;
   continuationState?: BrainContinuationPayload;
+  compactionIntent?: BrainWakeRequest["compactionIntent"];
+  compaction_intent?: BrainWakeRequest["compactionIntent"];
   tools?: Array<{
     name: string;
     description: string;
@@ -457,6 +461,7 @@ export interface BrainWakeSessionBufferInput {
   systemPrompt: string;
   roleAssemblyJson: Uint8Array;
   wakeId: string;
+  compactionIntent?: BrainWakeRequest["compactionIntent"];
 }
 
 export interface NativeSessionStateSummary {

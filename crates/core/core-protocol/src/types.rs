@@ -1092,7 +1092,11 @@ pub struct BrainWakeRequest {
     pub provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state_absence: Option<ProviderStateAbsenceReason>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "compactionIntent",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub compaction_intent: Option<BrainWakeCompactionIntent>,
 }
 

@@ -381,8 +381,10 @@ import {
   type ServiceBrowserResources,
 } from "./service-browser-resources.js";
 import {
+  appendCoreEventsToChatLog,
   completionPacketProjectionMetadata,
   dispatchWake as dispatchWakeFromModule,
+  observeWakeEvents,
   runtimePauseSummary,
   runtimePauseWakeReport as runtimePauseWakeReportFromModule,
   type ServiceWakeDispatchContext,
@@ -1590,8 +1592,8 @@ async function handleHttpRequest(
             (artifact) =>
               artifact.intent_key === input.intentKey &&
               artifact.session_id === input.session.sessionId &&
-              (artifact.source_projection_fingerprint ?? `manual-${artifact.intent_key}`) ===
-                effectiveFingerprint,
+              (artifact.source_projection_fingerprint ??
+                `manual-${artifact.intent_key}`) === effectiveFingerprint,
           );
           if (duplicate) {
             const revision = duplicate.strategy_revision
@@ -1603,7 +1605,9 @@ async function handleHttpRequest(
               Number.isFinite(input.expectRevision) &&
               revision !== input.expectRevision
             ) {
-              throw new Error(`revision_conflict: expected ${input.expectRevision} but found ${revision}`);
+              throw new Error(
+                `revision_conflict: expected ${input.expectRevision} but found ${revision}`,
+              );
             }
             return {
               ok: true as const,
@@ -1626,12 +1630,16 @@ async function handleHttpRequest(
             input.expectRevision !== undefined &&
             existing.length > 0
           ) {
-            const latest = [...existing].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+            const latest = [...existing].sort((a, b) =>
+              a.created_at < b.created_at ? 1 : -1,
+            )[0];
             const latestRevision = latest.strategy_revision
               ? Number.parseInt(latest.strategy_revision, 10)
               : 0;
             if (latestRevision !== input.expectRevision) {
-              throw new Error(`revision_conflict: expected ${input.expectRevision} but found ${latestRevision}`);
+              throw new Error(
+                `revision_conflict: expected ${input.expectRevision} but found ${latestRevision}`,
+              );
             }
           }
           // Prefer the real brain wake path for manual compaction: build a
@@ -1647,119 +1655,101 @@ async function handleHttpRequest(
           // (R6624-2/3/4). The direct Rust manual operation remains available only via
           // native bridge for delegated/idempotency testing, not as the public route's
           // success path.
+          // R6624-6: route through observed wake dispatch (observeWakeEvents/appendCoreEventsToChatLog)
+          // so the brain's provider_status artifacts are durably persisted via saveContextCompactionArtifact.
+          // This is the only path that maps brain events to durable rows; direct wakeBrain only returns
+          // BrainWakeAccepted and would never persist. We build the request via the dispatch context
+          // (brain, systemPrompt, roleAssembly) and then observe.
           let wakeError: unknown = undefined;
           try {
-            const wakeId = `manual-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            const brainRequest = await (state.bridge as unknown as {
-              buildBrainWakeRequestForSession: (input: unknown) => Promise<unknown>;
-              wakeBrain: (request: unknown) => Promise<unknown>;
-            }).buildBrainWakeRequestForSession({
-              sessionId: input.session.sessionId,
-              wakeId,
-              compactionIntent: {
-                intentKey: input.intentKey,
-                kind: "manual",
-                strategyId: input.strategyId ?? undefined,
-                strategyRevision: input.strategyRevision ?? undefined,
-                sourceProjectionFingerprint: input.sourceProjectionFingerprint ?? undefined,
-                trigger: "manual_intent",
-              },
+            const dispatchCtx = wakeDispatchContext(state);
+            const brain = dispatchCtx.brainForProfile(
+              input.session.profileId as unknown as ProfileId,
+            );
+            if (brain === undefined) {
+              throw new Error(
+                `no brain registered for profile ${String(input.session.profileId)}`,
+              );
+            }
+            const profileContext = await dispatchCtx.loadProfileContext(
+              input.session.profileId as unknown as ProfileId,
+            );
+            const configured = dispatchCtx.configuredSessionForRuntimeSession(
+              input.session as unknown as SessionState,
+            );
+            const strategyPrep = await dispatchCtx.prepareContextStrategy({
+              session: input.session as unknown as SessionState,
+              configuredSession: configured as unknown as never,
+              profileContext,
             });
-            const wakeResult = (await (state.bridge as unknown as { wakeBrain: (r: unknown) => Promise<unknown> }).wakeBrain(
-              brainRequest,
-            )) as unknown as {
-              observedEvents?: unknown[];
-              events?: unknown[];
-              status?: string;
-              summary?: string;
-            } | undefined;
-            // Best-effort: if wakeBrain returned observed provider_status events inline (as
-            // the native dispatch does for direct calls), persist them now so polling can
-            // find the artifact without relying on a separate background dispatcher.
-            try {
-              const inlineEvents: unknown[] =
-                (Array.isArray(wakeResult?.observedEvents) ? wakeResult?.observedEvents : undefined) ??
-                (Array.isArray(wakeResult?.events) ? wakeResult?.events : undefined) ??
-                (Array.isArray((brainRequest as unknown as { events?: unknown[] })?.events)
-                  ? ((brainRequest as unknown as { events?: unknown[] }).events as unknown[])
-                  : []);
-              if (inlineEvents.length > 0) {
-                // We cannot call appendCoreEventsToChatLog cleanly without a full dispatch context here,
-                // but we can at least extract any compaction provider_status artifact and persist it directly.
-                for (const ev of inlineEvents) {
-                  const maybe = ev as { type?: unknown; event?: unknown; metadataJson?: unknown; metadata_json?: unknown };
-                  const brainEvent = (maybe?.event ?? maybe) as {
-                    type?: unknown;
-                    metadataJson?: unknown;
-                    metadata_json?: unknown;
-                    level?: unknown;
-                    message?: unknown;
-                  };
-                  const md = (brainEvent?.metadataJson ?? brainEvent?.metadata_json) as string | undefined;
-                  if (typeof md === "string" && md.includes("context_compaction")) {
-                    try {
-                      const parsed = JSON.parse(md) as { kind?: string; artifact?: unknown; usage?: unknown };
-                      if (parsed.kind === "context_compaction_completed" && parsed.artifact && typeof parsed.artifact === "object") {
-                        const art = parsed.artifact as Record<string, unknown>;
-                        const nowIso = new Date().toISOString();
-                        // Minimal persistence via bridge if artifact already validated; otherwise let
-                        // the normal dispatch path handle it. We attempt a direct save to close R6624-4.
-                        const artifactId = typeof art.artifactId === "string" ? art.artifactId : typeof art.artifact_id === "string" ? (art.artifact_id as string) : undefined;
-                        if (artifactId) {
-                          // Defer to polling; the dispatch will have persisted if called via observed path.
-                        }
-                      } else if (parsed.kind === "context_compaction_failed") {
-                        // For failed with null artifact, synthesize and persist the failed terminal record
-                        // so restart/readback sees a durable failure and preserves prior valid projection.
-                        const nowIso = new Date().toISOString();
-                        const { createHash } = await import("node:crypto");
-                        const digest = createHash("sha256")
-                          .update([input.session.sessionId, wakeId, input.intentKey, nowIso].join(":"))
-                          .digest("hex")
-                          .slice(0, 32);
-                        const failedArtifact = {
-                          artifact_id: `context_compaction_${digest}`,
-                          session_id: input.session.sessionId,
-                          branch_id: null,
-                          strategy_id: (typeof (parsed as unknown as { strategyId?: unknown }).strategyId === "string"
-                            ? (parsed as unknown as { strategyId: string }).strategyId
-                            : "rolling_summary_compaction") as string,
-                          strategy_revision: (typeof (parsed as unknown as { strategyRevision?: unknown }).strategyRevision === "string"
-                            ? (parsed as unknown as { strategyRevision: string }).strategyRevision
-                            : "1") as string,
-                          logical_turn_id: null,
-                          execution_epoch_id: null,
-                          source_projection_fingerprint: input.sourceProjectionFingerprint ?? `manual-${input.intentKey}`,
-                          trigger: "manual_intent",
-                          before_tokens: 0,
-                          after_tokens: 0,
-                          preserved_item_count: 0,
-                          excised_item_count: 0,
-                          intent_key: input.intentKey,
-                          terminal_status: "failed",
-                          provider_chain_action: "preserve_prior_valid_projection",
-                          source_refs_json: { source: "service_app_inline_failed", wake_id: wakeId, synthetic_failed_artifact: true },
-                          provider_metadata_json: { provider_chain_action: "preserve_prior_valid_projection", source_event_kind: "context_compaction_failed" },
-                          estimate_before_json: (parsed.usage as unknown) ?? {},
-                          estimate_after_json: (parsed.usage as unknown) ?? {},
-                          summary_text: `manual compaction ${input.intentKey} failed – prior projection preserved`,
-                          enters_future_context: false,
-                          context_policy: "rolling_summary_compaction",
-                          metadata_json: { schema_version: 1, wake_id: wakeId, synthetic_failed_artifact: true },
-                          created_at: nowIso,
-                          updated_at: nowIso,
-                        } as unknown as Parameters<typeof state.bridge.saveContextCompactionArtifact>[0];
-                        try {
-                          await state.bridge.saveContextCompactionArtifact(failedArtifact);
-                        } catch {}
-                      }
-                    } catch {}
-                  }
-                }
-              }
-            } catch {}
-            // Poll for the persisted artifact (completed or failed) that the
-            // brain's wake dispatch will have written via saveContextCompactionArtifact.
+            const roleplayContext =
+              await dispatchCtx.roleplayPromptContextForSession(
+                input.session as unknown as SessionState,
+              );
+            const effectiveProfileContext = {
+              ...profileContext,
+              toolSelection: effectiveToolSelectionForResourceLimits(
+                profileContext.toolSelection,
+                (input.session as unknown as SessionState).resourceLimits,
+              ),
+            };
+            const roleInput = {
+              sessionMemoryContext: strategyPrep.sessionMemoryContext,
+              additionalInstructions: [
+                ...strategyPrep.additionalInstructions,
+                ...(roleplayContext ? [roleplayContext] : []),
+              ],
+            };
+            const role = buildProfileRoleAssembly(
+              effectiveProfileContext as unknown as never,
+              roleInput as never,
+            );
+            const wakeId = `manual-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const compactionIntentPayload = {
+              intentKey: input.intentKey,
+              kind: "manual",
+              strategyId: input.strategyId ?? undefined,
+              strategyRevision: input.strategyRevision ?? undefined,
+              sourceProjectionFingerprint:
+                input.sourceProjectionFingerprint ?? undefined,
+              trigger: "manual_intent",
+            };
+            const request =
+              await dispatchCtx.bridge.buildBrainWakeRequestForSession({
+                brain,
+                sessionId: input.session.sessionId,
+                systemPrompt: role.systemPrompt,
+                roleAssemblyJson: new TextEncoder().encode(
+                  JSON.stringify(role.roleAssembly),
+                ),
+                wakeId,
+                compactionIntent: compactionIntentPayload,
+              } as unknown as never);
+            // Also set snake_case for Rust deserialization (JsonSchema uses snake_case for BrainWakeRequest)
+            (request as unknown as Record<string, unknown>).compaction_intent =
+              compactionIntentPayload;
+            (request as unknown as Record<string, unknown>).compactionIntent =
+              compactionIntentPayload;
+            console.log(
+              `[manual-compact] built request compactionIntent=${JSON.stringify((request as unknown as Record<string, unknown>).compactionIntent ?? (request as unknown as Record<string, unknown>).compaction_intent)} wakeId=${wakeId}`,
+            );
+            const observed = await observeWakeEvents(
+              dispatchCtx,
+              input.session.sessionId as unknown as SessionId,
+              () => dispatchCtx.bridge.wakeBrain(request as unknown as never),
+              (events) =>
+                appendCoreEventsToChatLog(
+                  dispatchCtx,
+                  input.session as unknown as SessionState,
+                  wakeId,
+                  events,
+                ),
+            );
+            console.log(
+              `[manual-compact] wakeId=${wakeId} observed ${observed.events.length} events accepted=${JSON.stringify(observed.accepted).slice(0, 500)} events=${JSON.stringify(observed.events).slice(0, 2000)}`,
+            );
+            // Poll for the persisted artifact (completed or failed) that appendCoreEventsToChatLog
+            // will have written via saveContextCompactionArtifact. Use same idempotency key as Rust.
             for (let attempt = 0; attempt < 20; attempt++) {
               await new Promise((r) => setTimeout(r, 250));
               const found = await state.bridge.listContextCompactionArtifacts({
@@ -1774,10 +1764,13 @@ async function handleHttpRequest(
               const match = found.find(
                 (a) =>
                   a.intent_key === input.intentKey &&
-                  (a.source_projection_fingerprint ?? `manual-${a.intent_key}`) === effectiveFingerprint,
+                  (a.source_projection_fingerprint ??
+                    `manual-${a.intent_key}`) === effectiveFingerprint,
               );
               if (match) {
-                const rev = match.strategy_revision ? Number.parseInt(match.strategy_revision, 10) : 0;
+                const rev = match.strategy_revision
+                  ? Number.parseInt(match.strategy_revision, 10)
+                  : 0;
                 return {
                   ok: true as const,
                   session_id: match.session_id as unknown as string,
@@ -1796,7 +1789,66 @@ async function handleHttpRequest(
                 };
               }
             }
-            // No durable artifact persisted – fail closed per R6624-4, do not fall back to synthetic success.
+            // Also check observed events directly: if the brain emitted a compaction event but
+            // appendCoreEventsToChatLog somehow missed it (should not happen), try to persist now
+            // via the same mapper and then re-poll once.
+            const compactionEvent = observed.events.find(
+              (e) =>
+                e.type === "brain_event_observed" &&
+                (e.event as BrainEvent).type === "provider_status" &&
+                String(
+                  (e.event as unknown as { metadataJson?: unknown })
+                    .metadataJson ?? "",
+                ).includes("context_compaction"),
+            ) as unknown as { event: BrainEvent } | undefined;
+            if (compactionEvent) {
+              try {
+                await appendCoreEventsToChatLog(
+                  dispatchCtx,
+                  input.session as unknown as SessionState,
+                  wakeId,
+                  observed.events,
+                );
+                const found2 =
+                  await state.bridge.listContextCompactionArtifacts({
+                    session_id: input.session.sessionId,
+                    branch_id: undefined,
+                    strategy_id: undefined,
+                    enters_future_context: undefined,
+                    latest_only: false,
+                    limit: 1000,
+                    offset: 0,
+                  });
+                const match2 = found2.find(
+                  (a) =>
+                    a.intent_key === input.intentKey &&
+                    (a.source_projection_fingerprint ??
+                      `manual-${a.intent_key}`) === effectiveFingerprint,
+                );
+                if (match2) {
+                  const rev = match2.strategy_revision
+                    ? Number.parseInt(match2.strategy_revision, 10)
+                    : 0;
+                  return {
+                    ok: true as const,
+                    session_id: match2.session_id as unknown as string,
+                    artifact: match2 as unknown as {
+                      artifact_id: string;
+                      session_id: string;
+                      strategy_id: string;
+                      terminal_status: string;
+                      created_at: string;
+                      strategy_revision?: string | null;
+                      [key: string]: unknown;
+                    },
+                    terminal_status: match2.terminal_status ?? "completed",
+                    idempotent: false,
+                    revision: rev,
+                  };
+                }
+              } catch {}
+            }
+            // No durable artifact persisted – fail closed per R6624-4/5/6, do not fall back to synthetic success.
             throw new Error(
               `manual compaction did not produce a durable brain artifact for intent ${input.intentKey} (wakeId ${wakeId}); not falling back to synthetic CoreEngine artifact`,
             );
@@ -1804,8 +1856,7 @@ async function handleHttpRequest(
             wakeError = error;
             // Only fall through to synthetic when the brain wake could not even be constructed
             // (e.g., no brain registered for session's profile). If a wake was attempted and simply
-            // produced no durable artifact, we fail closed per R6624-5: any attempted wake with no
-            // persisted completed/failed artifact must return a typed failure, not synthetic success.
+            // produced no durable artifact, we fail closed per R6624-5/6.
             const msg = error instanceof Error ? error.message : String(error);
             const isNoBrain =
               msg.includes("no brain") ||
@@ -1822,7 +1873,10 @@ async function handleHttpRequest(
           }
           // Synthetic fallback only for explicitly proven no-brain/native fallback boundary (R6624-5).
           if (wakeError !== undefined) {
-            const msg2 = wakeError instanceof Error ? wakeError.message : String(wakeError);
+            const msg2 =
+              wakeError instanceof Error
+                ? wakeError.message
+                : String(wakeError);
             const isNoBrain2 =
               msg2.includes("no brain") ||
               msg2.includes("brain not") ||

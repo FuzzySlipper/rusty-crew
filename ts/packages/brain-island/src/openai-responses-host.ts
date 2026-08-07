@@ -230,7 +230,8 @@ export async function createOpenAiResponsesBrainHost(
   }
   if (
     strategyId === "previous-response-chain" &&
-    responsesDialect !== "openai_stateful" && responsesDialect !== "meta"
+    responsesDialect !== "openai_stateful" &&
+    responsesDialect !== "meta"
   ) {
     throw new Error(
       `Responses dialect ${responsesDialect} does not support previous-response-chain`,
@@ -244,6 +245,14 @@ export async function createOpenAiResponsesBrainHost(
         throw new Error("openai-responses brain requires native bridge");
       }
       const requestTimeoutMs = providerRequestTimeoutMs("openai-responses");
+      const compactionIntent =
+        (
+          wake as unknown as {
+            compactionIntent?: unknown;
+            compaction_intent?: unknown;
+          }
+        ).compactionIntent ??
+        (wake as unknown as { compaction_intent?: unknown }).compaction_intent;
       const input = {
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
@@ -254,6 +263,12 @@ export async function createOpenAiResponsesBrainHost(
         providerState: wake.providerState,
         providerStateAbsence: wake.providerStateAbsence,
         continuationState: wake.continuationState,
+        ...(compactionIntent !== undefined
+          ? {
+              compactionIntent:
+                compactionIntent as OpenAiResponsesBrainRunInput["compactionIntent"],
+            }
+          : {}),
         config: {
           model: context.profile.profile.modelConfig.modelName,
           responsesDialect,

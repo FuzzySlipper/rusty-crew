@@ -61,7 +61,9 @@ export interface RustyViewChatContext {
   contextUsage?(
     input: SessionContextUsageInput,
   ): Promise<SessionContextUsageResult>;
-  manualContextCompaction?(input: ManualContextCompactionInput): Promise<ManualContextCompactionResult>;
+  manualContextCompaction?(
+    input: ManualContextCompactionInput,
+  ): Promise<ManualContextCompactionResult>;
   getToolCallDebugDetail?(
     input: ToolCallDebugDetailInput,
   ): Promise<ToolCallDebugDetail | undefined>;
@@ -2415,7 +2417,8 @@ async function handleManualContextCompaction(
     return failure(501, requestId, {
       code: "internal_error",
       reason_code: "manual_context_compaction_not_wired",
-      message: "manual context compaction is not yet wired to Rust; brain wakes for manual intent are real but the HTTP control is still being connected",
+      message:
+        "manual context compaction is not yet wired to Rust; brain wakes for manual intent are real but the HTTP control is still being connected",
       retryable: false,
     });
   }
@@ -2430,7 +2433,10 @@ async function handleManualContextCompaction(
       retryable: false,
     });
   }
-  const parsed = parseManualContextCompactionRequest(request.body, request.headers);
+  const parsed = parseManualContextCompactionRequest(
+    request.body,
+    request.headers,
+  );
   if (!parsed.ok) return invalidChatRequest(requestId, parsed);
   try {
     const result = await context.manualContextCompaction({
@@ -2445,7 +2451,10 @@ async function handleManualContextCompaction(
     return success(requestId, result, result.idempotent ? 200 : 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("revision_conflict") || message.includes("Revision conflict")) {
+    if (
+      message.includes("revision_conflict") ||
+      message.includes("Revision conflict")
+    ) {
       return failure(409, requestId, {
         code: "conflict",
         reason_code: "revision_conflict",
@@ -2453,7 +2462,10 @@ async function handleManualContextCompaction(
         retryable: false,
       });
     }
-    if (message.includes("compaction_policy_disabled") || message.includes("policy disabled")) {
+    if (
+      message.includes("compaction_policy_disabled") ||
+      message.includes("policy disabled")
+    ) {
       return failure(412, requestId, {
         code: "failed_precondition",
         reason_code: "compaction_policy_disabled",
@@ -3237,7 +3249,9 @@ function parseManualContextCompactionRequest(
   | { ok: false; reasonCode: string; message: string } {
   const headerRevision =
     headers?.["if-match"] ?? headers?.["If-Match"] ?? headers?.["IF-MATCH"];
-  const headerValue = Array.isArray(headerRevision) ? headerRevision[0] : headerRevision;
+  const headerValue = Array.isArray(headerRevision)
+    ? headerRevision[0]
+    : headerRevision;
   let expectRevision: number | null = null;
   if (typeof headerValue === "string" && headerValue.trim() !== "") {
     const parsed = Number(headerValue.trim());
@@ -3245,7 +3259,8 @@ function parseManualContextCompactionRequest(
       return {
         ok: false,
         reasonCode: "invalid_if_match",
-        message: "If-Match header must be a non-negative integer revision when provided",
+        message:
+          "If-Match header must be a non-negative integer revision when provided",
       };
     }
     expectRevision = parsed;
@@ -3262,7 +3277,9 @@ function parseManualContextCompactionRequest(
     };
   }
   const rawIntentKey = nullableStringValue(value.intent_key ?? value.intentKey);
-  const intentKey = rawIntentKey?.trim() ? rawIntentKey.trim() : `manual-${Date.now()}`;
+  const intentKey = rawIntentKey?.trim()
+    ? rawIntentKey.trim()
+    : `manual-${Date.now()}`;
   if (!intentKey || intentKey.trim() === "") {
     return {
       ok: false,
@@ -3271,7 +3288,11 @@ function parseManualContextCompactionRequest(
     };
   }
   const strategyId = nullableStringValue(value.strategy_id ?? value.strategyId);
-  if (strategyId !== null && strategyId !== undefined && strategyId.trim() === "") {
+  if (
+    strategyId !== null &&
+    strategyId !== undefined &&
+    strategyId.trim() === ""
+  ) {
     return {
       ok: false,
       reasonCode: "invalid_strategy_id",
@@ -3282,7 +3303,9 @@ function parseManualContextCompactionRequest(
     value.strategy_revision ?? value.strategyRevision,
   );
   const sourceProjectionFingerprint = nullableStringValue(
-    value.source_projection_fingerprint ?? value.sourceProjectionFingerprint ?? value.fingerprint,
+    value.source_projection_fingerprint ??
+      value.sourceProjectionFingerprint ??
+      value.fingerprint,
   );
   const bodyExpectRevision =
     value.expect_revision ?? value.expectRevision ?? value.revision;

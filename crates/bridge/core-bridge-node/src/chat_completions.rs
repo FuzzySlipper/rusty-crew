@@ -40,6 +40,8 @@ struct JsChatCompletionsBrainRunInput {
     config: JsChatCompletionsBrainConfig,
     #[serde(default)]
     client: JsChatCompletionsClientConfig,
+    #[serde(default, alias = "compaction_intent")]
+    compaction_intent: Option<rusty_crew_core_protocol::BrainWakeCompactionIntent>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -515,7 +517,7 @@ fn run_chat_completions_brain_with_buffered_tools(
         provider_state: input.provider_state,
         continuation_state: input.continuation_state,
         final_message_fallback,
-        compaction_intent: None,
+        compaction_intent: input.compaction_intent,
     };
     match input.client {
         JsChatCompletionsClientConfig::Fake => {

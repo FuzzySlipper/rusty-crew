@@ -108,6 +108,9 @@ export function toNativeBrainAction(action: BrainAction): unknown {
 export function toNativeChatCompletionsBrainRunInput(
   input: ChatCompletionsBrainRunInput,
 ): unknown {
+  const compactionIntent =
+    (input as unknown as { compactionIntent?: unknown }).compactionIntent ??
+    (input as unknown as { compaction_intent?: unknown }).compaction_intent;
   return {
     wakeId: input.wakeId,
     sessionId: input.sessionId,
@@ -124,6 +127,11 @@ export function toNativeChatCompletionsBrainRunInput(
       ? toNativeProviderStateInput(input.providerState)
       : undefined,
     continuationState: input.continuationState,
+    ...(compactionIntent !== undefined
+      ? {
+          compactionIntent,
+        }
+      : {}),
     tools: input.tools?.map((tool) => ({
       name: tool.name,
       description: tool.description,

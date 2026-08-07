@@ -62,6 +62,7 @@ fn run_case(
         system_prompt: "system prompt ".repeat(24 * 1024),
         role_assembly_json: large_json_bytes("role_assembly", 128 * 1024),
         wake_id: "throughput-wake".to_string(),
+        compaction_intent: None,
     })?;
     let body_state_bytes = bridge.get_buffer(buffered.request.body_state)?.byte_len;
     let system_prompt_bytes = bridge.get_buffer(buffered.request.system_prompt)?.byte_len;

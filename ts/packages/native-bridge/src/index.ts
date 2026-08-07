@@ -1506,7 +1506,7 @@ function createNativeBridgeModule(
         input.roleAssemblyJson,
         input.wakeId,
       );
-      const request = {
+      const request: BrainWakeRequest & Record<string, unknown> = {
         brain: input.brain,
         sessionId: input.sessionId,
         bodyState: buffered.bodyState as RuntimeBufferHandle,
@@ -1515,7 +1515,12 @@ function createNativeBridgeModule(
         wakeId: input.wakeId,
         ...continuationStateFromBufferedWake(buffered),
         ...providerStateFromBufferedWake(buffered),
-      };
+        ...(input.compactionIntent !== undefined
+          ? {
+              compactionIntent: input.compactionIntent,
+            }
+          : {}),
+      } as unknown as BrainWakeRequest;
       validateBridgeValue<BrainWakeRequest>({
         operation: "build_brain_wake_request_for_session",
         direction: "rust_to_ts",

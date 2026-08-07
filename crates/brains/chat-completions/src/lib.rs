@@ -1390,6 +1390,12 @@ where
                                 .unwrap_or(usize::MAX),
                             1,
                         );
+                    let failed_artifact = brain_runtime_context_compaction_failed_artifact(
+                        &input.context,
+                        &usage,
+                        intent,
+                        &input.context.session_id.to_string(),
+                    );
                     push_stream_item(
                         &mut stream,
                         context_compaction_status(
@@ -1398,7 +1404,8 @@ where
                             BrainProviderStatusLevel::Error,
                             "compaction_policy_disabled",
                             &usage,
-                            None,
+                            Some(&failed_artifact),
+                            Some(&intent.intent_key),
                         ),
                         &mut sink,
                     );
@@ -1443,12 +1450,17 @@ where
                     "manual_intent",
                     &usage,
                     None,
+                    Some(&intent.intent_key),
                 ),
                 &mut sink,
             );
             match compact_chat_messages(&mut messages, policy, usage.clone(), sequence) {
                 Ok(mut artifact) => {
-                    artifact.artifact_id = format!("manual-{}-{}", intent.intent_key, sequence);
+                    artifact.artifact_id = format!(
+                        "manual_{}_{}",
+                        intent.intent_key.replace('-', "_"),
+                        sequence
+                    );
                     artifact.session_id = Some(input.context.session_id.0.clone());
                     artifact.logical_turn_id = Some(input.context.wake_id.clone());
                     artifact.trigger =
@@ -1469,6 +1481,7 @@ where
                             "manual_intent_completed",
                             &usage,
                             Some(&artifact),
+                            Some(&intent.intent_key),
                         ),
                         &mut sink,
                     );
@@ -1516,8 +1529,8 @@ where
                     };
                     return ChatCompletionsBrainLoopOutput {
                         stream,
-                        completed: true,
-                        yielded: false,
+                        completed: false,
+                        yielded: true,
                         attention: None,
                         provider_request_count,
                         tool_round_count,
@@ -1547,6 +1560,7 @@ where
                             "manual_intent_failed",
                             &usage,
                             Some(&failed_artifact),
+                            Some(&intent.intent_key),
                         ),
                         &mut sink,
                     );
@@ -1596,6 +1610,7 @@ where
                                 "Mid-turn context compaction started at a safe provider boundary.",
                                 &usage,
                                 None,
+                                None,
                             ),
                             &mut sink,
                         );
@@ -1621,6 +1636,7 @@ where
                                         "Mid-turn context compaction completed; the replacement model projection was checkpointed before another provider request.",
                                         &usage,
                                         Some(&artifact),
+                                        None,
                                     ),
                                     &mut sink,
                                 );
@@ -1688,6 +1704,7 @@ where
                                         BrainProviderStatusLevel::Error,
                                         &summary,
                                         &usage,
+                                        None,
                                         None,
                                     ),
                                     &mut sink,
@@ -1890,6 +1907,7 @@ where
                             BrainProviderStatusLevel::Error,
                             &summary,
                             &usage,
+                            None,
                             None,
                         ),
                         &mut sink,
@@ -2631,14 +2649,18 @@ fn brain_runtime_context_compaction_failed_artifact(
     let fingerprint = intent
         .source_projection_fingerprint
         .clone()
-        .or_else(|| Some(format!("manual-{}", intent.intent_key)));
+        .or_else(|| Some(format!("manual_{}", intent.intent_key.replace('-', "_"))));
     let strategy_id = intent
         .strategy_id
         .clone()
         .unwrap_or_else(|| "rolling_summary_compaction".to_string());
     let strategy_revision = intent.strategy_revision.clone().or(Some("1".to_string()));
     BrainContextCompactionArtifact {
-        artifact_id: format!("failed_{}_{}", intent.intent_key, context.wake_id),
+        artifact_id: format!(
+            "failed_{}_{}",
+            intent.intent_key.replace('-', "_"),
+            context.wake_id.replace('-', "_")
+        ),
         sequence: 1,
         strategy_id,
         strategy_revision,
@@ -2672,7 +2694,15 @@ fn context_compaction_status(
     message: &str,
     usage: &rusty_crew_brain_runtime::BrainContextUsageSnapshot,
     artifact: Option<&BrainContextCompactionArtifact>,
+    intent_key: Option<&str>,
 ) -> BrainWakeStreamItem {
+    // R6613-8: carry authoritative intent key at top-level; artifact has no intent_key field and
+    // deriving from fingerprint loses custom fingerprints (fp-caller). Manual call sites pass
+    // intent.intent_key explicitly; auto paths pass None and we fall back to fingerprint derive.
+    let derived_intent = artifact
+        .and_then(|a| a.source_projection_fingerprint.clone())
+        .map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string());
+    let authoritative = intent_key.map(|s| s.to_string()).or(derived_intent);
     brain_event_item(
         context,
         BrainEvent::ProviderStatus {
@@ -2683,8 +2713,8 @@ fn context_compaction_status(
                     "kind": kind,
                     "usage": usage,
                     "artifact": artifact,
-                    "intentKey": artifact.and_then(|a| a.source_projection_fingerprint.clone()).map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string()),
-                    "intent_key": artifact.and_then(|a| a.source_projection_fingerprint.clone()).map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string()),
+                    "intentKey": authoritative.clone(),
+                    "intent_key": authoritative.clone(),
                     "sourceProjectionFingerprint": artifact.and_then(|a| a.source_projection_fingerprint.clone()),
                     "source_projection_fingerprint": artifact.and_then(|a| a.source_projection_fingerprint.clone()),
                     "strategyId": artifact.map(|a| a.strategy_id.clone()),

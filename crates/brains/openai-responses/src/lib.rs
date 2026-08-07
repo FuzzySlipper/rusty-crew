@@ -3201,6 +3201,8 @@ where
                             .unwrap_or(usize::MAX),
                             1,
                         );
+                    let failed_artifact =
+                        responses_failed_compaction_artifact(&request, &usage, intent);
                     push_stream_item(
                         &mut items,
                         responses_context_compaction_event(
@@ -3209,7 +3211,8 @@ where
                             BrainProviderStatusLevel::Error,
                             "compaction_policy_disabled",
                             &usage,
-                            None,
+                            Some(&failed_artifact),
+                            Some(&intent.intent_key),
                         ),
                         &mut sink,
                     );
@@ -3272,6 +3275,7 @@ where
                         "manual_intent_duplicate",
                         &usage,
                         None,
+                        Some(&intent.intent_key),
                     ),
                     &mut sink,
                 );
@@ -3284,6 +3288,7 @@ where
                         "manual_intent_duplicate",
                         &usage,
                         Some(existing),
+                        Some(&intent.intent_key),
                     ),
                     &mut sink,
                 );
@@ -3333,6 +3338,7 @@ where
                     "manual_intent",
                     &usage,
                     None,
+                    Some(&intent.intent_key),
                 ),
                 &mut sink,
             );
@@ -3375,6 +3381,7 @@ where
                             "manual_intent_completed",
                             &usage,
                             Some(&artifact),
+                            Some(&intent.intent_key),
                         ),
                         &mut sink,
                     );
@@ -3411,7 +3418,7 @@ where
                         stream: BrainWakeStream::from_items(items),
                         provider_state: None,
                         transport_metrics: metrics.finish(),
-                        yielded: false,
+                        yielded: true,
                         attention: None,
                         continuation_state: Some(continuation_state),
                     });
@@ -3428,6 +3435,7 @@ where
                             "manual_intent_failed",
                             &usage,
                             Some(&failed_artifact),
+                            Some(&intent.intent_key),
                         ),
                         &mut sink,
                     );
@@ -3524,6 +3532,7 @@ where
                                 "Mid-turn Responses context compaction started at a safe provider boundary.",
                                 &usage,
                                 None,
+                                None,
                             ),
                             &mut sink,
                         );
@@ -3561,6 +3570,7 @@ where
                                         "Mid-turn Responses context compaction completed; previous-response chaining was deliberately rebuilt from the compacted replay projection.",
                                         &usage,
                                         Some(&artifact),
+                                        None,
                                     ),
                                     &mut sink,
                                 );
@@ -3605,6 +3615,7 @@ where
                                         &summary,
                                         &usage,
                                         Some(&failed_artifact),
+                                        Some(&auto_intent.intent_key),
                                     ),
                                     &mut sink,
                                 );
@@ -4455,14 +4466,18 @@ fn responses_failed_compaction_artifact(
     let fingerprint = intent
         .source_projection_fingerprint
         .clone()
-        .or_else(|| Some(format!("manual-{}", intent.intent_key)));
+        .or_else(|| Some(format!("manual_{}", intent.intent_key.replace('-', "_"))));
     let strategy_id = intent
         .strategy_id
         .clone()
         .unwrap_or_else(|| "rolling_summary_compaction".to_string());
     let strategy_revision = intent.strategy_revision.clone().or(Some("1".to_string()));
     rusty_crew_brain_runtime::BrainContextCompactionArtifact {
-        artifact_id: format!("failed_{}_{}", intent.intent_key, request.wake_id),
+        artifact_id: format!(
+            "failed_{}_{}",
+            intent.intent_key.replace('-', "_"),
+            request.wake_id.replace('-', "_")
+        ),
         sequence: 1,
         strategy_id,
         strategy_revision,
@@ -4498,7 +4513,12 @@ fn responses_context_compaction_event(
     message: &str,
     usage: &rusty_crew_brain_runtime::BrainContextUsageSnapshot,
     artifact: Option<&BrainContextCompactionArtifact>,
+    intent_key: Option<&str>,
 ) -> BrainWakeStreamItem {
+    let derived_intent = artifact
+        .and_then(|a| a.source_projection_fingerprint.clone())
+        .map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string());
+    let authoritative = intent_key.map(|s| s.to_string()).or(derived_intent);
     event(
         request,
         BrainEvent::ProviderStatus {
@@ -4509,8 +4529,8 @@ fn responses_context_compaction_event(
                     "kind": kind,
                     "usage": usage,
                     "artifact": artifact,
-                    "intentKey": artifact.and_then(|a| a.source_projection_fingerprint.clone()).map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string()),
-                    "intent_key": artifact.and_then(|a| a.source_projection_fingerprint.clone()).map(|s| s.strip_prefix("manual-").unwrap_or(&s).to_string()),
+                    "intentKey": authoritative.clone(),
+                    "intent_key": authoritative.clone(),
                     "sourceProjectionFingerprint": artifact.and_then(|a| a.source_projection_fingerprint.clone()),
                     "source_projection_fingerprint": artifact.and_then(|a| a.source_projection_fingerprint.clone()),
                     "strategyId": artifact.map(|a| a.strategy_id.clone()),

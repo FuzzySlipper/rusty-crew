@@ -131,6 +131,7 @@ fn native_bridge_releases_buffer_handles_once() {
             system_prompt: "system".to_string(),
             role_assembly_json: vec![b'{', b'}'],
             wake_id: "wake".to_string(),
+            compaction_intent: None,
         })
         .unwrap();
     let body_handle = buffered.request.body_state;
@@ -181,6 +182,7 @@ fn native_bridge_reports_leaked_runtime_buffers() {
             system_prompt: "system".to_string(),
             role_assembly_json: vec![b'{', b'}'],
             wake_id: "wake".to_string(),
+            compaction_intent: None,
         })
         .unwrap();
 
