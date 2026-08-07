@@ -1634,6 +1634,74 @@ async function handleHttpRequest(
               throw new Error(`revision_conflict: expected ${input.expectRevision} but found ${latestRevision}`);
             }
           }
+          // Prefer the real brain wake path for manual compaction: build a
+          // BrainWakeRequest with compactionIntent and run it through the
+          // selected Rust brain (chat-completions / responses). This ensures
+          // the same safe-boundary check and provider projection mutation as
+          // automatic compaction, rather than a synthetic CoreEngine artifact.
+          // Fall back to the direct Rust manual operation only if the brain
+          // wake cannot be constructed (e.g., no brain registered for the
+          // session's profile).
+          try {
+            const wakeId = `manual-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const brainRequest = await (state.bridge as unknown as {
+              buildBrainWakeRequestForSession: (input: unknown) => Promise<unknown>;
+              wakeBrain: (request: unknown) => Promise<unknown>;
+            }).buildBrainWakeRequestForSession({
+              sessionId: input.session.sessionId,
+              wakeId,
+              compactionIntent: {
+                intentKey: input.intentKey,
+                kind: "manual",
+                strategyId: input.strategyId ?? undefined,
+                strategyRevision: input.strategyRevision ?? undefined,
+                sourceProjectionFingerprint: input.sourceProjectionFingerprint ?? undefined,
+                trigger: "manual_intent",
+              },
+            });
+            await (state.bridge as unknown as { wakeBrain: (r: unknown) => Promise<unknown> }).wakeBrain(brainRequest);
+            // Poll for the persisted artifact (completed or failed) that the
+            // brain's wake dispatch will have written via saveContextCompactionArtifact.
+            for (let attempt = 0; attempt < 20; attempt++) {
+              await new Promise((r) => setTimeout(r, 250));
+              const found = await state.bridge.listContextCompactionArtifacts({
+                session_id: input.session.sessionId,
+                branch_id: undefined,
+                strategy_id: undefined,
+                enters_future_context: undefined,
+                latest_only: false,
+                limit: 1000,
+                offset: 0,
+              });
+              const match = found.find(
+                (a) =>
+                  a.intent_key === input.intentKey &&
+                  (a.source_projection_fingerprint ?? `manual-${a.intent_key}`) === effectiveFingerprint,
+              );
+              if (match) {
+                const rev = match.strategy_revision ? Number.parseInt(match.strategy_revision, 10) : 0;
+                return {
+                  ok: true as const,
+                  session_id: match.session_id as unknown as string,
+                  artifact: match as unknown as {
+                    artifact_id: string;
+                    session_id: string;
+                    strategy_id: string;
+                    terminal_status: string;
+                    created_at: string;
+                    strategy_revision?: string | null;
+                    [key: string]: unknown;
+                  },
+                  terminal_status: match.terminal_status ?? "completed",
+                  idempotent: false,
+                  revision: rev,
+                };
+              }
+            }
+          } catch {
+            // Fall through to direct Rust manual operation if brain wake is
+            // unavailable for this session/profile.
+          }
           const typed = (await state.bridge.manualContextCompaction({
             session_id: input.session.sessionId,
             intent_key: input.intentKey,
