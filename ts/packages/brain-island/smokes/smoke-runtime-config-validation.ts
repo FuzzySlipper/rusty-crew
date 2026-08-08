@@ -38,7 +38,6 @@ const profile: ProfileConfig = {
   },
   runtime: {
     defaultResourceLimits: {
-      workdir: "/tmp/rusty-crew-runtime-validator",
       maxDurationMs: 60_000,
       maxDelegationDepth: 4,
     },
@@ -91,8 +90,8 @@ const runtimeConfig: RustyCrewRuntimeConfig = {
       agentId,
       profileId,
       kind: "full",
+      workspaceCwd: "/tmp/rusty-crew-runtime-validator",
       resourceLimits: {
-        workdir: "/tmp/rusty-crew-runtime-validator",
         maxDurationMs: 60_000,
         maxDelegationDepth: 4,
       },
@@ -263,6 +262,7 @@ const createPlan = await planCreateProfileWithRust({
     displayName: "Field Created Profile",
     soulMarkdown: "# Field soul\n\n  Preserve exact spacing.\n",
     memoryMarkdown: "# Field memory\n",
+    workspaceCwd: "/tmp/rusty-crew-runtime-validator",
     mcpToolProfile: "field-created-profile",
     source: { templateId: "starter" },
     now: "2026-06-26T09:30:00.000Z",

@@ -317,8 +317,12 @@ function sessionState(
     profileId: "prime" as never,
     kind: "full",
     delegation: null,
+    workspace: {
+      cwd: "/home",
+      revision: 1,
+      updatedAt: "2026-07-28T00:00:00Z",
+    },
     resourceLimits: {
-      workdir: "/home",
       maxDurationMs: null,
       maxDelegationDepth: null,
     },

@@ -953,7 +953,6 @@ mod tests {
                 delegation: None,
                 workspace: None,
                 resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
-                    workdir: None,
                     max_duration_ms: None,
                     max_delegation_depth: None,
                 },
@@ -1065,7 +1064,6 @@ mod tests {
                 delegation: None,
                 workspace: None,
                 resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
-                    workdir: None,
                     max_duration_ms: None,
                     max_delegation_depth: None,
                 },

@@ -5,6 +5,7 @@ import type {
   ResourceLimits,
   SessionId,
   TaskId,
+  DelegatedWorkspaceConstraint,
 } from "@rusty-crew/contracts";
 import type { NativeDelegatedRoleLifecyclePlan } from "@rusty-crew/native-bridge";
 import type { BrainRoleAssembly } from "./index.js";
@@ -31,6 +32,7 @@ export interface DelegationRoleContext {
   expectedOutput?: string;
   correlationId?: string;
   resourceLimits?: ResourceLimits;
+  workspaceConstraint?: DelegatedWorkspaceConstraint;
   taskContext?: string;
   acceptanceCriteria?: string[];
   parentInstructions?: string;
@@ -82,6 +84,7 @@ export function buildDelegatedRoleAssemblyFromLifecyclePlan(
       expectedOutput: input.expectedOutput,
       correlationId: input.plan.correlationId,
       resourceLimits: input.plan.resourceLimits,
+      workspaceConstraint: input.plan.workspaceConstraint,
       taskContext: input.taskContext,
       acceptanceCriteria: input.acceptanceCriteria,
       parentInstructions: input.parentInstructions,
@@ -125,6 +128,9 @@ export function buildDelegatedRoleAssembly(
     "",
     "## Resource Limits",
     resourceLimitsText(input.context.resourceLimits),
+    input.context.workspaceConstraint
+      ? `- delegated workspace constraint: ${input.context.workspaceConstraint.cwd}`
+      : "- No delegated workspace constraint was supplied.",
     "",
     "## Delegated Prompt",
     input.context.prompt,
@@ -214,7 +220,6 @@ function resourceLimitsText(limits: ResourceLimits | undefined): string {
     return "- No child-specific resource limits were supplied.";
   }
   return [
-    limits.workdir ? `- workdir: ${limits.workdir}` : undefined,
     limits.maxDurationMs !== undefined
       ? `- maxDurationMs: ${limits.maxDurationMs}`
       : undefined,

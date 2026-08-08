@@ -28,7 +28,8 @@ export const nativeMappingInventory = {
           "resource_limits",
           "task_id",
           "timeout_ms",
-          "type"
+          "type",
+          "workspace_constraint"
         ],
         "BrainActionBatch": [
           "actions",
@@ -2092,8 +2093,7 @@ export const nativeMappingInventory = {
         ],
         "ResourceLimits": [
           "max_delegation_depth",
-          "max_duration_ms",
-          "workdir"
+          "max_duration_ms"
         ],
         "RuntimeConfigDiagnostic": [
           "code",

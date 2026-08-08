@@ -28,9 +28,11 @@ const failurePolicySchema = Type.Union([
 ]);
 
 const delegationResourceSchema = Type.Object({
-  workdir: Type.Optional(Type.String({ minLength: 1 })),
   maxDurationMs: Type.Optional(Type.Number({ minimum: 1 })),
   maxDelegationDepth: Type.Optional(Type.Number({ minimum: 0 })),
+});
+const delegatedWorkspaceConstraintSchema = Type.Object({
+  cwd: Type.String({ minLength: 1 }),
 });
 
 const capacityRequestSchema = Type.Object({
@@ -49,6 +51,7 @@ const spawnSubagentParameters = Type.Object({
   prompt: Type.String({ minLength: 1 }),
   taskId: Type.Optional(Type.String({ minLength: 1 })),
   expectedOutput: Type.Optional(Type.String({ minLength: 1 })),
+  workspaceConstraint: Type.Optional(delegatedWorkspaceConstraintSchema),
   resourceLimits: Type.Optional(delegationResourceSchema),
   timeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
   priority: Type.Optional(prioritySchema),
@@ -65,6 +68,7 @@ const fanOutSubagentsParameters = Type.Object({
   priority: Type.Optional(prioritySchema),
   parentConsumption: Type.Optional(parentConsumptionSchema),
   expectedOutput: Type.Optional(Type.String({ minLength: 1 })),
+  workspaceConstraint: Type.Optional(delegatedWorkspaceConstraintSchema),
   resourceLimits: Type.Optional(delegationResourceSchema),
   subagents: Type.Array(
     Type.Object({
@@ -73,6 +77,7 @@ const fanOutSubagentsParameters = Type.Object({
       taskId: Type.Optional(Type.String({ minLength: 1 })),
       expectedOutput: Type.Optional(Type.String({ minLength: 1 })),
       correlationId: Type.Optional(Type.String({ minLength: 1 })),
+      workspaceConstraint: Type.Optional(delegatedWorkspaceConstraintSchema),
       resourceLimits: Type.Optional(delegationResourceSchema),
       capacityRequest: Type.Optional(capacityRequestSchema),
     }),
@@ -192,6 +197,7 @@ export function spawnSubagentTool(
           prompt: params.prompt,
           taskId: params.taskId,
           expectedOutput: params.expectedOutput,
+          workspaceConstraint: params.workspaceConstraint,
           resourceLimits: params.resourceLimits,
           timeoutMs: params.timeoutMs,
           priority: params.priority,
@@ -241,6 +247,8 @@ export function fanOutSubagentsTool(
           prompt: subagent.prompt,
           taskId: subagent.taskId,
           expectedOutput: subagent.expectedOutput ?? params.expectedOutput,
+          workspaceConstraint:
+            subagent.workspaceConstraint ?? params.workspaceConstraint,
           resourceLimits: subagent.resourceLimits ?? params.resourceLimits,
           timeoutMs: params.timeoutMs,
           priority: params.priority,
@@ -404,6 +412,7 @@ function requestDelegationAction(
     prompt: string;
     taskId?: string;
     expectedOutput?: string;
+    workspaceConstraint?: { cwd: string };
     resourceLimits?: ResourceLimits;
     timeoutMs?: number;
     priority?: "low" | "normal" | "high";
@@ -424,6 +433,7 @@ function requestDelegationAction(
     taskId: input.taskId as TaskId | undefined,
     prompt: input.prompt,
     expectedOutput: input.expectedOutput,
+    workspaceConstraint: input.workspaceConstraint,
     resourceLimits: childResourceLimits(context, input.resourceLimits),
     timeoutMs: input.timeoutMs,
     priority: input.priority,
@@ -488,7 +498,6 @@ function childResourceLimits(
   const inheritedDepth =
     parentDepth == null ? undefined : Math.max(0, parentDepth - 1);
   return {
-    workdir: requested?.workdir ?? parent.workdir,
     maxDurationMs: requested?.maxDurationMs ?? parent.maxDurationMs,
     maxDelegationDepth: requested?.maxDelegationDepth ?? inheritedDepth,
   };
@@ -649,8 +658,10 @@ function delegationRequestFromFields(
       expectedOutput:
         stringField(fields, "expected_output") ??
         sectionByHeading(prompt, "Expected Output"),
+      workspaceConstraint: stringField(fields, "workspace_cwd")
+        ? { cwd: stringField(fields, "workspace_cwd")! }
+        : undefined,
       resourceLimits: compactResourceLimits({
-        workdir: stringField(fields, "workdir"),
         maxDurationMs: maxDurationMs.value,
         maxDelegationDepth: maxDelegationDepth.value,
       }),
@@ -869,8 +880,7 @@ function stringField(
 function compactResourceLimits(
   input: ResourceLimits,
 ): ResourceLimits | undefined {
-  return input.workdir !== undefined ||
-    input.maxDurationMs !== undefined ||
+  return input.maxDurationMs !== undefined ||
     input.maxDelegationDepth !== undefined
     ? input
     : undefined;

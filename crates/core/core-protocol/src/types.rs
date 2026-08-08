@@ -330,17 +330,27 @@ pub struct ProfileRegistryLifecycleUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ResourceLimits {
-    pub workdir: Option<String>,
     pub max_duration_ms: Option<u32>,
     pub max_delegation_depth: Option<u32>,
+}
+
+/// An opt-in filesystem constraint for one explicit delegated invocation.
+///
+/// This is deliberately not a profile or ordinary-session policy. It is
+/// persisted only with delegation lineage so a child cannot acquire it from a
+/// reusable profile or infer it from its parent's execution cwd.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DelegatedWorkspaceConstraint {
+    pub cwd: String,
 }
 
 /// The canonical execution context for one logical session.
 ///
 /// This is deliberately not a filesystem permission boundary. Ordinary full
-/// agents may still address absolute paths outside `cwd`; delegated workdir
-/// confinement remains a separate resource-limit concern.
+/// agents may still address absolute paths outside `cwd`; optional delegated
+/// confinement is represented separately on explicit delegation lineage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionWorkspace {
     pub cwd: String,
@@ -376,6 +386,8 @@ pub struct DelegationLineage {
     pub source_action_index: u32,
     pub requested_task_id: Option<TaskId>,
     pub correlation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_constraint: Option<DelegatedWorkspaceConstraint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1298,6 +1310,8 @@ pub enum BrainAction {
         prompt: String,
         expected_output: Option<String>,
         resource_limits: Option<ResourceLimits>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace_constraint: Option<DelegatedWorkspaceConstraint>,
         timeout_ms: Option<u32>,
         priority: Option<DelegationPriority>,
         fan_out_group_id: Option<String>,
@@ -2284,5 +2298,15 @@ mod tests {
         assert!(error
             .message
             .contains("invalid model provider secret envelope"));
+    }
+
+    #[test]
+    fn resource_limits_reject_path_fields() {
+        let error = serde_json::from_value::<ResourceLimits>(serde_json::json!({
+            "workdir": "/profile-or-session-path",
+            "max_duration_ms": 30_000
+        }))
+        .expect_err("resource limits must not accept a path field");
+        assert!(error.to_string().contains("unknown field `workdir`"));
     }
 }

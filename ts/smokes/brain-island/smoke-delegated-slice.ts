@@ -236,7 +236,6 @@ async function projectBodyState(sessionId: SessionId): Promise<BodyState> {
       kind: raw.session.kind,
       delegation: toTsDelegationLineage(raw.session.delegation),
       resourceLimits: {
-        workdir: raw.session.resource_limits?.workdir,
         maxDurationMs: raw.session.resource_limits?.max_duration_ms,
         maxDelegationDepth: raw.session.resource_limits?.max_delegation_depth,
       },
@@ -337,7 +336,6 @@ function toTsEvent(event: RustCoreEventJson): CoreEvent {
           kind: event.state.kind,
           delegation: toTsDelegationLineage(event.state.delegation),
           resourceLimits: {
-            workdir: event.state.resource_limits?.workdir,
             maxDurationMs: event.state.resource_limits?.max_duration_ms,
             maxDelegationDepth:
               event.state.resource_limits?.max_delegation_depth,
@@ -421,6 +419,9 @@ function toTsDelegationLineage(
         sourceActionIndex: lineage.source_action_index,
         requestedTaskId: lineage.requested_task_id as TaskId | undefined,
         correlationId: lineage.correlation_id,
+        workspaceConstraint: lineage.workspace_constraint
+          ? { cwd: lineage.workspace_constraint.cwd }
+          : undefined,
       }
     : undefined;
 }
@@ -447,7 +448,6 @@ interface RustSessionStateJson {
   kind: "full" | "worker" | "delegated";
   delegation?: RustDelegationLineageJson;
   resource_limits?: {
-    workdir?: string;
     max_duration_ms?: number;
     max_delegation_depth?: number;
   };
@@ -465,6 +465,7 @@ interface RustDelegationLineageJson {
   source_action_index: number;
   requested_task_id?: string;
   correlation_id: string;
+  workspace_constraint?: { cwd: string };
 }
 
 interface RustDelegatedCompletionJson {

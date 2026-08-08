@@ -86,8 +86,8 @@ try {
           taskId: "2844" as TaskId,
           prompt: "Complete the delegated production wake proof.",
           expectedOutput: "completion packet",
+          workspaceConstraint: { cwd: "/home/dev/rusty-crew" },
           resourceLimits: {
-            workdir: "/home/dev/rusty-crew",
             maxDurationMs: 30_000,
             maxDelegationDepth: 0,
           },
@@ -192,7 +192,6 @@ try {
             agentId: plannerAgentId,
             kind: "full",
             resourceLimits: {
-              workdir: "/home/dev/rusty-crew",
               maxDurationMs: 30_000,
               maxDelegationDepth: 1,
             },
@@ -202,10 +201,10 @@ try {
           profileId: coderProfileId,
           toolProfileKey: "coder-profile",
           requestedResourceLimits: {
-            workdir: "/home/dev/rusty-crew",
             maxDurationMs: 30_000,
             maxDelegationDepth: 0,
           },
+          requestedWorkspaceConstraint: { cwd: "/home/dev/rusty-crew" },
           sourceWakeId: "production-wake-1",
           sourceActionIndex: 0,
           taskId: "2844" as TaskId,

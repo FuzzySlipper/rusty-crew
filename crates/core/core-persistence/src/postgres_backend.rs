@@ -13353,7 +13353,6 @@ mod tests {
 
     fn backend_resource_limits() -> ResourceLimits {
         ResourceLimits {
-            workdir: Some("/tmp/rusty-crew-test".to_string()),
             max_duration_ms: Some(60_000),
             max_delegation_depth: Some(4),
         }
@@ -16273,7 +16272,6 @@ mod tests {
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -16804,7 +16802,6 @@ mod tests {
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -17012,7 +17009,6 @@ mod tests {
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },

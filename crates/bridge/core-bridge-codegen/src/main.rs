@@ -2697,7 +2697,6 @@ fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
 
 fn sample_resource_limits() -> ResourceLimits {
     ResourceLimits {
-        workdir: Some("/home/dev/rusty-crew".to_owned()),
         max_duration_ms: Some(3_600_000),
         max_delegation_depth: Some(4),
     }
@@ -3467,6 +3466,9 @@ fn sample_brain_action() -> BrainAction {
         prompt: "Review bridge mapping inventory coverage.".to_owned(),
         expected_output: Some("Findings and validation evidence.".to_owned()),
         resource_limits: Some(sample_resource_limits()),
+        workspace_constraint: Some(DelegatedWorkspaceConstraint {
+            cwd: "/home/dev/rusty-crew".to_owned(),
+        }),
         timeout_ms: Some(300_000),
         priority: Some(DelegationPriority::Normal),
         fan_out_group_id: Some("bridge-validation-group".to_owned()),
@@ -3542,7 +3544,6 @@ fn sample_session_state() -> SessionState {
             updated_at: sample_timestamp(),
         }),
         resource_limits: ResourceLimits {
-            workdir: None,
             max_duration_ms: None,
             max_delegation_depth: Some(3),
         },

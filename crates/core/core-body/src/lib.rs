@@ -7,6 +7,7 @@ use rusty_crew_core_protocol::{
     DeltaQueueOwner, EventReceipt, MidTurnDeltaMode, SessionId, SessionKind, SessionStatus,
 };
 use rusty_crew_core_session::SessionRegistry;
+use std::path::Path;
 
 pub trait WakeThreshold {
     fn should_wake(&self, state: &BodyState, event: &CoreEvent) -> bool;
@@ -226,6 +227,7 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
             prompt,
             expected_output,
             resource_limits,
+            workspace_constraint,
             timeout_ms,
             fan_out_group_id,
             fan_out_max_concurrency,
@@ -259,15 +261,13 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
                     "request_delegation timeout_ms must be greater than zero when provided",
                 ));
             }
-            if resource_limits
-                .as_ref()
-                .and_then(|limits| limits.workdir.as_deref())
-                .is_some_and(|value| value.trim().is_empty())
-            {
-                return Err(CoreError::new(
-                    CoreErrorKind::InvalidInput,
-                    "request_delegation resource_limits.workdir must be non-empty when provided",
-                ));
+            if let Some(constraint) = workspace_constraint {
+                if constraint.cwd.trim().is_empty() || !Path::new(&constraint.cwd).is_absolute() {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "request_delegation workspace_constraint.cwd must be a non-empty absolute path",
+                    ));
+                }
             }
             if resource_limits
                 .as_ref()

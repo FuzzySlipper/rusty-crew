@@ -132,7 +132,7 @@ try {
     agentId,
     profileId,
     kind: "full",
-    resourceLimits: { workdir: dataDir },
+    workspace: { cwd: dataDir, revision: 1, updatedAt: now() },
     toolProfile: { tools: [] },
   });
   await bridge.ensureConfiguredSession({
@@ -140,7 +140,7 @@ try {
     agentId: peerAgentId,
     profileId: peerProfileId,
     kind: "full",
-    resourceLimits: { workdir: dataDir },
+    workspace: { cwd: dataDir, revision: 1, updatedAt: now() },
     toolProfile: { tools: [] },
   });
   await bridge.bindExternalAgent({
@@ -728,7 +728,7 @@ try {
     agentId: staleAgentId,
     profileId: staleProfileId,
     kind: "full",
-    resourceLimits: { workdir: dataDir },
+    workspace: { cwd: dataDir, revision: 1, updatedAt: now() },
     toolProfile: { tools: [] },
   });
   await bridge.bindExternalAgent({
@@ -773,7 +773,7 @@ try {
     agentId,
     profileId,
     kind: "full",
-    resourceLimits: { workdir: dataDir },
+    workspace: { cwd: dataDir, revision: 1, updatedAt: now() },
     toolProfile: { tools: [] },
   });
   await bridge.ensureConfiguredSession({
@@ -781,7 +781,7 @@ try {
     agentId: peerAgentId,
     profileId: peerProfileId,
     kind: "full",
-    resourceLimits: { workdir: dataDir },
+    workspace: { cwd: dataDir, revision: 1, updatedAt: now() },
     toolProfile: { tools: [] },
   });
   controller = new ServiceExternalRuntimeController({ bridge });

@@ -13,8 +13,9 @@ prompt, and schedules the wake.
 - `task_id`: optional Den/product task reference.
 - `prompt`: required routed prompt for the delegated session.
 - `expected_output`: optional natural-language output/packet expectation.
-- `resource_limits`: optional child limits such as workdir, duration, and
-  delegation depth.
+- `workspace_constraint`: optional, explicitly delegated-only absolute cwd
+  constraint for worker path operations.
+- `resource_limits`: optional child duration and delegation-depth limits.
 - `timeout_ms`: optional requested lifecycle timeout.
 - `priority`: optional scheduling hint: `low`, `normal`, or `high`.
 - `fan_out_group_id`: optional grouping key for bounded fan-out execution.
@@ -41,6 +42,7 @@ records:
 - `timeout_ms` must be greater than zero when provided.
 - `fan_out_max_concurrency` must be greater than zero when provided.
 - `resource_limits.max_duration_ms` must be greater than zero when provided.
+- `workspace_constraint.cwd` must be a non-empty absolute path when provided.
 - All requests in the same fan-out group in one action batch must agree on
   `fan_out_max_concurrency` and `fan_out_failure_policy`.
 - A fan-out group whose submitted action count exceeds `fan_out_max_concurrency`
@@ -49,6 +51,10 @@ records:
 Depth, timeout execution, and parent consumption semantics are lifecycle
 concerns owned by Rust. Fan-out is modelled as direct delegated sessions, not a
 worker-pool lease.
+
+The workspace constraint is not a profile default and is not inferred from the
+parent or child session workspace. Session workspace cwd remains execution
+context, not a filesystem permission boundary.
 
 ## Body Projection
 

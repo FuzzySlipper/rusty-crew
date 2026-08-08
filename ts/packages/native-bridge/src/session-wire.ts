@@ -13,7 +13,6 @@ import {
   toSessionResourceLimits,
   type RawSessionResourceLimits,
 } from "./session-resource-wire.js";
-
 export interface RawSessionState {
   handle: number;
   session_id: SessionId;
@@ -27,6 +26,7 @@ export interface RawSessionState {
     source_action_index: number;
     requested_task_id?: TaskId;
     correlation_id: string;
+    workspace_constraint?: { cwd: string };
   };
   workspace?: RawSessionWorkspace | null;
   resource_limits?: RawSessionResourceLimits;
@@ -64,6 +64,9 @@ export function toSessionState(state: RawSessionState): SessionState {
           sourceActionIndex: state.delegation.source_action_index,
           requestedTaskId: state.delegation.requested_task_id,
           correlationId: state.delegation.correlation_id,
+          workspaceConstraint: state.delegation.workspace_constraint
+            ? { cwd: state.delegation.workspace_constraint.cwd }
+            : undefined,
         }
       : undefined,
     workspace:

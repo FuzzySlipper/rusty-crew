@@ -213,6 +213,7 @@ impl CoreEngine {
                 task_id,
                 prompt,
                 resource_limits,
+                workspace_constraint,
                 correlation_id,
                 parent_consumption,
                 fan_out_group_id,
@@ -264,17 +265,16 @@ impl CoreEngine {
                 source_action_index: index as u32,
                 requested_task_id: task_id.clone(),
                 correlation_id: correlation_id.clone(),
+                workspace_constraint: workspace_constraint.clone(),
             };
             let delegated_resource_limits = resource_limits.clone().unwrap_or(ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: Some(0),
             });
-            let workspace = delegated_resource_limits
-                .workdir
+            let workspace = workspace_constraint
                 .as_ref()
-                .map(|cwd| SessionWorkspace {
-                    cwd: cwd.clone(),
+                .map(|constraint| SessionWorkspace {
+                    cwd: constraint.cwd.clone(),
                     revision: 1,
                     updated_at: self.now(),
                 })

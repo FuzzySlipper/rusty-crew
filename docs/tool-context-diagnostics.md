@@ -35,9 +35,11 @@ The report filters channel and MCP diagnostics to the current session or profile
 
 - channel binding count, statuses, and degraded notes
 - MCP surface count, statuses, server names, and collision count
-- workdir scope
 - duration and delegation depth limits
 - read-only session effects on write/process tools
+
+Session cwd and delegated workspace constraints are intentionally not reported
+as generic resource limits. Profiles cannot carry either field.
 
 Tool rows expose canonical metadata and inventory explanations. They do not
 include executor module pointers by default; those remain an intentional

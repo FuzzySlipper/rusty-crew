@@ -9665,6 +9665,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "resource_limits": {
+              "additionalProperties": false,
               "properties": {
                 "max_delegation_depth": {
                   "format": "uint32",
@@ -9679,12 +9680,6 @@ export const bridgeWireSchemaArtifact = {
                   "minimum": 0,
                   "type": [
                     "integer",
-                    "null"
-                  ]
-                },
-                "workdir": {
-                  "type": [
-                    "string",
                     "null"
                   ]
                 }
@@ -9787,6 +9782,7 @@ export const bridgeWireSchemaArtifact = {
           "type": "string"
         },
         "resource_limits": {
+          "additionalProperties": false,
           "properties": {
             "max_delegation_depth": {
               "format": "uint32",
@@ -9801,12 +9797,6 @@ export const bridgeWireSchemaArtifact = {
               "minimum": 0,
               "type": [
                 "integer",
-                "null"
-              ]
-            },
-            "workdir": {
-              "type": [
-                "string",
                 "null"
               ]
             }
@@ -9833,6 +9823,21 @@ export const bridgeWireSchemaArtifact = {
         "tool_profile_key": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "workspace_constraint": {
+          "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+          "properties": {
+            "cwd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd"
+          ],
+          "type": [
+            "object",
             "null"
           ]
         }
@@ -11241,6 +11246,7 @@ export const bridgeWireSchemaArtifact = {
                     "type": "string"
                   },
                   "resource_limits": {
+                    "additionalProperties": false,
                     "properties": {
                       "max_delegation_depth": {
                         "format": "uint32",
@@ -11255,12 +11261,6 @@ export const bridgeWireSchemaArtifact = {
                         "minimum": 0,
                         "type": [
                           "integer",
-                          "null"
-                        ]
-                      },
-                      "workdir": {
-                        "type": [
-                          "string",
                           "null"
                         ]
                       }
@@ -11735,6 +11735,7 @@ export const bridgeWireSchemaArtifact = {
                     "type": "string"
                   },
                   "resource_limits": {
+                    "additionalProperties": false,
                     "properties": {
                       "max_delegation_depth": {
                         "format": "uint32",
@@ -11749,12 +11750,6 @@ export const bridgeWireSchemaArtifact = {
                         "minimum": 0,
                         "type": [
                           "integer",
-                          "null"
-                        ]
-                      },
-                      "workdir": {
-                        "type": [
-                          "string",
                           "null"
                         ]
                       }
@@ -13325,6 +13320,21 @@ export const bridgeWireSchemaArtifact = {
                 },
                 "source_wake_id": {
                   "type": "string"
+                },
+                "workspace_constraint": {
+                  "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+                  "properties": {
+                    "cwd": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cwd"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -13387,6 +13397,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "resource_limits": {
+              "additionalProperties": false,
               "properties": {
                 "max_delegation_depth": {
                   "format": "uint32",
@@ -13401,12 +13412,6 @@ export const bridgeWireSchemaArtifact = {
                   "minimum": 0,
                   "type": [
                     "integer",
-                    "null"
-                  ]
-                },
-                "workdir": {
-                  "type": [
-                    "string",
                     "null"
                   ]
                 }
@@ -13459,7 +13464,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "object"
             },
             "workspace": {
-              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
               "properties": {
                 "cwd": {
                   "type": "string"
@@ -13668,6 +13673,21 @@ export const bridgeWireSchemaArtifact = {
                           },
                           "source_wake_id": {
                             "type": "string"
+                          },
+                          "workspace_constraint": {
+                            "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+                            "properties": {
+                              "cwd": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "cwd"
+                            ],
+                            "type": [
+                              "object",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -13730,6 +13750,7 @@ export const bridgeWireSchemaArtifact = {
                         "type": "string"
                       },
                       "resource_limits": {
+                        "additionalProperties": false,
                         "properties": {
                           "max_delegation_depth": {
                             "format": "uint32",
@@ -13744,12 +13765,6 @@ export const bridgeWireSchemaArtifact = {
                             "minimum": 0,
                             "type": [
                               "integer",
-                              "null"
-                            ]
-                          },
-                          "workdir": {
-                            "type": [
-                              "string",
                               "null"
                             ]
                           }
@@ -13802,7 +13817,7 @@ export const bridgeWireSchemaArtifact = {
                         "type": "object"
                       },
                       "workspace": {
-                        "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+                        "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
                         "properties": {
                           "cwd": {
                             "type": "string"
@@ -19998,6 +20013,21 @@ export const bridgeWireSchemaArtifact = {
                 },
                 "source_wake_id": {
                   "type": "string"
+                },
+                "workspace_constraint": {
+                  "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+                  "properties": {
+                    "cwd": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cwd"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -20060,6 +20090,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "resource_limits": {
+              "additionalProperties": false,
               "properties": {
                 "max_delegation_depth": {
                   "format": "uint32",
@@ -20074,12 +20105,6 @@ export const bridgeWireSchemaArtifact = {
                   "minimum": 0,
                   "type": [
                     "integer",
-                    "null"
-                  ]
-                },
-                "workdir": {
-                  "type": [
-                    "string",
                     "null"
                   ]
                 }
@@ -20132,7 +20157,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "object"
             },
             "workspace": {
-              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
               "properties": {
                 "cwd": {
                   "type": "string"
@@ -21769,6 +21794,21 @@ export const bridgeWireSchemaArtifact = {
                 },
                 "source_wake_id": {
                   "type": "string"
+                },
+                "workspace_constraint": {
+                  "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+                  "properties": {
+                    "cwd": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cwd"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -21831,6 +21871,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "resource_limits": {
+              "additionalProperties": false,
               "properties": {
                 "max_delegation_depth": {
                   "format": "uint32",
@@ -21845,12 +21886,6 @@ export const bridgeWireSchemaArtifact = {
                   "minimum": 0,
                   "type": [
                     "integer",
-                    "null"
-                  ]
-                },
-                "workdir": {
-                  "type": [
-                    "string",
                     "null"
                   ]
                 }
@@ -21903,7 +21938,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "object"
             },
             "workspace": {
-              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
               "properties": {
                 "cwd": {
                   "type": "string"
@@ -25139,7 +25174,7 @@ export const bridgeWireSchemaArtifact = {
     "rusty_crew_core_protocol::types::SessionWorkspaceUpdateRecord": {
       "properties": {
         "current": {
-          "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+          "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
           "properties": {
             "cwd": {
               "type": "string"
@@ -25161,7 +25196,7 @@ export const bridgeWireSchemaArtifact = {
           "type": "object"
         },
         "previous": {
-          "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+          "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
           "properties": {
             "cwd": {
               "type": "string"
@@ -25219,6 +25254,21 @@ export const bridgeWireSchemaArtifact = {
                 },
                 "source_wake_id": {
                   "type": "string"
+                },
+                "workspace_constraint": {
+                  "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+                  "properties": {
+                    "cwd": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cwd"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -25281,6 +25331,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "string"
             },
             "resource_limits": {
+              "additionalProperties": false,
               "properties": {
                 "max_delegation_depth": {
                   "format": "uint32",
@@ -25295,12 +25346,6 @@ export const bridgeWireSchemaArtifact = {
                   "minimum": 0,
                   "type": [
                     "integer",
-                    "null"
-                  ]
-                },
-                "workdir": {
-                  "type": [
-                    "string",
                     "null"
                   ]
                 }
@@ -25353,7 +25398,7 @@ export const bridgeWireSchemaArtifact = {
               "type": "object"
             },
             "workspace": {
-              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
               "properties": {
                 "cwd": {
                   "type": "string"

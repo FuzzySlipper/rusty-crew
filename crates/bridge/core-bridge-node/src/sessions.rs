@@ -72,7 +72,6 @@ pub(crate) fn to_js_session_state(
             updated_at: workspace.updated_at,
         }),
         resource_limits: JsResourceLimits {
-            workdir: state.resource_limits.workdir,
             max_duration_ms: state.resource_limits.max_duration_ms,
             max_delegation_depth: state.resource_limits.max_delegation_depth,
         },
@@ -130,12 +129,10 @@ pub(crate) fn js_session_config(
             }),
         resource_limits: match resource_limits {
             Some(limits) => rusty_crew_core_bridge_api::ResourceLimits {
-                workdir: limits.workdir,
                 max_duration_ms: limits.max_duration_ms,
                 max_delegation_depth: limits.max_delegation_depth,
             },
             None => rusty_crew_core_bridge_api::ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },

@@ -192,7 +192,6 @@ impl CoreEngine {
             resource_limits: template
                 .map(|config| config.resource_limits.clone())
                 .unwrap_or(ResourceLimits {
-                    workdir: None,
                     max_duration_ms: None,
                     max_delegation_depth: None,
                 }),

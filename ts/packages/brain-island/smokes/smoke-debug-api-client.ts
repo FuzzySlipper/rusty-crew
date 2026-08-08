@@ -22,9 +22,12 @@ const session = {
   agentId: "debug-client-agent" as AgentId,
   profileId: "debug-client-profile" as ProfileId,
   kind: "full",
-  resourceLimits: {
-    workdir: "/home/dev/rusty-crew",
+  workspace: {
+    cwd: "/home/dev/rusty-crew",
+    revision: 1,
+    updatedAt: "2026-06-20T00:00:00Z",
   },
+  resourceLimits: {},
   toolProfile: {
     tools: [
       {

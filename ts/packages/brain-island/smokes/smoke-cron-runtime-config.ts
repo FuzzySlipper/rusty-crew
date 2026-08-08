@@ -31,7 +31,6 @@ try {
         modelConfig: { provider: "local", modelName: "deterministic" },
         runtime: {
           defaultResourceLimits: {
-            workdir: join(root, "work", "cron-profile"),
             maxDurationMs: 60000,
             maxDelegationDepth: 3,
           },
@@ -72,6 +71,7 @@ try {
             agentId: "cron-agent",
             profileId: "cron-profile",
             kind: "full",
+            workspaceCwd: join(root, "work", "cron-session"),
           },
         ],
         scheduledJobs: [
@@ -158,10 +158,7 @@ try {
   assert.equal(runtimeConfig.mcpBindings[0]?.toolProfileKey, "cron-profile");
   assert.equal(runtimeConfig.sessions[0]?.ownerId, "cron-owner");
   assert.equal(runtimeConfig.sessions[0]?.maxHistoryMessages, 42);
-  assert.equal(
-    runtimeConfig.sessions[0]?.resourceLimits?.workdir,
-    join(root, "work", "cron-profile"),
-  );
+  assert.equal(runtimeConfig.sessions[0]?.resourceLimits?.maxDurationMs, 60000);
 
   const registered: Array<{
     jobId: string;
@@ -284,6 +281,7 @@ try {
             agentId: "cron-agent",
             profileId: "cron-profile",
             kind: "full",
+            workspaceCwd: join(root, "work", "cron-session"),
           },
         ],
         channelBindings: [

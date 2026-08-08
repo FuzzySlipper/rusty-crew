@@ -39,8 +39,8 @@ try {
     agentId,
     profileId,
     kind: "full",
+    workspaceCwd: workdir,
     resourceLimits: {
-      workdir,
       maxDurationMs: 120_000,
       maxDelegationDepth: 0,
     },
@@ -56,8 +56,8 @@ try {
       "data",
       "outcome",
       "result",
-      "resourceLimits",
-      "workdir",
+      "workspace",
+      "cwd",
     ]),
     workdir,
   );
@@ -83,6 +83,7 @@ try {
     agentId: `${profileId}-default-agent`,
     profileId,
     kind: "full",
+    workspaceCwd: workdir,
     reason: "task 5846 omitted resource limits",
   });
   assert.equal(
@@ -95,7 +96,7 @@ try {
       "outcome",
       "result",
       "resourceLimits",
-      "workdir",
+      "maxDurationMs",
     ]),
     undefined,
   );
@@ -109,7 +110,7 @@ try {
       agentId: `${profileId}-${label}-agent`,
       profileId,
       kind: "full",
-      resourceLimits: { workdir: invalidWorkdir },
+      workspaceCwd: invalidWorkdir,
       reason: `task 5846 rejects ${label} workdir`,
     });
     assert.equal(invalid.status, 200, invalid.text);
@@ -264,7 +265,7 @@ function assertSessionLimits(
   session: Record<string, unknown>,
   expectedWorkdir: string,
 ): void {
-  assert.equal(nested(session, ["resourceLimits", "workdir"]), expectedWorkdir);
+  assert.equal(nested(session, ["workspace", "cwd"]), expectedWorkdir);
   assert.equal(nested(session, ["resourceLimits", "maxDurationMs"]), 120_000);
   assert.equal(nested(session, ["resourceLimits", "maxDelegationDepth"]), 0);
 }

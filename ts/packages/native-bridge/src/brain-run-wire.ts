@@ -69,9 +69,11 @@ export function toNativeBrainAction(action: BrainAction): unknown {
         task_id: action.taskId,
         prompt: action.prompt,
         expected_output: action.expectedOutput,
+        workspace_constraint: action.workspaceConstraint
+          ? { cwd: action.workspaceConstraint.cwd }
+          : undefined,
         resource_limits: action.resourceLimits
           ? {
-              workdir: action.resourceLimits.workdir,
               max_duration_ms: action.resourceLimits.maxDurationMs,
               max_delegation_depth: action.resourceLimits.maxDelegationDepth,
             }
@@ -307,9 +309,11 @@ export function toBrainAction(action: RawBrainAction): BrainAction {
         taskId: action.task_id,
         prompt: action.prompt,
         expectedOutput: action.expected_output,
+        workspaceConstraint: action.workspace_constraint
+          ? { cwd: action.workspace_constraint.cwd }
+          : undefined,
         resourceLimits: action.resource_limits
           ? {
-              workdir: action.resource_limits.workdir,
               maxDurationMs: action.resource_limits.max_duration_ms,
               maxDelegationDepth: action.resource_limits.max_delegation_depth,
             }
@@ -693,6 +697,7 @@ export type RawBrainAction =
       task_id?: TaskId;
       prompt: string;
       expected_output?: string;
+      workspace_constraint?: { cwd: string };
       resource_limits?: RawResourceLimits;
       timeout_ms?: number;
       priority?: Extract<

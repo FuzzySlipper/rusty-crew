@@ -206,7 +206,6 @@ mod tests {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             }),
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: Some(60_000),
                 max_delegation_depth: Some(1),
             },

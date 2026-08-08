@@ -48,8 +48,7 @@
           "profile_id": "validation-profile",
           "resource_limits": {
             "max_delegation_depth": 3,
-            "max_duration_ms": null,
-            "workdir": null
+            "max_duration_ms": null
           },
           "session_id": "validation-session",
           "status": "idle",
@@ -91,8 +90,7 @@
           "profile_id": "validation-profile",
           "resource_limits": {
             "max_delegation_depth": 3,
-            "max_duration_ms": null,
-            "workdir": null
+            "max_duration_ms": null
           },
           "session_id": "validation-session",
           "status": "idle",

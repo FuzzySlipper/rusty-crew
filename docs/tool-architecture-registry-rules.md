@@ -45,7 +45,7 @@ bounded by infrastructure/resource constraints.
 ### Rust Owns
 
 - `ToolProfile` descriptors attached to sessions.
-- Resource limits such as workdir, max duration, and delegation depth.
+- Resource limits such as max duration and delegation depth.
 - Session/tool-profile auditability: which tools a session was allowed to see.
 - Durable tool execution telemetry carried by brain events or future internal
   tool events.
@@ -53,9 +53,10 @@ bounded by infrastructure/resource constraints.
   validation.
 - Rejection of malformed session/tool descriptors at registration boundaries.
 
-Rust does not execute ordinary TypeScript tools. Rust may enforce constraints
-that must not be bypassed, such as workdir scope or cancellation state, through
-bridge-visible contracts and durable events.
+Rust does not execute ordinary TypeScript tools. Rust validates the separately
+typed delegated workspace constraint and lifecycle state through bridge-visible
+contracts and durable events. Ordinary session cwd remains execution context,
+not a generic tool restriction.
 
 ## Canonical Registry
 

@@ -62,8 +62,10 @@ fn multi_agent_restart_search_queue_and_query_apis_prove_persistence_substrate()
                     task_id: Some(rusty_crew_core_protocol::TaskId::new("2879")),
                     prompt: "complete the e2e delegated persistence proof".to_string(),
                     expected_output: Some("proof completion".to_string()),
+                    workspace_constraint: Some(DelegatedWorkspaceConstraint {
+                        cwd: "/home/dev/rusty-crew".to_string(),
+                    }),
                     resource_limits: Some(ResourceLimits {
-                        workdir: Some("/home/dev/rusty-crew".to_string()),
                         max_duration_ms: Some(30_000),
                         max_delegation_depth: Some(0),
                     }),

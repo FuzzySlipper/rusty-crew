@@ -16,8 +16,8 @@ const session = {
   agentId: "tui-agent",
   profileId: "tui-profile",
   kind: "full",
-  resourceLimits: {
-    workdir: "/home/dev/rusty-crew",
+  workspace: {
+    cwd: "/home/dev/rusty-crew",
   },
   toolProfile: {
     tools: [
@@ -94,7 +94,7 @@ const directContext = {
     createdAt: session.createdAt,
     lastActiveAt: session.lastActiveAt,
     toolCount: session.toolProfile.tools.length,
-    workdir: session.resourceLimits.workdir,
+    workdir: session.workspace?.cwd,
   },
   selectedTools: session.toolProfile.tools,
   context: {

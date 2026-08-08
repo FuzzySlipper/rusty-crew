@@ -36,8 +36,10 @@ fn request_delegation_creates_and_wakes_worker_session() {
                 task_id: Some(rusty_crew_core_protocol::TaskId::new("2772")),
                 prompt: "complete the tiny delegated slice".to_string(),
                 expected_output: Some("completion packet with concise summary".to_string()),
+                workspace_constraint: Some(DelegatedWorkspaceConstraint {
+                    cwd: "/home/dev/rusty-crew".to_string(),
+                }),
                 resource_limits: Some(ResourceLimits {
-                    workdir: Some("/home/dev/rusty-crew".to_string()),
                     max_duration_ms: Some(30_000),
                     max_delegation_depth: Some(0),
                 }),
@@ -61,9 +63,23 @@ fn request_delegation_creates_and_wakes_worker_session() {
     assert_eq!(delegated.kind, SessionKind::Delegated);
     assert_eq!(delegated.profile_id, ProfileId::new("coder-profile"));
     assert_eq!(
+        delegated
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.cwd.as_str()),
+        Some("/home/dev/rusty-crew")
+    );
+    assert_eq!(
+        delegated
+            .delegation
+            .as_ref()
+            .and_then(|lineage| lineage.workspace_constraint.as_ref())
+            .map(|constraint| constraint.cwd.as_str()),
+        Some("/home/dev/rusty-crew")
+    );
+    assert_eq!(
         delegated.resource_limits,
         ResourceLimits {
-            workdir: Some("/home/dev/rusty-crew".to_string()),
             max_duration_ms: Some(30_000),
             max_delegation_depth: Some(0),
         }
@@ -210,8 +226,8 @@ fn rejects_malformed_delegation_before_side_effects() {
                 task_id: None,
                 prompt: "try malformed delegation".to_string(),
                 expected_output: Some(" ".to_string()),
+                workspace_constraint: None,
                 resource_limits: Some(ResourceLimits {
-                    workdir: None,
                     max_duration_ms: Some(0),
                     max_delegation_depth: Some(0),
                 }),
@@ -263,6 +279,7 @@ fn delegation_retry_does_not_duplicate_child_session() {
             task_id: None,
             prompt: "retry-safe delegation".to_string(),
             expected_output: None,
+            workspace_constraint: None,
             resource_limits: None,
             timeout_ms: None,
             priority: None,
@@ -315,6 +332,7 @@ fn delegation_depth_zero_rejects_before_side_effects() {
                 task_id: None,
                 prompt: "should not spawn".to_string(),
                 expected_output: None,
+                workspace_constraint: None,
                 resource_limits: None,
                 timeout_ms: None,
                 priority: None,
@@ -385,6 +403,7 @@ fn delegated_completion_packets_route_to_parent_body_and_policy_wake() {
                         ))),
                         prompt: format!("complete delegated slice {index}"),
                         expected_output: Some("completion packet".to_string()),
+                        workspace_constraint: None,
                         resource_limits: None,
                         timeout_ms: None,
                         priority: None,
@@ -842,8 +861,8 @@ fn delegated_sessions_resolve_tool_profile_from_requested_profile() {
                 task_id: None,
                 prompt: "use only delegated profile tools".to_string(),
                 expected_output: None,
+                workspace_constraint: None,
                 resource_limits: Some(ResourceLimits {
-                    workdir: Some("/home/dev/rusty-crew".to_string()),
                     max_duration_ms: Some(30_000),
                     max_delegation_depth: Some(0),
                 }),
@@ -879,10 +898,27 @@ fn delegated_sessions_resolve_tool_profile_from_requested_profile() {
     assert_eq!(
         delegated.resource_limits,
         ResourceLimits {
-            workdir: Some("/home/dev/rusty-crew".to_string()),
             max_duration_ms: Some(30_000),
             max_delegation_depth: Some(0),
         }
+    );
+    assert_eq!(
+        delegated
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.cwd.as_str()),
+        planner
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.cwd.as_str())
+    );
+    assert!(
+        delegated
+            .delegation
+            .as_ref()
+            .and_then(|lineage| lineage.workspace_constraint.as_ref())
+            .is_none(),
+        "an inherited execution cwd must not become a delegated path constraint"
     );
 }
 
@@ -968,8 +1004,8 @@ fn delegation_request_for_profile(profile_id: &str) -> BrainAction {
         task_id: None,
         prompt: "complete a delegated profile validation proof".to_string(),
         expected_output: None,
+        workspace_constraint: None,
         resource_limits: Some(ResourceLimits {
-            workdir: Some("/home/dev/rusty-crew".to_string()),
             max_duration_ms: None,
             max_delegation_depth: Some(0),
         }),

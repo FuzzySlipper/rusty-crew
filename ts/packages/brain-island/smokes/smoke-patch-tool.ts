@@ -20,6 +20,7 @@ import {
   patchTool,
   resolveLocalCodeTools,
   selectToolProfile,
+  workerPatchTool,
 } from "../src/index.js";
 import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
@@ -91,10 +92,12 @@ try {
         agentId,
         profileId,
         kind: "full",
-        resourceLimits: {
-          workdir,
-          maxDurationMs: 5_000,
+        workspace: {
+          cwd: workdir,
+          revision: 1,
+          updatedAt: "2026-06-20T00:00:00Z",
         },
+        resourceLimits: { maxDurationMs: 5_000 },
         toolProfile: selection.toolProfile,
         status: "idle",
         brainTurnCount: 0,
@@ -171,19 +174,16 @@ try {
   assert.equal((absolutePatchResult.details as { ok: boolean }).ok, true);
   assert.equal(readFileSync(outsidePatchPath, "utf8"), "outside new\n");
 
-  const workerPatch = patchTool(
-    {
-      workdir,
-      maxReadBytes: defaultLocalCodeResourcePolicy.maxReadBytes,
-      maxSearchFileBytes: defaultLocalCodeResourcePolicy.maxSearchFileBytes,
-      maxCommandOutputBytes:
-        defaultLocalCodeResourcePolicy.maxCommandOutputBytes,
-      commandTimeoutMs: 5_000,
-      maxDurationMs: 5_000,
-      resourcePolicy: defaultLocalCodeResourcePolicy,
-    },
-    { name: "worker_patch", filesystemScope: "workdir" },
-  );
+  const workerPatch = workerPatchTool({
+    workdir,
+    delegatedWorkspaceConstraint: workdir,
+    maxReadBytes: defaultLocalCodeResourcePolicy.maxReadBytes,
+    maxSearchFileBytes: defaultLocalCodeResourcePolicy.maxSearchFileBytes,
+    maxCommandOutputBytes: defaultLocalCodeResourcePolicy.maxCommandOutputBytes,
+    commandTimeoutMs: 5_000,
+    maxDurationMs: 5_000,
+    resourcePolicy: defaultLocalCodeResourcePolicy,
+  });
   const workerPatchResult = await workerPatch.execute("worker-patch-outside", {
     path: outsidePatchPath,
     old_string: "outside new",

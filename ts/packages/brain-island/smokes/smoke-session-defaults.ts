@@ -59,21 +59,8 @@ const inherited = sessionWithProfileDefaults(
 );
 assert.equal(inherited.ownerId, "owner:profile");
 assert.equal(inherited.maxHistoryMessages, 200);
-assert.equal(inherited.resourceLimits?.workdir, undefined);
 assert.equal(inherited.resourceLimits?.maxDurationMs, 30_000);
 assert.equal(inherited.toolProfile?.tools[0]?.name, "read_file");
-
-const explicitSessionWorkdir = sessionWithProfileDefaults(
-  {
-    sessionId: "explicit-workdir-session" as SessionId,
-    agentId: "runner" as AgentId,
-    profileId: "runner-profile" as ProfileId,
-    kind: "full",
-    resourceLimits: { workdir: "/tmp/session-workdir" },
-  },
-  profileContext,
-);
-assert.equal(explicitSessionWorkdir.resourceLimits?.workdir, undefined);
 
 const explicit = {
   sessionId: "explicit-session" as SessionId,

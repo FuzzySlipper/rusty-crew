@@ -512,7 +512,6 @@ export interface JsQueuedMessageRecord {
 }
 
 export interface JsResourceLimits {
-  workdir?: string
   maxDurationMs?: number
   maxDelegationDepth?: number
 }

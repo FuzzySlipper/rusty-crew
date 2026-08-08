@@ -414,6 +414,7 @@ export type BrainAction = {
   taskId?: TaskId;
   timeoutMs?: number | null;
   type: "request_delegation";
+  workspaceConstraint?: DelegatedWorkspaceConstraint | null;
 } | {
   packet: CompletionPacket;
   type: "deliver_completion";
@@ -770,6 +771,10 @@ export type DelegatedSessionRuntimeStatus = {
   terminal: boolean;
 };
 
+export type DelegatedWorkspaceConstraint = {
+  cwd: string;
+};
+
 export type DelegationLifecycleEvent = {
   delegatedSessionId: SessionId;
   detail?: string | null;
@@ -787,6 +792,7 @@ export type DelegationLineage = {
   requestedTaskId?: TaskId;
   sourceActionIndex: number;
   sourceWakeId: string;
+  workspaceConstraint?: DelegatedWorkspaceConstraint | null;
 };
 
 export type DelegationPriority = "low" | "normal" | "high";
@@ -1731,7 +1737,6 @@ export type ProviderStateMode = "unused" | "optional" | "required";
 export type ResourceLimits = {
   maxDelegationDepth?: number | null;
   maxDurationMs?: number | null;
-  workdir?: string | null;
 };
 
 export type ReviewFindingStatus = {

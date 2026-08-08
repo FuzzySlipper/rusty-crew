@@ -585,11 +585,7 @@ const PROFILE_SCHEMA = schema(
     ]),
     brain: schema(["module", "strategy"]),
     runtime: schema(["maxTurns", "maxTokensPerTurn"], {
-      defaultResourceLimits: schema([
-        "workdir",
-        "maxDurationMs",
-        "maxDelegationDepth",
-      ]),
+      defaultResourceLimits: schema(["maxDurationMs", "maxDelegationDepth"]),
     }),
     runtimeConfig: schema([
       "maxIterations",

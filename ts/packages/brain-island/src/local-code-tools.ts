@@ -143,6 +143,7 @@ type GitDiffParams = Static<typeof gitDiffParameters>;
 
 export interface LocalToolContext {
   workdir: string;
+  delegatedWorkspaceConstraint?: string;
   maxReadBytes: number;
   maxSearchFileBytes: number;
   maxCommandOutputBytes: number;
@@ -431,8 +432,10 @@ export function workerWriteTool(
     parameters: writeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: WriteFileParams) => {
+      const workerWorkdir =
+        context.delegatedWorkspaceConstraint ?? context.workdir;
       const target = resolveToolPath(
-        context.workdir,
+        workerWorkdir,
         params.path,
         localToolFilesystemScope(context, "worker_write"),
       );
@@ -456,13 +459,19 @@ export function workerWriteTool(
 }
 
 export function workerPatchTool(context: LocalToolContext): BrainTool {
-  return patchTool(context, {
-    name: "worker_patch",
-    label: "Worker patch",
-    description:
-      "Apply bounded find-and-replace edits or V4A multi-file patches inside the delegated worker workdir and return a unified diff.",
-    filesystemScope: localToolFilesystemScope(context, "worker_patch"),
-  });
+  return patchTool(
+    {
+      ...context,
+      workdir: context.delegatedWorkspaceConstraint ?? context.workdir,
+    },
+    {
+      name: "worker_patch",
+      label: "Worker patch",
+      description:
+        "Apply bounded find-and-replace edits or V4A multi-file patches inside the delegated worker workdir and return a unified diff.",
+      filesystemScope: localToolFilesystemScope(context, "worker_patch"),
+    },
+  );
 }
 
 function localToolContext(
@@ -479,6 +488,14 @@ function localToolContext(
   const maxDurationMs = limits.maxDurationMs ?? policy.maxDurationMs;
   return {
     workdir: resolve(workspace.cwd),
+    ...(session.kind === "delegated" &&
+    session.delegation?.workspaceConstraint?.cwd
+      ? {
+          delegatedWorkspaceConstraint: resolve(
+            session.delegation.workspaceConstraint.cwd,
+          ),
+        }
+      : {}),
     maxReadBytes: policy.maxReadBytes,
     maxSearchFileBytes: policy.maxSearchFileBytes,
     maxCommandOutputBytes: policy.maxCommandOutputBytes,
@@ -492,6 +509,12 @@ function localToolFilesystemScope(
   context: LocalToolContext,
   toolName: string,
 ): FilesystemScope {
+  if (
+    (toolName === "worker_write" || toolName === "worker_patch") &&
+    context.delegatedWorkspaceConstraint === undefined
+  ) {
+    return "unrestricted";
+  }
   return (
     context.resourcePolicy.tools.find((tool) => tool.toolName === toolName)
       ?.filesystemScope ?? "unrestricted"

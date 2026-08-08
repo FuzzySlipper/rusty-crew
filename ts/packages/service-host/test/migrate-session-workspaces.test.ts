@@ -49,6 +49,7 @@ test("legacy full-session migration writes only explicit session workspaces", ()
     "legacy-full",
     "mixed-full",
     "missing-without-workdir",
+    "delegated",
   ]);
   const sessions = migrated.config.sessions as Array<Record<string, unknown>>;
   assert.equal(sessions[0]?.workspaceCwd, "/explicit/migration");
@@ -57,9 +58,7 @@ test("legacy full-session migration writes only explicit session workspaces", ()
   assert.equal(sessions[2]?.workspaceCwd, "/preserve-explicit");
   assert.deepEqual(sessions[2]?.resourceLimits, { maxDurationMs: 7 });
   assert.equal(sessions[3]?.workspaceCwd, "/explicit/migration");
-  assert.deepEqual(sessions[4]?.resourceLimits, {
-    workdir: "/delegated-scope",
-  });
+  assert.deepEqual(sessions[4]?.resourceLimits, {});
   assert.deepEqual(source.sessions[0]?.resourceLimits, {
     workdir: "/legacy",
     maxDurationMs: 5,

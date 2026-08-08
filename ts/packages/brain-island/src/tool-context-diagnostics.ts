@@ -153,8 +153,6 @@ export interface ToolContextSkillSummary {
 }
 
 export interface ToolContextResourceSummary {
-  workdir?: string;
-  workdirScoped: boolean;
   maxDurationMs?: number;
   maxDelegationDepth?: number;
   notes: readonly string[];
@@ -394,7 +392,6 @@ export function formatToolContextDiagnosticsMarkdown(
     "",
     "## Resources And Adapters",
     "",
-    `- workdir: ${report.resources.workdir ?? "none"}`,
     `- resource notes: ${joinOrNone(report.resources.notes)}`,
     `- channel statuses: ${joinOrNone(report.adapters.channels.statuses)}`,
     `- mcp statuses: ${joinOrNone(report.adapters.mcp.statuses)}`,
@@ -628,7 +625,6 @@ function resourceSummary(
     input.resourceLimits ??
     input.profileContext?.profile.runtime?.defaultResourceLimits;
   const notes = [
-    limits?.workdir ? "workdir scope is configured" : "workdir scope missing",
     limits?.maxDurationMs === undefined
       ? "duration limit missing"
       : "duration limit configured",
@@ -641,8 +637,6 @@ function resourceSummary(
   ].filter((note): note is string => Boolean(note));
 
   return {
-    workdir: limits?.workdir ?? undefined,
-    workdirScoped: Boolean(limits?.workdir),
     maxDurationMs: limits?.maxDurationMs ?? undefined,
     maxDelegationDepth: limits?.maxDelegationDepth ?? undefined,
     notes,
@@ -985,13 +979,6 @@ function resourceIssues(
   resources: ToolContextResourceSummary,
 ): ToolContextDiagnosticsIssue[] {
   const issues: ToolContextDiagnosticsIssue[] = [];
-  if (!resources.workdirScoped) {
-    issues.push({
-      code: "workdir_limited",
-      severity: "warning",
-      message: "session has no workdir scope configured",
-    });
-  }
   if (
     resources.maxDurationMs === undefined ||
     resources.maxDelegationDepth === undefined

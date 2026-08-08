@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -28,6 +27,7 @@ import {
   defaultBodyDeltaPolicy,
   defaultLocalCodeResourcePolicy,
   selectToolProfile,
+  workerWriteTool,
 } from "../src/index.js";
 import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
@@ -133,7 +133,7 @@ class ToolCallingFakeAgent {
         "worker-write-outside-call",
         {
           path: outsideWritePath,
-          content: "should not write\n",
+          content: "full session worker tool remains unrestricted\n",
         },
       );
     } catch (error) {
@@ -233,7 +233,7 @@ try {
   );
   assert.equal(
     readFileSync(outsideWritePath, "utf8"),
-    "written outside workdir\n",
+    "full session worker tool remains unrestricted\n",
   );
   const searchDetails = toolResults.search_files.details as {
     matches: Array<{ path: string; preview: string }>;
@@ -254,13 +254,25 @@ try {
     ),
   );
   assert.equal(searchDetails.skippedCount, searchDetails.skipped.length);
-  assert.match(
-    textResult(toolResults.worker_write_outside),
-    /path escapes session workdir/,
-  );
   assert.equal(
-    existsSync(join(workdir, outsideWritePath.replace(/^\/+/, ""))),
-    false,
+    readFileSync(outsideWritePath, "utf8"),
+    "full session worker tool remains unrestricted\n",
+  );
+  const constrainedWorkerWrite = workerWriteTool({
+    workdir,
+    delegatedWorkspaceConstraint: workdir,
+    maxReadBytes: defaultLocalCodeResourcePolicy.maxReadBytes,
+    maxSearchFileBytes: defaultLocalCodeResourcePolicy.maxSearchFileBytes,
+    maxCommandOutputBytes: defaultLocalCodeResourcePolicy.maxCommandOutputBytes,
+    commandTimeoutMs: defaultLocalCodeResourcePolicy.commandTimeoutMs,
+    resourcePolicy: defaultLocalCodeResourcePolicy,
+  });
+  await assert.rejects(
+    constrainedWorkerWrite.execute("constrained-worker-write", {
+      path: outsideWritePath,
+      content: "delegated constraint must reject this\n",
+    }),
+    /path escapes session workdir/,
   );
   assert.match(textResult(toolResults.terminal), /local-tools-ok/);
   assert.equal(
@@ -335,9 +347,8 @@ try {
         absoluteWriteText: readFileSync(outsideWritePath, "utf8").trim(),
         searchMatches: searchDetails.matches.length,
         searchSkipped: searchDetails.skipped,
-        workerWriteDenied: /path escapes session workdir/.test(
-          textResult(toolResults.worker_write_outside),
-        ),
+        fullSessionWorkerWriteUnrestricted: true,
+        delegatedConstraintDeniedEscape: true,
         terminalExit: (toolResults.terminal.details as { exitCode: number })
           .exitCode,
         runtimeActivity: terminalProcess.activityId,

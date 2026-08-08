@@ -46,7 +46,6 @@ try {
         runtime: {
           maxTurns: 2,
           defaultResourceLimits: {
-            workdir: "/home/dev/rusty-crew",
             maxDurationMs: 10_000,
             maxDelegationDepth: 0,
           },

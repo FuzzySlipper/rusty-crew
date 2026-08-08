@@ -306,7 +306,6 @@ impl CoreEngine {
                 updated_at: request.requested_at.clone(),
             }),
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -518,7 +517,6 @@ impl CoreEngine {
                 updated_at: current.request.requested_at.clone(),
             }),
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },

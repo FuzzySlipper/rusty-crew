@@ -451,23 +451,21 @@ fn normalize_session_config_workspace(config: &mut SessionConfig) -> CoreResult<
 }
 
 fn validate_session_resource_limits(config: &SessionConfig) -> CoreResult<()> {
-    if config.kind == SessionKind::Full && config.resource_limits.workdir.is_some() {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "session_workspace_resource_limit_forbidden: full sessions use workspace, not resourceLimits.workdir",
-        ));
-    }
-    if let Some(workdir) = config.resource_limits.workdir.as_deref() {
-        if workdir.trim().is_empty() {
+    if let Some(constraint) = config
+        .delegation
+        .as_ref()
+        .and_then(|lineage| lineage.workspace_constraint.as_ref())
+    {
+        if config.kind != SessionKind::Delegated {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
-                "session resourceLimits.workdir must not be blank",
+                "delegated workspace constraints are valid only on delegated sessions",
             ));
         }
-        if !Path::new(workdir).is_absolute() {
+        if constraint.cwd.trim().is_empty() || !Path::new(&constraint.cwd).is_absolute() {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
-                "session resourceLimits.workdir must be an absolute path",
+                "delegated workspace constraint cwd must be a non-empty absolute path",
             ));
         }
     }
@@ -520,7 +518,6 @@ mod tests {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             }),
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: Some(60_000),
                 max_delegation_depth: Some(2),
             },
@@ -546,7 +543,7 @@ mod tests {
                 .map(|workspace| workspace.cwd.as_str()),
             Some("/home/dev/goblinbench-fixture")
         );
-        assert_eq!(state.resource_limits.workdir, None);
+        assert!(state.delegation.is_none());
     }
 
     #[test]

@@ -1287,7 +1287,6 @@ function createNativeBridgeModule(
     workspace: config.workspace ?? undefined,
     resourceLimits: config.resourceLimits
       ? {
-          workdir: config.resourceLimits.workdir ?? undefined,
           maxDurationMs: config.resourceLimits.maxDurationMs ?? undefined,
           maxDelegationDepth:
             config.resourceLimits.maxDelegationDepth ?? undefined,

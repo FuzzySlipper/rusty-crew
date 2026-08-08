@@ -31,7 +31,6 @@ pub struct JsToolProfile {
 
 #[napi_derive::napi(object)]
 pub struct JsResourceLimits {
-    pub workdir: Option<String>,
     pub max_duration_ms: Option<u32>,
     pub max_delegation_depth: Option<u32>,
 }

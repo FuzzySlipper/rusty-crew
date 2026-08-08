@@ -274,7 +274,6 @@ function toBodyState(value: unknown): BodyState {
           }
         : undefined,
       resourceLimits: {
-        workdir: state.session.resource_limits?.workdir,
         maxDurationMs: state.session.resource_limits?.max_duration_ms,
         maxDelegationDepth: state.session.resource_limits?.max_delegation_depth,
       },
@@ -482,7 +481,6 @@ function toBodyStateSession(
         }
       : undefined,
     resourceLimits: {
-      workdir: session.resource_limits?.workdir,
       maxDurationMs: session.resource_limits?.max_duration_ms,
       maxDelegationDepth: session.resource_limits?.max_delegation_depth,
     },
@@ -562,6 +560,9 @@ function toDelegationLineage(
         sourceActionIndex: lineage.source_action_index,
         requestedTaskId: lineage.requested_task_id,
         correlationId: lineage.correlation_id,
+        workspaceConstraint: lineage.workspace_constraint
+          ? { cwd: lineage.workspace_constraint.cwd }
+          : undefined,
       }
     : undefined;
 }
@@ -593,7 +594,6 @@ interface RustSessionStateJson {
     updated_at: string;
   };
   resource_limits?: {
-    workdir?: string;
     max_duration_ms?: number;
     max_delegation_depth?: number;
   };
@@ -619,6 +619,7 @@ interface RustDelegationLineageJson {
   source_action_index: number;
   requested_task_id?: TaskId;
   correlation_id: string;
+  workspace_constraint?: { cwd: string };
 }
 
 interface RustDelegatedCompletionJson {

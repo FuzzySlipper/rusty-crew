@@ -15,8 +15,10 @@ pub(super) fn spawn_delegated(
                 task_id: None,
                 prompt: "complete a delegated lifecycle slice".to_string(),
                 expected_output: None,
+                workspace_constraint: Some(DelegatedWorkspaceConstraint {
+                    cwd: "/home/dev/rusty-crew".to_string(),
+                }),
                 resource_limits: Some(ResourceLimits {
-                    workdir: Some("/home/dev/rusty-crew".to_string()),
                     max_duration_ms,
                     max_delegation_depth: Some(0),
                 }),
@@ -47,8 +49,8 @@ pub(super) fn fan_out_request(
         ))),
         prompt: format!("complete fan-out slice {index}"),
         expected_output: Some("completion packet".to_string()),
+        workspace_constraint: None,
         resource_limits: Some(ResourceLimits {
-            workdir: Some("/home/dev/rusty-crew".to_string()),
             max_duration_ms: Some(30_000),
             max_delegation_depth: Some(0),
         }),

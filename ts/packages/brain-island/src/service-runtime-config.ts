@@ -1304,12 +1304,10 @@ export function sessionWithProfileDefaults(
 }
 
 function sessionResourceLimits(
-  kind: RustyCrewConfiguredSession["kind"],
+  _kind: RustyCrewConfiguredSession["kind"],
   limits: ResourceLimits | undefined,
 ): ResourceLimits | undefined {
-  if (limits === undefined || kind !== "full") return limits;
-  const { workdir: _profileOrLegacyWorkdir, ...coordinationLimits } = limits;
-  return coordinationLimits;
+  return limits;
 }
 
 export function effectiveSessionDefaults(

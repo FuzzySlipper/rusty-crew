@@ -433,10 +433,11 @@ npm run config:migrate-session-workspaces -w @rusty-crew/service-host -- \
 `--write` creates an exclusive timestamped `service.json.pre-workspace-*`
 backup before atomically replacing the config. Use `--backup <absolute-path>`
 to select the rollback path. The migration writes only missing full-session
-`workspaceCwd` values and removes the retired full-session
-`resourceLimits.workdir`; it does not read profiles or alter delegated
-workdirs. Repeat with the production config only after deliberately selecting
-its migration cwd. This is execution context, not filesystem confinement.
+`workspaceCwd` values and removes the retired `resourceLimits.workdir` from
+every legacy session; it does not read profiles or create delegated workspace
+constraints. Repeat with the production config only after deliberately
+selecting its migration cwd. This is execution context, not filesystem
+confinement.
 
 Logical turns have no finite service, session, or profile lifetime. They yield
 through brain-specific scheduling quanta and continue until completion,

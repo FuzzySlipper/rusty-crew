@@ -62,7 +62,6 @@ fn openai_responses_bridge_uses_oauth_bearer_and_headers_without_secret_update()
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -356,7 +355,6 @@ fn native_bridge_mirrors_registered_tool_profiles_into_delegated_sessions() {
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: Some(1),
             },
@@ -380,6 +378,7 @@ fn native_bridge_mirrors_registered_tool_profiles_into_delegated_sessions() {
                 task_id: None,
                 prompt: "use registered coder tools".to_string(),
                 expected_output: None,
+                workspace_constraint: None,
                 resource_limits: None,
                 timeout_ms: None,
                 priority: None,
@@ -907,7 +906,6 @@ fn native_bridge_shutdown_reports_and_clears_subscriptions() {
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -968,7 +966,6 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -1347,7 +1344,6 @@ fn openai_responses_buffered_bridge_yields_and_resumes_without_repeating_tools()
             delegation: None,
             workspace: None,
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -1872,7 +1868,6 @@ fn provider_state_session_config(session_id: &str, profile_id: &str) -> SessionC
         delegation: None,
         workspace: None,
         resource_limits: ResourceLimits {
-            workdir: None,
             max_duration_ms: None,
             max_delegation_depth: None,
         },

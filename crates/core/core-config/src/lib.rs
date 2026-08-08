@@ -5,11 +5,11 @@
 //! render prompts, discover tools, call providers, or mutate runtime state.
 
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ExternalMessageDeliveryPolicy,
-    IsoTimestamp, ProfileId, ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
-    ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
-    ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind, TaskId,
-    MAX_RESOURCE_DELEGATION_DEPTH, MAX_RESOURCE_DURATION_MS,
+    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, DelegatedWorkspaceConstraint,
+    ExternalMessageDeliveryPolicy, IsoTimestamp, ProfileId, ProfileRegistryDerivedRuntimeRef,
+    ProfileRegistryImportExportMetadata, ProfileRegistryLifecycleStatus, ProfileRegistryRecord,
+    ProfileRegistrySourceAssetRef, ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow,
+    SessionId, SessionKind, TaskId, MAX_RESOURCE_DELEGATION_DEPTH, MAX_RESOURCE_DURATION_MS,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -144,6 +144,7 @@ pub struct DelegatedRoleLifecyclePlanInput {
     pub profile_id: ProfileId,
     pub tool_profile_key: Option<String>,
     pub requested_resource_limits: Option<ResourceLimits>,
+    pub requested_workspace_constraint: Option<DelegatedWorkspaceConstraint>,
     pub source_wake_id: String,
     pub source_action_index: u32,
     pub task_id: Option<TaskId>,
@@ -170,6 +171,7 @@ pub struct DelegatedRoleLifecyclePlan {
     pub profile_id: ProfileId,
     pub kind: SessionKind,
     pub resource_limits: ResourceLimits,
+    pub workspace_constraint: Option<DelegatedWorkspaceConstraint>,
     pub tool_profile_key: Option<String>,
     pub source_wake_id: String,
     pub source_action_index: u32,
@@ -1109,7 +1111,6 @@ pub fn plan_delegated_role_lifecycle(
         .resource_limits
         .clone()
         .unwrap_or(ResourceLimits {
-            workdir: None,
             max_duration_ms: None,
             max_delegation_depth: None,
         });
@@ -1146,21 +1147,17 @@ pub fn plan_delegated_role_lifecycle(
             ));
         }
     }
-    if requested_limits
-        .and_then(|limits| limits.workdir.as_deref())
-        .is_some_and(|workdir| workdir.trim().is_empty())
-    {
-        diagnostics.push(RuntimeConfigDiagnostic::error(
-            "invalid_resource_limits",
-            "requestedResourceLimits.workdir",
-            "workdir must not be empty when provided",
-        ));
+    if let Some(constraint) = input.requested_workspace_constraint.as_ref() {
+        if constraint.cwd.trim().is_empty() || !Path::new(&constraint.cwd).is_absolute() {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "invalid_delegated_workspace_constraint",
+                "requestedWorkspaceConstraint.cwd",
+                "delegated workspace constraint cwd must be a non-empty absolute path",
+            ));
+        }
     }
 
     let effective_limits = ResourceLimits {
-        workdir: requested_limits
-            .and_then(|limits| limits.workdir.clone())
-            .or(parent_limits.workdir),
         max_duration_ms: requested_duration.or(parent_limits.max_duration_ms),
         max_delegation_depth: requested_depth.or(inherited_depth),
     };
@@ -1187,6 +1184,7 @@ pub fn plan_delegated_role_lifecycle(
         profile_id: input.profile_id.clone(),
         kind: SessionKind::Delegated,
         resource_limits: effective_limits,
+        workspace_constraint: input.requested_workspace_constraint.clone(),
         tool_profile_key: input.tool_profile_key.clone(),
         source_wake_id: input.source_wake_id.clone(),
         source_action_index: input.source_action_index,
@@ -3330,21 +3328,6 @@ fn validate_resource_limits(
     limits: Option<&ResourceLimits>,
 ) {
     let Some(limits) = limits else { return };
-    if let Some(workdir) = limits.workdir.as_deref() {
-        if workdir.trim().is_empty() {
-            validator.error(
-                "invalid_resource_limits",
-                format!("{path}.workdir"),
-                "workdir must not be blank when provided",
-            );
-        } else if !Path::new(workdir).is_absolute() {
-            validator.error(
-                "invalid_resource_limits",
-                format!("{path}.workdir"),
-                "workdir must be an absolute path",
-            );
-        }
-    }
     validate_optional_max(
         validator,
         "invalid_resource_limits",
@@ -3384,19 +3367,6 @@ fn validate_session_workspace(
             "full sessions require an explicit workspaceCwd",
         ),
         _ => {}
-    }
-    if session.kind == SessionKind::Full
-        && session
-            .resource_limits
-            .as_ref()
-            .and_then(|limits| limits.workdir.as_ref())
-            .is_some()
-    {
-        validator.error(
-            "session_workspace_resource_limit_forbidden",
-            format!("sessions[{index}].resourceLimits.workdir"),
-            "full-session workdir belongs in workspaceCwd, not resourceLimits",
-        );
     }
 }
 
@@ -4261,7 +4231,6 @@ mod tests {
         let mut draft = valid_draft();
         draft.sessions[0].session_id = SessionId::new(" bad");
         draft.sessions[0].resource_limits = Some(ResourceLimits {
-            workdir: Some(String::new()),
             max_duration_ms: Some(MAX_RESOURCE_DURATION_MS + 1),
             max_delegation_depth: Some(MAX_RESOURCE_DELEGATION_DEPTH + 1),
         });
@@ -4272,7 +4241,6 @@ mod tests {
             &result,
             &[
                 "invalid_session_id",
-                "invalid_resource_limits",
                 "invalid_resource_limits",
                 "invalid_resource_limits",
                 "invalid_schedule",
@@ -4467,7 +4435,6 @@ mod tests {
                 agent_id: AgentId::new("parent-agent"),
                 kind: SessionKind::Full,
                 resource_limits: Some(ResourceLimits {
-                    workdir: Some("/home/dev/rusty-crew".to_string()),
                     max_duration_ms: Some(60_000),
                     max_delegation_depth: Some(2),
                 }),
@@ -4477,9 +4444,11 @@ mod tests {
             profile_id: ProfileId::new("coder-profile"),
             tool_profile_key: Some("bounded-coder".to_string()),
             requested_resource_limits: Some(ResourceLimits {
-                workdir: None,
                 max_duration_ms: Some(30_000),
                 max_delegation_depth: None,
+            }),
+            requested_workspace_constraint: Some(DelegatedWorkspaceConstraint {
+                cwd: "/home/dev/rusty-crew".to_string(),
             }),
             source_wake_id: "wake-1".to_string(),
             source_action_index: 0,
@@ -4493,10 +4462,15 @@ mod tests {
         assert_eq!(
             plan.resource_limits,
             ResourceLimits {
-                workdir: Some("/home/dev/rusty-crew".to_string()),
                 max_duration_ms: Some(30_000),
                 max_delegation_depth: Some(1),
             }
+        );
+        assert_eq!(
+            plan.workspace_constraint,
+            Some(DelegatedWorkspaceConstraint {
+                cwd: "/home/dev/rusty-crew".to_string(),
+            })
         );
         assert_eq!(plan.tool_profile_key.as_deref(), Some("bounded-coder"));
         assert_eq!(plan.correlation_id, "delegation:wake-1:0");
@@ -4510,7 +4484,6 @@ mod tests {
                 agent_id: AgentId::new("parent-agent"),
                 kind: SessionKind::Delegated,
                 resource_limits: Some(ResourceLimits {
-                    workdir: Some("/home/dev/rusty-crew".to_string()),
                     max_duration_ms: Some(30_000),
                     max_delegation_depth: Some(0),
                 }),
@@ -4520,9 +4493,11 @@ mod tests {
             profile_id: ProfileId::new("coder-profile"),
             tool_profile_key: Some(" ".to_string()),
             requested_resource_limits: Some(ResourceLimits {
-                workdir: Some(" ".to_string()),
                 max_duration_ms: Some(60_000),
                 max_delegation_depth: Some(2),
+            }),
+            requested_workspace_constraint: Some(DelegatedWorkspaceConstraint {
+                cwd: " ".to_string(),
             }),
             source_wake_id: " ".to_string(),
             source_action_index: 4,
@@ -4544,7 +4519,7 @@ mod tests {
                 "delegation_depth_exhausted",
                 "delegation_depth_escalation",
                 "delegation_duration_escalation",
-                "invalid_resource_limits",
+                "invalid_delegated_workspace_constraint",
             ],
         );
     }
@@ -4986,7 +4961,6 @@ mod tests {
                 kind: SessionKind::Full,
                 workspace_cwd: Some("/tmp/rusty-crew/work".to_string()),
                 resource_limits: Some(ResourceLimits {
-                    workdir: None,
                     max_duration_ms: Some(60_000),
                     max_delegation_depth: Some(4),
                 }),

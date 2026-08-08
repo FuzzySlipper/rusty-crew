@@ -2518,7 +2518,15 @@
                 "minimum": 0,
                 "type": ["integer", "null"]
               },
-              "type": { "const": "request_delegation", "type": "string" }
+              "type": { "const": "request_delegation", "type": "string" },
+              "workspace_constraint": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DelegatedWorkspaceConstraint"
+                  },
+                  { "type": "null" }
+                ]
+              }
             },
             "required": ["type", "profile_id", "prompt"],
             "type": "object"
@@ -3447,6 +3455,12 @@
         "required": ["session", "terminal"],
         "type": "object"
       },
+      "DelegatedWorkspaceConstraint": {
+        "description": "An opt-in filesystem constraint for one explicit delegated invocation.\n\nThis is deliberately not a profile or ordinary-session policy. It is\npersisted only with delegation lineage so a child cannot acquire it from a\nreusable profile or infer it from its parent's execution cwd.",
+        "properties": { "cwd": { "type": "string" } },
+        "required": ["cwd"],
+        "type": "object"
+      },
       "DelegationLifecycleEvent": {
         "properties": {
           "delegated_session_id": { "type": "string" },
@@ -3483,7 +3497,13 @@
             "minimum": 0,
             "type": "integer"
           },
-          "source_wake_id": { "type": "string" }
+          "source_wake_id": { "type": "string" },
+          "workspace_constraint": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/DelegatedWorkspaceConstraint" },
+              { "type": "null" }
+            ]
+          }
         },
         "required": [
           "parent_session_id",
@@ -5884,6 +5904,7 @@
         "type": "string"
       },
       "ResourceLimits": {
+        "additionalProperties": false,
         "properties": {
           "max_delegation_depth": {
             "format": "uint32",
@@ -5894,8 +5915,7 @@
             "format": "uint32",
             "minimum": 0,
             "type": ["integer", "null"]
-          },
-          "workdir": { "type": ["string", "null"] }
+          }
         },
         "type": "object"
       },
@@ -6757,7 +6777,7 @@
         "type": "object"
       },
       "SessionWorkspace": {
-        "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+        "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
         "properties": {
           "cwd": { "type": "string" },
           "revision": { "format": "uint64", "minimum": 0, "type": "integer" },

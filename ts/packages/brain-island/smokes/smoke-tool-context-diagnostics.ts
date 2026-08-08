@@ -80,7 +80,6 @@ const profileContext = {
       maxTurns: 4,
       maxTokensPerTurn: 8192,
       defaultResourceLimits: {
-        workdir: "/home/dev/rusty-crew",
         maxDurationMs: 30_000,
         maxDelegationDepth: 2,
       },
@@ -267,7 +266,7 @@ assert.equal(
   ),
   false,
 );
-assert.equal(report.resources.workdirScoped, true);
+assert.equal(report.resources.maxDurationMs, 30_000);
 assert.equal(report.adapters.mcp.degraded, 1);
 assert.equal(
   report.issues.some((issue) => issue.code === "mcp_surface_degraded"),

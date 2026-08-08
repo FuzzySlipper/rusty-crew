@@ -24,8 +24,12 @@ const session = {
   agentId: "debug-agent" as AgentId,
   profileId: "debug-profile" as ProfileId,
   kind: "full",
+  workspace: {
+    cwd: "/home/dev/rusty-crew",
+    revision: 1,
+    updatedAt: "2026-06-20T00:00:00Z",
+  },
   resourceLimits: {
-    workdir: "/home/dev/rusty-crew",
     maxDurationMs: 30_000,
     maxDelegationDepth: 2,
   },

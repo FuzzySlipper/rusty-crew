@@ -24,8 +24,8 @@ const baseContext = {
   prompt: "Implement the bounded slice.",
   expectedOutput: "completion packet with implementation summary",
   correlationId: "delegation-correlation",
+  workspaceConstraint: { cwd: "/home/dev/rusty-crew" },
   resourceLimits: {
-    workdir: "/home/dev/rusty-crew",
     maxDurationMs: 30_000,
     maxDelegationDepth: 0,
   },
@@ -42,7 +42,6 @@ const coderLifecyclePlan = await native.planDelegatedRoleLifecycle({
     agentId: baseContext.parentAgentId,
     kind: "full",
     resourceLimits: {
-      workdir: "/home/dev/rusty-crew",
       maxDurationMs: 60_000,
       maxDelegationDepth: 1,
     },
@@ -52,6 +51,7 @@ const coderLifecyclePlan = await native.planDelegatedRoleLifecycle({
   profileId: "coder-profile",
   toolProfileKey: "coder-profile",
   requestedResourceLimits: baseContext.resourceLimits,
+  requestedWorkspaceConstraint: baseContext.workspaceConstraint,
   sourceWakeId: baseContext.sourceWakeId,
   sourceActionIndex: baseContext.sourceActionIndex,
   taskId: baseContext.taskId,
@@ -94,7 +94,6 @@ const rejectedLifecyclePlan = await native.planDelegatedRoleLifecycle({
     agentId: "prime-agent",
     kind: "delegated",
     resourceLimits: {
-      workdir: "/home/dev/rusty-crew",
       maxDurationMs: 30_000,
       maxDelegationDepth: 0,
     },

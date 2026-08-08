@@ -34,7 +34,6 @@ export function migrateLegacyFullSessionWorkspaces(
   for (const [index, candidate] of clonedSessions.entries()) {
     if (!isRecord(candidate))
       throw new Error(`sessions[${index}] must be an object`);
-    if (candidate.kind !== "full") continue;
     const sessionId = candidate.sessionId;
     if (typeof sessionId !== "string" || sessionId.length === 0) {
       throw new Error(
@@ -42,7 +41,7 @@ export function migrateLegacyFullSessionWorkspaces(
       );
     }
     let changed = false;
-    if (candidate.workspaceCwd === undefined) {
+    if (candidate.kind === "full" && candidate.workspaceCwd === undefined) {
       candidate.workspaceCwd = explicitWorkspaceCwd;
       changed = true;
     }

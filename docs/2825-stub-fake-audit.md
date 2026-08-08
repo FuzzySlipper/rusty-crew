@@ -62,7 +62,8 @@ Outcome: resolved for the originally dangerous delegation/runtime cases.
 
 Current code:
 
-- `RequestDelegation` validation rejects empty `resource_limits.workdir`.
+- `RequestDelegation` validation rejects an empty or relative explicit
+  `workspace_constraint.cwd`.
 - `validate_delegation_invariants()` rejects delegation when parent
   `max_delegation_depth` is `Some(0)`.
 - delegated sessions carry resolved `ResourceLimits`.

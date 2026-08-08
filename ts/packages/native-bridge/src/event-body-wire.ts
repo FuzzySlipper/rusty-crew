@@ -84,6 +84,9 @@ export function toNativeSessionState(session: SessionState): unknown {
           source_action_index: session.delegation.sourceActionIndex,
           requested_task_id: session.delegation.requestedTaskId,
           correlation_id: session.delegation.correlationId,
+          workspace_constraint: session.delegation.workspaceConstraint
+            ? { cwd: session.delegation.workspaceConstraint.cwd }
+            : undefined,
         }
       : undefined,
     workspace: session.workspace
@@ -94,7 +97,6 @@ export function toNativeSessionState(session: SessionState): unknown {
         }
       : undefined,
     resource_limits: {
-      workdir: session.resourceLimits.workdir,
       max_duration_ms: session.resourceLimits.maxDurationMs,
       max_delegation_depth: session.resourceLimits.maxDelegationDepth,
     },

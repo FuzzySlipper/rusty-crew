@@ -423,7 +423,12 @@ function session(
     agentId: agentId as AgentId,
     profileId: profileId as ProfileId,
     kind: "full",
-    resourceLimits: { workdir: "/home/dev/rusty-crew" },
+    workspace: {
+      cwd: "/home/dev/rusty-crew",
+      revision: 1,
+      updatedAt: "2026-06-20T15:00:00.000Z",
+    },
+    resourceLimits: {},
     toolProfile: {
       tools: [{ name: "read_file", description: "Read a file." }],
     },

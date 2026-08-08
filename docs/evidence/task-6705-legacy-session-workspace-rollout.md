@@ -40,3 +40,8 @@ preserved, a missing workspace receives only the operator-supplied absolute
 value, and every full-session workdir is removed. Delegated workdirs remain
 untouched. Focused tests cover existing/missing workspaces with and without the
 retired field.
+
+Task 6693 subsequently removed `workdir` from `ResourceLimits` entirely and
+introduced the separately typed, explicit delegated workspace constraint. The
+statements above describe only the historical migration behavior at task 6705's
+submitted revision.

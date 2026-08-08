@@ -147,8 +147,8 @@ try {
         profileId: coderProfileId,
         taskId: "2983" as TaskId,
         prompt: "Create a terminal delegated run for cleanup proof.",
+        workspaceConstraint: { cwd: "/home/dev/rusty-crew" },
         resourceLimits: {
-          workdir: "/home/dev/rusty-crew",
           maxDurationMs: 30_000,
           maxDelegationDepth: 0,
         },

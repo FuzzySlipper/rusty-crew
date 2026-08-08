@@ -329,7 +329,6 @@ function runtimeSection(context: LoadedProfileContext): string | undefined {
     runtime.maxTurns === undefined
       ? undefined
       : `Max turns: ${runtime.maxTurns}`,
-    limits?.workdir ? `Workdir: ${limits.workdir}` : undefined,
     limits?.maxDurationMs === undefined
       ? undefined
       : `Max duration ms: ${limits.maxDurationMs}`,

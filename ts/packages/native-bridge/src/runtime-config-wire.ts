@@ -144,6 +144,9 @@ export function toRawDelegatedRoleLifecyclePlanInput(
     requested_resource_limits: input.requestedResourceLimits
       ? toRawResourceLimits(input.requestedResourceLimits)
       : undefined,
+    requested_workspace_constraint: input.requestedWorkspaceConstraint
+      ? { cwd: input.requestedWorkspaceConstraint.cwd }
+      : undefined,
     source_wake_id: input.sourceWakeId,
     source_action_index: input.sourceActionIndex,
     task_id: input.taskId,
@@ -166,6 +169,13 @@ export function toNativeDelegatedRoleLifecyclePlan(
     kind: "delegated",
     resourceLimits:
       toResourceLimits(raw["resource_limits"] as RawResourceLimits) ?? {},
+    workspaceConstraint:
+      raw["workspace_constraint"] !== null &&
+      typeof raw["workspace_constraint"] === "object"
+        ? {
+            cwd: (raw["workspace_constraint"] as { cwd: string }).cwd,
+          }
+        : undefined,
     toolProfileKey:
       typeof raw["tool_profile_key"] === "string"
         ? raw["tool_profile_key"]
@@ -561,7 +571,6 @@ export function toResourceLimits(
     return undefined;
   }
   return {
-    workdir: limits.workdir ?? undefined,
     maxDurationMs: limits.max_duration_ms ?? undefined,
     maxDelegationDepth: limits.max_delegation_depth ?? undefined,
   };
@@ -569,7 +578,6 @@ export function toResourceLimits(
 
 export function toRawResourceLimits(limits: ResourceLimits): RawResourceLimits {
   return {
-    workdir: limits.workdir ?? undefined,
     max_duration_ms: limits.maxDurationMs ?? undefined,
     max_delegation_depth: limits.maxDelegationDepth ?? undefined,
   };
@@ -845,7 +853,6 @@ export interface RawProfileModelConfigSeed {
 }
 
 export interface RawResourceLimits {
-  workdir?: string;
   max_duration_ms?: number;
   max_delegation_depth?: number;
 }

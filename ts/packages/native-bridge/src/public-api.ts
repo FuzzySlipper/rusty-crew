@@ -1455,6 +1455,7 @@ export interface NativeDelegatedRoleLifecyclePlanInput {
   profileId: string;
   toolProfileKey?: string;
   requestedResourceLimits?: ResourceLimits;
+  requestedWorkspaceConstraint?: { cwd: string };
   sourceWakeId: string;
   sourceActionIndex: number;
   taskId?: string;
@@ -1472,6 +1473,7 @@ export interface NativeDelegatedRoleLifecyclePlan {
   profileId: string;
   kind: "delegated";
   resourceLimits: ResourceLimits;
+  workspaceConstraint?: { cwd: string };
   toolProfileKey?: string;
   sourceWakeId: string;
   sourceActionIndex: number;

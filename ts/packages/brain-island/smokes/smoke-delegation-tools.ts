@@ -38,6 +38,7 @@ assert.deepEqual(
     "summarize_files",
     "find_relevant_paths",
     "deliver_completion_md",
+    "rusty_crew_help",
   ],
 );
 
@@ -58,6 +59,7 @@ class DelegationToolFakeAgent {
       taskId: "3107",
       prompt: "Implement one delegated tool slice.",
       expectedOutput: "completion packet",
+      workspaceConstraint: { cwd: "/home/dev/rusty-crew" },
       priority: "high",
       correlationId: "spawn-proof",
       parentConsumption: "await_completion",
@@ -196,8 +198,12 @@ const result = await brain.wake({
       agentId,
       profileId,
       kind: "full",
+      workspace: {
+        cwd: "/home/dev/rusty-crew",
+        revision: 1,
+        updatedAt: "2026-06-21T00:00:00Z",
+      },
       resourceLimits: {
-        workdir: "/home/dev/rusty-crew",
         maxDurationMs: 30_000,
         maxDelegationDepth: 2,
       },
@@ -237,6 +243,8 @@ const [
 );
 assert.equal(spawn?.profileId, "coder-profile");
 assert.equal(spawn?.correlationId, "spawn-proof");
+assert.equal(spawn?.workspaceConstraint?.cwd, "/home/dev/rusty-crew");
+assert.equal(spawnMd?.workspaceConstraint, undefined);
 assert.equal(spawnMd?.correlationId, "spawn-md-proof");
 assert.equal(spawnMd?.taskId, "3877");
 assert.match(spawnMd?.expectedOutput ?? "", /Completion packet/);

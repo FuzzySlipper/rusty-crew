@@ -192,7 +192,6 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
             .transpose()
             .map_err(to_sql_error)?
             .unwrap_or(ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             }),
@@ -284,11 +283,15 @@ fn save_session_config_search_row_in_tx(
         .collect::<Vec<_>>()
         .join(" ");
     let body = format!(
-        "agent {} profile {} kind {} workdir {} tools {}",
+        "agent {} profile {} kind {} workspace {} tools {}",
         config.agent_id,
         config.profile_id,
         session_kind_as_str(&config.kind),
-        config.resource_limits.workdir.as_deref().unwrap_or(""),
+        config
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.cwd.as_str())
+            .unwrap_or(""),
         tool_names
     );
     tx.execute(
@@ -1048,7 +1051,6 @@ mod tests {
                 updated_at: "2026-07-02T01:00:00Z".to_string(),
             }),
             resource_limits: ResourceLimits {
-                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: Some(2),
             },

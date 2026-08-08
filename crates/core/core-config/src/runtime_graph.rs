@@ -424,7 +424,7 @@ fn plan_sessions(
                 });
                 SessionKind::Full
             });
-            let mut resource_limits = session
+            let resource_limits = session
                 .resource_limits
                 .clone()
                 .or_else(|| {
@@ -433,7 +433,6 @@ fn plan_sessions(
                         .and_then(|runtime| runtime.default_resource_limits.clone())
                 })
                 .unwrap_or(ResourceLimits {
-                    workdir: None,
                     max_duration_ms: None,
                     max_delegation_depth: None,
                 });
@@ -448,35 +447,14 @@ fn plan_sessions(
                     source: RuntimeGraphDefaultSource::ProfileRuntimeDefault,
                 });
             }
-            let workspace_cwd = session.workspace_cwd.clone().or_else(|| {
-                session
-                    .resource_limits
-                    .as_ref()
-                    .and_then(|limits| limits.workdir.clone())
-            });
-            if session.kind.as_ref().unwrap_or(&kind) == &SessionKind::Full {
-                resource_limits.workdir = None;
-                if workspace_cwd.is_none() {
-                    diagnostics.push(RuntimeConfigDiagnostic::error(
-                        "session_workspace_required",
-                        format!("sessions[{}].workspaceCwd", session.session_id),
-                        "full sessions require an explicit workspaceCwd",
-                    ));
-                }
-            }
-            if profile
-                .and_then(|profile| profile.runtime.as_ref())
-                .and_then(|runtime| runtime.default_resource_limits.as_ref())
-                .and_then(|limits| limits.workdir.as_ref())
-                .is_some()
+            let workspace_cwd = session.workspace_cwd.clone();
+            if session.kind.as_ref().unwrap_or(&kind) == &SessionKind::Full
+                && workspace_cwd.is_none()
             {
                 diagnostics.push(RuntimeConfigDiagnostic::error(
-                    "profile_workspace_forbidden",
-                    format!(
-                        "profiles[{}].runtime.defaultResourceLimits.workdir",
-                        session.profile_id
-                    ),
-                    "profiles cannot define a workspace cwd; set sessions[].workspaceCwd",
+                    "session_workspace_required",
+                    format!("sessions[{}].workspaceCwd", session.session_id),
+                    "full sessions require an explicit workspaceCwd",
                 ));
             }
             let profile_defaults = profile.and_then(|profile| profile.session_defaults.as_ref());
@@ -899,7 +877,6 @@ mod tests {
         session.local_tool_profile_id = Some("session-tools".to_string());
         session.workspace_cwd = Some("/explicit".to_string());
         session.resource_limits = Some(ResourceLimits {
-            workdir: None,
             max_duration_ms: Some(10_000),
             max_delegation_depth: Some(1),
         });
@@ -910,7 +887,7 @@ mod tests {
             Some("session-tools")
         );
         assert_eq!(session.workspace_cwd.as_deref(), Some("/explicit"));
-        assert_eq!(session.resource_limits.workdir, None);
+        assert_eq!(session.resource_limits.max_duration_ms, Some(10_000));
     }
 
     #[test]

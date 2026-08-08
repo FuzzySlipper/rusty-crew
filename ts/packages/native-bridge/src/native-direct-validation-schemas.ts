@@ -131,6 +131,9 @@ const rawDelegationLineageSchema = Type.Object(
     source_action_index: Type.Number({ minimum: 0 }),
     requested_task_id: nullableString,
     correlation_id: Type.String(),
+    workspace_constraint: Type.Optional(
+      Type.Object({ cwd: Type.String() }, { additionalProperties: false }),
+    ),
   },
   { additionalProperties: false },
 );

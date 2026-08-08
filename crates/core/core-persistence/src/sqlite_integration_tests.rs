@@ -7803,7 +7803,6 @@ fn sample_session_config() -> SessionConfig {
 
 fn sample_resource_limits() -> ResourceLimits {
     ResourceLimits {
-        workdir: Some("/tmp/rusty-crew-test".to_string()),
         max_duration_ms: Some(60_000),
         max_delegation_depth: Some(4),
     }

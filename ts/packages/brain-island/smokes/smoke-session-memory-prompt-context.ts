@@ -29,7 +29,7 @@ try {
         },
         runtime: {
           defaultResourceLimits: {
-            workdir: "/home/dev/rusty-crew",
+            maxDurationMs: 30_000,
           },
         },
         memoryConfig: {

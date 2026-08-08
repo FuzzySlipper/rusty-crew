@@ -230,8 +230,12 @@ try {
         agentId,
         profileId,
         kind: "full",
+        workspace: {
+          cwd: workdir,
+          revision: 1,
+          updatedAt: "2026-06-20T00:00:00Z",
+        },
         resourceLimits: {
-          workdir,
           maxDurationMs: 5_000,
         },
         toolProfile: selection.toolProfile,
