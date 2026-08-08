@@ -2,12 +2,76 @@
 
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentActivation, AgentMessageDeliveryId, AgentMessageInputKind, ExternalControllerContext,
-    ExternalMessageDeliveryPolicy, ExternalTurnCorrelation, ExternalTurnInputPart,
-    ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
+    AgentActivation, AgentMessageDeliveryId, AgentMessageInputKind, ExternalAgentBinding,
+    ExternalControllerContext, ExternalMessageDeliveryPolicy, ExternalTurnCorrelation,
+    ExternalTurnInputPart, ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance,
+    TurnInputProvenanceKind,
 };
 
 impl CoreEngine {
+    pub(crate) fn reconcile_idle_external_follow_ups(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ExternalTurnRequestId>> {
+        let nonterminal_session_ids = self
+            .store
+            .list_nonterminal_external_turns()?
+            .into_iter()
+            .map(|turn| turn.request.session_id)
+            .collect::<HashSet<_>>();
+        let mut inspected_session_ids = HashSet::new();
+        let mut promoted_request_ids = Vec::new();
+
+        for binding in self
+            .store
+            .list_external_agent_bindings()?
+            .into_iter()
+            .filter(ExternalAgentBinding::is_routable)
+            .filter(|binding| {
+                binding.message_delivery_policy == ExternalMessageDeliveryPolicy::SerialNextTurn
+            })
+        {
+            let session_id = binding.session_id.as_ref().expect("routable session id");
+            if !inspected_session_ids.insert(session_id.clone())
+                || nonterminal_session_ids.contains(session_id)
+            {
+                continue;
+            }
+            let has_pending_follow_up = self
+                .store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(session_id.clone()),
+                    owner_agent_id: None,
+                    limit: Some(1),
+                })?
+                .into_iter()
+                .next()
+                .is_some();
+            if !has_pending_follow_up {
+                continue;
+            }
+
+            let latest_turn = match binding.native_thread_id.as_deref() {
+                Some(native_thread_id) => self
+                    .store
+                    .list_external_turns_for_native_thread(&binding.runtime_id, native_thread_id)?
+                    .into_iter()
+                    .rfind(|turn| turn.request.session_id == *session_id),
+                None => None,
+            };
+            if let Some(latest_turn) = latest_turn.as_ref() {
+                if !self.external_turn_allows_follow_up_promotion(latest_turn)? {
+                    continue;
+                }
+            }
+            if let Some(promoted) = self.promote_next_external_follow_up(session_id, now)? {
+                promoted_request_ids.push(promoted.request.request_id);
+            }
+        }
+        Ok(promoted_request_ids)
+    }
+
     pub fn transition_external_turn(
         &self,
         request_id: &ExternalTurnRequestId,

@@ -61,6 +61,7 @@ impl CoreEngine {
         engine.expire_delegated_sessions()?;
         engine.reactivate_active_roleplay_sessions()?;
         engine.reactivate_active_external_sessions()?;
+        engine.reconcile_idle_external_follow_ups(&now)?;
         engine.hydrate_logical_turn_continuations()?;
         Ok(engine)
     }
