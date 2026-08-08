@@ -103,6 +103,65 @@ test("provider-state recovery does not read durable history when state is presen
   assert.equal(observed[0]?.durableConversation, undefined);
 });
 
+test("Rust body-state decoding preserves the canonical session workspace", async () => {
+  const observed: BrainWakeInput[] = [];
+  const bodyState = JSON.stringify({
+    session: {
+      handle: 1,
+      session_id: "session-1",
+      agent_id: "agent-1",
+      profile_id: "profile-1",
+      kind: "full",
+      workspace: {
+        cwd: "/home/dev/rusty-crew",
+        revision: 3,
+        updated_at: "2026-08-08T18:00:00Z",
+      },
+      resource_limits: {},
+      tool_profile: { tools: [] },
+      status: "idle",
+      brain_turn_count: 0,
+      created_at: "2026-08-08T17:00:00Z",
+      last_active_at: "2026-08-08T18:00:00Z",
+    },
+    pending_messages: [],
+    recent_events: [],
+    child_completions: [],
+    fan_out_groups: [],
+    delta_policy: {
+      mode: "frozen_snapshot_next_wake",
+      queue_owner: "body",
+      queued_message_ttl_ms: 60_000,
+      max_queued_messages: 32,
+    },
+  });
+  const buffers = recoveryBuffers({
+    bodyState,
+    readChatSession: async () => ({ events: [], has_more: false }),
+  });
+
+  await wakeBrainFromBridgeRequest(
+    buffers,
+    recordingBrain(observed),
+    wakeRequest({
+      providerState: {
+        moduleId: "chat-completions",
+        strategyId: "default",
+        profileFingerprint: "profile:v1",
+        providerFingerprint: "provider:v1",
+        payloadVersion: "chat-completions:v1",
+        payload: {},
+      },
+    }),
+  );
+
+  assert.deepEqual(observed[0]?.state.session.workspace, {
+    cwd: "/home/dev/rusty-crew",
+    revision: 3,
+    updatedAt: "2026-08-08T18:00:00Z",
+  });
+});
+
 test("provider-state recovery fails before the brain runs when the first page is unavailable", async () => {
   const observed: BrainWakeInput[] = [];
   const buffers = recoveryBuffers({

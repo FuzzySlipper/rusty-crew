@@ -266,6 +266,13 @@ function toBodyState(value: unknown): BodyState {
       profileId: state.session.profile_id,
       kind: state.session.kind,
       delegation: toDelegationLineage(state.session.delegation),
+      workspace: state.session.workspace
+        ? {
+            cwd: state.session.workspace.cwd,
+            revision: state.session.workspace.revision,
+            updatedAt: state.session.workspace.updated_at,
+          }
+        : undefined,
       resourceLimits: {
         workdir: state.session.resource_limits?.workdir,
         maxDurationMs: state.session.resource_limits?.max_duration_ms,
@@ -467,6 +474,13 @@ function toBodyStateSession(
     profileId: session.profile_id,
     kind: session.kind,
     delegation: toDelegationLineage(session.delegation),
+    workspace: session.workspace
+      ? {
+          cwd: session.workspace.cwd,
+          revision: session.workspace.revision,
+          updatedAt: session.workspace.updated_at,
+        }
+      : undefined,
     resourceLimits: {
       workdir: session.resource_limits?.workdir,
       maxDurationMs: session.resource_limits?.max_duration_ms,
@@ -573,6 +587,11 @@ interface RustSessionStateJson {
   profile_id: BodyState["session"]["profileId"];
   kind: BodyState["session"]["kind"];
   delegation?: RustDelegationLineageJson;
+  workspace?: {
+    cwd: string;
+    revision: number;
+    updated_at: string;
+  };
   resource_limits?: {
     workdir?: string;
     max_duration_ms?: number;
