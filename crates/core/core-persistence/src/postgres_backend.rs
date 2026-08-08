@@ -16532,6 +16532,33 @@ mod tests {
             reason_code: "explicit_new".into(),
             created_at: "2026-07-10T00:00:03Z".into(),
         });
+        for (mut invalid, expected_kind) in [
+            (
+                {
+                    let mut candidate = lineaged.clone();
+                    candidate.session_id = None;
+                    candidate
+                },
+                CoreErrorKind::InvalidInput,
+            ),
+            (
+                {
+                    let mut candidate = lineaged.clone();
+                    candidate.native_thread_id = None;
+                    candidate
+                },
+                CoreErrorKind::ActionRejected,
+            ),
+        ] {
+            invalid.updated_at = "2026-07-10T00:00:04Z".into();
+            assert_eq!(
+                store
+                    .put_external_agent_binding(&invalid, Some(successor.revision))
+                    .unwrap_err()
+                    .kind,
+                expected_kind
+            );
+        }
         let lineaged = store
             .put_external_agent_binding(&lineaged, Some(successor.revision))
             .unwrap();

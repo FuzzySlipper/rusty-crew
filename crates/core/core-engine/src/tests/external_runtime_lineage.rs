@@ -75,6 +75,31 @@ fn external_binding_lineage_is_rust_validated_immutable_idempotent_and_restartab
         );
     }
 
+    let mut missing_successor_session = successor_seed.clone();
+    missing_successor_session.session_id = None;
+    let mut reused_predecessor_session = successor_seed.clone();
+    reused_predecessor_session.session_id = predecessor.session_id.clone();
+    let mut missing_successor_thread = successor_seed.clone();
+    missing_successor_thread.native_thread_id = None;
+    let mut reused_predecessor_thread = successor_seed.clone();
+    reused_predecessor_thread.native_thread_id = predecessor.native_thread_id.clone();
+    for (mut invalid, expected_kind) in [
+        (missing_successor_session, CoreErrorKind::InvalidInput),
+        (reused_predecessor_session, CoreErrorKind::ActionRejected),
+        (missing_successor_thread, CoreErrorKind::ActionRejected),
+        (reused_predecessor_thread, CoreErrorKind::ActionRejected),
+    ] {
+        invalid.lineage = Some(authoritative_lineage.clone());
+        assert_eq!(
+            engine
+                .bind_external_agent(&invalid, Some(successor_seed.revision))
+                .unwrap_err()
+                .kind,
+            expected_kind,
+            "a lineaged successor requires present and distinct session/thread identities"
+        );
+    }
+
     let mut establish = successor_seed.clone();
     establish.lineage = Some(authoritative_lineage.clone());
     establish.updated_at = "2026-06-19T00:00:01Z".into();

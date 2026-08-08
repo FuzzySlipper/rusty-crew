@@ -770,13 +770,15 @@ pub fn validate_external_agent_binding_transition(
             "external binding lineage does not match the authoritative predecessor binding",
         ));
     }
-    if candidate.session_id.as_ref() == Some(&lineage.predecessor_session_id)
+    if candidate.session_id.is_none()
+        || candidate.session_id.as_ref() == Some(&lineage.predecessor_session_id)
+        || candidate.native_thread_id.is_none()
         || candidate.native_thread_id.as_deref()
             == Some(lineage.predecessor_native_thread_id.as_str())
     {
         return Err(CoreError::new(
             CoreErrorKind::ActionRejected,
-            "external binding lineage successor must use a distinct Crew session and native thread",
+            "external binding lineage successor must have a distinct Crew session and native thread",
         ));
     }
     Ok(())
