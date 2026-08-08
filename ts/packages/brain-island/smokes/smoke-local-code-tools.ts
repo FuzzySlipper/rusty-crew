@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -274,6 +276,39 @@ try {
     }),
     /path escapes session workdir/,
   );
+  const escapedCreationPath = join(outsideDir, "escaped-created.txt");
+  symlinkSync(outsideDir, join(workdir, "escape-directory"), "dir");
+  await assert.rejects(
+    constrainedWorkerWrite.execute("constrained-worker-write-dir-symlink", {
+      path: "escape-directory/escaped-created.txt",
+      content: "must remain inside the delegated constraint\n",
+    }),
+    /delegated workspace path contains symlink/,
+  );
+  assert.equal(existsSync(escapedCreationPath), false);
+
+  const outsideBeforeFileSymlink = readFileSync(outsideWritePath, "utf8");
+  symlinkSync(outsideWritePath, join(workdir, "escape-file"), "file");
+  await assert.rejects(
+    constrainedWorkerWrite.execute("constrained-worker-write-file-symlink", {
+      path: "escape-file",
+      content: "must not replace the outside file\n",
+    }),
+    /delegated workspace path contains symlink/,
+  );
+  assert.equal(
+    readFileSync(outsideWritePath, "utf8"),
+    outsideBeforeFileSymlink,
+  );
+
+  await constrainedWorkerWrite.execute("constrained-worker-write-new-file", {
+    path: "nested/delegated-created.txt",
+    content: "created inside constraint\n",
+  });
+  assert.equal(
+    readFileSync(join(workdir, "nested", "delegated-created.txt"), "utf8"),
+    "created inside constraint\n",
+  );
   assert.match(textResult(toolResults.terminal), /local-tools-ok/);
   assert.equal(
     (toolResults.terminal.details as { exitCode: number }).exitCode,
@@ -349,6 +384,7 @@ try {
         searchSkipped: searchDetails.skipped,
         fullSessionWorkerWriteUnrestricted: true,
         delegatedConstraintDeniedEscape: true,
+        delegatedConstraintDeniedSymlinkEscape: true,
         terminalExit: (toolResults.terminal.details as { exitCode: number })
           .exitCode,
         runtimeActivity: terminalProcess.activityId,

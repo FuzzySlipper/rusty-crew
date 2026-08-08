@@ -9,6 +9,10 @@ import type {
 } from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
 import { patchTool } from "./patch-tool.js";
+import {
+  openConstrainedMutableFile,
+  replaceOpenFile,
+} from "./constrained-filesystem.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 
 export const defaultLocalCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan =
@@ -439,7 +443,20 @@ export function workerWriteTool(
         params.path,
         localToolFilesystemScope(context, "worker_write"),
       );
-      await writeFile(target, params.content, "utf8");
+      if (localToolFilesystemScope(context, "worker_write") === "workdir") {
+        const handle = await openConstrainedMutableFile(
+          workerWorkdir,
+          target,
+          true,
+        );
+        try {
+          await replaceOpenFile(handle, params.content);
+        } finally {
+          await handle.close();
+        }
+      } else {
+        await writeFile(target, params.content, "utf8");
+      }
       const details = {
         path: params.path,
         absolutePath: target,

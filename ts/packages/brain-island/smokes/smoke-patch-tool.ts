@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -193,6 +200,51 @@ try {
   assert.match(textResult(workerPatchResult), /path escapes session workdir/);
   assert.equal(readFileSync(outsidePatchPath, "utf8"), "outside new\n");
 
+  symlinkSync(outsidePatchPath, join(workdir, "escape-file.txt"), "file");
+  const fileSymlinkPatch = await workerPatch.execute(
+    "worker-patch-file-symlink",
+    {
+      path: "escape-file.txt",
+      old_string: "outside new",
+      new_string: "escaped through file symlink",
+    },
+  );
+  assert.equal((fileSymlinkPatch.details as { ok: boolean }).ok, false);
+  assert.match(
+    textResult(fileSymlinkPatch),
+    /delegated workspace path contains symlink/,
+  );
+  assert.equal(readFileSync(outsidePatchPath, "utf8"), "outside new\n");
+
+  mkdirSync(join(outsideDir, "linked-directory"));
+  const outsideDirectoryFile = join(outsideDir, "linked-directory", "v4a.txt");
+  writeFileSync(outsideDirectoryFile, "before v4a\n", "utf8");
+  symlinkSync(
+    join(outsideDir, "linked-directory"),
+    join(workdir, "escape-directory"),
+    "dir",
+  );
+  const directorySymlinkPatch = await workerPatch.execute(
+    "worker-patch-directory-symlink",
+    {
+      mode: "patch",
+      patch: [
+        "*** Begin Patch",
+        "*** Update File: escape-directory/v4a.txt",
+        "@@ delegated-symlink @@",
+        "-before v4a",
+        "+escaped v4a",
+        "*** End Patch",
+      ].join("\n"),
+    },
+  );
+  assert.equal((directorySymlinkPatch.details as { ok: boolean }).ok, false);
+  assert.match(
+    textResult(directorySymlinkPatch),
+    /delegated workspace path contains symlink/,
+  );
+  assert.equal(readFileSync(outsideDirectoryFile, "utf8"), "before v4a\n");
+
   console.log(
     JSON.stringify(
       {
@@ -207,6 +259,7 @@ try {
         workerPatchDenied: /path escapes session workdir/.test(
           textResult(workerPatchResult),
         ),
+        workerPatchSymlinkDenied: true,
         diffLines: textResult(patchResult).split("\n").length,
       },
       null,

@@ -5,6 +5,11 @@ import { promisify } from "node:util";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import { Type, type Static } from "typebox";
 import type { LocalToolContext } from "./local-code-tools.js";
+import {
+  openConstrainedMutableFile,
+  replaceOpenFile,
+} from "./constrained-filesystem.js";
+import type { FileHandle } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
 
@@ -104,22 +109,36 @@ async function executeReplaceMode(
     return errorResult(`path escapes session workdir: ${path}`);
   }
 
-  const originalContent = await fs
-    .readFile(absolutePath, "utf8")
-    .catch((error: unknown) =>
-      errorResult(`Cannot read file ${path}: ${errorMessage(error)}`),
+  let constrainedHandle: FileHandle | undefined;
+  try {
+    constrainedHandle = await openPatchHandle(
+      context.workdir,
+      absolutePath,
+      filesystemScope,
     );
+  } catch (error: unknown) {
+    return errorResult(`Cannot read file ${path}: ${errorMessage(error)}`);
+  }
+  const originalContent = await readPatchFile(
+    absolutePath,
+    constrainedHandle,
+  ).catch((error: unknown) =>
+    errorResult(`Cannot read file ${path}: ${errorMessage(error)}`),
+  );
   if (typeof originalContent !== "string") {
+    await constrainedHandle?.close();
     return originalContent;
   }
 
   const matchResult = findBestMatch(originalContent, oldString, replaceAll);
   if (!matchResult) {
+    await constrainedHandle?.close();
     return errorResult(
       `Could not find a unique match for old_string in ${path}. Use search_files to find the exact text first.`,
     );
   }
   if (!matchResult.unique && !replaceAll) {
+    await constrainedHandle?.close();
     return errorResult(
       `old_string matched ${matchResult.count} times in ${path}. Set replace_all=true or narrow old_string.`,
     );
@@ -136,18 +155,24 @@ async function executeReplaceMode(
 
   try {
     await fs.mkdir(dirname(absolutePath), { recursive: true });
-    await fs.writeFile(absolutePath, patchedContent, "utf8");
+    await writePatchFile(absolutePath, patchedContent, constrainedHandle);
   } catch (error: unknown) {
+    await constrainedHandle?.close();
     return errorResult(`Failed to write ${path}: ${errorMessage(error)}`);
   }
 
   const syntaxResult = await checkSyntax(absolutePath);
   if (!syntaxResult.ok) {
-    await fs.writeFile(absolutePath, rollback, "utf8").catch(() => undefined);
+    await writePatchFile(absolutePath, rollback, constrainedHandle).catch(
+      () => undefined,
+    );
+    await constrainedHandle?.close();
     return errorResult(
       `Syntax check failed after edit; file rolled back.\n${syntaxResult.error}`,
     );
   }
+
+  await constrainedHandle?.close();
 
   return textResult(diff, {
     ok: true,
@@ -212,18 +237,32 @@ async function applyPatchFile(
     return;
   }
 
-  const originalContent = await fs
-    .readFile(absolutePath, "utf8")
-    .catch((error: unknown) => {
-      errors.push(`Cannot read ${file.path}: ${errorMessage(error)}`);
-      return undefined;
-    });
+  const constrainedHandle = await openPatchHandle(
+    context.workdir,
+    absolutePath,
+    filesystemScope,
+  ).catch((error: unknown) => {
+    errors.push(`Cannot read ${file.path}: ${errorMessage(error)}`);
+    return undefined;
+  });
+  if (filesystemScope === "workdir" && constrainedHandle === undefined) {
+    return;
+  }
+  const originalContent = await readPatchFile(
+    absolutePath,
+    constrainedHandle,
+  ).catch((error: unknown) => {
+    errors.push(`Cannot read ${file.path}: ${errorMessage(error)}`);
+    return undefined;
+  });
   if (originalContent === undefined) {
+    await constrainedHandle?.close();
     return;
   }
 
   const patchedContent = applyV4AHunks(originalContent, file.hunks);
   if (patchedContent === originalContent) {
+    await constrainedHandle?.close();
     errors.push(
       `No changes applied to ${file.path}; context lines did not match`,
     );
@@ -231,18 +270,23 @@ async function applyPatchFile(
   }
 
   await fs.mkdir(dirname(absolutePath), { recursive: true });
-  await fs.writeFile(absolutePath, patchedContent, "utf8");
+  await writePatchFile(absolutePath, patchedContent, constrainedHandle);
 
   const syntaxResult = await checkSyntax(absolutePath);
   if (!syntaxResult.ok) {
-    await fs
-      .writeFile(absolutePath, originalContent, "utf8")
-      .catch(() => undefined);
+    await writePatchFile(
+      absolutePath,
+      originalContent,
+      constrainedHandle,
+    ).catch(() => undefined);
+    await constrainedHandle?.close();
     errors.push(
       `${file.path}: syntax check failed; rolled back: ${syntaxResult.error}`,
     );
     return;
   }
+
+  await constrainedHandle?.close();
 
   diffs.push(buildDiff(file.path, originalContent, patchedContent).join("\n"));
 }
@@ -507,6 +551,37 @@ function resolvePatchPath(
     throw new Error(`path escapes session workdir: ${path}`);
   }
   return target;
+}
+
+async function openPatchHandle(
+  root: string,
+  target: string,
+  scope: FilesystemScope,
+): Promise<FileHandle | undefined> {
+  return scope === "workdir"
+    ? openConstrainedMutableFile(root, target, false)
+    : undefined;
+}
+
+async function readPatchFile(
+  target: string,
+  handle: FileHandle | undefined,
+): Promise<string> {
+  return handle === undefined
+    ? fs.readFile(target, "utf8")
+    : handle.readFile("utf8");
+}
+
+async function writePatchFile(
+  target: string,
+  content: string,
+  handle: FileHandle | undefined,
+): Promise<void> {
+  if (handle === undefined) {
+    await fs.writeFile(target, content, "utf8");
+  } else {
+    await replaceOpenFile(handle, content);
+  }
 }
 
 function textResult(
