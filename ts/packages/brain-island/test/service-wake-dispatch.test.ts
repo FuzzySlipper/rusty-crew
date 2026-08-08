@@ -149,6 +149,12 @@ test("completed compaction events persist a stable artifact for restart hydratio
         artifact: {
           sequence: 1,
           strategyId: "rolling_summary_compaction",
+          strategyRevision: "roleplay-adapter-v7",
+          strategyPayloadMetadata: {
+            schema_version: 1,
+            payload_lineage: { parentArtifactId: "artifact-parent" },
+            preservation_payload: { facts: ["scene fact"] },
+          },
           reasonCode: "context_fill_threshold_exceeded",
           usageBefore: {
             inputTokens: 90,
@@ -179,6 +185,14 @@ test("completed compaction events persist a stable artifact for restart hydratio
     tokens: 40,
     source: "serialized_compaction_projection",
   });
+  assert.deepEqual(
+    (saved[0]?.metadata_json as Record<string, unknown>).strategy_payload,
+    {
+      schema_version: 1,
+      payload_lineage: { parentArtifactId: "artifact-parent" },
+      preservation_payload: { facts: ["scene fact"] },
+    },
+  );
 });
 
 test("compaction artifact persistence failure is degraded observability", async () => {

@@ -15,15 +15,17 @@ pub use openai_oauth::{
 
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
-    decide_context_compaction_for_projection, is_context_limit_provider_error,
-    validate_compaction_artifacts, BrainContextCompactionArtifact, BrainContextCompactionDecision,
-    BrainContextCompactionPolicy, BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic,
-    ContextAccountingSnapshot, ContextAdmission, ContextAdmissionState, ContextCompactionPhase,
-    ContextCompactionProjection, ContextDiagnosticSeverity, ContextDurableTranscript,
-    ContextMeasurementSource, ContextProjectionSegment, ContextPromptProjection,
-    ContextProviderDescriptor, ContextProviderProtocol, ContextProviderState, ContextProviderUsage,
-    ContextReservedOutput, ContextSizeMeasurement, ContextTokenMeasurement,
-    ContextTokenUsageTotals,
+    compaction_strategy_artifact_metadata, decide_context_compaction_for_projection,
+    execute_compaction_strategy, is_context_limit_provider_error, validate_compaction_artifacts,
+    BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionItem,
+    BrainContextCompactionPolicy, BrainContextCompactionSnapshot, BrainContextCompactionStrategy,
+    BrainContextCompactionStrategyInput, BrainContextSafeCompactionBoundary,
+    BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic, ContextAccountingSnapshot,
+    ContextAdmission, ContextAdmissionState, ContextCompactionPhase, ContextCompactionProjection,
+    ContextDiagnosticSeverity, ContextDurableTranscript, ContextMeasurementSource,
+    ContextProjectionSegment, ContextPromptProjection, ContextProviderDescriptor,
+    ContextProviderProtocol, ContextProviderState, ContextProviderUsage, ContextReservedOutput,
+    ContextSizeMeasurement, ContextTokenMeasurement, ContextTokenUsageTotals,
 };
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
@@ -2956,6 +2958,8 @@ pub struct ResponsesReplayBrain<C, T> {
     client: C,
     tools: T,
     request_builder: ResponsesRequestBuilder,
+    compaction_strategy: Arc<dyn BrainContextCompactionStrategy>,
+    compaction_domain_context: Option<Value>,
 }
 
 enum ResponsesProviderDisposition {
@@ -3058,7 +3062,23 @@ where
             client,
             tools,
             request_builder: ResponsesRequestBuilder::new(config).tools(descriptors),
+            compaction_strategy: Arc::new(
+                rusty_crew_brain_runtime::RollingSummaryCompactionStrategy,
+            ),
+            compaction_domain_context: None,
         }
+    }
+
+    pub fn with_compaction_strategy(
+        mut self,
+        strategy: Arc<dyn BrainContextCompactionStrategy>,
+    ) -> Self {
+        self.compaction_strategy = strategy;
+        self
+    }
+
+    pub fn set_compaction_domain_context(&mut self, domain_context: Option<Value>) {
+        self.compaction_domain_context = domain_context;
     }
 
     pub fn strategy_metadata() -> (String, String, ProviderStateMode) {
@@ -3096,6 +3116,7 @@ where
         history: ResponsesReplayProjection,
         mut sink: BrainWakeItemSink<'_>,
     ) -> CoreResult<ResponsesBrainWakeResult> {
+        let compaction_domain_context = self.compaction_domain_context.take();
         let mut items = Vec::new();
         let restored = match request.continuation_state.as_ref() {
             Some(payload) => match responses_continuation_state(payload) {
@@ -3397,6 +3418,10 @@ where
                 usage.clone(),
                 sequence,
                 output_continuation.compaction_guidance.as_deref(),
+                ResponsesCompactionExtension {
+                    strategy: Arc::clone(&self.compaction_strategy),
+                    domain_context: compaction_domain_context.clone(),
+                },
             )
             .and_then(|(artifact, guidance)| {
                 let mut compacted_request = self.request_builder.build_replay(
@@ -3585,6 +3610,10 @@ where
                             usage.clone(),
                             sequence,
                             output_continuation.compaction_guidance.as_deref(),
+                            ResponsesCompactionExtension {
+                                strategy: Arc::clone(&self.compaction_strategy),
+                                domain_context: compaction_domain_context.clone(),
+                            },
                         )
                         .and_then(|(artifact, guidance)| {
                             let mut compacted_request = self.request_builder.build_replay(
@@ -3759,6 +3788,10 @@ where
                         usage.clone(),
                         sequence,
                         output_continuation.compaction_guidance.as_deref(),
+                        ResponsesCompactionExtension {
+                            strategy: Arc::clone(&self.compaction_strategy),
+                            domain_context: compaction_domain_context.clone(),
+                        },
                     )
                     .and_then(|(artifact, guidance)| {
                         let mut compacted_request = self.request_builder.build_replay(
@@ -4709,6 +4742,7 @@ fn responses_failed_compaction_artifact(
         sequence: 1,
         strategy_id,
         strategy_revision,
+        strategy_payload_metadata: None,
         logical_turn_id: None,
         execution_epoch_id: None,
         source_projection_fingerprint: fingerprint,
@@ -4809,13 +4843,24 @@ fn responses_context_compaction_attention(summary: String) -> BrainWakeAttention
     }
 }
 
+#[derive(Clone)]
+struct ResponsesCompactionExtension {
+    strategy: Arc<dyn BrainContextCompactionStrategy>,
+    domain_context: Option<Value>,
+}
+
 fn compact_responses_items(
     items: &mut Vec<ResponsesInputItem>,
     policy: &BrainContextCompactionPolicy,
     usage_before: rusty_crew_brain_runtime::BrainContextUsageSnapshot,
     sequence: u64,
     prior_guidance: Option<&str>,
+    extension: ResponsesCompactionExtension,
 ) -> Result<(BrainContextCompactionArtifact, String), String> {
+    let ResponsesCompactionExtension {
+        strategy,
+        domain_context,
+    } = extension;
     let mut recent_start = items.len().saturating_sub(4);
     while recent_start > 0
         && matches!(
@@ -4831,51 +4876,108 @@ fn compact_responses_items(
                 .to_string(),
         );
     }
-    let compacted = &items[..recent_start];
-    let summary_budget = policy
-        .target_tokens()
-        .saturating_mul(4)
-        .saturating_div(4)
-        .clamp(256, 4096) as usize;
-    let mut summary = String::from(
-        "[Rusty Crew mid-turn context summary]\nEarlier completed Responses exchanges were compacted from provider input only. Raw transcript, reasoning telemetry, and tool effects remain authoritative.\n",
-    );
+    let projected_items = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let (role, tool_exchange_id, content) = match item {
+                ResponsesInputItem::UserMessage { content } => ("user", None, content.clone()),
+                ResponsesInputItem::AssistantMessage { content } => {
+                    ("assistant", None, content.clone())
+                }
+                ResponsesInputItem::Reasoning { summary, .. } => (
+                    "reasoning_summary",
+                    None,
+                    summary.clone().unwrap_or_else(|| "retained".to_string()),
+                ),
+                ResponsesInputItem::FunctionCall {
+                    call_id,
+                    name,
+                    arguments,
+                    ..
+                } => (
+                    "tool_call",
+                    Some(call_id.clone()),
+                    format!("{name}({arguments})"),
+                ),
+                ResponsesInputItem::FunctionCallOutput {
+                    call_id,
+                    output,
+                    is_error,
+                } => (
+                    "tool_result",
+                    Some(call_id.clone()),
+                    format!("error={is_error}: {output}"),
+                ),
+                ResponsesInputItem::ReplayHint { .. } => (
+                    "replay_hint",
+                    None,
+                    "provider replay hint retained".to_string(),
+                ),
+            };
+            BrainContextCompactionItem {
+                source_ref: format!("responses-item-{index}"),
+                role: role.to_string(),
+                content,
+                tool_exchange_id,
+                tool_exchange_completed: index < recent_start,
+                metadata: Value::Null,
+            }
+        })
+        .collect::<Vec<_>>();
+    let source_projection_fingerprint = serde_json::to_value(&*items)
+        .map_err(|error| format!("serialize Responses compaction snapshot: {error}"))
+        .and_then(|value| {
+            responses_json_fingerprint(&value)
+                .map_err(|error| format!("fingerprint Responses compaction snapshot: {error}"))
+        })?;
+    let decision = execute_compaction_strategy(
+        strategy,
+        BrainContextCompactionStrategyInput {
+            snapshot: BrainContextCompactionSnapshot {
+                source_projection_fingerprint: source_projection_fingerprint.clone(),
+                items: projected_items,
+            },
+            policy: policy.clone(),
+            safe_boundary: BrainContextSafeCompactionBoundary {
+                boundary_id: format!("responses-before-item-{recent_start}"),
+                compact_before_item: recent_start,
+                active_tool_exchange_id: None,
+            },
+            domain_context: match (domain_context, prior_guidance) {
+                (Some(Value::Object(mut context)), Some(guidance)) => {
+                    context.insert("priorGuidance".to_string(), json!(guidance));
+                    Some(Value::Object(context))
+                }
+                (Some(context), Some(guidance)) => Some(json!({
+                    "adapterContext": context,
+                    "priorGuidance": guidance,
+                })),
+                (Some(context), None) => Some(context),
+                (None, Some(guidance)) => Some(json!({"priorGuidance": guidance})),
+                (None, None) => None,
+            },
+            parent_artifact_id: None,
+        },
+        Duration::from_secs(2),
+    )
+    .map_err(|failure| format!("{}: {}", failure.reason_code, failure.summary))?;
+    let compacted_refs = decision
+        .compacted_source_refs
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let replacement = items
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !compacted_refs.contains(format!("responses-item-{index}").as_str()))
+        .map(|(_, item)| item.clone())
+        .collect::<Vec<_>>();
+    let mut summary = decision.summary_text.clone();
     if let Some(prior) = prior_guidance {
-        summary.push_str(truncate_utf8_responses(
-            prior,
-            summary_budget.saturating_div(3),
-        ));
         summary.push('\n');
+        summary.push_str(truncate_utf8_responses(prior, 1024));
     }
-    for item in compacted {
-        let line = match item {
-            ResponsesInputItem::UserMessage { content } => format!("user: {content}\n"),
-            ResponsesInputItem::AssistantMessage { content } => {
-                format!("assistant: {content}\n")
-            }
-            ResponsesInputItem::Reasoning { summary, .. } => {
-                format!(
-                    "reasoning summary: {}\n",
-                    summary.as_deref().unwrap_or("retained")
-                )
-            }
-            ResponsesInputItem::FunctionCall {
-                name, arguments, ..
-            } => format!("tool call: {name}({arguments})\n"),
-            ResponsesInputItem::FunctionCallOutput {
-                call_id,
-                output,
-                is_error,
-            } => format!("tool result {call_id} error={is_error}: {output}\n"),
-            ResponsesInputItem::ReplayHint { .. } => "provider replay hint retained\n".to_string(),
-        };
-        let remaining = summary_budget.saturating_sub(summary.len());
-        if remaining <= 32 {
-            break;
-        }
-        summary.push_str(truncate_utf8_responses(&line, remaining.min(320)));
-    }
-    let replacement = items[recent_start..].to_vec();
     let estimated_tokens_after = serde_json::to_vec(&(&replacement, &summary))
         .map(|value| (value.len() as u64).saturating_add(3) / 4)
         .map_err(|error| format!("serialize compacted Responses context: {error}"))?;
@@ -4896,16 +4998,17 @@ fn compact_responses_items(
         execution_epoch_id: None,
         source_projection_fingerprint: None,
         strategy_id: policy.strategy_id.clone(),
-        strategy_revision: Some("1".to_string()),
+        strategy_revision: Some(decision.strategy_revision.clone()),
+        strategy_payload_metadata: Some(compaction_strategy_artifact_metadata(&decision)),
         reason_code: "context_fill_threshold_exceeded".to_string(),
         trigger: Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::AutoThreshold),
         usage_before: usage_before.clone(),
         estimated_tokens_after,
         before_tokens: Some(usage_before.input_tokens),
         after_tokens: Some(estimated_tokens_after),
-        preserved_item_count: Some(replacement.len() as u64),
-        excised_item_count: Some(compacted.len() as u64),
-        compacted_item_count: compacted.len() as u64,
+        preserved_item_count: Some(decision.retained_source_refs.len() as u64),
+        excised_item_count: Some(decision.compacted_source_refs.len() as u64),
+        compacted_item_count: decision.compacted_source_refs.len() as u64,
         retained_item_count: replacement.len() as u64,
         summary_text: summary.clone(),
         provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
@@ -4924,6 +5027,7 @@ fn compact_responses_projection(
     usage_before: rusty_crew_brain_runtime::BrainContextUsageSnapshot,
     sequence: u64,
     prior_guidance: Option<&str>,
+    extension: ResponsesCompactionExtension,
 ) -> Result<(BrainContextCompactionArtifact, String), String> {
     let mut projected_items = base_history.input_items.clone();
     projected_items.extend(continuation_items.iter().cloned());
@@ -4933,6 +5037,7 @@ fn compact_responses_projection(
         usage_before,
         sequence,
         prior_guidance,
+        extension,
     )?;
     base_history.input_items.clear();
     *continuation_items = projected_items;
@@ -8947,7 +9052,17 @@ mod tests {
             arguments: "{}".to_string(),
         }];
         let original = items.clone();
-        let result = compact_responses_items(&mut items, &policy, usage, 1, None);
+        let result = compact_responses_items(
+            &mut items,
+            &policy,
+            usage,
+            1,
+            None,
+            ResponsesCompactionExtension {
+                strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+                domain_context: None,
+            },
+        );
         assert!(
             result.is_err(),
             "pending tool exchange must not be compacted across unsafe boundary"
@@ -8991,7 +9106,17 @@ mod tests {
         }
         let original = items.clone();
         let mut compacted = items.clone();
-        let ok = compact_responses_items(&mut compacted, &policy, usage.clone(), 1, None);
+        let ok = compact_responses_items(
+            &mut compacted,
+            &policy,
+            usage.clone(),
+            1,
+            None,
+            ResponsesCompactionExtension {
+                strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+                domain_context: None,
+            },
+        );
         assert!(
             ok.is_ok(),
             "long history should compact at safe boundary: {:?}",
@@ -9007,7 +9132,17 @@ mod tests {
             content: "hello".to_string(),
         }];
         let unsafe_original = unsafe_items.clone();
-        let unsafe_result = compact_responses_items(&mut unsafe_items, &policy, usage, 2, None);
+        let unsafe_result = compact_responses_items(
+            &mut unsafe_items,
+            &policy,
+            usage,
+            2,
+            None,
+            ResponsesCompactionExtension {
+                strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+                domain_context: None,
+            },
+        );
         assert!(
             unsafe_result.is_err(),
             "unsafe boundary must fail and preserve prior"

@@ -9,15 +9,18 @@ use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
-    decide_context_compaction_for_projection, is_context_limit_provider_error,
-    validate_compaction_artifacts, BrainContextCompactionArtifact, BrainContextCompactionDecision,
-    BrainContextCompactionPolicy, BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic,
-    ContextAccountingSnapshot, ContextAdmission, ContextAdmissionState, ContextCompactionPhase,
-    ContextCompactionProjection, ContextDiagnosticSeverity, ContextDurableTranscript,
-    ContextMeasurementSource, ContextProjectionSegment, ContextPromptProjection,
-    ContextProtocolProjection, ContextProviderDescriptor, ContextProviderProtocol,
-    ContextProviderState, ContextProviderUsage, ContextReservedOutput, ContextSizeMeasurement,
-    ContextTokenMeasurement, ContextTokenUsageTotals,
+    compaction_strategy_artifact_metadata, decide_context_compaction_for_projection,
+    execute_compaction_strategy, is_context_limit_provider_error, validate_compaction_artifacts,
+    BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionItem,
+    BrainContextCompactionPolicy, BrainContextCompactionSnapshot, BrainContextCompactionStrategy,
+    BrainContextCompactionStrategyInput, BrainContextSafeCompactionBoundary,
+    BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic, ContextAccountingSnapshot,
+    ContextAdmission, ContextAdmissionState, ContextCompactionPhase, ContextCompactionProjection,
+    ContextDiagnosticSeverity, ContextDurableTranscript, ContextMeasurementSource,
+    ContextProjectionSegment, ContextPromptProjection, ContextProtocolProjection,
+    ContextProviderDescriptor, ContextProviderProtocol, ContextProviderState, ContextProviderUsage,
+    ContextReservedOutput, ContextSizeMeasurement, ContextTokenMeasurement,
+    ContextTokenUsageTotals,
 };
 use rusty_crew_core_protocol::{
     BrainActionBatch, BrainContinuationPayload, BrainEvent, BrainEventEnvelope,
@@ -1146,6 +1149,8 @@ pub struct ChatCompletionsBrainLoop<C, T> {
     tools: T,
     request_builder: ChatCompletionsRequestBuilder,
     config: ChatCompletionsBrainLoopConfig,
+    compaction_strategy: Arc<dyn BrainContextCompactionStrategy>,
+    compaction_domain_context: Option<Value>,
 }
 
 impl<C, T> ChatCompletionsBrainLoop<C, T>
@@ -1164,12 +1169,28 @@ where
             tools,
             request_builder: ChatCompletionsRequestBuilder::new(chat_config).tools(descriptors),
             config: ChatCompletionsBrainLoopConfig::default(),
+            compaction_strategy: Arc::new(
+                rusty_crew_brain_runtime::RollingSummaryCompactionStrategy,
+            ),
+            compaction_domain_context: None,
         }
     }
 
     pub fn with_loop_config(mut self, config: ChatCompletionsBrainLoopConfig) -> Self {
         self.config = config;
         self
+    }
+
+    pub fn with_compaction_strategy(
+        mut self,
+        strategy: Arc<dyn BrainContextCompactionStrategy>,
+    ) -> Self {
+        self.compaction_strategy = strategy;
+        self
+    }
+
+    pub fn set_compaction_domain_context(&mut self, domain_context: Option<Value>) {
+        self.compaction_domain_context = domain_context;
     }
 
     pub fn wake_with_messages(
@@ -1205,6 +1226,7 @@ where
         input: ChatCompletionsBrainLoopInput,
         mut sink: BrainWakeItemSink<'_>,
     ) -> ChatCompletionsBrainLoopOutput {
+        let compaction_domain_context = self.compaction_domain_context.take();
         let mut mapper = ChatCompletionsEventMapper::new();
         let mut stream = Vec::new();
         let restored = match input.continuation_state.as_ref() {
@@ -1455,15 +1477,22 @@ where
                 &mut sink,
             );
             let mut compacted_messages = messages.clone();
-            match compact_chat_messages(&mut compacted_messages, policy, usage.clone(), sequence)
-                .and_then(|artifact| {
-                    let compacted_request = self.request_builder.build_for_session_with_images(
-                        compacted_messages.clone(),
-                        &input_images,
-                        Some(&input.context.session_id),
-                    );
-                    finalize_chat_compaction_artifact(artifact, &compacted_request)
-                }) {
+            match compact_chat_messages(
+                &mut compacted_messages,
+                policy,
+                usage.clone(),
+                sequence,
+                Arc::clone(&self.compaction_strategy),
+                compaction_domain_context.clone(),
+            )
+            .and_then(|artifact| {
+                let compacted_request = self.request_builder.build_for_session_with_images(
+                    compacted_messages.clone(),
+                    &input_images,
+                    Some(&input.context.session_id),
+                );
+                finalize_chat_compaction_artifact(artifact, &compacted_request)
+            }) {
                 Ok(mut artifact) => {
                     artifact.artifact_id = format!(
                         "manual_{}_{}",
@@ -1651,6 +1680,8 @@ where
                             .expect("compact decision policy"),
                         usage.clone(),
                         sequence,
+                        Arc::clone(&self.compaction_strategy),
+                        compaction_domain_context.clone(),
                     )
                     .and_then(|artifact| {
                         let compacted_request = self.request_builder.build_for_session_with_images(
@@ -1942,6 +1973,8 @@ where
                             policy,
                             usage.clone(),
                             sequence,
+                            Arc::clone(&self.compaction_strategy),
+                            compaction_domain_context.clone(),
                         )
                         .and_then(|artifact| {
                             let compacted_request =
@@ -2803,6 +2836,7 @@ fn brain_runtime_context_compaction_failed_artifact(
         sequence: 1,
         strategy_id,
         strategy_revision,
+        strategy_payload_metadata: None,
         logical_turn_id: None,
         execution_epoch_id: None,
         source_projection_fingerprint: fingerprint,
@@ -3217,6 +3251,8 @@ fn compact_chat_messages(
     policy: &BrainContextCompactionPolicy,
     usage_before: rusty_crew_brain_runtime::BrainContextUsageSnapshot,
     sequence: u64,
+    strategy: Arc<dyn BrainContextCompactionStrategy>,
+    domain_context: Option<Value>,
 ) -> Result<BrainContextCompactionArtifact, String> {
     let protected_end = messages
         .iter()
@@ -3245,47 +3281,78 @@ fn compact_chat_messages(
         );
     }
 
-    let compacted = &messages[protected_end..recent_start];
-    let summary_budget = policy
-        .target_tokens()
-        .saturating_mul(4)
-        .saturating_div(4)
-        .clamp(256, 4096) as usize;
-    let mut summary = String::from(
-        "[Rusty Crew mid-turn context summary]\nEarlier completed exchanges were compacted from the model-facing continuation only. Raw transcript and tool telemetry remain authoritative.\n",
-    );
-    for message in compacted {
-        let role = match message.role {
-            ChatMessageRole::System => "system",
-            ChatMessageRole::User => "user",
-            ChatMessageRole::Assistant => "assistant",
-            ChatMessageRole::Tool => "tool",
-        };
-        let details = if !message.tool_calls.is_empty() {
-            message
-                .tool_calls
-                .iter()
-                .map(|call| format!("{}({})", call.function.name, call.function.arguments))
-                .collect::<Vec<_>>()
-                .join(", ")
-        } else {
-            message
-                .content
-                .as_deref()
-                .or(message.reasoning_content.as_deref())
-                .unwrap_or("")
-                .to_string()
-        };
-        let remaining = summary_budget.saturating_sub(summary.len());
-        if remaining <= 32 {
-            break;
-        }
-        let line = format!("{role}: {}\n", truncate_utf8(&details, remaining.min(320)));
-        summary.push_str(truncate_utf8(&line, remaining));
-    }
+    let projected_items = messages[protected_end..]
+        .iter()
+        .enumerate()
+        .map(|(relative_index, message)| {
+            let role = match message.role {
+                ChatMessageRole::System => "system",
+                ChatMessageRole::User => "user",
+                ChatMessageRole::Assistant => "assistant",
+                ChatMessageRole::Tool => "tool",
+            };
+            let content = if !message.tool_calls.is_empty() {
+                message
+                    .tool_calls
+                    .iter()
+                    .map(|call| format!("{}({})", call.function.name, call.function.arguments))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                message
+                    .content
+                    .as_deref()
+                    .or(message.reasoning_content.as_deref())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            BrainContextCompactionItem {
+                source_ref: format!("chat-message-{}", protected_end + relative_index),
+                role: role.to_string(),
+                content,
+                tool_exchange_id: message
+                    .tool_call_id
+                    .clone()
+                    .or_else(|| message.tool_calls.first().map(|call| call.id.clone())),
+                tool_exchange_completed: protected_end + relative_index < recent_start,
+                metadata: Value::Null,
+            }
+        })
+        .collect::<Vec<_>>();
+    let source_projection_fingerprint = progress_json_fingerprint(messages);
+    let strategy_input = BrainContextCompactionStrategyInput {
+        snapshot: BrainContextCompactionSnapshot {
+            source_projection_fingerprint: source_projection_fingerprint.clone(),
+            items: projected_items,
+        },
+        policy: policy.clone(),
+        safe_boundary: BrainContextSafeCompactionBoundary {
+            boundary_id: format!("chat-before-message-{recent_start}"),
+            compact_before_item: recent_start - protected_end,
+            active_tool_exchange_id: None,
+        },
+        domain_context,
+        parent_artifact_id: None,
+    };
+    let decision = execute_compaction_strategy(strategy, strategy_input, Duration::from_secs(2))
+        .map_err(|failure| format!("{}: {}", failure.reason_code, failure.summary))?;
+    let compacted_refs = decision
+        .compacted_source_refs
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
     let mut replacement = messages[..protected_end].to_vec();
-    replacement.push(ChatCompletionMessage::system(summary.clone()));
-    replacement.extend_from_slice(&messages[recent_start..]);
+    replacement.push(ChatCompletionMessage::system(decision.summary_text.clone()));
+    replacement.extend(
+        messages[protected_end..]
+            .iter()
+            .enumerate()
+            .filter(|(relative_index, _)| {
+                !compacted_refs
+                    .contains(format!("chat-message-{}", protected_end + relative_index).as_str())
+            })
+            .map(|(_, message)| message.clone()),
+    );
     let estimated_tokens_after = serde_json::to_vec(&replacement)
         .map(|value| (value.len() as u64).saturating_add(3) / 4)
         .map_err(|error| format!("serialize compacted chat context: {error}"))?;
@@ -3306,18 +3373,19 @@ fn compact_chat_messages(
         execution_epoch_id: None,
         source_projection_fingerprint: None,
         strategy_id: policy.strategy_id.clone(),
-        strategy_revision: Some("1".to_string()),
+        strategy_revision: Some(decision.strategy_revision.clone()),
+        strategy_payload_metadata: Some(compaction_strategy_artifact_metadata(&decision)),
         reason_code: "context_fill_threshold_exceeded".to_string(),
         trigger: Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::AutoThreshold),
         usage_before: usage_before.clone(),
         estimated_tokens_after,
         before_tokens: Some(usage_before.input_tokens),
         after_tokens: Some(estimated_tokens_after),
-        preserved_item_count: Some(replacement.len() as u64),
-        excised_item_count: Some(compacted.len() as u64),
-        compacted_item_count: compacted.len() as u64,
+        preserved_item_count: Some(decision.retained_source_refs.len() as u64),
+        excised_item_count: Some(decision.compacted_source_refs.len() as u64),
+        compacted_item_count: decision.compacted_source_refs.len() as u64,
         retained_item_count: replacement.len() as u64,
-        summary_text: summary,
+        summary_text: decision.summary_text,
         provider_chain_action: Some("rebuild_replay_after_compaction".to_string()),
         terminal_status: Some(
             rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed,
@@ -3344,17 +3412,6 @@ fn finalize_chat_compaction_artifact(
     artifact.before_tokens = Some(artifact.usage_before.input_tokens);
     artifact.after_tokens = Some(estimated_tokens_after);
     Ok(artifact)
-}
-
-fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
-    if value.len() <= max_bytes {
-        return value;
-    }
-    let mut boundary = max_bytes;
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    &value[..boundary]
 }
 
 fn chat_completions_debug_request(
@@ -9841,7 +9898,14 @@ mod tests {
             },
         ];
         let original = messages.clone();
-        let result = compact_chat_messages(&mut messages, &policy, usage, 1);
+        let result = compact_chat_messages(
+            &mut messages,
+            &policy,
+            usage,
+            1,
+            Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+            None,
+        );
         assert!(
             result.is_err(),
             "pending tool exchange must not be compacted across unsafe boundary"
@@ -9879,7 +9943,14 @@ mod tests {
         let original = messages.clone();
         let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(950, 1000);
         let mut compacted = messages.clone();
-        let ok = compact_chat_messages(&mut compacted, &policy, usage.clone(), 1);
+        let ok = compact_chat_messages(
+            &mut compacted,
+            &policy,
+            usage.clone(),
+            1,
+            Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+            None,
+        );
         assert!(
             ok.is_ok(),
             "long history should compact at safe boundary: {:?}",
@@ -9896,7 +9967,14 @@ mod tests {
             ChatCompletionMessage::user("hello"),
         ];
         let unsafe_original = unsafe_messages.clone();
-        let unsafe_result = compact_chat_messages(&mut unsafe_messages, &policy, usage, 2);
+        let unsafe_result = compact_chat_messages(
+            &mut unsafe_messages,
+            &policy,
+            usage,
+            2,
+            Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+            None,
+        );
         assert!(
             unsafe_result.is_err(),
             "unsafe boundary must fail and preserve prior"

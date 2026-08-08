@@ -857,6 +857,7 @@ type CompactionRuntimeArtifact = {
   sequence?: unknown;
   strategyId?: unknown;
   strategyRevision?: unknown;
+  strategyPayloadMetadata?: unknown;
   logicalTurnId?: unknown;
   executionEpochId?: unknown;
   sourceProjectionFingerprint?: unknown;
@@ -1062,6 +1063,11 @@ function contextCompactionArtifactFromMetadata(
       : nonEmptyString(runtimeArtifact.providerChainAction);
   const artifactId = nonEmptyString(runtimeArtifact.artifactId);
   const strategyRevision = nonEmptyString(runtimeArtifact.strategyRevision);
+  const strategyPayloadMetadata = isRecord(
+    runtimeArtifact.strategyPayloadMetadata,
+  )
+    ? runtimeArtifact.strategyPayloadMetadata
+    : undefined;
   const logicalTurnId = nonEmptyString(runtimeArtifact.logicalTurnId);
   const executionEpochId = nonEmptyString(runtimeArtifact.executionEpochId);
   const sourceProjectionFingerprint = nonEmptyString(
@@ -1137,6 +1143,7 @@ function contextCompactionArtifactFromMetadata(
       runtime_artifact_sequence: sequence,
       wake_id: wakeId,
       reason_code: reasonCode,
+      strategy_payload: strategyPayloadMetadata,
     },
     created_at: now,
     updated_at: now,
