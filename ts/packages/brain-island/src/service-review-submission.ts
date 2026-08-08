@@ -1504,7 +1504,9 @@ function exactHeadFinalizedRound(
       continue;
     }
     const verdict = stringValue(value, ["verdict"]);
-    if (verdict !== "looks_good" && verdict !== "changes_requested") continue;
+    if (verdict !== "looks_good" && verdict !== "changes_requested") {
+      return undefined;
+    }
     return { reviewRoundId, exactHeadCommit: head, verdict };
   }
   return undefined;

@@ -204,6 +204,84 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
   ]);
 });
 
+test("reconciliation does not reuse an older verdict past a newer pending same-head round", async () => {
+  const pending = scopedSubmissionRecord("rusty-crew", {
+    type: "external_cli",
+    clientId: "test",
+    idempotencyKey: "test-newer-round",
+  });
+  const submitted = {
+    ...pending,
+    phase: "submitted",
+    reviewRoundId: undefined,
+    gateId: undefined,
+  } as ReviewSubmissionRecord;
+  const transitions: Array<Record<string, unknown>> = [];
+  const denCalls: string[] = [];
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [submitted],
+      transitionReviewSubmission: async (request: Record<string, unknown>) => {
+        transitions.push(request);
+        return {
+          ...submitted,
+          phase: "gate_pending",
+          reviewRoundId: 4090,
+          revision: submitted.revision + 1,
+        };
+      },
+    } as never,
+    reviewProjectIds: ["rusty-crew"],
+    reviewDenBindingId: "service-den",
+    runtimeConfig: {
+      sessions: [],
+      mcpBindings: [
+        {
+          bindingId: "service-den",
+          status: "active",
+          serverNames: ["den"],
+        },
+      ],
+      mcpServers: [],
+    } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-08T09:30:00.000Z",
+    callDenTool: async (_binding: unknown, toolName: string) => {
+      denCalls.push(toolName);
+      if (toolName === "list_review_rounds") {
+        return {
+          project_id: "rusty-crew",
+          items: [
+            {
+              id: 4089,
+              project_id: "rusty-crew",
+              head_commit: submitted.commitSha,
+              verdict: "looks_good",
+            },
+            {
+              id: 4090,
+              project_id: "rusty-crew",
+              head_commit: submitted.commitSha,
+              verdict: null,
+            },
+          ],
+        };
+      }
+      if (toolName === "watch_github_checks") {
+        return { gate: { id: 2738, status: "pending" } };
+      }
+      assert.fail(`unexpected Den tool ${toolName}`);
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+
+  assert.deepEqual(denCalls, ["list_review_rounds", "watch_github_checks"]);
+  assert.equal(
+    (transitions[0]?.transition as Record<string, unknown>)?.type,
+    "den_handoff_recorded",
+  );
+});
+
 function record(
   submissionId: string,
   taskId: string,
