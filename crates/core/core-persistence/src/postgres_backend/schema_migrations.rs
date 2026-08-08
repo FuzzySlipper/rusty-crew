@@ -7,7 +7,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 48;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 49;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -260,7 +260,25 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "make compaction idempotency projection-aware",
         apply: Some(apply_postgres_context_compaction_intent_projection_aware),
     },
+    PostgresSchemaMigration {
+        version: 49,
+        description: "add provider state compatibility lineage",
+        apply: Some(apply_postgres_provider_state_compatibility_lineage),
+    },
 ];
+
+fn apply_postgres_provider_state_compatibility_lineage(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.provider_wire_states
+             ADD COLUMN IF NOT EXISTS compatibility_snapshot_json TEXT;
+         ALTER TABLE {schema}.provider_wire_states
+             ADD COLUMN IF NOT EXISTS compatibility_plan_json TEXT;"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL provider state compatibility lineage", error))
+}
 
 fn apply_postgres_responses_provider_dialect(
     tx: &mut Transaction<'_>,

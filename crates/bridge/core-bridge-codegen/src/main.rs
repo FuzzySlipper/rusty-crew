@@ -3409,6 +3409,7 @@ fn sample_brain_provider_state_scope() -> BrainProviderStateScope {
     BrainProviderStateScope {
         profile_fingerprint: "profile-fingerprint-v1".to_owned(),
         provider_fingerprint: "provider-fingerprint-v1".to_owned(),
+        compatibility: None,
     }
 }
 

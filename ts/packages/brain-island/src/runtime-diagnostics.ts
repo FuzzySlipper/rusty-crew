@@ -91,6 +91,8 @@ export interface RuntimeProviderStateSessionDiagnostics {
   recordId?: number;
   profileFingerprint?: string;
   providerFingerprint?: string;
+  compatibilitySnapshot?: import("@rusty-crew/contracts").ProviderStateCompatibilitySnapshot;
+  compatibilityPlan?: import("@rusty-crew/contracts").ProviderStateCompatibilityPlan;
   status: RuntimeProviderStateStatus;
   payloadVersion?: string;
   payloadBytes?: number;

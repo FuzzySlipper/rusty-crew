@@ -52,15 +52,20 @@ const promptChanged = providerStateScopeForProfile({
   strategy,
   moduleStrategy,
 });
-assert.notEqual(
+assert.equal(
   promptChanged.profileFingerprint,
   first.profileFingerprint,
-  "prompt material should change the profile fingerprint",
+  "prompt refresh must preserve profile identity",
 );
 assert.equal(
   promptChanged.providerFingerprint,
   first.providerFingerprint,
   "prompt material should not change the provider fingerprint",
+);
+assert.notEqual(
+  promptChanged.compatibility?.prompt,
+  first.compatibility?.prompt,
+  "prompt refresh should remain visible to the Rust compatibility planner",
 );
 
 const toolsChanged = providerStateScopeForProfile({
@@ -68,10 +73,15 @@ const toolsChanged = providerStateScopeForProfile({
   strategy,
   moduleStrategy,
 });
-assert.notEqual(
+assert.equal(
   toolsChanged.profileFingerprint,
   first.profileFingerprint,
-  "tool identity should change the profile fingerprint",
+  "tool refresh must preserve profile identity",
+);
+assert.notEqual(
+  toolsChanged.compatibility?.toolCatalog,
+  first.compatibility?.toolCatalog,
+  "tool refresh should remain visible to the Rust compatibility planner",
 );
 
 const mechanicIdentityChanged = providerStateScopeForProfile({
@@ -82,10 +92,10 @@ const mechanicIdentityChanged = providerStateScopeForProfile({
   strategy,
   moduleStrategy,
 });
-assert.notEqual(
+assert.equal(
   mechanicIdentityChanged.profileFingerprint,
   first.profileFingerprint,
-  "mechanic identity and role should change the profile fingerprint",
+  "display and role refresh must preserve profile identity",
 );
 assert.equal(
   mechanicIdentityChanged.providerFingerprint,
@@ -136,15 +146,20 @@ const profileOptionChanged = providerStateScopeForProfile({
     },
   },
 });
-assert.notEqual(
+assert.equal(
   profileOptionChanged.profileFingerprint,
   first.profileFingerprint,
-  "module-declared profile options should change profile fingerprint",
+  "module-declared prompt options must preserve profile identity",
 );
 assert.equal(
   profileOptionChanged.providerFingerprint,
   first.providerFingerprint,
   "module-declared profile options should not change provider fingerprint",
+);
+assert.notEqual(
+  profileOptionChanged.compatibility?.prompt,
+  first.compatibility?.prompt,
+  "module-declared prompt options should remain visible to Rust",
 );
 
 const providerOptionChanged = providerStateScopeForProfile({

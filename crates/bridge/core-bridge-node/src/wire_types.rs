@@ -60,6 +60,25 @@ pub struct JsBrainStrategyMetadata {
 pub struct JsBrainProviderStateScope {
     pub profile_fingerprint: String,
     pub provider_fingerprint: String,
+    pub compatibility: Option<JsProviderStateCompatibilityFacts>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProviderStateCompatibilityFacts {
+    pub version: String,
+    pub profile_identity: String,
+    pub display_metadata: String,
+    pub prompt: String,
+    pub skills: String,
+    pub tool_catalog: String,
+    pub provider_endpoint: String,
+    pub model: String,
+    pub protocol: String,
+    pub dialect: String,
+    pub reasoning_semantics: String,
+    pub brain_module: String,
+    pub brain_strategy: String,
+    pub provider_state_schema: String,
 }
 
 #[napi_derive::napi(object)]
@@ -70,6 +89,8 @@ pub struct JsProviderStateDiagnostic {
     pub strategy_id: String,
     pub profile_fingerprint: String,
     pub provider_fingerprint: String,
+    pub compatibility_snapshot_json: Option<String>,
+    pub compatibility_plan_json: Option<String>,
     pub status: String,
     pub payload_version: Option<String>,
     pub payload_bytes: Option<f64>,

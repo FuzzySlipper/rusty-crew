@@ -1341,6 +1341,75 @@ pub struct BrainStrategyMetadata {
 pub struct BrainProviderStateScope {
     pub profile_fingerprint: String,
     pub provider_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<ProviderStateCompatibilityFacts>,
+}
+
+/// Versioned component fingerprints used by Rust to decide whether provider
+/// continuation state can be retained. These are hashes of source facts, not
+/// policy decisions: callers may assemble and hash the facts, while Rust owns
+/// their compatibility meaning.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderStateCompatibilityFacts {
+    pub version: String,
+    pub profile_identity: String,
+    pub display_metadata: String,
+    pub prompt: String,
+    pub skills: String,
+    pub tool_catalog: String,
+    pub provider_endpoint: String,
+    pub model: String,
+    pub protocol: String,
+    pub dialect: String,
+    pub reasoning_semantics: String,
+    pub brain_module: String,
+    pub brain_strategy: String,
+    pub provider_state_schema: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderStateCompatibilitySnapshot {
+    pub facts: ProviderStateCompatibilityFacts,
+    pub session_effort: String,
+    pub session_workspace: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStateCompatibilityClass {
+    Identical,
+    Compatible,
+    Incompatible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStateCompatibilityAction {
+    PreserveLineage,
+    ReconstructFromDurableProjection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStateCompatibilityOutcome {
+    Preserved,
+    ReconstructionRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderStateCompatibilityChange {
+    pub dimension: String,
+    pub prior_fingerprint: String,
+    pub current_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderStateCompatibilityPlan {
+    pub version: String,
+    pub class: ProviderStateCompatibilityClass,
+    pub changes: Vec<ProviderStateCompatibilityChange>,
+    pub action: ProviderStateCompatibilityAction,
+    pub outcome: ProviderStateCompatibilityOutcome,
 }
 
 impl BrainStrategyMetadata {

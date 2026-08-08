@@ -14,6 +14,8 @@ import type {
   BrainWakeProviderStateOutput,
   BrainWakeProviderStateInput,
   ProviderStateClearReason,
+  ProviderStateCompatibilityPlan,
+  ProviderStateCompatibilitySnapshot,
   BrainWakeAccepted,
   BrainWakeAttention,
   BrainWakeFailure,
@@ -1884,6 +1886,8 @@ export interface NativeProviderStateDiagnostic {
   recordId?: number;
   profileFingerprint?: string;
   providerFingerprint?: string;
+  compatibilitySnapshot?: ProviderStateCompatibilitySnapshot;
+  compatibilityPlan?: ProviderStateCompatibilityPlan;
   status: NativeProviderStateStatus;
   payloadVersion?: string;
   payloadBytes?: number;

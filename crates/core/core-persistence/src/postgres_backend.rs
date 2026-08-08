@@ -84,10 +84,11 @@ use crate::{
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
     ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
     ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
-    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
-    QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
+    ProviderStateAbsenceReason, ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
+    ProviderStateCompatibilitySnapshot, ProviderWireStateDiagnostic,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateRecord,
+    ProviderWireStateWakeLookup, ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage,
+    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
     RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, ReviewSubmissionRecord,
     RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayLoreEntryPromotion,
     RoleplayLoreFactCapture, RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord,
@@ -1853,6 +1854,11 @@ impl PostgresBackendStore {
     ) -> CoreResult<ProviderWireStateRecord> {
         validate_provider_wire_state_key(&write.key)?;
         let payload_json = to_json_text(&write.payload_json)?;
+        let compatibility_snapshot_json = write
+            .compatibility_snapshot
+            .as_ref()
+            .map(to_json_text)
+            .transpose()?;
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         let mut tx = client
@@ -1882,8 +1888,10 @@ impl PostgresBackendStore {
                         expires_at,
                         last_wake_id,
                         invalidated_at,
-                        invalidation_reason
-                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'json', $8, $8, $9, $10, NULL, NULL)
+                        invalidation_reason,
+                        compatibility_snapshot_json,
+                        compatibility_plan_json
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'json', $8, $8, $9, $10, NULL, NULL, $11, NULL)
                      RETURNING row_id,
                         session_id,
                         module_id,
@@ -1898,7 +1906,8 @@ impl PostgresBackendStore {
                         expires_at,
                         last_wake_id,
                         invalidated_at,
-                        invalidation_reason"
+                        invalidation_reason,
+                        compatibility_snapshot_json"
                 ),
                 &[
                     &write.key.session_id.0,
@@ -1911,6 +1920,7 @@ impl PostgresBackendStore {
                     &write.now,
                     &write.expires_at,
                     &write.last_wake_id,
+                    &compatibility_snapshot_json,
                 ],
             )
             .map_err(|error| postgres_error("insert PostgreSQL provider wire state", error))?;
@@ -1972,7 +1982,9 @@ impl PostgresBackendStore {
                 absence_reason: Some(ProviderStateAbsenceReason::Expired),
             });
         }
-        if record.profile_fingerprint != lookup.profile_fingerprint {
+        if record.profile_fingerprint != lookup.profile_fingerprint
+            && record.compatibility_snapshot.is_none()
+        {
             // Fingerprint drift is a recoverable rebuild boundary, not a
             // reason to destroy the last provider-owned continuation. Keep
             // the old row available for rollback and let the brain rebuild
@@ -1989,7 +2001,9 @@ impl PostgresBackendStore {
                 absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
             });
         }
-        if record.provider_fingerprint != lookup.provider_fingerprint {
+        if record.provider_fingerprint != lookup.provider_fingerprint
+            && record.compatibility_snapshot.is_none()
+        {
             // Provider changes may be reversed, and failed reconstruction
             // must not erase the prior state.
             tx.commit().map_err(|error| {
@@ -2091,7 +2105,9 @@ impl PostgresBackendStore {
                         expires_at,
                         last_wake_id,
                         invalidated_at,
-                        invalidation_reason
+                        invalidation_reason,
+                        compatibility_snapshot_json,
+                        compatibility_plan_json
                      FROM {schema}.provider_wire_states
                      ORDER BY
                         CASE
@@ -2108,6 +2124,34 @@ impl PostgresBackendStore {
         rows.iter()
             .map(row_to_provider_wire_state_diagnostic)
             .collect()
+    }
+
+    pub fn record_provider_state_compatibility_plan(
+        &self,
+        row_id: i64,
+        current: &ProviderStateCompatibilitySnapshot,
+        plan: &ProviderStateCompatibilityPlan,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let snapshot_json = to_json_text(current)?;
+        let plan_json = to_json_text(plan)?;
+        let preserve = plan.action == ProviderStateCompatibilityAction::PreserveLineage;
+        self.client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.provider_wire_states
+                        SET compatibility_snapshot_json = CASE WHEN $1 THEN $2 ELSE compatibility_snapshot_json END,
+                            compatibility_plan_json = $3,
+                            updated_at = $4
+                      WHERE row_id = $5"
+                ),
+                &[&preserve, &snapshot_json, &plan_json, now, &row_id],
+            )
+            .map_err(|error| {
+                postgres_error("record PostgreSQL provider state compatibility plan", error)
+            })?;
+        Ok(())
     }
 
     pub fn upsert_runtime_search_entry(&self, entry: &RuntimeSearchResult) -> CoreResult<()> {
@@ -7688,6 +7732,10 @@ fn row_to_provider_wire_state_record(row: &Row) -> CoreResult<ProviderWireStateR
         last_wake_id: row.get(12),
         invalidated_at: row.get(13),
         invalidation_reason,
+        compatibility_snapshot: row
+            .get::<_, Option<String>>(15)
+            .map(|raw| parse_postgres_json(&raw, "provider state compatibility snapshot"))
+            .transpose()?,
     })
 }
 
@@ -7708,6 +7756,14 @@ fn row_to_provider_wire_state_diagnostic(row: &Row) -> CoreResult<ProviderWireSt
         row_id: row.get(0),
         profile_fingerprint: row.get(4),
         provider_fingerprint: row.get(5),
+        compatibility_snapshot: row
+            .get::<_, Option<String>>(14)
+            .map(|raw| parse_postgres_json(&raw, "provider state compatibility snapshot"))
+            .transpose()?,
+        compatibility_plan: row
+            .get::<_, Option<String>>(15)
+            .map(|raw| parse_postgres_json(&raw, "provider state compatibility plan"))
+            .transpose()?,
         payload_version: row.get(6),
         payload_bytes: payload_bytes as u64,
         created_at: row.get(8),
@@ -7823,7 +7879,8 @@ fn load_current_provider_wire_state_by_key(
                     expires_at,
                     last_wake_id,
                     invalidated_at,
-                    invalidation_reason
+                    invalidation_reason,
+                    compatibility_snapshot_json
                  FROM {schema}.provider_wire_states
                  WHERE session_id = $1
                    AND module_id = $2
@@ -7862,7 +7919,8 @@ fn load_provider_wire_state_by_row_id(
                     expires_at,
                     last_wake_id,
                     invalidated_at,
-                    invalidation_reason
+                    invalidation_reason,
+                    compatibility_snapshot_json
                  FROM {schema}.provider_wire_states
                  WHERE row_id = $1"
             ),
@@ -7895,7 +7953,8 @@ fn load_expired_current_provider_wire_states(
                     expires_at,
                     last_wake_id,
                     invalidated_at,
-                    invalidation_reason
+                    invalidation_reason,
+                    compatibility_snapshot_json
                  FROM {schema}.provider_wire_states
                  WHERE invalidated_at IS NULL
                    AND expires_at IS NOT NULL
@@ -13743,6 +13802,7 @@ mod tests {
                 key: provider_wire_state_key("session-alpha", "openai-responses", "replay"),
                 profile_fingerprint: "profile-v1".to_string(),
                 provider_fingerprint: "provider-v1".to_string(),
+                compatibility_snapshot: None,
                 payload_version: "v1".to_string(),
                 payload_json: json!({"response_id": "maintenance"}),
                 now: "2026-06-20T08:00:00Z".to_string(),
@@ -15972,6 +16032,7 @@ mod tests {
             key: input.key,
             profile_fingerprint: input.profile_fingerprint.to_string(),
             provider_fingerprint: input.provider_fingerprint.to_string(),
+            compatibility_snapshot: None,
             payload_version: input.payload_version.to_string(),
             payload_json: input.payload_json,
             now: input.now.to_string(),

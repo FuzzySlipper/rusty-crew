@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 65;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 66;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -344,7 +344,29 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "make compaction idempotency projection-aware",
         apply: migrate_v65_make_compaction_idempotency_projection_aware,
     },
+    SchemaMigration {
+        version: 66,
+        description: "add provider state compatibility lineage",
+        apply: migrate_v66_add_provider_state_compatibility_lineage,
+    },
 ];
+
+fn migrate_v66_add_provider_state_compatibility_lineage(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    add_missing_column_tx(
+        tx,
+        "provider_wire_states",
+        "compatibility_snapshot_json",
+        "TEXT",
+    )?;
+    add_missing_column_tx(
+        tx,
+        "provider_wire_states",
+        "compatibility_plan_json",
+        "TEXT",
+    )
+}
 
 fn migrate_v63_add_context_compaction_provenance(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     add_missing_column_tx(

@@ -1299,6 +1299,24 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn record_provider_state_compatibility_plan(
+        &self,
+        row_id: i64,
+        current: &ProviderStateCompatibilitySnapshot,
+        plan: &ProviderStateCompatibilityPlan,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.record_provider_state_compatibility_plan(row_id, current, plan, now)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.record_provider_state_compatibility_plan(row_id, current, plan, now)
+            }
+        }
+    }
+
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         match self {
             Self::Sqlite(sqlite) => sqlite.count_rows(table),

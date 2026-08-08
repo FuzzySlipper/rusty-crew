@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
-import type { BrainProviderStateScope } from "@rusty-crew/contracts";
+import type {
+  BrainProviderStateScope,
+  BrainStrategyMetadata,
+  ProviderStateCompatibilityFacts,
+} from "@rusty-crew/contracts";
 import type { BrainModuleStrategyMetadata } from "./brain-catalog.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
-import type { BrainStrategyMetadata } from "@rusty-crew/contracts";
 
 export interface ProviderStateFingerprintInput {
   profile: LoadedProfileContext;
@@ -13,15 +16,55 @@ export interface ProviderStateFingerprintInput {
 export interface ProviderStateFingerprintMaterial {
   profile: unknown;
   provider: unknown;
+  compatibility: Record<
+    keyof Omit<ProviderStateCompatibilityFacts, "version">,
+    unknown
+  >;
 }
 
 export function providerStateScopeForProfile(
   input: ProviderStateFingerprintInput,
 ): BrainProviderStateScope {
   const material = providerStateFingerprintMaterial(input);
+  const compatibility: ProviderStateCompatibilityFacts = {
+    version: "1",
+    profileIdentity: stableFingerprint(material.compatibility.profileIdentity),
+    displayMetadata: stableFingerprint(material.compatibility.displayMetadata),
+    prompt: stableFingerprint(material.compatibility.prompt),
+    skills: stableFingerprint(material.compatibility.skills),
+    toolCatalog: stableFingerprint(material.compatibility.toolCatalog),
+    providerEndpoint: stableFingerprint(
+      material.compatibility.providerEndpoint,
+    ),
+    model: stableFingerprint(material.compatibility.model),
+    protocol: stableFingerprint(material.compatibility.protocol),
+    dialect: stableFingerprint(material.compatibility.dialect),
+    reasoningSemantics: stableFingerprint(
+      material.compatibility.reasoningSemantics,
+    ),
+    brainModule: stableFingerprint(material.compatibility.brainModule),
+    brainStrategy: stableFingerprint(material.compatibility.brainStrategy),
+    providerStateSchema: stableFingerprint(
+      material.compatibility.providerStateSchema,
+    ),
+  };
   return {
-    profileFingerprint: stableFingerprint(material.profile),
-    providerFingerprint: stableFingerprint(material.provider),
+    // Profile identity is deliberately narrow. Display, prompts, skills,
+    // tools, effort, and workspace are compatible refresh dimensions.
+    profileFingerprint: compatibility.profileIdentity,
+    providerFingerprint: stableFingerprint({
+      version: compatibility.version,
+      profileIdentity: compatibility.profileIdentity,
+      providerEndpoint: compatibility.providerEndpoint,
+      model: compatibility.model,
+      protocol: compatibility.protocol,
+      dialect: compatibility.dialect,
+      reasoningSemantics: compatibility.reasoningSemantics,
+      brainModule: compatibility.brainModule,
+      brainStrategy: compatibility.brainStrategy,
+      providerStateSchema: compatibility.providerStateSchema,
+    }),
+    compatibility,
   };
 }
 
@@ -30,59 +73,77 @@ export function providerStateFingerprintMaterial(
 ): ProviderStateFingerprintMaterial {
   const profile = input.profile.profile;
   const moduleFingerprints = input.moduleStrategy?.fingerprints;
-  return {
-    profile: {
-      profileId: profile.profileId,
+  const compatibility: ProviderStateFingerprintMaterial["compatibility"] = {
+    profileIdentity: { profileId: profile.profileId },
+    displayMetadata: {
       displayName: profile.displayName,
-      moduleId: input.strategy.moduleId,
-      strategyId: input.strategy.strategyId,
+    },
+    prompt: {
       prompt: profile.prompt,
       roleplayMechanic: profile.roleplayMechanic,
-      skills: input.profile.skills.map((skill) => ({
-        slug: skill.slug,
-        title: skill.title,
-        summary: skill.summary,
-        tags: skill.tags,
-        bodyMarkdown: skill.bodyMarkdown,
-      })),
-      toolIdentity: {
-        catalogId: input.profile.toolSelection.catalogId,
-        selectedTools: input.profile.toolSelection.inventory.selectedTools.map(
-          (tool) => ({
-            name: tool.name,
-            version: tool.version,
-            outputShape: tool.outputShape,
-            category: tool.category,
-            safety: tool.safety,
-            surfaces: tool.surfaces,
-          }),
-        ),
-      },
       moduleOptions: moduleFingerprints?.profileOptions,
     },
-    provider: {
-      moduleId: input.strategy.moduleId,
-      strategyId: input.strategy.strategyId,
-      providerStateMode: input.strategy.providerState.mode,
+    skills: input.profile.skills.map((skill) => ({
+      slug: skill.slug,
+      title: skill.title,
+      summary: skill.summary,
+      tags: skill.tags,
+      bodyMarkdown: skill.bodyMarkdown,
+    })),
+    toolCatalog: {
+      catalogId: input.profile.toolSelection.catalogId,
+      selectedTools: input.profile.toolSelection.inventory.selectedTools.map(
+        (tool) => ({
+          name: tool.name,
+          version: tool.version,
+          outputShape: tool.outputShape,
+          category: tool.category,
+          safety: tool.safety,
+          surfaces: tool.surfaces,
+        }),
+      ),
+    },
+    providerEndpoint: {
       provider: profile.modelConfig.provider,
-      modelName: profile.modelConfig.modelName,
       baseUrl: profile.modelConfig.baseUrl,
-      api: profile.modelConfig.api,
       apiKeyEnv: profile.modelConfig.apiKeyEnv,
-      modelSettings: {
-        temperatureMilli: profile.modelConfig.temperatureMilli,
-        maxOutputTokens: profile.modelConfig.maxOutputTokens,
-        reasoningEffort: profile.modelConfig.reasoningEffort,
-        reasoningFormat: profile.modelConfig.reasoningFormat,
-        responsesDialect: profile.modelConfig.responsesDialect,
-        chatCompletionsDialect: profile.modelConfig.chatCompletionsDialect,
-        thinkingMode: profile.modelConfig.thinkingMode,
-        reasoningHistory: profile.modelConfig.reasoningHistory,
-        reasoningBudgetTokens: profile.modelConfig.reasoningBudgetTokens,
-        promptCaching: profile.modelConfig.promptCaching,
-      },
+    },
+    model: { modelName: profile.modelConfig.modelName },
+    protocol: { api: profile.modelConfig.api },
+    dialect: {
+      responsesDialect: profile.modelConfig.responsesDialect,
+      chatCompletionsDialect: profile.modelConfig.chatCompletionsDialect,
+    },
+    reasoningSemantics: {
+      reasoningFormat: profile.modelConfig.reasoningFormat,
+      thinkingMode: profile.modelConfig.thinkingMode,
+      reasoningHistory: profile.modelConfig.reasoningHistory,
+      promptCaching: profile.modelConfig.promptCaching,
+    },
+    brainModule: {
+      moduleId: input.strategy.moduleId,
+    },
+    brainStrategy: {
+      strategyId: input.strategy.strategyId,
+    },
+    providerStateSchema: {
+      mode: input.strategy.providerState.mode,
       moduleOptions: moduleFingerprints?.providerOptions,
     },
+  };
+  return {
+    profile: compatibility.profileIdentity,
+    provider: {
+      providerEndpoint: compatibility.providerEndpoint,
+      model: compatibility.model,
+      protocol: compatibility.protocol,
+      dialect: compatibility.dialect,
+      reasoningSemantics: compatibility.reasoningSemantics,
+      brainModule: compatibility.brainModule,
+      brainStrategy: compatibility.brainStrategy,
+      providerStateSchema: compatibility.providerStateSchema,
+    },
+    compatibility,
   };
 }
 
@@ -95,9 +156,7 @@ export function stableJson(value: unknown): string {
 }
 
 function sortJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortJsonValue);
-  }
+  if (Array.isArray(value)) return value.map(sortJsonValue);
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)

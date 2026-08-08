@@ -61,6 +61,7 @@ import { createNativeBridgeCrewSessionMethods } from "./crew-session-wrappers.js
 import { createNativeBridgeChatMethods } from "./chat-wrappers.js";
 import { createNativeBridgeAdminMethods } from "./admin-wrappers.js";
 import { createNativeBridgeBrainCatalogMethods } from "./brain-wrappers.js";
+import { toNativeBrainRegistration } from "./brain-registration-wire.js";
 import { createNativeBridgeAgentCoordinationMethods } from "./agent-coordination-wrappers.js";
 import { createNativeBridgeExternalRuntimeMethods } from "./external-runtime-wrappers.js";
 import { createNativeBridgeExternalRuntimeCertificationMethods } from "./external-runtime-certification-wrappers.js";
@@ -1053,6 +1054,10 @@ function providerStateInputFromNativeJson(
 function toNativeProviderStateDiagnostic(
   raw: NativeProviderStateDiagnostic,
 ): NativeProviderStateDiagnostic {
+  const wire = raw as NativeProviderStateDiagnostic & {
+    compatibilitySnapshotJson?: string;
+    compatibilityPlanJson?: string;
+  };
   return {
     sessionId: raw.sessionId,
     moduleId: raw.moduleId,
@@ -1060,6 +1065,18 @@ function toNativeProviderStateDiagnostic(
     recordId: raw.recordId,
     profileFingerprint: raw.profileFingerprint,
     providerFingerprint: raw.providerFingerprint,
+    compatibilitySnapshot:
+      wire.compatibilitySnapshotJson === undefined
+        ? undefined
+        : providerStateCompatibilitySnapshotFromNativeJson(
+            wire.compatibilitySnapshotJson,
+          ),
+    compatibilityPlan:
+      wire.compatibilityPlanJson === undefined
+        ? undefined
+        : providerStateCompatibilityPlanFromNativeJson(
+            wire.compatibilityPlanJson,
+          ),
     status: raw.status,
     payloadVersion: raw.payloadVersion,
     payloadBytes: raw.payloadBytes,
@@ -1070,6 +1087,84 @@ function toNativeProviderStateDiagnostic(
     invalidatedAt: raw.invalidatedAt,
     invalidationReason: raw.invalidationReason,
     isCurrent: raw.isCurrent,
+  };
+}
+
+function providerStateCompatibilitySnapshotFromNativeJson(
+  raw: string,
+): NonNullable<NativeProviderStateDiagnostic["compatibilitySnapshot"]> {
+  const parsed = JSON.parse(raw) as {
+    facts: {
+      version: string;
+      profile_identity: string;
+      display_metadata: string;
+      prompt: string;
+      skills: string;
+      tool_catalog: string;
+      provider_endpoint: string;
+      model: string;
+      protocol: string;
+      dialect: string;
+      reasoning_semantics: string;
+      brain_module: string;
+      brain_strategy: string;
+      provider_state_schema: string;
+    };
+    session_effort: string;
+    session_workspace: string;
+  };
+  return {
+    facts: {
+      version: parsed.facts.version,
+      profileIdentity: parsed.facts.profile_identity,
+      displayMetadata: parsed.facts.display_metadata,
+      prompt: parsed.facts.prompt,
+      skills: parsed.facts.skills,
+      toolCatalog: parsed.facts.tool_catalog,
+      providerEndpoint: parsed.facts.provider_endpoint,
+      model: parsed.facts.model,
+      protocol: parsed.facts.protocol,
+      dialect: parsed.facts.dialect,
+      reasoningSemantics: parsed.facts.reasoning_semantics,
+      brainModule: parsed.facts.brain_module,
+      brainStrategy: parsed.facts.brain_strategy,
+      providerStateSchema: parsed.facts.provider_state_schema,
+    },
+    sessionEffort: parsed.session_effort,
+    sessionWorkspace: parsed.session_workspace,
+  };
+}
+
+function providerStateCompatibilityPlanFromNativeJson(
+  raw: string,
+): NonNullable<NativeProviderStateDiagnostic["compatibilityPlan"]> {
+  const parsed = JSON.parse(raw) as {
+    version: string;
+    class: NonNullable<
+      NativeProviderStateDiagnostic["compatibilityPlan"]
+    >["class"];
+    changes: Array<{
+      dimension: string;
+      prior_fingerprint: string;
+      current_fingerprint: string;
+    }>;
+    action: NonNullable<
+      NativeProviderStateDiagnostic["compatibilityPlan"]
+    >["action"];
+    outcome: NonNullable<
+      NativeProviderStateDiagnostic["compatibilityPlan"]
+    >["outcome"];
+  };
+  return {
+    version: parsed.version,
+    class: parsed.class,
+    changes: parsed.changes.map((change) => ({
+      dimension: change.dimension,
+      priorFingerprint: change.prior_fingerprint,
+      currentFingerprint: change.current_fingerprint,
+    })),
+    action: parsed.action,
+    outcome: parsed.outcome,
   };
 }
 
@@ -1184,42 +1279,6 @@ function createNativeBridgeModule(
     string,
     NativeProviderStateDiagnostic
   >();
-  const nativeBrainRegistration = (
-    registration: BrainImplementationRegistration,
-  ) => ({
-    implementationId: registration.implementationId,
-    profileId: registration.profileId,
-    toolProfile: {
-      tools: registration.toolProfile.tools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema ?? undefined,
-      })),
-    },
-    modelConfig: {
-      provider: registration.modelConfig.provider,
-      modelName: registration.modelConfig.modelName,
-      temperatureMilli: registration.modelConfig.temperatureMilli,
-      maxOutputTokens: registration.modelConfig.maxOutputTokens,
-    },
-    strategy: registration.strategy
-      ? {
-          moduleId: registration.strategy.moduleId,
-          strategyId: registration.strategy.strategyId,
-          providerState: {
-            mode: registration.strategy.providerState.mode,
-          },
-        }
-      : undefined,
-    providerStateScope: registration.providerStateScope
-      ? {
-          profileFingerprint:
-            registration.providerStateScope.profileFingerprint,
-          providerFingerprint:
-            registration.providerStateScope.providerFingerprint,
-        }
-      : undefined,
-  });
   const nativeSessionConfig = (config: NativeSessionConfigInput) => ({
     ...config,
     resourceLimits: config.resourceLimits
@@ -1280,14 +1339,14 @@ function createNativeBridgeModule(
       binding.shutdownEngine(request.engine, request.drainTimeoutMs),
     registerBrainImplementation: async (registration) => {
       const handle = binding.registerBrainImplementation(
-        nativeBrainRegistration(registration),
+        toNativeBrainRegistration(registration),
       ) as BrainImplementationHandle;
       brainRegistrations.set(handle, registration);
       return handle;
     },
     replaceBrainImplementation: async (registration) => {
       const handle = binding.replaceBrainImplementation(
-        nativeBrainRegistration(registration),
+        toNativeBrainRegistration(registration),
       ) as BrainImplementationHandle;
       brainRegistrations.set(handle, registration);
       return handle;

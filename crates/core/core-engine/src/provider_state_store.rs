@@ -3,7 +3,9 @@ use rusty_crew_core_persistence::{
     ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
     ProviderWireStateWrite,
 };
-use rusty_crew_core_protocol::{CoreResult, IsoTimestamp};
+use rusty_crew_core_protocol::{
+    CoreResult, IsoTimestamp, ProviderStateCompatibilityPlan, ProviderStateCompatibilitySnapshot,
+};
 
 pub(crate) trait ProviderStateStore {
     fn load_provider_state_for_wake(
@@ -21,6 +23,13 @@ pub(crate) trait ProviderStateStore {
         &self,
         limit: u32,
     ) -> CoreResult<Vec<ProviderWireStateDiagnostic>>;
+    fn record_provider_state_compatibility_plan(
+        &self,
+        row_id: i64,
+        current: &ProviderStateCompatibilitySnapshot,
+        plan: &ProviderStateCompatibilityPlan,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()>;
 }
 
 impl ProviderStateStore for CoreCoordinationStore {
@@ -49,6 +58,15 @@ impl ProviderStateStore for CoreCoordinationStore {
         limit: u32,
     ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
         self.list_provider_wire_state_diagnostics(limit)
+    }
+    fn record_provider_state_compatibility_plan(
+        &self,
+        row_id: i64,
+        current: &ProviderStateCompatibilitySnapshot,
+        plan: &ProviderStateCompatibilityPlan,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        self.record_provider_state_compatibility_plan(row_id, current, plan, now)
     }
 }
 
@@ -80,6 +98,16 @@ pub(crate) fn list_provider_state_diagnostics(
     limit: u32,
 ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
     store.list_provider_state_diagnostics(limit)
+}
+
+pub(crate) fn record_provider_state_compatibility_plan(
+    store: &impl ProviderStateStore,
+    row_id: i64,
+    current: &ProviderStateCompatibilitySnapshot,
+    plan: &ProviderStateCompatibilityPlan,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    store.record_provider_state_compatibility_plan(row_id, current, plan, now)
 }
 
 #[cfg(test)]
@@ -134,6 +162,16 @@ mod tests {
             let mut diagnostics = self.diagnostics.lock().unwrap().clone();
             diagnostics.truncate(limit as usize);
             Ok(diagnostics)
+        }
+
+        fn record_provider_state_compatibility_plan(
+            &self,
+            _row_id: i64,
+            _current: &ProviderStateCompatibilitySnapshot,
+            _plan: &ProviderStateCompatibilityPlan,
+            _now: &IsoTimestamp,
+        ) -> CoreResult<()> {
+            Ok(())
         }
     }
 
@@ -191,6 +229,8 @@ mod tests {
             key: key.clone(),
             profile_fingerprint: "profile-v1".to_string(),
             provider_fingerprint: "provider-v1".to_string(),
+            compatibility_snapshot: None,
+            compatibility_plan: None,
             payload_version: "v1".to_string(),
             payload_bytes: 42,
             created_at: "2026-07-09T08:44:00Z".to_string(),

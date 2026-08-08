@@ -470,6 +470,7 @@ export type BrainEventEnvelope = {
 export type BrainPhase = "idle" | "exploring" | "composing" | "reviewing";
 
 export type BrainProviderStateScope = {
+  compatibility?: ProviderStateCompatibilityFacts | null;
   profileFingerprint: string;
   providerFingerprint: string;
 };
@@ -1663,6 +1664,49 @@ export type ProjectionVisibility = "observation" | "user_visible";
 export type ProviderStateAbsenceReason = "not_configured" | "missing" | "expired" | "invalidated" | "module_does_not_use_state" | "load_failed";
 
 export type ProviderStateClearReason = "brain_requested_clear" | "operator_requested_clear";
+
+export type ProviderStateCompatibilityAction = "preserve_lineage" | "reconstruct_from_durable_projection";
+
+export type ProviderStateCompatibilityChange = {
+  currentFingerprint: string;
+  dimension: string;
+  priorFingerprint: string;
+};
+
+export type ProviderStateCompatibilityClass = "identical" | "compatible" | "incompatible";
+
+export type ProviderStateCompatibilityFacts = {
+  brainModule: string;
+  brainStrategy: string;
+  dialect: string;
+  displayMetadata: string;
+  model: string;
+  profileIdentity: string;
+  prompt: string;
+  protocol: string;
+  providerEndpoint: string;
+  providerStateSchema: string;
+  reasoningSemantics: string;
+  skills: string;
+  toolCatalog: string;
+  version: string;
+};
+
+export type ProviderStateCompatibilityOutcome = "preserved" | "reconstruction_required";
+
+export type ProviderStateCompatibilityPlan = {
+  action: ProviderStateCompatibilityAction;
+  changes: Array<ProviderStateCompatibilityChange>;
+  class: ProviderStateCompatibilityClass;
+  outcome: ProviderStateCompatibilityOutcome;
+  version: string;
+};
+
+export type ProviderStateCompatibilitySnapshot = {
+  facts: ProviderStateCompatibilityFacts;
+  sessionEffort: string;
+  sessionWorkspace: string;
+};
 
 export type ProviderStateMode = "unused" | "optional" | "required";
 

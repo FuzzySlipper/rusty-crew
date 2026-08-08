@@ -1893,6 +1893,16 @@
     },
     "BrainProviderStateScope": {
       "properties": {
+        "compatibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderStateCompatibilityFacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile_fingerprint": {
           "type": "string"
         },
@@ -7056,6 +7066,160 @@
       ],
       "type": "string"
     },
+    "ProviderStateCompatibilityAction": {
+      "enum": [
+        "preserve_lineage",
+        "reconstruct_from_durable_projection"
+      ],
+      "type": "string"
+    },
+    "ProviderStateCompatibilityChange": {
+      "properties": {
+        "current_fingerprint": {
+          "type": "string"
+        },
+        "dimension": {
+          "type": "string"
+        },
+        "prior_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimension",
+        "prior_fingerprint",
+        "current_fingerprint"
+      ],
+      "type": "object"
+    },
+    "ProviderStateCompatibilityClass": {
+      "enum": [
+        "identical",
+        "compatible",
+        "incompatible"
+      ],
+      "type": "string"
+    },
+    "ProviderStateCompatibilityFacts": {
+      "description": "Versioned component fingerprints used by Rust to decide whether provider\ncontinuation state can be retained. These are hashes of source facts, not\npolicy decisions: callers may assemble and hash the facts, while Rust owns\ntheir compatibility meaning.",
+      "properties": {
+        "brain_module": {
+          "type": "string"
+        },
+        "brain_strategy": {
+          "type": "string"
+        },
+        "dialect": {
+          "type": "string"
+        },
+        "display_metadata": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "profile_identity": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "provider_endpoint": {
+          "type": "string"
+        },
+        "provider_state_schema": {
+          "type": "string"
+        },
+        "reasoning_semantics": {
+          "type": "string"
+        },
+        "skills": {
+          "type": "string"
+        },
+        "tool_catalog": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "profile_identity",
+        "display_metadata",
+        "prompt",
+        "skills",
+        "tool_catalog",
+        "provider_endpoint",
+        "model",
+        "protocol",
+        "dialect",
+        "reasoning_semantics",
+        "brain_module",
+        "brain_strategy",
+        "provider_state_schema"
+      ],
+      "type": "object"
+    },
+    "ProviderStateCompatibilityOutcome": {
+      "enum": [
+        "preserved",
+        "reconstruction_required"
+      ],
+      "type": "string"
+    },
+    "ProviderStateCompatibilityPlan": {
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ProviderStateCompatibilityAction"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/ProviderStateCompatibilityChange"
+          },
+          "type": "array"
+        },
+        "class": {
+          "$ref": "#/$defs/ProviderStateCompatibilityClass"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ProviderStateCompatibilityOutcome"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "class",
+        "changes",
+        "action",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "ProviderStateCompatibilitySnapshot": {
+      "properties": {
+        "facts": {
+          "$ref": "#/$defs/ProviderStateCompatibilityFacts"
+        },
+        "session_effort": {
+          "type": "string"
+        },
+        "session_workspace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "facts",
+        "session_effort",
+        "session_workspace"
+      ],
+      "type": "object"
+    },
     "ProviderStateMode": {
       "enum": [
         "unused",
@@ -9299,6 +9463,12 @@
     "project_id": {
       "type": "string"
     },
+    "provider_state_compatibility_plan": {
+      "$ref": "#/$defs/ProviderStateCompatibilityPlan"
+    },
+    "provider_state_compatibility_snapshot": {
+      "$ref": "#/$defs/ProviderStateCompatibilitySnapshot"
+    },
     "resource_limits": {
       "$ref": "#/$defs/ResourceLimits"
     },
@@ -9417,6 +9587,8 @@
     "brain_wake_failure",
     "brain_strategy_metadata",
     "brain_provider_state_scope",
+    "provider_state_compatibility_snapshot",
+    "provider_state_compatibility_plan",
     "brain_wake_provider_state_output",
     "action_batch_receipt",
     "event_receipt",

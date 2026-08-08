@@ -287,6 +287,14 @@ impl NativeBridge {
                             strategy_id: record.key.strategy_id,
                             profile_fingerprint: record.profile_fingerprint,
                             provider_fingerprint: record.provider_fingerprint,
+                            compatibility_snapshot_json: record
+                                .compatibility_snapshot
+                                .as_ref()
+                                .and_then(|value| serde_json::to_string(value).ok()),
+                            compatibility_plan_json: record
+                                .compatibility_plan
+                                .as_ref()
+                                .and_then(|value| serde_json::to_string(value).ok()),
                             status: status.to_string(),
                             payload_version: Some(record.payload_version),
                             payload_bytes: Some(record.payload_bytes as f64),

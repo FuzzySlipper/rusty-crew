@@ -337,6 +337,7 @@ export interface JsBrainModelConfig {
 export interface JsBrainProviderStateScope {
   profileFingerprint: string
   providerFingerprint: string
+  compatibility?: JsProviderStateCompatibilityFacts
 }
 
 export interface JsBrainProviderStateStrategyMetadata {
@@ -452,6 +453,23 @@ export interface JsProfileMemoryWrite {
   caps?: JsProfileMemoryCaps
 }
 
+export interface JsProviderStateCompatibilityFacts {
+  version: string
+  profileIdentity: string
+  displayMetadata: string
+  prompt: string
+  skills: string
+  toolCatalog: string
+  providerEndpoint: string
+  model: string
+  protocol: string
+  dialect: string
+  reasoningSemantics: string
+  brainModule: string
+  brainStrategy: string
+  providerStateSchema: string
+}
+
 export interface JsProviderStateDiagnostic {
   recordId: number
   sessionId: string
@@ -459,6 +477,8 @@ export interface JsProviderStateDiagnostic {
   strategyId: string
   profileFingerprint: string
   providerFingerprint: string
+  compatibilitySnapshotJson?: string
+  compatibilityPlanJson?: string
   status: string
   payloadVersion?: string
   payloadBytes?: number

@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 impl CoreEngine {
     pub fn provider_state_for_wake(
@@ -28,6 +29,8 @@ impl CoreEngine {
             );
         };
         let key = provider_wire_state_key(session_id, &strategy.module_id, &strategy.strategy_id);
+        let compatibility_snapshot =
+            self.provider_state_compatibility_snapshot(registration, session_id)?;
         let lookup = ProviderWireStateWakeLookup {
             key,
             profile_fingerprint: scope.profile_fingerprint.clone(),
@@ -54,6 +57,30 @@ impl CoreEngine {
                     .unwrap_or(ProviderStateAbsenceReason::Missing),
             );
         };
+        if let (Some(prior), Some(current)) = (
+            record.compatibility_snapshot.as_ref(),
+            compatibility_snapshot.as_ref(),
+        ) {
+            let plan = provider_compatibility::plan_provider_state_compatibility(prior, current);
+            record_provider_state_compatibility_plan(
+                &self.store,
+                record.row_id,
+                current,
+                &plan,
+                &self.now(),
+            )?;
+            if plan.action == ProviderStateCompatibilityAction::ReconstructFromDurableProjection {
+                return self.provider_state_unavailable_for_mode(
+                    strategy.provider_state.mode.clone(),
+                    ProviderStateAbsenceReason::Invalidated,
+                );
+            }
+        } else if record.compatibility_snapshot.is_some() {
+            return self.provider_state_unavailable_for_mode(
+                strategy.provider_state.mode.clone(),
+                ProviderStateAbsenceReason::Invalidated,
+            );
+        }
         Ok(ProviderStateHydration {
             state: Some(BrainWakeProviderStateInput {
                 module_id: record.key.module_id,
@@ -142,6 +169,8 @@ impl CoreEngine {
                 key: provider_wire_state_key(session_id, &module_id, &strategy_id),
                 profile_fingerprint: state.profile_fingerprint,
                 provider_fingerprint: state.provider_fingerprint,
+                compatibility_snapshot: self
+                    .provider_state_compatibility_snapshot(registration, session_id)?,
                 payload_version: state.payload_version,
                 payload_json: state.payload,
                 now,
@@ -150,6 +179,34 @@ impl CoreEngine {
             },
         )?;
         Ok(())
+    }
+
+    fn provider_state_compatibility_snapshot(
+        &self,
+        registration: &BrainImplementationRegistration,
+        session_id: &SessionId,
+    ) -> CoreResult<Option<ProviderStateCompatibilitySnapshot>> {
+        let Some(facts) = registration
+            .provider_state_scope
+            .as_ref()
+            .and_then(|scope| scope.compatibility.clone())
+        else {
+            return Ok(None);
+        };
+        let session = self.sessions.get_session(session_id)?;
+        Ok(Some(ProviderStateCompatibilitySnapshot {
+            facts,
+            session_effort: fingerprint_text(
+                session
+                    .inference_overrides
+                    .reasoning_effort
+                    .as_deref()
+                    .unwrap_or(""),
+            ),
+            session_workspace: fingerprint_text(
+                session.resource_limits.workdir.as_deref().unwrap_or(""),
+            ),
+        }))
     }
 
     fn clear_provider_state(
@@ -175,6 +232,10 @@ impl CoreEngine {
         )?;
         Ok(())
     }
+}
+
+fn fingerprint_text(value: &str) -> String {
+    format!("{:x}", Sha256::digest(value.as_bytes()))
 }
 
 fn provider_wire_state_key(

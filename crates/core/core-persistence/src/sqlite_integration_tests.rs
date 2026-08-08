@@ -15,7 +15,9 @@ use rusty_crew_core_protocol::{
     MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy,
     MemoryScope, MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
     ModelProviderCredentialKind, ProfileRegistryDerivedRuntimeRef,
-    ProfileRegistryImportExportMetadata, ProfileRegistrySourceAssetRef, ToolDescriptor,
+    ProfileRegistryImportExportMetadata, ProfileRegistrySourceAssetRef,
+    ProviderStateCompatibilityChange, ProviderStateCompatibilityClass,
+    ProviderStateCompatibilityFacts, ProviderStateCompatibilityOutcome, ToolDescriptor,
     MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
 };
 use serde_json::json;
@@ -4356,6 +4358,73 @@ fn provider_wire_state_replaces_current_record_and_preserves_payload_version() {
 }
 
 #[test]
+fn provider_state_compatibility_lineage_survives_store_restart() {
+    let db_path = temp_db_path("provider-compatibility-restart");
+    let store = CoordinationStore::open_file(&db_path).unwrap();
+    let snapshot = ProviderStateCompatibilitySnapshot {
+        facts: ProviderStateCompatibilityFacts {
+            version: "1".into(),
+            profile_identity: "profile".into(),
+            display_metadata: "display".into(),
+            prompt: "prompt".into(),
+            skills: "skills".into(),
+            tool_catalog: "tools".into(),
+            provider_endpoint: "endpoint".into(),
+            model: "model".into(),
+            protocol: "responses".into(),
+            dialect: "dialect".into(),
+            reasoning_semantics: "reasoning".into(),
+            brain_module: "module".into(),
+            brain_strategy: "strategy".into(),
+            provider_state_schema: "schema".into(),
+        },
+        session_effort: "effort".into(),
+        session_workspace: "workspace".into(),
+    };
+    let mut write = sample_provider_wire_state_write(ProviderWireStateWriteFixture {
+        key: sample_provider_wire_state_key(),
+        profile_fingerprint: "profile-fp-1",
+        provider_fingerprint: "provider-fp-1",
+        payload_version: "provider-owned-v1",
+        payload_json: serde_json::json!({"response_id": "resp-1"}),
+        now: "2026-08-08T12:00:00Z",
+        expires_at: None,
+        last_wake_id: Some("wake-1"),
+    });
+    write.compatibility_snapshot = Some(snapshot.clone());
+    let row = store.save_provider_wire_state(&write).unwrap();
+    let plan = ProviderStateCompatibilityPlan {
+        version: "1".into(),
+        class: ProviderStateCompatibilityClass::Compatible,
+        changes: vec![ProviderStateCompatibilityChange {
+            dimension: "session_workspace".into(),
+            prior_fingerprint: "workspace-one".into(),
+            current_fingerprint: "workspace-two".into(),
+        }],
+        action: ProviderStateCompatibilityAction::PreserveLineage,
+        outcome: ProviderStateCompatibilityOutcome::Preserved,
+    };
+    store
+        .record_provider_state_compatibility_plan(
+            row.row_id,
+            &snapshot,
+            &plan,
+            &"2026-08-08T12:01:00Z".into(),
+        )
+        .unwrap();
+    drop(store);
+
+    let restarted = CoordinationStore::open_file(&db_path).unwrap();
+    let diagnostic = restarted
+        .list_provider_wire_state_diagnostics(1)
+        .unwrap()
+        .remove(0);
+    assert_eq!(diagnostic.compatibility_snapshot, Some(snapshot));
+    assert_eq!(diagnostic.compatibility_plan, Some(plan));
+    remove_temp_db(&db_path);
+}
+
+#[test]
 fn provider_wire_state_withholds_expired_and_preserves_fingerprint_stale_records() {
     let db_path = temp_db_path("provider-wire-invalidation");
     let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -7091,6 +7160,7 @@ fn sample_provider_wire_state_write(
         key: input.key,
         profile_fingerprint: input.profile_fingerprint.to_string(),
         provider_fingerprint: input.provider_fingerprint.to_string(),
+        compatibility_snapshot: None,
         payload_version: input.payload_version.to_string(),
         payload_json: input.payload_json,
         now: input.now.to_string(),

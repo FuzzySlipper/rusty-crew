@@ -69,6 +69,29 @@ impl CoordinationStore {
         let conn = self.conn()?;
         list_provider_wire_state_diagnostics(&conn, limit)
     }
+
+    pub fn record_provider_state_compatibility_plan(
+        &self,
+        row_id: i64,
+        current: &ProviderStateCompatibilitySnapshot,
+        plan: &ProviderStateCompatibilityPlan,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        let conn = self.conn()?;
+        let snapshot_json = to_json_text(current)?;
+        let plan_json = to_json_text(plan)?;
+        let preserve = plan.action == ProviderStateCompatibilityAction::PreserveLineage;
+        conn.execute(
+            "UPDATE provider_wire_states
+                SET compatibility_snapshot_json = CASE WHEN ?1 THEN ?2 ELSE compatibility_snapshot_json END,
+                    compatibility_plan_json = ?3,
+                    updated_at = ?4
+              WHERE row_id = ?5",
+            params![preserve, snapshot_json, plan_json, now.as_str(), row_id],
+        )
+        .map_err(|error| persistence_error("record provider state compatibility plan", error))?;
+        Ok(())
+    }
 }
 
 fn save_provider_wire_state_in_tx(
@@ -77,6 +100,11 @@ fn save_provider_wire_state_in_tx(
 ) -> CoreResult<ProviderWireStateRecord> {
     validate_provider_wire_state_key(&write.key)?;
     let payload_json = to_json_text(&write.payload_json)?;
+    let compatibility_snapshot_json = write
+        .compatibility_snapshot
+        .as_ref()
+        .map(to_json_text)
+        .transpose()?;
     invalidate_current_provider_wire_state_for_key_in_tx(
         tx,
         &write.key,
@@ -98,8 +126,10 @@ fn save_provider_wire_state_in_tx(
             expires_at,
             last_wake_id,
             invalidated_at,
-            invalidation_reason
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'json', ?8, ?8, ?9, ?10, NULL, NULL)",
+            invalidation_reason,
+            compatibility_snapshot_json,
+            compatibility_plan_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'json', ?8, ?8, ?9, ?10, NULL, NULL, ?11, NULL)",
         params![
             write.key.session_id.0.as_str(),
             write.key.module_id.as_str(),
@@ -111,6 +141,7 @@ fn save_provider_wire_state_in_tx(
             write.now.as_str(),
             write.expires_at.as_deref(),
             write.last_wake_id.as_deref(),
+            compatibility_snapshot_json.as_deref(),
         ],
     )
     .map_err(|error| persistence_error("insert provider wire state", error))?;
@@ -145,7 +176,9 @@ fn load_provider_wire_state_for_wake_in_tx(
             absence_reason: Some(ProviderStateAbsenceReason::Expired),
         });
     }
-    if record.profile_fingerprint != lookup.profile_fingerprint {
+    if record.profile_fingerprint != lookup.profile_fingerprint
+        && record.compatibility_snapshot.is_none()
+    {
         // Fingerprint drift is a recoverable rebuild boundary, not a reason to
         // destroy the last provider-owned continuation. Keep the old row
         // available for a later rollback and let the brain reconstruct from
@@ -156,7 +189,9 @@ fn load_provider_wire_state_for_wake_in_tx(
             absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
         });
     }
-    if record.provider_fingerprint != lookup.provider_fingerprint {
+    if record.provider_fingerprint != lookup.provider_fingerprint
+        && record.compatibility_snapshot.is_none()
+    {
         // See the profile-fingerprint branch above. Provider changes may be
         // reversed, and failed reconstruction must not erase the prior state.
         return Ok(ProviderWireStateWakeResult {
@@ -300,7 +335,8 @@ fn load_current_provider_wire_state_by_key(
             expires_at,
             last_wake_id,
             invalidated_at,
-            invalidation_reason
+            invalidation_reason,
+            compatibility_snapshot_json
          FROM provider_wire_states
          WHERE session_id = ?1
            AND module_id = ?2
@@ -338,7 +374,8 @@ fn load_provider_wire_state_by_row_id(
             expires_at,
             last_wake_id,
             invalidated_at,
-            invalidation_reason
+            invalidation_reason,
+            compatibility_snapshot_json
          FROM provider_wire_states
          WHERE row_id = ?1",
         params![row_id],
@@ -368,7 +405,8 @@ fn load_expired_current_provider_wire_states(
                 expires_at,
                 last_wake_id,
                 invalidated_at,
-                invalidation_reason
+                invalidation_reason,
+                compatibility_snapshot_json
              FROM provider_wire_states
              WHERE invalidated_at IS NULL
                AND expires_at IS NOT NULL
@@ -403,7 +441,9 @@ fn list_provider_wire_state_diagnostics(
                 expires_at,
                 last_wake_id,
                 invalidated_at,
-                invalidation_reason
+                invalidation_reason,
+                compatibility_snapshot_json,
+                compatibility_plan_json
              FROM provider_wire_states
              ORDER BY
                 CASE
@@ -430,6 +470,10 @@ fn row_to_provider_wire_state_record(
         .get::<_, Option<String>>(14)?
         .map(|raw| provider_wire_state_invalidation_reason_from_str(&raw))
         .transpose()?;
+    let compatibility_snapshot = row
+        .get::<_, Option<String>>(15)?
+        .map(|raw| from_json_text(&raw).map_err(to_sql_error))
+        .transpose()?;
     Ok(ProviderWireStateRecord {
         row_id: row.get(0)?,
         key: ProviderWireStateKey {
@@ -439,6 +483,7 @@ fn row_to_provider_wire_state_record(
         },
         profile_fingerprint: row.get(4)?,
         provider_fingerprint: row.get(5)?,
+        compatibility_snapshot,
         payload_version: row.get(6)?,
         payload_json: from_json_text(&payload_json).map_err(to_sql_error)?,
         payload_encoding: row.get(8)?,
@@ -454,6 +499,14 @@ fn row_to_provider_wire_state_record(
 fn row_to_provider_wire_state_diagnostic(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ProviderWireStateDiagnostic> {
+    let compatibility_snapshot = row
+        .get::<_, Option<String>>(14)?
+        .map(|raw| from_json_text(&raw).map_err(to_sql_error))
+        .transpose()?;
+    let compatibility_plan = row
+        .get::<_, Option<String>>(15)?
+        .map(|raw| from_json_text(&raw).map_err(to_sql_error))
+        .transpose()?;
     Ok(ProviderWireStateDiagnostic {
         key: ProviderWireStateKey {
             session_id: SessionId(row.get(1)?),
@@ -463,6 +516,8 @@ fn row_to_provider_wire_state_diagnostic(
         row_id: row.get(0)?,
         profile_fingerprint: row.get(4)?,
         provider_fingerprint: row.get(5)?,
+        compatibility_snapshot,
+        compatibility_plan,
         payload_version: row.get(6)?,
         payload_bytes: row.get::<_, u64>(7)?,
         created_at: row.get(8)?,

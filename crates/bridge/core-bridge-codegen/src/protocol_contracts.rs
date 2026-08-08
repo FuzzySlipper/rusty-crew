@@ -45,6 +45,8 @@ struct ProtocolContractRoots {
     brain_wake_failure: BrainWakeFailure,
     brain_strategy_metadata: BrainStrategyMetadata,
     brain_provider_state_scope: BrainProviderStateScope,
+    provider_state_compatibility_snapshot: ProviderStateCompatibilitySnapshot,
+    provider_state_compatibility_plan: ProviderStateCompatibilityPlan,
     brain_wake_provider_state_output: BrainWakeProviderStateOutput,
     action_batch_receipt: ActionBatchReceipt,
     event_receipt: EventReceipt,

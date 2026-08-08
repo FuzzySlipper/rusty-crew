@@ -2654,6 +2654,14 @@
       },
       "BrainProviderStateScope": {
         "properties": {
+          "compatibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderStateCompatibilityFacts"
+              },
+              { "type": "null" }
+            ]
+          },
           "profile_fingerprint": { "type": "string" },
           "provider_fingerprint": { "type": "string" }
         },
@@ -5739,6 +5747,96 @@
       "ProviderStateClearReason": {
         "enum": ["brain_requested_clear", "operator_requested_clear"],
         "type": "string"
+      },
+      "ProviderStateCompatibilityAction": {
+        "enum": ["preserve_lineage", "reconstruct_from_durable_projection"],
+        "type": "string"
+      },
+      "ProviderStateCompatibilityChange": {
+        "properties": {
+          "current_fingerprint": { "type": "string" },
+          "dimension": { "type": "string" },
+          "prior_fingerprint": { "type": "string" }
+        },
+        "required": ["dimension", "prior_fingerprint", "current_fingerprint"],
+        "type": "object"
+      },
+      "ProviderStateCompatibilityClass": {
+        "enum": ["identical", "compatible", "incompatible"],
+        "type": "string"
+      },
+      "ProviderStateCompatibilityFacts": {
+        "description": "Versioned component fingerprints used by Rust to decide whether provider\ncontinuation state can be retained. These are hashes of source facts, not\npolicy decisions: callers may assemble and hash the facts, while Rust owns\ntheir compatibility meaning.",
+        "properties": {
+          "brain_module": { "type": "string" },
+          "brain_strategy": { "type": "string" },
+          "dialect": { "type": "string" },
+          "display_metadata": { "type": "string" },
+          "model": { "type": "string" },
+          "profile_identity": { "type": "string" },
+          "prompt": { "type": "string" },
+          "protocol": { "type": "string" },
+          "provider_endpoint": { "type": "string" },
+          "provider_state_schema": { "type": "string" },
+          "reasoning_semantics": { "type": "string" },
+          "skills": { "type": "string" },
+          "tool_catalog": { "type": "string" },
+          "version": { "type": "string" }
+        },
+        "required": [
+          "version",
+          "profile_identity",
+          "display_metadata",
+          "prompt",
+          "skills",
+          "tool_catalog",
+          "provider_endpoint",
+          "model",
+          "protocol",
+          "dialect",
+          "reasoning_semantics",
+          "brain_module",
+          "brain_strategy",
+          "provider_state_schema"
+        ],
+        "type": "object"
+      },
+      "ProviderStateCompatibilityOutcome": {
+        "enum": ["preserved", "reconstruction_required"],
+        "type": "string"
+      },
+      "ProviderStateCompatibilityPlan": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ProviderStateCompatibilityAction"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderStateCompatibilityChange"
+            },
+            "type": "array"
+          },
+          "class": {
+            "$ref": "#/components/schemas/ProviderStateCompatibilityClass"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ProviderStateCompatibilityOutcome"
+          },
+          "version": { "type": "string" }
+        },
+        "required": ["version", "class", "changes", "action", "outcome"],
+        "type": "object"
+      },
+      "ProviderStateCompatibilitySnapshot": {
+        "properties": {
+          "facts": {
+            "$ref": "#/components/schemas/ProviderStateCompatibilityFacts"
+          },
+          "session_effort": { "type": "string" },
+          "session_workspace": { "type": "string" }
+        },
+        "required": ["facts", "session_effort", "session_workspace"],
+        "type": "object"
       },
       "ProviderStateMode": {
         "enum": ["unused", "optional", "required"],

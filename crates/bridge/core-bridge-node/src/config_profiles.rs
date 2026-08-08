@@ -289,6 +289,24 @@ pub(crate) fn to_brain_registration(
             rusty_crew_core_bridge_api::BrainProviderStateScope {
                 profile_fingerprint: scope.profile_fingerprint,
                 provider_fingerprint: scope.provider_fingerprint,
+                compatibility: scope.compatibility.map(|facts| {
+                    rusty_crew_core_bridge_api::ProviderStateCompatibilityFacts {
+                        version: facts.version,
+                        profile_identity: facts.profile_identity,
+                        display_metadata: facts.display_metadata,
+                        prompt: facts.prompt,
+                        skills: facts.skills,
+                        tool_catalog: facts.tool_catalog,
+                        provider_endpoint: facts.provider_endpoint,
+                        model: facts.model,
+                        protocol: facts.protocol,
+                        dialect: facts.dialect,
+                        reasoning_semantics: facts.reasoning_semantics,
+                        brain_module: facts.brain_module,
+                        brain_strategy: facts.brain_strategy,
+                        provider_state_schema: facts.provider_state_schema,
+                    }
+                }),
             }
         }),
     })

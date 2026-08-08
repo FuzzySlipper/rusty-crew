@@ -3,8 +3,11 @@ use rusty_crew_core_bridge_api::{
     AgentId, BrainAction, BrainActionBatch, BrainImplementationHandle, BrainImplementationId,
     BrainModelConfig, BrainProviderStateScope, BrainProviderStateStrategyMetadata,
     BrainStrategyMetadata, BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate,
-    CoreEventKind, EventSubscription, ProfileId, ProviderStateMode, ResourceLimits, SessionConfig,
-    SessionId, SessionKind, ShutdownRequest, ToolDescriptor, ToolProfile,
+    CoreEventKind, EventSubscription, ProfileId, ProviderStateAbsenceReason,
+    ProviderStateCompatibilityAction, ProviderStateCompatibilityClass,
+    ProviderStateCompatibilityFacts, ProviderStateCompatibilityPlan, ProviderStateMode,
+    ResourceLimits, SessionConfig, SessionId, SessionKind, ShutdownRequest, ToolDescriptor,
+    ToolProfile,
 };
 use rusty_crew_core_protocol::{
     BrainEvent, ModelProviderSecretEnvelope, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
@@ -589,6 +592,155 @@ fn native_bridge_hydrates_and_updates_provider_state_around_wakes() {
         )
         .expect_err("required state should fail before provider invocation");
     assert_eq!(required_error.kind, CoreErrorKind::BrainUnavailable);
+}
+
+#[test]
+fn provider_state_compatibility_preserves_benign_session_and_profile_refreshes() {
+    let mut bridge = NativeBridge::new();
+    bridge
+        .initialize_engine(EngineConfig {
+            engine_data_dir: std::env::temp_dir()
+                .join(format!(
+                    "rusty-crew-native-provider-compatibility-{}",
+                    std::process::id()
+                ))
+                .to_string_lossy()
+                .to_string(),
+            clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                at: "2026-08-08T12:00:00Z".to_string(),
+            },
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1000,
+            storage: None,
+        })
+        .unwrap();
+    let mut baseline = provider_state_brain_registration(
+        "compatibility-responses-v1",
+        "compatibility-profile",
+        ProviderStateMode::Optional,
+    );
+    baseline
+        .provider_state_scope
+        .as_mut()
+        .unwrap()
+        .compatibility = Some(provider_state_compatibility_facts());
+    let handle = bridge.register_brain_implementation(baseline).unwrap();
+    let mut session =
+        provider_state_session_config("compatibility-session", "compatibility-profile");
+    session.resource_limits.workdir = Some("/workspace/one".to_string());
+    bridge.create_session(session.clone()).unwrap();
+    bridge
+        .apply_provider_state_output(
+            handle,
+            &session.session_id,
+            "wake-1",
+            BrainWakeProviderStateOutput::Replace {
+                state: BrainWakeProviderStateUpdate {
+                    module_id: "openai-responses".to_string(),
+                    strategy_id: "replay".to_string(),
+                    profile_fingerprint: "profile-fingerprint".to_string(),
+                    provider_fingerprint: "provider-fingerprint".to_string(),
+                    payload_version: "provider-owned-v1".to_string(),
+                    payload: serde_json::json!({"response_id": "resp-lineage"}),
+                    ttl_ms: Some(60_000),
+                },
+            },
+        )
+        .unwrap();
+
+    session.resource_limits.workdir = Some("/workspace/two".to_string());
+    bridge.ensure_configured_session(session.clone()).unwrap();
+    bridge
+        .set_session_reasoning_effort(session.session_id.clone(), Some("high".to_string()))
+        .unwrap();
+    let mut refreshed = provider_state_brain_registration(
+        "compatibility-responses-v2",
+        "compatibility-profile",
+        ProviderStateMode::Optional,
+    );
+    let mut refreshed_facts = provider_state_compatibility_facts();
+    refreshed_facts.display_metadata = "display-v2".to_string();
+    refreshed_facts.prompt = "prompt-v2".to_string();
+    refreshed_facts.skills = "skills-v2".to_string();
+    refreshed_facts.tool_catalog = "tools-v2".to_string();
+    refreshed
+        .provider_state_scope
+        .as_mut()
+        .unwrap()
+        .compatibility = Some(refreshed_facts);
+    let refreshed_handle = bridge.replace_brain_implementation(refreshed).unwrap();
+
+    let hydrated = bridge
+        .build_brain_wake_request_for_session(
+            refreshed_handle,
+            session.session_id.clone(),
+            "system".to_string(),
+            b"{}".to_vec(),
+            "wake-2".to_string(),
+        )
+        .unwrap();
+    assert_eq!(
+        hydrated.request.provider_state.unwrap().payload,
+        serde_json::json!({"response_id": "resp-lineage"})
+    );
+    let diagnostic = bridge.provider_state_diagnostics(1).unwrap().remove(0);
+    let plan: ProviderStateCompatibilityPlan =
+        serde_json::from_str(diagnostic.compatibility_plan_json.as_deref().unwrap()).unwrap();
+    assert_eq!(plan.class, ProviderStateCompatibilityClass::Compatible);
+    assert_eq!(
+        plan.action,
+        ProviderStateCompatibilityAction::PreserveLineage
+    );
+    assert!(plan
+        .changes
+        .iter()
+        .any(|change| change.dimension == "session_workspace"));
+    assert!(plan
+        .changes
+        .iter()
+        .any(|change| change.dimension == "session_effort"));
+
+    let mut incompatible = provider_state_brain_registration_with_scope(
+        "compatibility-responses-v3",
+        "compatibility-profile",
+        ProviderStateMode::Optional,
+        "profile-fingerprint",
+        "provider-fingerprint-v2",
+    );
+    let mut incompatible_facts = provider_state_compatibility_facts();
+    incompatible_facts.model = "model-v2".to_string();
+    incompatible
+        .provider_state_scope
+        .as_mut()
+        .unwrap()
+        .compatibility = Some(incompatible_facts);
+    let incompatible_handle = bridge.replace_brain_implementation(incompatible).unwrap();
+    let rebuilt = bridge
+        .build_brain_wake_request_for_session(
+            incompatible_handle,
+            session.session_id,
+            "system".to_string(),
+            b"{}".to_vec(),
+            "wake-3".to_string(),
+        )
+        .unwrap();
+    assert!(rebuilt.request.provider_state.is_none());
+    assert_eq!(
+        rebuilt.request.provider_state_absence,
+        Some(ProviderStateAbsenceReason::Invalidated)
+    );
+    let diagnostic = bridge.provider_state_diagnostics(1).unwrap().remove(0);
+    let plan: ProviderStateCompatibilityPlan =
+        serde_json::from_str(diagnostic.compatibility_plan_json.as_deref().unwrap()).unwrap();
+    assert_eq!(plan.class, ProviderStateCompatibilityClass::Incompatible);
+    assert_eq!(
+        plan.action,
+        ProviderStateCompatibilityAction::ReconstructFromDurableProjection
+    );
+    assert!(
+        diagnostic.is_current,
+        "prior provider row remains inspectable"
+    );
 }
 
 #[test]
@@ -1574,8 +1726,28 @@ fn provider_state_brain_registration_with_scope(
     registration.provider_state_scope = Some(BrainProviderStateScope {
         profile_fingerprint: profile_fingerprint.to_string(),
         provider_fingerprint: provider_fingerprint.to_string(),
+        compatibility: None,
     });
     registration
+}
+
+fn provider_state_compatibility_facts() -> ProviderStateCompatibilityFacts {
+    ProviderStateCompatibilityFacts {
+        version: "1".to_string(),
+        profile_identity: "profile".to_string(),
+        display_metadata: "display-v1".to_string(),
+        prompt: "prompt-v1".to_string(),
+        skills: "skills-v1".to_string(),
+        tool_catalog: "tools-v1".to_string(),
+        provider_endpoint: "endpoint-v1".to_string(),
+        model: "model-v1".to_string(),
+        protocol: "responses".to_string(),
+        dialect: "openai-stateful".to_string(),
+        reasoning_semantics: "reasoning-v1".to_string(),
+        brain_module: "openai-responses".to_string(),
+        brain_strategy: "replay".to_string(),
+        provider_state_schema: "provider-owned-v1".to_string(),
+    }
 }
 
 fn provider_state_session_config(session_id: &str, profile_id: &str) -> SessionConfig {

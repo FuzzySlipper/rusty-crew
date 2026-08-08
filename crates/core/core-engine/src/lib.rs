@@ -33,6 +33,7 @@ mod memory;
 mod memory_spaces;
 mod memory_store;
 mod profile_admin;
+mod provider_compatibility;
 mod provider_runtime;
 mod provider_state_store;
 mod roleplay;
@@ -75,7 +76,8 @@ use memory_store::CrewMemoryStore;
 use provider_state_store::{
     clear_provider_state as clear_provider_state_store,
     list_provider_state_diagnostics as list_provider_state_store_diagnostics,
-    load_provider_state_for_wake, save_provider_state as save_provider_state_store,
+    load_provider_state_for_wake, record_provider_state_compatibility_plan,
+    save_provider_state as save_provider_state_store,
 };
 use review_submission_store::{
     list as list_review_submission_records, load as load_review_submission_record,
@@ -173,7 +175,10 @@ use rusty_crew_core_protocol::{
     ModelProviderRefreshImpactRequest, ModelProviderRefreshMode, ModelProviderRefreshPlan,
     ModelProviderRefreshPlanRequest, ModelProviderRefreshProfileAction, ModelProviderWrite,
     ParentConsumptionPolicy, ProfileId, ProfilePurgeReport, ProfileRegistryRecord,
-    ProfileRegistryWrite, ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode,
+    ProfileRegistryWrite, ProviderStateAbsenceReason, ProviderStateClearReason,
+    ProviderStateCompatibilityAction, ProviderStateCompatibilityChange,
+    ProviderStateCompatibilityClass, ProviderStateCompatibilityOutcome,
+    ProviderStateCompatibilityPlan, ProviderStateCompatibilitySnapshot, ProviderStateMode,
     ResourceLimits, RunId, RuntimeActivityBegin, RuntimeActivityCensus, RuntimeActivityCensusQuery,
     RuntimeActivityCensusSummary, RuntimeActivityFinding, RuntimeActivityFindingCode,
     RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind, RuntimeActivityOwner,

@@ -152,6 +152,7 @@ assert.equal(typeof valid?.payloadBytes, "number");
 assert.equal(valid?.lastWakeId, "optional-missing");
 assert.equal(valid?.isCurrent, true);
 assert.equal(valid?.source, "durable");
+assert.equal(valid?.compatibilitySnapshot?.facts.version, "1");
 
 const versionMismatchWake = await bridge.buildBrainWakeRequestForSession({
   brain: optionalHandle,
@@ -240,6 +241,12 @@ assert.equal(
     (state) => state.sessionId === "optional-session",
   )?.source,
   "durable",
+);
+assert.equal(
+  (await bridge.providerStateDiagnostics()).find(
+    (state) => state.sessionId === "optional-session",
+  )?.compatibilityPlan?.class,
+  "incompatible",
 );
 
 const clearHandle = await bridge.registerBrainRuntime(
@@ -404,6 +411,22 @@ function registration(
         : {
             profileFingerprint,
             providerFingerprint: "provider-fingerprint",
+            compatibility: {
+              version: "1",
+              profileIdentity: profileFingerprint,
+              displayMetadata: "display-metadata",
+              prompt: "prompt",
+              skills: "skills",
+              toolCatalog: "tool-catalog",
+              providerEndpoint: "provider-endpoint",
+              model: "model",
+              protocol: "protocol",
+              dialect: "dialect",
+              reasoningSemantics: "reasoning-semantics",
+              brainModule: "brain-module",
+              brainStrategy: "brain-strategy",
+              providerStateSchema: "provider-state-schema",
+            },
           },
   };
 }
