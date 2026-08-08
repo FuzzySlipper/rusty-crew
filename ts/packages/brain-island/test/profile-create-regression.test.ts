@@ -195,6 +195,7 @@ test("profile create rolls back files, registry, and runtime after late activati
         body: {
           profileId,
           providerAlias: "missing-base-url",
+          workspaceCwd: "/home/dev/rusty-crew",
         },
       }),
       /rust-chat-completions live client requires modelConfig\.baseUrl/,
@@ -237,6 +238,7 @@ function createProfileCommand(
     body: {
       profileId,
       providerAlias: "default",
+      workspaceCwd: "/home/dev/rusty-crew",
       ...prompts,
     },
   };

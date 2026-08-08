@@ -232,7 +232,7 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     "admin.control.profiles.create",
     "POST",
     "/v1/admin/control/profiles",
-    "Create a profile and related service plumbing.",
+    "Create a profile and its initial session; full sessions require an explicit workspaceCwd.",
     "create_profile",
     ["profile"],
   ),

@@ -605,7 +605,7 @@
     "/v1/admin/control/profiles": {
       "post": {
         "operationId": "adminControlProfilesCreate",
-        "summary": "Create a profile and related service plumbing.",
+        "summary": "Create a profile and its initial session; full sessions require an explicit workspaceCwd.",
         "tags": ["profile"],
         "security": [{ "AdminBearer": [] }],
         "responses": {

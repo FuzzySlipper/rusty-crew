@@ -2469,6 +2469,7 @@ fn sample_create_profile_plan_input() -> CreateProfilePlanInput {
             session_id: Some("field-created-session".to_owned()),
             implementation_id: Some("field-created-brain".to_owned()),
             kind: Some(SessionKind::Full),
+            workspace_cwd: Some("/tmp/field-created-workspace".to_owned()),
             provider_alias: Some("field-provider".to_owned()),
             external_message_delivery_policy: None,
             model_config: Some(ProfileModelConfigSeed {

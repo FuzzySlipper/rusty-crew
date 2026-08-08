@@ -91,6 +91,7 @@ export const coreConfigFacadeArtifact = {
       "request.source.source_bundle_path",
       "request.source.source_profile_id",
       "request.source.template_id",
+      "request.workspace_cwd",
       "runtime_config",
       "runtime_config.brains",
       "runtime_config.brains[].implementation_id",

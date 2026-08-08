@@ -1711,6 +1711,7 @@ export interface NativeCreateProfileRequest {
   sessionId?: string;
   implementationId?: string;
   kind?: "full" | "worker" | "delegated";
+  workspaceCwd?: string;
   providerAlias?: string;
   externalMessageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   modelConfig?: NativeProfileModelConfigSeed;

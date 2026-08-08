@@ -404,6 +404,8 @@ pub struct CreateProfileRequest {
     pub session_id: Option<String>,
     pub implementation_id: Option<String>,
     pub kind: Option<SessionKind>,
+    #[serde(default)]
+    pub workspace_cwd: Option<String>,
     pub provider_alias: Option<String>,
     #[serde(default)]
     pub external_message_delivery_policy: Option<ExternalMessageDeliveryPolicy>,
@@ -1316,6 +1318,13 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("{profile_id}-brain"));
     let kind = input.request.kind.clone().unwrap_or(SessionKind::Full);
+    let workspace_cwd = input
+        .request
+        .workspace_cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
     let provider_alias = input
         .request
         .provider_alias
@@ -1338,6 +1347,21 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         strategy: None,
     });
     let mut diagnostics = Vec::new();
+    match workspace_cwd.as_deref() {
+        Some(cwd) if !Path::new(cwd).is_absolute() => {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "invalid_session_workspace",
+                "request.workspaceCwd",
+                "workspaceCwd must be an absolute path",
+            ))
+        }
+        None if kind == SessionKind::Full => diagnostics.push(RuntimeConfigDiagnostic::error(
+            "session_workspace_required",
+            "request.workspaceCwd",
+            "full sessions require an explicit workspaceCwd",
+        )),
+        _ => {}
+    }
     collect_id_diagnostic(
         &mut diagnostics,
         "invalid_profile_id",
@@ -1607,7 +1631,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         agent_id: agent_id.clone(),
         profile_id: profile_id.clone(),
         kind,
-        workspace_cwd: None,
+        workspace_cwd,
         resource_limits: None,
         owner_id: None,
         history_window: None,
@@ -4540,6 +4564,7 @@ mod tests {
                 session_id: None,
                 implementation_id: None,
                 kind: None,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 provider_alias: None,
                 external_message_delivery_policy: None,
                 model_config: None,
@@ -4584,7 +4609,7 @@ mod tests {
                 agent_id: AgentId::new("field-created-profile"),
                 profile_id: ProfileId::new("field-created-profile"),
                 kind: SessionKind::Full,
-                workspace_cwd: None,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 resource_limits: None,
                 owner_id: None,
                 history_window: None,
@@ -4644,6 +4669,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["brain", "session"]
         );
+
+        let mut missing_workspace = input.clone();
+        missing_workspace.request.workspace_cwd = None;
+        let missing_plan = plan_create_profile(&missing_workspace);
+        assert!(!missing_plan.ok());
+        assert!(missing_plan.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "session_workspace_required"
+                && diagnostic.path.as_deref() == Some("request.workspaceCwd")
+        }));
+
+        let mut relative_workspace = input;
+        relative_workspace.request.workspace_cwd = Some("relative/repo".to_string());
+        let relative_plan = plan_create_profile(&relative_workspace);
+        assert!(!relative_plan.ok());
+        assert!(relative_plan.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "invalid_session_workspace"
+                && diagnostic.path.as_deref() == Some("request.workspaceCwd")
+        }));
     }
 
     #[test]
@@ -4661,6 +4704,7 @@ mod tests {
                 session_id: None,
                 implementation_id: None,
                 kind: None,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 provider_alias: None,
                 external_message_delivery_policy: Some(
                     ExternalMessageDeliveryPolicy::SerialNextTurn,
@@ -4764,6 +4808,7 @@ mod tests {
                 session_id: Some("runner-session".to_string()),
                 implementation_id: Some("runner-brain".to_string()),
                 kind: Some(SessionKind::Full),
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 provider_alias: None,
                 external_message_delivery_policy: None,
                 model_config: None,
@@ -4811,6 +4856,7 @@ mod tests {
                 session_id: None,
                 implementation_id: None,
                 kind: None,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 provider_alias: None,
                 external_message_delivery_policy: None,
                 model_config: Some(ProfileModelConfigSeed {

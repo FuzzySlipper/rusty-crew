@@ -460,6 +460,7 @@ async function createProfile(
       displayName: `Task 6617 context certification ${suffix}`,
       providerAlias: alias,
       kind: "full",
+      workspaceCwd: "/home/dev/rusty-crew",
       localToolProfileId: "full_coding_agent",
       reason: "task 6617 live context compaction certification",
     },

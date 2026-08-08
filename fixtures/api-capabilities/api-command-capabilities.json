@@ -2241,7 +2241,7 @@
         "id": "admin.control.profiles.create",
         "method": "POST",
         "path_template": "/v1/admin/control/profiles",
-        "description": "Create a profile and related service plumbing.",
+        "description": "Create a profile and its initial session; full sessions require an explicit workspaceCwd.",
         "auth": "admin",
         "mutation": "control",
         "stability": "stable",

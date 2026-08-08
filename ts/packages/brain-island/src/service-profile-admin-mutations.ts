@@ -515,6 +515,7 @@ export async function createServiceProfile(
   const displayName = optionalBodyString(command, "displayName");
   const soulMarkdown = optionalBodyMarkdown(command, "soulMarkdown");
   const memoryMarkdown = optionalBodyMarkdown(command, "memoryMarkdown");
+  const workspaceCwd = optionalBodyString(command, "workspaceCwd");
   const providerAlias =
     optionalBodyString(command, "providerAlias") ?? "default";
   const externalMessageDeliveryPolicy = parseExternalMessageDeliveryPolicy(
@@ -561,6 +562,7 @@ export async function createServiceProfile(
       sessionId: optionalBodyString(command, "sessionId"),
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
+      ...(workspaceCwd === undefined ? {} : { workspaceCwd }),
       providerAlias,
       externalMessageDeliveryPolicy,
       brain: {
