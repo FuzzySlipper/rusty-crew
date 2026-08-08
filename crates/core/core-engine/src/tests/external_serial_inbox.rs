@@ -104,6 +104,81 @@ fn serial_operator_input_promotes_without_agent_reply_and_stays_plain() {
 }
 
 #[test]
+fn serial_routed_input_without_replyable_sender_promotes_after_completion() {
+    let engine = test_engine();
+    let reviewer = engine
+        .create_session(session_config(
+            "unreplyable-reviewer-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let mut serial_binding = binding();
+    serial_binding.session_id = Some(reviewer.session_id.clone());
+    serial_binding.message_delivery_policy = ExternalMessageDeliveryPolicy::SerialNextTurn;
+    engine.bind_external_agent(&serial_binding, None).unwrap();
+
+    for index in 1..=2 {
+        engine
+            .deliver_agent_message(AgentMessageCommand {
+                caller: AgentCoordinationCaller::System {
+                    sender_agent_id: AgentId::new("external-cli"),
+                },
+                delivery_id: AgentMessageDeliveryId::new(format!("unreplyable-delivery-{index}")),
+                idempotency_key: format!("unreplyable-delivery-{index}"),
+                message_id: format!("unreplyable-message-{index}"),
+                to_address: reviewer.agent_id.0.clone(),
+                input_kind: AgentMessageInputKind::RoutedAgentMessage,
+                body: format!("managed review {index}"),
+                collaboration_mode: None,
+                correlation_id: Some(format!("unreplyable-review-{index}")),
+                require_wake: true,
+                created_at: format!("2026-06-19T00:00:0{index}Z"),
+                expires_at: "2026-06-19T00:30:00Z".into(),
+            })
+            .unwrap();
+    }
+
+    let first_request = ExternalTurnRequestId::new("agent-message:unreplyable-message-1");
+    engine
+        .transition_external_turn(
+            &first_request,
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:03Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &first_request,
+            ExternalTurnPhase::Active,
+            Some("native-unreplyable-turn".into()),
+            None,
+            "2026-06-19T00:00:04Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &first_request,
+            ExternalTurnPhase::Completed,
+            None,
+            None,
+            "2026-06-19T00:00:05Z".into(),
+        )
+        .unwrap();
+
+    assert!(engine
+        .get_external_turn(&ExternalTurnRequestId::new(
+            "external-follow-up:agent-message-queue:unreplyable-message-2"
+        ))
+        .unwrap()
+        .is_some());
+}
+
+#[test]
 fn serial_external_inbox_preserves_fifo_expiry_and_reply_identity() {
     let engine = test_engine();
     let sender = engine

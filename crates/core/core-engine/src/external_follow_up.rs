@@ -114,6 +114,12 @@ impl CoreEngine {
         if turn.phase != ExternalTurnPhase::Completed {
             return Ok(false);
         }
+        if source_delivery
+            .as_ref()
+            .is_some_and(|delivery| delivery.request.from_session_id.is_none())
+        {
+            return Ok(true);
+        }
         if matches!(
             turn.terminal_reason_code.as_deref(),
             Some("review_no_reply" | "agent_message_no_reply")
