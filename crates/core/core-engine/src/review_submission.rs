@@ -336,6 +336,32 @@ impl CoreEngine {
                 record.phase = ReviewSubmissionPhase::DenFinalized;
                 record.last_adapter_error = None;
             }
+            ReviewSubmissionTransition::DenAlreadyFinalized {
+                review_round_id,
+                exact_head_commit,
+                verdict,
+                terminal_reason,
+            } => {
+                if review_submission_terminal(record.phase) {
+                    return Ok(record);
+                }
+                if review_round_id == 0
+                    || !exact_head_commit.eq_ignore_ascii_case(&record.commit_sha)
+                    || !matches!(verdict.as_str(), "looks_good" | "changes_requested")
+                    || terminal_reason.trim().is_empty()
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "invalid already-finalized Den review state",
+                    ));
+                }
+                record.review_round_id = Some(review_round_id);
+                record.review_exact_head_commit = Some(exact_head_commit);
+                record.review_verdict = Some(verdict);
+                record.terminal_reason = Some(terminal_reason);
+                record.phase = ReviewSubmissionPhase::ReviewTerminal;
+                record.last_adapter_error = None;
+            }
             ReviewSubmissionTransition::ReplyPending => {
                 require_review_phase(&record, ReviewSubmissionPhase::DenFinalized)?;
                 record.phase = ReviewSubmissionPhase::ReplyPending;

@@ -6015,6 +6015,27 @@
           },
           {
             "properties": {
+              "exactHeadCommit": { "type": "string" },
+              "reviewRoundId": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "terminalReason": { "type": "string" },
+              "type": { "const": "den_already_finalized", "type": "string" },
+              "verdict": { "type": "string" }
+            },
+            "required": [
+              "type",
+              "reviewRoundId",
+              "exactHeadCommit",
+              "verdict",
+              "terminalReason"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
               "type": { "const": "reply_pending", "type": "string" }
             },
             "required": ["type"],

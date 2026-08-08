@@ -657,6 +657,12 @@ pub enum ReviewSubmissionTransition {
         task_status: String,
         material_digest: Option<String>,
     },
+    DenAlreadyFinalized {
+        review_round_id: u64,
+        exact_head_commit: String,
+        verdict: String,
+        terminal_reason: String,
+    },
     ReplyPending,
     ReplySent {
         reply_message_id: String,

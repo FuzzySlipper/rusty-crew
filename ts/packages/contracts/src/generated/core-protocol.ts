@@ -1777,6 +1777,12 @@ export type ReviewSubmissionTransition = {
   type: "den_finalized";
   verdict: string;
 } | {
+  exactHeadCommit: string;
+  reviewRoundId: number;
+  terminalReason: string;
+  type: "den_already_finalized";
+  verdict: string;
+} | {
   type: "reply_pending";
 } | {
   replyDeliveryId: string;

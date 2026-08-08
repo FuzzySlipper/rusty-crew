@@ -40,6 +40,42 @@ fn repeated_adapter_failure_records_retry_time_and_revision() {
 }
 
 #[test]
+fn already_finalized_den_round_settles_pending_submission_with_verdict() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-finalized-session",
+            "review-finalized-agent",
+            "review-finalized-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let record = begin(&engine, &session.session_id, 6698, 'b');
+    let settled = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id,
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenAlreadyFinalized {
+                review_round_id: 4149,
+                exact_head_commit: exact_sha('b'),
+                verdict: "looks_good".to_string(),
+                terminal_reason: "den_round_already_finalized".to_string(),
+            },
+            now: "2026-08-08T09:30:00Z".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(settled.phase, ReviewSubmissionPhase::ReviewTerminal);
+    assert_eq!(settled.review_round_id, Some(4149));
+    assert_eq!(settled.review_exact_head_commit, Some(exact_sha('b')));
+    assert_eq!(settled.review_verdict.as_deref(), Some("looks_good"));
+    assert_eq!(
+        settled.terminal_reason.as_deref(),
+        Some("den_round_already_finalized")
+    );
+}
+
+#[test]
 fn passing_review_gate_is_restart_durable_and_does_not_wake_submitter() {
     let data_dir = unique_data_dir("review-submission-pass");
     let engine = test_engine_with_data_dir(data_dir.clone());

@@ -688,7 +688,6 @@ async function resumeRoutedReview(
     }
 
     if (record.phase === "den_finalization_pending") {
-      const result = parseStoredReviewResult(record.reviewResultJson);
       const binding = selectReviewDenBinding(
         context,
         record.submitterSessionId,
@@ -703,6 +702,26 @@ async function resumeRoutedReview(
             : "Submitting session has no active Den MCP binding.",
         );
       }
+      const rounds = await reviewRounds(
+        context,
+        binding,
+        Number(record.taskId),
+        String(record.projectId),
+      );
+      const alreadyFinalized = exactHeadFinalizedRound(
+        rounds,
+        record.commitSha,
+        record.reviewRoundId ?? undefined,
+      );
+      if (alreadyFinalized !== undefined) {
+        record = await settleAlreadyFinalizedReview(
+          context,
+          record,
+          alreadyFinalized,
+        );
+        return completedReceipt(record);
+      }
+      const result = parseStoredReviewResult(record.reviewResultJson);
       const payload = await denCall(context, binding, "finalize_review", {
         review_round_id: record.reviewRoundId,
         verdict: result.verdict,
@@ -1049,6 +1068,18 @@ async function advanceDenHandoff(
         Number(record.taskId),
         String(record.projectId),
       );
+      const alreadyFinalized = exactHeadFinalizedRound(
+        rounds,
+        record.commitSha,
+      );
+      if (alreadyFinalized !== undefined) {
+        record = await settleAlreadyFinalizedReview(
+          context,
+          record,
+          alreadyFinalized,
+        );
+        return accepted(record);
+      }
       const existingRound = exactHeadRound(rounds, record.commitSha);
       const baseCommit =
         record.baseCommit ?? priorReviewedHead(rounds, record.commitSha);
@@ -1445,6 +1476,57 @@ function exactHeadRound(
     }
   }
   return undefined;
+}
+
+interface FinalizedDenReviewRound {
+  readonly reviewRoundId: number;
+  readonly exactHeadCommit: string;
+  readonly verdict: "looks_good" | "changes_requested";
+}
+
+function exactHeadFinalizedRound(
+  rounds: Record<string, unknown>[],
+  commitSha: string,
+  expectedRoundId?: number,
+): FinalizedDenReviewRound | undefined {
+  for (const value of [...rounds].reverse()) {
+    const head = stringValue(value, ["head_commit", "headCommit"]);
+    if (head?.toLowerCase() !== commitSha.toLowerCase()) continue;
+    const reviewRoundId = numericValue(value, [
+      "review_round_id",
+      "reviewRoundId",
+      "id",
+    ]);
+    if (
+      reviewRoundId === undefined ||
+      (expectedRoundId !== undefined && reviewRoundId !== expectedRoundId)
+    ) {
+      continue;
+    }
+    const verdict = stringValue(value, ["verdict"]);
+    if (verdict !== "looks_good" && verdict !== "changes_requested") continue;
+    return { reviewRoundId, exactHeadCommit: head, verdict };
+  }
+  return undefined;
+}
+
+async function settleAlreadyFinalizedReview(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+  round: FinalizedDenReviewRound,
+): Promise<ReviewSubmissionRecord> {
+  return context.bridge.transitionReviewSubmission({
+    submissionId: record.submissionId,
+    expectedRevision: record.revision,
+    transition: {
+      type: "den_already_finalized",
+      reviewRoundId: round.reviewRoundId,
+      exactHeadCommit: round.exactHeadCommit,
+      verdict: round.verdict,
+      terminalReason: "den_round_already_finalized",
+    },
+    now: context.now(),
+  });
 }
 
 async function recordAdapterFailure(

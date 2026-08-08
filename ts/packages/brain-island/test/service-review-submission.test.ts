@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ReviewSubmissionRecord } from "@rusty-crew/contracts";
+import type {
+  AgentRouteResolution,
+  ReviewSubmissionRecord,
+} from "@rusty-crew/contracts";
 import {
   createServiceReviewSubmissionRuntime,
   parseExternalReviewSubmissionRequest,
@@ -17,9 +20,31 @@ test("review dispatch identity changes only with resolved route authority", () =
   const resolution = {
     address: "@reviewer",
     routable: true,
-    route: { revision: 3 },
-    resolvedTarget: { bindingRevision: 14 },
-  } as never;
+    route: {
+      routeKey: "reviewer",
+      label: "reviewer",
+      enabled: true,
+      target: {
+        type: "managed_external",
+        agentId: "reviewer-agent",
+        bindingId: "reviewer-binding",
+        bindingRevision: 14,
+      },
+      revision: 3,
+      createdAt: "2026-08-08T09:00:00.000Z",
+      updatedAt: "2026-08-08T09:00:00.000Z",
+    },
+    resolvedTarget: {
+      agentId: "reviewer-agent",
+      bindingId: "reviewer-binding",
+      bindingRevision: 14,
+      displayLabel: "reviewer",
+      profileId: "reviewer",
+      runtimeId: "codex",
+      runtimeKind: "codex_app_server",
+      sessionId: "reviewer-session",
+    },
+  } as AgentRouteResolution;
 
   assert.equal(
     reviewerDispatchIdentity("review-1", resolution),
@@ -28,7 +53,7 @@ test("review dispatch identity changes only with resolved route authority", () =
   assert.equal(
     reviewerDispatchIdentity("review-1", {
       ...resolution,
-      route: { revision: 4 },
+      route: { ...resolution.route!, revision: 4 },
     }),
     "review-1:route-4:binding-14",
   );
@@ -104,6 +129,79 @@ test("managed reviews reject inactive or absent Den bindings", () => {
   } as never;
 
   assert.equal(selectReviewDenBinding(context, "missing"), undefined);
+});
+
+test("reconciliation settles an exact-head Den round finalized outside Crew", async () => {
+  const pending = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli",
+      clientId: "test",
+      idempotencyKey: "test",
+    }),
+    phase: "den_finalization_pending",
+    reviewRoundId: 4089,
+    reviewResultJson: JSON.stringify({ verdict: "looks_good" }),
+    updatedAt: "2026-08-05T00:00:00.000Z",
+  } as ReviewSubmissionRecord;
+  const transitions: Array<Record<string, unknown>> = [];
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [pending],
+      transitionReviewSubmission: async (request: Record<string, unknown>) => {
+        transitions.push(request);
+        return {
+          ...pending,
+          phase: "review_terminal",
+          reviewVerdict: "looks_good",
+        };
+      },
+    } as never,
+    reviewProjectIds: ["rusty-crew"],
+    reviewDenBindingId: "service-den",
+    runtimeConfig: {
+      sessions: [],
+      mcpBindings: [
+        {
+          bindingId: "service-den",
+          status: "active",
+          serverNames: ["den"],
+        },
+      ],
+      mcpServers: [],
+    } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-08T09:30:00.000Z",
+    callDenTool: async (_binding: unknown, toolName: string) => {
+      assert.equal(toolName, "list_review_rounds");
+      return {
+        project_id: "rusty-crew",
+        items: [
+          {
+            id: 4089,
+            project_id: "rusty-crew",
+            head_commit: pending.commitSha,
+            verdict: "looks_good",
+          },
+        ],
+      };
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+
+  assert.deepEqual(transitions, [
+    {
+      submissionId: pending.submissionId,
+      expectedRevision: pending.revision,
+      transition: {
+        type: "den_already_finalized",
+        reviewRoundId: 4089,
+        exactHeadCommit: pending.commitSha,
+        verdict: "looks_good",
+        terminalReason: "den_round_already_finalized",
+      },
+      now: "2026-08-08T09:30:00.000Z",
+    },
+  ]);
 });
 
 function record(
