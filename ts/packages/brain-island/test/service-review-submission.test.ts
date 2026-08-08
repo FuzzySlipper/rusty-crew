@@ -7,9 +7,104 @@ import {
   parseExternalReviewSubmissionRequest,
   parseReviewProjectIds,
   reconcileReviewSubmissions,
+  reviewerDispatchIdentity,
+  selectReviewDenBinding,
   selectRoutedReviewRecord,
   submitExternalReview,
 } from "../src/service-review-submission.js";
+
+test("review dispatch identity changes only with resolved route authority", () => {
+  const resolution = {
+    address: "@reviewer",
+    routable: true,
+    route: { revision: 3 },
+    resolvedTarget: { bindingRevision: 14 },
+  } as never;
+
+  assert.equal(
+    reviewerDispatchIdentity("review-1", resolution),
+    "review-1:route-3:binding-14",
+  );
+  assert.equal(
+    reviewerDispatchIdentity("review-1", {
+      ...resolution,
+      route: { revision: 4 },
+    }),
+    "review-1:route-4:binding-14",
+  );
+});
+
+test("managed reviews prefer a submitter session Den binding", () => {
+  const context = {
+    runtimeConfig: {
+      sessions: [
+        { sessionId: "session-1", profileId: "profile-1", agentId: "agent-1" },
+      ],
+      mcpBindings: [
+        {
+          bindingId: "session-den",
+          status: "active",
+          profileId: "profile-1",
+          agentId: "agent-1",
+          sessionId: "session-1",
+          serverNames: ["den"],
+        },
+        {
+          bindingId: "service-den",
+          status: "active",
+          serverNames: ["den"],
+        },
+      ],
+    },
+    reviewDenBindingId: "service-den",
+  } as never;
+
+  assert.equal(
+    selectReviewDenBinding(context, "session-1")?.bindingId,
+    "session-den",
+  );
+});
+
+test("managed reviews fall back to the configured service Den binding", () => {
+  const context = {
+    runtimeConfig: {
+      sessions: [
+        { sessionId: "session-1", profileId: "profile-1", agentId: "agent-1" },
+      ],
+      mcpBindings: [
+        {
+          bindingId: "service-den",
+          status: "active",
+          serverNames: ["den"],
+        },
+      ],
+    },
+    reviewDenBindingId: "service-den",
+  } as never;
+
+  assert.equal(
+    selectReviewDenBinding(context, "session-1")?.bindingId,
+    "service-den",
+  );
+  assert.equal(
+    selectReviewDenBinding(context, "missing")?.bindingId,
+    "service-den",
+  );
+});
+
+test("managed reviews reject inactive or absent Den bindings", () => {
+  const context = {
+    runtimeConfig: {
+      sessions: [],
+      mcpBindings: [
+        { bindingId: "service-den", status: "inactive", serverNames: ["den"] },
+      ],
+    },
+    reviewDenBindingId: "service-den",
+  } as never;
+
+  assert.equal(selectReviewDenBinding(context, "missing"), undefined);
+});
 
 function record(
   submissionId: string,

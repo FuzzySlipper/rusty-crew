@@ -114,9 +114,11 @@ function projectPayload(
     }
     case "dynamic_tool_activity": {
       const tool = stringValue(source.tool);
+      const resultText = dynamicToolResultText(source.contentItems);
       return {
         ...base,
         ...(tool === undefined ? {} : { tool }),
+        ...(resultText === undefined ? {} : { text: resultText }),
         ...(typeof source.success === "boolean"
           ? { success: source.success }
           : {}),
@@ -164,6 +166,33 @@ function projectPayload(
     default:
       return base;
   }
+}
+
+const DYNAMIC_TOOL_RESULT_LIMIT = 4_096;
+const DYNAMIC_TOOL_RESULT_TRUNCATION_MARKER = "...[truncated]";
+const UNSAFE_RESULT_CONTROL_CHARACTERS =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
+function dynamicToolResultText(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result = value
+    .map(asRecord)
+    .filter((item) => stringValue(item.type) === "inputText")
+    .map((item) => stringValue(item.text))
+    .filter((item): item is string => item !== undefined)
+    .join("\n")
+    .replace(UNSAFE_RESULT_CONTROL_CHARACTERS, " ");
+  if (result.length === 0) return undefined;
+  if (result.length <= DYNAMIC_TOOL_RESULT_LIMIT) return result;
+  const contentLength =
+    DYNAMIC_TOOL_RESULT_LIMIT - DYNAMIC_TOOL_RESULT_TRUNCATION_MARKER.length;
+  let end = contentLength;
+  if (end > 0 && isHighSurrogate(result.charCodeAt(end - 1))) end -= 1;
+  return `${result.slice(0, end)}${DYNAMIC_TOOL_RESULT_TRUNCATION_MARKER}`;
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff;
 }
 
 function projectErrorPayload(

@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn repeated_adapter_failure_records_retry_time_and_revision() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-retry-session",
+            "review-retry-agent",
+            "review-retry-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let record = begin(&engine, &session.session_id, 6698, 'a');
+    let failure = ReviewSubmissionTransition::AdapterFailed {
+        reason_code: "den_mcp_binding_unavailable".to_string(),
+        summary: "configured binding unavailable".to_string(),
+    };
+    let first = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: failure.clone(),
+            now: "2026-08-08T09:00:00Z".to_string(),
+        })
+        .unwrap();
+    let retry = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id,
+            expected_revision: first.revision,
+            transition: failure,
+            now: "2026-08-08T09:01:00Z".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(retry.phase, ReviewSubmissionPhase::Submitted);
+    assert_eq!(retry.revision, first.revision + 1);
+    assert_eq!(retry.updated_at, "2026-08-08T09:01:00Z");
+    assert_eq!(retry.last_adapter_error, first.last_adapter_error);
+}
+
+#[test]
 fn passing_review_gate_is_restart_durable_and_does_not_wake_submitter() {
     let data_dir = unique_data_dir("review-submission-pass");
     let engine = test_engine_with_data_dir(data_dir.clone());

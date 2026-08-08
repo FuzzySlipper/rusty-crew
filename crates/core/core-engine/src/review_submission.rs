@@ -258,9 +258,6 @@ impl CoreEngine {
                 summary,
             } => {
                 let failure = format!("{reason_code}: {summary}");
-                if record.last_adapter_error.as_deref() == Some(&failure) {
-                    return Ok(record);
-                }
                 record.last_adapter_error = Some(failure);
                 if record.phase == ReviewSubmissionPhase::ReviewerDispatchPending {
                     self.schedule_review_submission_failure_wake(

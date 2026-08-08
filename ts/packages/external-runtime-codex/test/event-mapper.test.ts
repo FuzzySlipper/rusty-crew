@@ -101,6 +101,43 @@ test("failed turn completion preserves its embedded error", () => {
   });
 });
 
+test("failed dynamic tool completion preserves a bounded readable result", () => {
+  const event = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "item-1",
+          type: "dynamicToolCall",
+          tool: "complete_routed_review",
+          status: "failed",
+          success: false,
+          contentItems: [
+            {
+              type: "inputText",
+              text: `No managed review submission\u0000${"x".repeat(5_000)}`,
+            },
+            { type: "inputImage", imageUrl: "data:image/png;base64,ignored" },
+          ],
+        },
+      },
+    },
+    11,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.kind, "dynamic_tool_activity");
+  assert.equal(event.payload.tool, "complete_routed_review");
+  assert.equal(event.payload.success, false);
+  assert.equal(event.payload.text?.length, 4_096);
+  assert.equal(event.payload.text?.includes("\u0000"), false);
+  assert.match(event.payload.text ?? "", /^No managed review submission /);
+  assert.match(event.payload.text ?? "", /\.\.\.\[truncated\]$/);
+});
+
 test("error diagnostics bound and sanitize every browser-facing string", () => {
   const oversizedCode = `code\u0000${"x".repeat(1_000)}`;
   const diagnostic = projectCodexErrorDiagnostic({

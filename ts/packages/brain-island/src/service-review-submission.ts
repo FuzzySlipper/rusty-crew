@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   AgentCoordinationCaller,
   AgentMessageDeliveryReceipt,
+  AgentRouteResolution,
   McpBindingRecord,
   ReviewFindingStatus,
   ReviewSubmissionRecord,
@@ -394,9 +395,10 @@ export async function reconcileReviewSubmissions(
     } else if (record.phase === "reviewer_dispatch_pending") {
       await dispatchReviewer(context, record);
     } else if (
-      record.phase === "den_finalization_pending" ||
       record.phase === "den_finalized" ||
-      record.phase === "reply_pending"
+      ((record.phase === "den_finalization_pending" ||
+        record.phase === "reply_pending") &&
+        retryDue(record))
     ) {
       await resumeRoutedReview(context, record);
     }
@@ -687,7 +689,10 @@ async function resumeRoutedReview(
 
     if (record.phase === "den_finalization_pending") {
       const result = parseStoredReviewResult(record.reviewResultJson);
-      const binding = denBinding(context, record.submitterSessionId);
+      const binding = selectReviewDenBinding(
+        context,
+        record.submitterSessionId,
+      );
       if (binding === undefined) {
         return completionFailed(
           context,
@@ -1023,7 +1028,7 @@ async function advanceDenHandoff(
   initial: ReviewSubmissionRecord,
 ): Promise<ReviewSubmissionToolReceipt> {
   let record = initial;
-  const binding = denBinding(context, record.submitterSessionId);
+  const binding = selectReviewDenBinding(context, record.submitterSessionId);
   if (binding === undefined) {
     record = await recordAdapterFailure(
       context,
@@ -1119,7 +1124,7 @@ async function settleFailedGate(
   context: ServiceReviewSubmissionContext,
   record: ReviewSubmissionRecord,
 ): Promise<void> {
-  const binding = denBinding(context, record.submitterSessionId);
+  const binding = selectReviewDenBinding(context, record.submitterSessionId);
   if (binding === undefined) return;
   try {
     await denCall(context, binding, "update_task", {
@@ -1150,7 +1155,7 @@ async function reconcilePendingGate(
   context: ServiceReviewSubmissionContext,
   record: ReviewSubmissionRecord,
 ): Promise<void> {
-  const binding = denBinding(context, record.submitterSessionId);
+  const binding = selectReviewDenBinding(context, record.submitterSessionId);
   if (binding === undefined || record.gateId === undefined) return;
   try {
     const gate = await denCall(context, binding, "get_github_check_gate", {
@@ -1187,22 +1192,36 @@ async function dispatchReviewer(
 ): Promise<void> {
   const identity = record.submissionId.replaceAll(":", "-");
   try {
-    const initial = await context.bridge.deliverAgentMessage({
-      caller: {
-        type: "review_submission",
-        submissionId: record.submissionId,
-      },
-      deliveryId: `review-delivery:${identity}`,
-      idempotencyKey: `review-delivery:${identity}`,
-      messageId: `review-message:${identity}`,
-      toAddress: record.reviewer,
-      inputKind: "routed_agent_message",
-      body: reviewerRequestBody(record),
-      correlationId: `review:${record.taskId}:${record.commitSha}`,
-      requireWake: true,
-      createdAt: context.now(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
-    });
+    const resolution = await context.bridge.resolveAgentAddress(
+      record.reviewer,
+    );
+    if (!resolution.routable) {
+      throw new ReviewSubmissionAdapterError(
+        resolution.reasonCode ?? "reviewer_route_unavailable",
+        `Reviewer route ${record.reviewer} is not currently routable.`,
+      );
+    }
+    const attemptIdentity = reviewerDispatchIdentity(identity, resolution);
+    const deliveryId = `review-delivery:${attemptIdentity}`;
+    const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
+    const initial =
+      existing ??
+      (await context.bridge.deliverAgentMessage({
+        caller: {
+          type: "review_submission",
+          submissionId: record.submissionId,
+        },
+        deliveryId,
+        idempotencyKey: deliveryId,
+        messageId: `review-message:${attemptIdentity}`,
+        toAddress: record.reviewer,
+        inputKind: "routed_agent_message",
+        body: reviewerRequestBody(record),
+        correlationId: `review:${record.taskId}:${record.commitSha}`,
+        requireWake: true,
+        createdAt: context.now(),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+      }));
     const receipt = await context.applyCoordinationDelivery(initial);
     if (receipt.status !== "accepted") {
       throw new ReviewSubmissionAdapterError(
@@ -1233,7 +1252,16 @@ async function dispatchReviewer(
   }
 }
 
-function denBinding(
+export function reviewerDispatchIdentity(
+  submissionIdentity: string,
+  resolution: AgentRouteResolution,
+): string {
+  const routeRevision = resolution.route?.revision ?? 0;
+  const bindingRevision = resolution.resolvedTarget?.bindingRevision ?? 0;
+  return `${submissionIdentity}:route-${routeRevision}:binding-${bindingRevision}`;
+}
+
+export function selectReviewDenBinding(
   context: ServiceReviewSubmissionContext,
   sessionId?: string | null,
 ): McpBindingRecord | undefined {
@@ -1241,15 +1269,18 @@ function denBinding(
     const session = context.runtimeConfig.sessions.find(
       (candidate) => candidate.sessionId === sessionId,
     );
-    if (session === undefined) return undefined;
-    return context.runtimeConfig.mcpBindings.find(
-      (binding) =>
-        binding.status === "active" &&
-        binding.profileId === session.profileId &&
-        binding.agentId === session.agentId &&
-        (binding.sessionId === undefined || binding.sessionId === sessionId) &&
-        binding.serverNames.includes("den"),
-    );
+    if (session !== undefined) {
+      const sessionBinding = context.runtimeConfig.mcpBindings.find(
+        (binding) =>
+          binding.status === "active" &&
+          binding.profileId === session.profileId &&
+          binding.agentId === session.agentId &&
+          (binding.sessionId === undefined ||
+            binding.sessionId === sessionId) &&
+          binding.serverNames.includes("den"),
+      );
+      if (sessionBinding !== undefined) return sessionBinding;
+    }
   }
   const configuredBindingId = context.reviewDenBindingId?.trim();
   if (!configuredBindingId) return undefined;

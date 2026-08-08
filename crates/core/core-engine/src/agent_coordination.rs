@@ -1441,6 +1441,9 @@ mod routed_agent_message_text_tests {
         assert!(text.contains(
             "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)"
         ));
+        assert!(text.contains(
+            "complete_routed_review is valid only when the payload explicitly begins with a Rusty Crew managed review submission identifier"
+        ));
         assert!(!text.contains("call rusty_crew.reply_agent_message"));
     }
 

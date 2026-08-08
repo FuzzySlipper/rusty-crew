@@ -54,11 +54,17 @@ When review is needed, call `list_agents` and locate the routable switchboard
 route. Use its explicit address `<reviewer-route>`, never its display label,
 profile ID, session ID, Codex thread name, or a guessed alias.
 
-Submit one self-contained asynchronous request with `send_agent_message`. Set
-the recipient to `<reviewer-route>`, choose a `ttlSeconds` from 1 through
-86400 that covers the expected queue delay, and put the repository/path, exact
-commit or artifact identity, review scope, acceptance criteria, and relevant
-test evidence in `body`. Do not use `agent_round` for queued review work.
+For a managed Den review, use `submit_task_for_review` or the external Rusty
+Crew review CLI. Those paths create the durable submission attachment that
+authorizes `complete_routed_review`; an ordinary `send_agent_message` does not.
+
+Use `send_agent_message` only for a deliberately direct/unmanaged review or
+other independent reviewer work. Set the recipient to `<reviewer-route>`, choose
+a `ttlSeconds` from 1 through 86400 that covers the expected queue delay, and
+put the repository/path, exact commit or artifact identity, review scope,
+acceptance criteria, and relevant test evidence in `body`. The reviewer must
+finalize a direct Den round through Den and must not call
+`complete_routed_review`. Do not use `agent_round` for queued review work.
 
 Choose a unique `correlationId` and retain it with the task or review request.
 The send tool reports an accepted, queued, or routed summary; it does not return
