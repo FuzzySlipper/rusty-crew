@@ -30,3 +30,13 @@ Rollout results:
 The migration requires the operator value, never reads profiles, never adds
 roots/exclusions/allowed paths, and leaves delegated `resourceLimits.workdir`
 unchanged.
+
+## Review correction: mixed legacy records
+
+Round 4167 found a mixed legacy shape with both an explicit `workspaceCwd` and
+the retired full-session `resourceLimits.workdir`. Workspace insertion and
+retired-field cleanup are now independent: an existing explicit workspace is
+preserved, a missing workspace receives only the operator-supplied absolute
+value, and every full-session workdir is removed. Delegated workdirs remain
+untouched. Focused tests cover existing/missing workspaces with and without the
+retired field.

@@ -2,6 +2,7 @@
 
 use super::super::*;
 use rusty_crew_core_protocol::{
+    validate_external_agent_binding_transition,
     validate_external_runtime_certification_invalidation,
     validate_external_runtime_certification_record, validate_external_runtime_probe_evidence,
     validate_external_runtime_registration, validate_external_turn_transition, AgentActivation,
@@ -1122,14 +1123,48 @@ impl CoordinationStore {
             params![record.binding_id.0.as_str()],
             "load external agent binding",
         )?;
+        if let Some(current) = current.as_ref() {
+            let mut replay = record.clone();
+            replay.revision = current.revision;
+            if current.lineage.is_some() && &replay == current {
+                return Ok(current.clone());
+            }
+        }
         validate_expected_revision(
             "external binding",
             &record.binding_id.0,
             current.as_ref().map(|value| value.revision),
             expected_revision,
         )?;
+        let predecessor = match record.lineage.as_ref() {
+            Some(lineage) => load_json_optional::<ExternalAgentBinding, _>(
+                &tx,
+                "SELECT record_json FROM external_agent_bindings WHERE binding_id = ?1",
+                params![lineage.predecessor_binding_id.0.as_str()],
+                "load external binding lineage predecessor",
+            )?,
+            None => None,
+        };
+        let referenced_as_predecessor = load_json_optional::<ExternalAgentBinding, _>(
+            &tx,
+            "SELECT record_json FROM external_agent_bindings
+             WHERE json_extract(record_json, '$.lineage.predecessorBindingId') = ?1
+             LIMIT 1",
+            params![record.binding_id.0.as_str()],
+            "load external binding lineage successor",
+        )?
+        .is_some();
+        validate_external_agent_binding_transition(
+            current.as_ref(),
+            predecessor.as_ref(),
+            referenced_as_predecessor,
+            record,
+        )?;
         let mut saved = record.clone();
-        saved.revision = current.map(|value| value.revision + 1).unwrap_or(1);
+        saved.revision = current
+            .as_ref()
+            .map(|value| value.revision + 1)
+            .unwrap_or(1);
         tx.execute(
             "INSERT INTO external_agent_bindings
                 (binding_id, runtime_id, session_id, agent_id, purpose, status,

@@ -16286,6 +16286,7 @@ mod tests {
             last_active_at: "2026-07-10T00:00:00Z".into(),
         };
         store.save_session(&session).unwrap();
+        let successor_session_seed = session.clone();
         let runtime = rusty_crew_core_protocol::ExternalRuntimeRegistration {
             runtime_id: rusty_crew_core_protocol::ExternalRuntimeId::new("codex-local"),
             kind: rusty_crew_core_protocol::ExternalRuntimeKind::CodexAppServer,
@@ -16508,6 +16509,48 @@ mod tests {
         let binding = store
             .put_external_agent_binding(&binding, Some(binding.revision))
             .unwrap();
+        let mut successor_session = successor_session_seed;
+        successor_session.handle = SessionHandle::new(2);
+        successor_session.session_id = SessionId::new("codex-successor-session");
+        successor_session.agent_id = AgentId::new("codex-successor-agent");
+        store.save_session(&successor_session).unwrap();
+        let mut successor = binding.clone();
+        successor.binding_id =
+            rusty_crew_core_protocol::ExternalBindingId::new("codex-successor-binding");
+        successor.session_id = Some(successor_session.session_id.clone());
+        successor.agent_id = Some(successor_session.agent_id.clone());
+        successor.native_thread_id = Some("native-successor-thread".into());
+        successor.lineage = None;
+        successor.revision = 0;
+        let successor = store.put_external_agent_binding(&successor, None).unwrap();
+        let mut lineaged = successor.clone();
+        lineaged.lineage = Some(rusty_crew_core_protocol::ExternalAgentBindingLineage {
+            predecessor_binding_id: binding.binding_id.clone(),
+            predecessor_session_id: session.session_id.clone(),
+            predecessor_native_thread_id: "native-thread".into(),
+            transition_id: "postgres-lineage-transition".into(),
+            reason_code: "explicit_new".into(),
+            created_at: "2026-07-10T00:00:03Z".into(),
+        });
+        let lineaged = store
+            .put_external_agent_binding(&lineaged, Some(successor.revision))
+            .unwrap();
+        assert_eq!(
+            store
+                .put_external_agent_binding(&lineaged, Some(successor.revision))
+                .unwrap(),
+            lineaged,
+            "PostgreSQL exact lineage replay must be idempotent"
+        );
+        let mut removed_lineage = lineaged.clone();
+        removed_lineage.lineage = None;
+        assert_eq!(
+            store
+                .put_external_agent_binding(&removed_lineage, Some(lineaged.revision))
+                .unwrap_err()
+                .kind,
+            CoreErrorKind::ActionRejected
+        );
         let mut ready = starting.clone();
         ready.binding = binding.clone();
         ready.native_thread_id = binding.native_thread_id.clone();

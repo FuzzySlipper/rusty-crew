@@ -704,6 +704,84 @@ impl ExternalAgentBinding {
     }
 }
 
+/// Enforces the Rust-owned identity and predecessor invariants for an external
+/// binding write. Persistence calls this while holding the binding write
+/// transaction so a caller cannot fabricate, replace, or erase lineage through
+/// the generic whole-record API.
+pub fn validate_external_agent_binding_transition(
+    current: Option<&ExternalAgentBinding>,
+    predecessor: Option<&ExternalAgentBinding>,
+    referenced_as_predecessor: bool,
+    candidate: &ExternalAgentBinding,
+) -> CoreResult<()> {
+    if let Some(current) = current {
+        let owns_lineage = current.lineage.is_some();
+        if (owns_lineage
+            && (current.runtime_id != candidate.runtime_id
+                || current.session_id != candidate.session_id
+                || current.agent_id != candidate.agent_id
+                || current.purpose != candidate.purpose
+                || current.native_thread_id != candidate.native_thread_id))
+            || (referenced_as_predecessor
+                && (current.runtime_id != candidate.runtime_id
+                    || current.session_id != candidate.session_id
+                    || current.native_thread_id != candidate.native_thread_id))
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external binding authority identity cannot be changed after creation",
+            ));
+        }
+        if current.lineage.is_some() && current.lineage != candidate.lineage {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "external binding lineage is immutable after Rust establishes it",
+            ));
+        }
+    }
+
+    let Some(lineage) = candidate.lineage.as_ref() else {
+        return Ok(());
+    };
+    if current.is_none() {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "external binding lineage can only be established on an existing successor binding",
+        ));
+    }
+    let predecessor = predecessor.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!(
+                "external binding lineage predecessor {} was not found",
+                lineage.predecessor_binding_id.0
+            ),
+        )
+    })?;
+    if predecessor.purpose != ExternalBindingPurpose::CrewAgent
+        || candidate.purpose != ExternalBindingPurpose::CrewAgent
+        || predecessor.runtime_id != candidate.runtime_id
+        || predecessor.session_id.as_ref() != Some(&lineage.predecessor_session_id)
+        || predecessor.native_thread_id.as_deref()
+            != Some(lineage.predecessor_native_thread_id.as_str())
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "external binding lineage does not match the authoritative predecessor binding",
+        ));
+    }
+    if candidate.session_id.as_ref() == Some(&lineage.predecessor_session_id)
+        || candidate.native_thread_id.as_deref()
+            == Some(lineage.predecessor_native_thread_id.as_str())
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "external binding lineage successor must use a distinct Crew session and native thread",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalAgentSessionCreationPhase {

@@ -37,3 +37,19 @@ correctly exposed 46 legacy debug configured full sessions without an explicit
 workspace. Task 6705 migrated those sessions with the operator-selected `/home`
 execution cwd and a rollback backup before this successful run. No profile
 workspace or filesystem restriction was introduced.
+
+## Review correction: Rust-owned lineage authority
+
+Round 4166 identified that the original service flow supplied a coherent
+lineage record but the generic Rust binding write did not independently enforce
+that relationship. The persistence transaction now loads the authoritative
+predecessor and rejects missing, foreign, session-mismatched, thread-mismatched,
+self-session, and self-thread lineage. Once established, successor lineage is
+immutable; identity fields on a referenced predecessor cannot be redirected.
+An exact stale replay returns the existing record without advancing revision,
+while conflicting overwrite/removal and ordinary stale writes are rejected.
+
+The Rust engine regression covers negative transitions, exact replay, and
+SQLite restart readback. The PostgreSQL external-runtime conformance test covers
+establishment, exact replay, and removal rejection through the same protocol
+validator. `npm run test:postgres-backend` passed after the correction.
