@@ -9,9 +9,9 @@ use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
-    decide_context_compaction, is_context_limit_provider_error, validate_compaction_artifacts,
-    BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionPolicy,
-    BrainContextUsageSnapshot, BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic,
+    decide_context_compaction_for_projection, is_context_limit_provider_error,
+    validate_compaction_artifacts, BrainContextCompactionArtifact, BrainContextCompactionDecision,
+    BrainContextCompactionPolicy, BufferedBrainHostTurnDisposition, ContextAccountingDiagnostic,
     ContextAccountingSnapshot, ContextAdmission, ContextAdmissionState, ContextCompactionPhase,
     ContextCompactionProjection, ContextDiagnosticSeverity, ContextDurableTranscript,
     ContextMeasurementSource, ContextProjectionSegment, ContextPromptProjection,
@@ -1434,12 +1434,12 @@ where
                     };
                 }
             };
-            let usage = rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_serialized_bytes(
-                serde_json::to_vec(&messages)
-                    .map(|value| value.len())
-                    .unwrap_or(usize::MAX),
-                policy.context_window_tokens,
+            let manual_request = self.request_builder.build_for_session_with_images(
+                messages.clone(),
+                &input_images,
+                Some(&input.context.session_id),
             );
+            let usage = chat_request_projection_usage(&manual_request, Some(policy));
             let sequence = context_compaction.artifacts.len() as u64 + 1;
             push_stream_item(
                 &mut stream,
@@ -1454,7 +1454,16 @@ where
                 ),
                 &mut sink,
             );
-            match compact_chat_messages(&mut messages, policy, usage.clone(), sequence) {
+            let mut compacted_messages = messages.clone();
+            match compact_chat_messages(&mut compacted_messages, policy, usage.clone(), sequence)
+                .and_then(|artifact| {
+                    let compacted_request = self.request_builder.build_for_session_with_images(
+                        compacted_messages.clone(),
+                        &input_images,
+                        Some(&input.context.session_id),
+                    );
+                    finalize_chat_compaction_artifact(artifact, &compacted_request)
+                }) {
                 Ok(mut artifact) => {
                     artifact.artifact_id = format!(
                         "manual_{}_{}",
@@ -1472,6 +1481,7 @@ where
                         .source_projection_fingerprint
                         .clone()
                         .or(Some(format!("manual-{}", intent.intent_key)));
+                    messages = compacted_messages;
                     push_stream_item(
                         &mut stream,
                         context_compaction_status(
@@ -1591,43 +1601,74 @@ where
         }
 
         loop {
-            if tool_round_count > context_compaction.last_compacted_tool_round {
-                let serialized_bytes = serde_json::to_vec(&messages)
-                    .map(|value| value.len())
-                    .unwrap_or(usize::MAX);
-                match decide_context_compaction(
-                    self.config.context_compaction.as_ref(),
-                    context_compaction.last_provider_input_tokens,
-                    serialized_bytes,
-                ) {
-                    Ok(BrainContextCompactionDecision::Compact(usage)) => {
-                        push_stream_item(
-                            &mut stream,
-                            context_compaction_status(
-                                &input.context,
-                                "context_compaction_started",
-                                BrainProviderStatusLevel::Info,
-                                "Mid-turn context compaction started at a safe provider boundary.",
-                                &usage,
-                                None,
-                                None,
-                            ),
-                            &mut sink,
+            let request = self.request_builder.build_for_session_with_images(
+                messages.clone(),
+                &input_images,
+                Some(&input.context.session_id),
+            );
+            let projected_usage =
+                chat_request_projection_usage(&request, self.config.context_compaction.as_ref());
+            let preflight_snapshot = chat_context_accounting_snapshot(ChatContextAccountingInput {
+                context: &input.context,
+                request: &request,
+                input_images: &input_images,
+                durable_messages: &durable_messages,
+                state: &context_compaction,
+                config: &self.request_builder.config,
+                compaction_policy: self.config.context_compaction.as_ref(),
+                current_usage: None,
+            });
+            push_stream_item(
+                &mut stream,
+                chat_context_accounting_status(&input.context, &preflight_snapshot),
+                &mut sink,
+            );
+            match decide_context_compaction_for_projection(
+                self.config.context_compaction.as_ref(),
+                projected_usage,
+            ) {
+                Ok(BrainContextCompactionDecision::Compact(usage)) => {
+                    push_stream_item(
+                        &mut stream,
+                        context_compaction_status(
+                            &input.context,
+                            "context_compaction_started",
+                            BrainProviderStatusLevel::Info,
+                            "Mid-turn context compaction started at a safe provider boundary.",
+                            &usage,
+                            None,
+                            None,
+                        ),
+                        &mut sink,
+                    );
+                    let sequence = context_compaction.artifacts.len() as u64 + 1;
+                    let mut compacted_messages = messages.clone();
+                    match compact_chat_messages(
+                        &mut compacted_messages,
+                        self.config
+                            .context_compaction
+                            .as_ref()
+                            .expect("compact decision policy"),
+                        usage.clone(),
+                        sequence,
+                    )
+                    .and_then(|artifact| {
+                        let compacted_request = self.request_builder.build_for_session_with_images(
+                            compacted_messages.clone(),
+                            &input_images,
+                            Some(&input.context.session_id),
                         );
-                        let sequence = context_compaction.artifacts.len() as u64 + 1;
-                        match compact_chat_messages(
-                            &mut messages,
-                            self.config
-                                .context_compaction
-                                .as_ref()
-                                .expect("compact decision policy"),
-                            usage.clone(),
-                            sequence,
-                        ) {
-                            Ok(artifact) => {
-                                context_compaction.last_compacted_tool_round = tool_round_count;
-                                context_compaction.artifacts.push(artifact.clone());
-                                push_stream_item(
+                        finalize_chat_compaction_artifact(artifact, &compacted_request)
+                    }) {
+                        Ok(mut artifact) => {
+                            artifact.session_id = Some(input.context.session_id.0.clone());
+                            artifact.logical_turn_id = Some(input.context.wake_id.clone());
+                            artifact.source_projection_fingerprint =
+                                Some(progress_json_fingerprint(&request));
+                            messages = compacted_messages;
+                            context_compaction.last_compacted_tool_round = tool_round_count;
+                            context_compaction.artifacts.push(artifact.clone());
+                            push_stream_item(
                                     &mut stream,
                                     context_compaction_status(
                                         &input.context,
@@ -1640,143 +1681,134 @@ where
                                     ),
                                     &mut sink,
                                 );
-                                let continuation_state = match chat_completions_continuation_output(
-                                    messages,
-                                    durable_messages,
-                                    input_images,
-                                    no_progress_state,
-                                    provider_request_count,
-                                    tool_round_count,
-                                    provider_event_counts.clone(),
-                                    provider_request_debug_samples.clone(),
-                                    output_limit_overlap_text,
-                                    output_limit_overlap_reasoning,
-                                    output_limit_accumulated_text,
-                                    output_limit_accumulated_reasoning,
-                                    context_compaction,
-                                ) {
-                                    Ok(state) => state,
-                                    Err(message) => {
-                                        push_stream_item(
-                                            &mut stream,
-                                            wake_failed_item_with_reason(
-                                                &input.context,
-                                                CoreErrorKind::InternalError,
-                                                "chat_completions_continuation_checkpoint_failed",
-                                                message,
-                                            ),
-                                            &mut sink,
-                                        );
-                                        return ChatCompletionsBrainLoopOutput {
-                                            stream,
-                                            completed: false,
-                                            yielded: false,
-                                            attention: None,
-                                            provider_request_count,
-                                            tool_round_count,
-                                            provider_event_counts,
-                                            provider_request_debug_samples,
-                                            provider_state: None,
-                                            continuation_state: None,
-                                        };
-                                    }
-                                };
-                                return ChatCompletionsBrainLoopOutput {
-                                    stream,
-                                    completed: false,
-                                    yielded: true,
-                                    attention: None,
-                                    provider_request_count,
-                                    tool_round_count,
-                                    provider_event_counts,
-                                    provider_request_debug_samples,
-                                    provider_state: None,
-                                    continuation_state: Some(continuation_state),
-                                };
-                            }
-                            Err(summary) => {
-                                let reason_code = "chat_completions_context_compaction_attention";
-                                push_stream_item(
-                                    &mut stream,
-                                    context_compaction_status(
-                                        &input.context,
-                                        "context_compaction_failed",
-                                        BrainProviderStatusLevel::Error,
-                                        &summary,
-                                        &usage,
-                                        None,
-                                        None,
-                                    ),
-                                    &mut sink,
-                                );
-                                let continuation_state = chat_completions_continuation_output(
-                                    messages,
-                                    durable_messages,
-                                    input_images,
-                                    no_progress_state,
-                                    provider_request_count,
-                                    tool_round_count,
-                                    provider_event_counts.clone(),
-                                    provider_request_debug_samples.clone(),
-                                    output_limit_overlap_text,
-                                    output_limit_overlap_reasoning,
-                                    output_limit_accumulated_text,
-                                    output_limit_accumulated_reasoning,
-                                    context_compaction,
-                                )
-                                .ok();
-                                return ChatCompletionsBrainLoopOutput {
-                                    stream,
-                                    completed: false,
-                                    yielded: false,
-                                    attention: Some(context_compaction_attention(
-                                        reason_code,
-                                        summary,
-                                    )),
-                                    provider_request_count,
-                                    tool_round_count,
-                                    provider_event_counts,
-                                    provider_request_debug_samples,
-                                    provider_state: None,
-                                    continuation_state,
-                                };
-                            }
+                            let continuation_state = match chat_completions_continuation_output(
+                                messages,
+                                durable_messages,
+                                input_images,
+                                no_progress_state,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts.clone(),
+                                provider_request_debug_samples.clone(),
+                                output_limit_overlap_text,
+                                output_limit_overlap_reasoning,
+                                output_limit_accumulated_text,
+                                output_limit_accumulated_reasoning,
+                                context_compaction,
+                            ) {
+                                Ok(state) => state,
+                                Err(message) => {
+                                    push_stream_item(
+                                        &mut stream,
+                                        wake_failed_item_with_reason(
+                                            &input.context,
+                                            CoreErrorKind::InternalError,
+                                            "chat_completions_continuation_checkpoint_failed",
+                                            message,
+                                        ),
+                                        &mut sink,
+                                    );
+                                    return ChatCompletionsBrainLoopOutput {
+                                        stream,
+                                        completed: false,
+                                        yielded: false,
+                                        attention: None,
+                                        provider_request_count,
+                                        tool_round_count,
+                                        provider_event_counts,
+                                        provider_request_debug_samples,
+                                        provider_state: None,
+                                        continuation_state: None,
+                                    };
+                                }
+                            };
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: true,
+                                attention: None,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state: Some(continuation_state),
+                            };
+                        }
+                        Err(summary) => {
+                            let reason_code = "chat_completions_context_compaction_attention";
+                            push_stream_item(
+                                &mut stream,
+                                context_compaction_status(
+                                    &input.context,
+                                    "context_compaction_failed",
+                                    BrainProviderStatusLevel::Error,
+                                    &summary,
+                                    &usage,
+                                    None,
+                                    None,
+                                ),
+                                &mut sink,
+                            );
+                            let continuation_state = chat_completions_continuation_output(
+                                messages,
+                                durable_messages,
+                                input_images,
+                                no_progress_state,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts.clone(),
+                                provider_request_debug_samples.clone(),
+                                output_limit_overlap_text,
+                                output_limit_overlap_reasoning,
+                                output_limit_accumulated_text,
+                                output_limit_accumulated_reasoning,
+                                context_compaction,
+                            )
+                            .ok();
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: false,
+                                attention: Some(context_compaction_attention(reason_code, summary)),
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state,
+                            };
                         }
                     }
-                    Ok(BrainContextCompactionDecision::Disabled)
-                    | Ok(BrainContextCompactionDecision::BelowThreshold(_)) => {}
-                    Err(message) => {
-                        push_stream_item(
-                            &mut stream,
-                            wake_failed_item_with_reason(
-                                &input.context,
-                                CoreErrorKind::InvalidInput,
-                                "chat_completions_context_compaction_policy_invalid",
-                                message,
-                            ),
-                            &mut sink,
-                        );
-                        return ChatCompletionsBrainLoopOutput {
-                            stream,
-                            completed: false,
-                            yielded: false,
-                            attention: None,
-                            provider_request_count,
-                            tool_round_count,
-                            provider_event_counts,
-                            provider_request_debug_samples,
-                            provider_state: None,
-                            continuation_state: None,
-                        };
-                    }
+                }
+                Ok(BrainContextCompactionDecision::Disabled)
+                | Ok(BrainContextCompactionDecision::BelowThreshold(_)) => {}
+                Err(message) => {
+                    push_stream_item(
+                        &mut stream,
+                        wake_failed_item_with_reason(
+                            &input.context,
+                            CoreErrorKind::InvalidInput,
+                            "chat_completions_context_compaction_policy_invalid",
+                            message,
+                        ),
+                        &mut sink,
+                    );
+                    return ChatCompletionsBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        yielded: false,
+                        attention: None,
+                        provider_request_count,
+                        tool_round_count,
+                        provider_event_counts,
+                        provider_request_debug_samples,
+                        provider_state: None,
+                        continuation_state: None,
+                    };
                 }
             }
             provider_request_count += 1;
-            let request = self.request_builder.build_for_session_with_images(
-                messages.clone(),
-                &input_images,
-                Some(&input.context.session_id),
-            );
             provider_request_debug_samples
                 .push(chat_completions_debug_request(&request, &input_images));
             let mut assistant_text = String::new();
@@ -1870,79 +1902,186 @@ where
             );
 
             if let Err(error) = result {
-                if self.config.context_compaction.is_some()
-                    && is_context_limit_provider_error(&error.to_string())
+                if let Some(policy) = self
+                    .config
+                    .context_compaction
+                    .as_ref()
+                    .filter(|_| is_context_limit_provider_error(&error.to_string()))
                 {
-                    let summary = format!(
-                        "The provider rejected the model projection before mid-turn context compaction could complete: {error}"
-                    );
-                    let serialized_bytes = serde_json::to_vec(&messages)
-                        .map(|value| value.len())
-                        .unwrap_or(usize::MAX);
-                    let usage = decide_context_compaction(
-                        self.config.context_compaction.as_ref(),
-                        context_compaction.last_provider_input_tokens,
-                        serialized_bytes,
-                    )
-                    .ok()
-                    .and_then(|decision| match decision {
-                        BrainContextCompactionDecision::Compact(usage)
-                        | BrainContextCompactionDecision::BelowThreshold(usage) => Some(usage),
-                        BrainContextCompactionDecision::Disabled => None,
-                    })
-                    .unwrap_or_else(|| {
-                        BrainContextUsageSnapshot::from_serialized_bytes(
-                            serialized_bytes,
-                            self.config
-                                .context_compaction
-                                .as_ref()
-                                .map_or(1, |policy| policy.context_window_tokens),
-                        )
-                    });
+                    let usage = chat_request_projection_usage(&request, Some(policy));
                     push_stream_item(
                         &mut stream,
                         context_compaction_status(
                             &input.context,
-                            "context_compaction_failed",
-                            BrainProviderStatusLevel::Error,
-                            &summary,
+                            "context_compaction_started",
+                            BrainProviderStatusLevel::Info,
+                            "Provider context-limit recovery started from the rejected exact request projection.",
                             &usage,
                             None,
                             None,
                         ),
                         &mut sink,
                     );
-                    let continuation_state = chat_completions_continuation_output(
-                        messages,
-                        durable_messages,
-                        input_images,
-                        no_progress_state,
-                        provider_request_count,
-                        tool_round_count,
-                        provider_event_counts.clone(),
-                        provider_request_debug_samples.clone(),
-                        output_limit_overlap_text,
-                        output_limit_overlap_reasoning,
-                        output_limit_accumulated_text,
-                        output_limit_accumulated_reasoning,
-                        context_compaction,
-                    )
-                    .ok();
-                    return ChatCompletionsBrainLoopOutput {
-                        stream,
-                        completed: false,
-                        yielded: false,
-                        attention: Some(context_compaction_attention(
-                            "chat_completions_provider_context_limit_attention",
-                            summary,
-                        )),
-                        provider_request_count,
-                        tool_round_count,
-                        provider_event_counts,
-                        provider_request_debug_samples,
-                        provider_state: None,
-                        continuation_state,
+                    let sequence = context_compaction.artifacts.len() as u64 + 1;
+                    let mut compacted_messages = messages.clone();
+                    let prior_provider_limit_recoveries = context_compaction
+                        .artifacts
+                        .iter()
+                        .filter(|artifact| {
+                            artifact.trigger
+                                == Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::ProviderLimit)
+                                && artifact.logical_turn_id.as_deref()
+                                    == Some(input.context.wake_id.as_str())
+                        })
+                        .count();
+                    let recovery = if prior_provider_limit_recoveries >= 2 {
+                        Err("provider context-limit recovery reached the bounded two-compaction limit for this logical turn".to_string())
+                    } else {
+                        compact_chat_messages(
+                            &mut compacted_messages,
+                            policy,
+                            usage.clone(),
+                            sequence,
+                        )
+                        .and_then(|artifact| {
+                            let compacted_request =
+                                self.request_builder.build_for_session_with_images(
+                                    compacted_messages.clone(),
+                                    &input_images,
+                                    Some(&input.context.session_id),
+                                );
+                            finalize_chat_compaction_artifact(artifact, &compacted_request)
+                        })
                     };
+                    match recovery {
+                        Ok(mut artifact) => {
+                            artifact.session_id = Some(input.context.session_id.0.clone());
+                            artifact.logical_turn_id = Some(input.context.wake_id.clone());
+                            artifact.reason_code = "provider_context_limit_recovery".to_string();
+                            artifact.trigger = Some(
+                                rusty_crew_brain_runtime::BrainContextCompactionTrigger::ProviderLimit,
+                            );
+                            artifact.source_projection_fingerprint =
+                                Some(progress_json_fingerprint(&request));
+                            context_compaction.last_compacted_tool_round = tool_round_count;
+                            context_compaction.artifacts.push(artifact.clone());
+                            push_stream_item(
+                                &mut stream,
+                                context_compaction_status(
+                                    &input.context,
+                                    "context_compaction_completed",
+                                    BrainProviderStatusLevel::Info,
+                                    "Provider context-limit recovery compacted the model projection; the same logical turn will resume without adding a transcript message.",
+                                    &usage,
+                                    Some(&artifact),
+                                    None,
+                                ),
+                                &mut sink,
+                            );
+                            let continuation_state = match chat_completions_continuation_output(
+                                compacted_messages,
+                                durable_messages,
+                                input_images,
+                                no_progress_state,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts.clone(),
+                                provider_request_debug_samples.clone(),
+                                output_limit_overlap_text,
+                                output_limit_overlap_reasoning,
+                                output_limit_accumulated_text,
+                                output_limit_accumulated_reasoning,
+                                context_compaction,
+                            ) {
+                                Ok(state) => state,
+                                Err(message) => {
+                                    push_stream_item(
+                                        &mut stream,
+                                        wake_failed_item_with_reason(
+                                            &input.context,
+                                            CoreErrorKind::InternalError,
+                                            "chat_completions_context_limit_checkpoint_failed",
+                                            message,
+                                        ),
+                                        &mut sink,
+                                    );
+                                    return ChatCompletionsBrainLoopOutput {
+                                        stream,
+                                        completed: false,
+                                        yielded: false,
+                                        attention: None,
+                                        provider_request_count,
+                                        tool_round_count,
+                                        provider_event_counts,
+                                        provider_request_debug_samples,
+                                        provider_state: None,
+                                        continuation_state: None,
+                                    };
+                                }
+                            };
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: true,
+                                attention: None,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state: Some(continuation_state),
+                            };
+                        }
+                        Err(compaction_error) => {
+                            let summary = format!(
+                                "The provider rejected the exact request projection ({error}), and no further safe compacted projection could be produced: {compaction_error}"
+                            );
+                            push_stream_item(
+                                &mut stream,
+                                context_compaction_status(
+                                    &input.context,
+                                    "context_compaction_failed",
+                                    BrainProviderStatusLevel::Error,
+                                    &summary,
+                                    &usage,
+                                    None,
+                                    None,
+                                ),
+                                &mut sink,
+                            );
+                            let continuation_state = chat_completions_continuation_output(
+                                messages,
+                                durable_messages,
+                                input_images,
+                                no_progress_state,
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts.clone(),
+                                provider_request_debug_samples.clone(),
+                                output_limit_overlap_text,
+                                output_limit_overlap_reasoning,
+                                output_limit_accumulated_text,
+                                output_limit_accumulated_reasoning,
+                                context_compaction,
+                            )
+                            .ok();
+                            return ChatCompletionsBrainLoopOutput {
+                                stream,
+                                completed: false,
+                                yielded: false,
+                                attention: Some(context_compaction_attention(
+                                    "chat_completions_provider_context_limit_attention",
+                                    summary,
+                                )),
+                                provider_request_count,
+                                tool_round_count,
+                                provider_event_counts,
+                                provider_request_debug_samples,
+                                provider_state: None,
+                                continuation_state,
+                            };
+                        }
+                    }
                 }
                 push_stream_item(
                     &mut stream,
@@ -2746,6 +2885,19 @@ fn serialized_context_tokens<T: Serialize>(value: &T) -> ContextTokenMeasurement
     .expect("serialized context estimate has a stable estimator id")
 }
 
+fn chat_request_projection_usage(
+    request: &ChatCompletionsRequest,
+    policy: Option<&BrainContextCompactionPolicy>,
+) -> rusty_crew_brain_runtime::BrainContextUsageSnapshot {
+    let input_tokens = serialized_context_tokens(request)
+        .tokens
+        .expect("serialized request estimate always has tokens");
+    rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_projection_estimate(
+        input_tokens,
+        policy.map_or(1, |policy| policy.context_window_tokens),
+    )
+}
+
 fn serialized_context_size<T: Serialize>(value: &T) -> ContextSizeMeasurement {
     let bytes = serde_json::to_vec(value).map_or(0, |value| value.len());
     ContextSizeMeasurement::measured(
@@ -3172,6 +3324,25 @@ fn compact_chat_messages(
         ),
     };
     *messages = replacement;
+    Ok(artifact)
+}
+
+fn finalize_chat_compaction_artifact(
+    mut artifact: BrainContextCompactionArtifact,
+    compacted_request: &ChatCompletionsRequest,
+) -> Result<BrainContextCompactionArtifact, String> {
+    let estimated_tokens_after = serialized_context_tokens(compacted_request)
+        .tokens
+        .expect("serialized compacted request estimate always has tokens");
+    if estimated_tokens_after >= artifact.usage_before.input_tokens {
+        return Err(
+            "context compaction did not reduce the exact assembled provider request projection"
+                .to_string(),
+        );
+    }
+    artifact.estimated_tokens_after = estimated_tokens_after;
+    artifact.before_tokens = Some(artifact.usage_before.input_tokens);
+    artifact.after_tokens = Some(estimated_tokens_after);
     Ok(artifact)
 }
 
@@ -7241,6 +7412,7 @@ mod tests {
         );
         let snapshot: ContextAccountingSnapshot = events(&output.stream)
             .into_iter()
+            .rev()
             .find_map(|event| match event {
                 BrainEvent::ProviderStatus {
                     metadata_json: Some(metadata),
@@ -8262,7 +8434,7 @@ mod tests {
         ]));
         let outputs = (1..=6)
             .map(|round| {
-                ChatCompletionsToolOutput::ok(format!("result-{round}-{}", "x".repeat(3000)))
+                ChatCompletionsToolOutput::ok(format!("result-{round}-{}", "x".repeat(12000)))
             })
             .collect();
         let mut brain =
@@ -8350,7 +8522,7 @@ mod tests {
             ],
             vec![ChatCompletionsToolOutput::ok(format!(
                 "result-6-{}",
-                "x".repeat(3000)
+                "x".repeat(12000)
             ))],
         )
         .with_loop_config(ChatCompletionsBrainLoopConfig {
@@ -8422,6 +8594,92 @@ mod tests {
     }
 
     #[test]
+    fn oversized_assembled_request_compacts_before_first_provider_dispatch() {
+        const REQUESTED_INPUT_TOKENS: u64 = 1_049_321;
+        const AVAILABLE_INPUT_TOKENS: u64 = 1_048_576;
+
+        let loop_config = ChatCompletionsBrainLoopConfig {
+            context_compaction: Some(BrainContextCompactionPolicy {
+                enabled: true,
+                auto_compaction_enabled: true,
+                strategy_id: "rolling_summary_compaction".to_string(),
+                context_window_tokens: AVAILABLE_INPUT_TOKENS,
+                compact_at_percent: 100,
+                target_percent_after_compaction: 55,
+            }),
+            ..ChatCompletionsBrainLoopConfig::default()
+        };
+        let mut brain = loop_with(Vec::new(), Vec::new()).with_loop_config(loop_config);
+        let mut messages = (0..10)
+            .map(|index| ChatCompletionMessage::user(format!("history-{index}")))
+            .collect::<Vec<_>>();
+
+        let empty_request = brain.request_builder.build_for_session_with_images(
+            messages.clone(),
+            &[],
+            Some(&context().session_id),
+        );
+        let empty_bytes = serde_json::to_vec(&empty_request)
+            .expect("serialize request with placeholder history")
+            .len();
+        let target_bytes = (REQUESTED_INPUT_TOKENS as usize)
+            .checked_mul(3)
+            .and_then(|bytes| bytes.checked_sub(2))
+            .expect("fixture target fits usize");
+        let placeholder_len = messages[1]
+            .content
+            .as_deref()
+            .expect("user message content")
+            .len();
+        let oversized_len = target_bytes
+            .checked_sub(empty_bytes - placeholder_len)
+            .expect("target request is larger than fixed request fields");
+        messages[1].content = Some("x".repeat(oversized_len));
+
+        let exact_request = brain.request_builder.build_for_session_with_images(
+            messages.clone(),
+            &[],
+            Some(&context().session_id),
+        );
+        assert_eq!(
+            chat_request_projection_usage(&exact_request, brain.config.context_compaction.as_ref())
+                .input_tokens,
+            REQUESTED_INPUT_TOKENS,
+            "the regression fixture must preserve the reported 1,049,321-token request"
+        );
+
+        let output = brain.wake_with_messages(context(), messages);
+
+        assert!(
+            output.yielded,
+            "preflight result: attention={:?} terminal={} statuses={:?}",
+            output.attention,
+            terminal_kind(&output.stream),
+            provider_status_kinds(&output.stream)
+        );
+        assert_eq!(output.provider_request_count, 0);
+        assert!(brain.client.requests().is_empty());
+        let checkpoint = chat_completions_continuation_state(
+            output
+                .continuation_state
+                .as_ref()
+                .expect("preflight compaction checkpoint"),
+        )
+        .expect("valid preflight compaction checkpoint");
+        assert_eq!(checkpoint.context_compaction.artifacts.len(), 1);
+        assert_eq!(
+            checkpoint.context_compaction.artifacts[0].before_tokens,
+            Some(REQUESTED_INPUT_TOKENS)
+        );
+        assert!(
+            checkpoint.context_compaction.artifacts[0]
+                .after_tokens
+                .expect("compacted request estimate")
+                < AVAILABLE_INPUT_TOKENS
+        );
+    }
+
+    #[test]
     fn completed_wake_provider_state_preserves_compaction_for_next_wake() {
         let mut scripts = (1..=5)
             .map(|round| {
@@ -8468,7 +8726,7 @@ mod tests {
             scripts,
             (1..=5)
                 .map(|round| {
-                    ChatCompletionsToolOutput::ok(format!("result-{round}-{}", "x".repeat(3000)))
+                    ChatCompletionsToolOutput::ok(format!("result-{round}-{}", "x".repeat(12000)))
                 })
                 .collect(),
         )
@@ -8555,7 +8813,7 @@ mod tests {
             ],
             vec![ChatCompletionsToolOutput::ok(format!(
                 "result-after-restart-{}",
-                "x".repeat(3000)
+                "x".repeat(12000)
             ))],
         )
         .with_loop_config(context_config);
@@ -8662,9 +8920,12 @@ mod tests {
             .map(String::as_str);
         assert_eq!(
             preceding_status,
-            Some("context_accounting_snapshot"),
-            "compaction failure must remain ordered after the accounting snapshot"
+            Some("context_compaction_started"),
+            "failed recovery must follow its started event"
         );
+        assert!(status_kinds[..failed_index]
+            .iter()
+            .any(|kind| kind == "context_accounting_snapshot"));
         assert_eq!(
             status_kinds
                 .iter()
@@ -8677,6 +8938,170 @@ mod tests {
             .stream
             .iter()
             .any(|item| matches!(item, BrainWakeStreamItem::WakeFailed { .. })));
+    }
+
+    #[test]
+    fn provider_context_rejection_compacts_and_resumes_same_logical_turn() {
+        let mut brain = loop_with(
+            vec![
+                Err(ChatCompletionsStreamError::ProviderError(
+                    "maximum context length exceeded".to_string(),
+                )),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta(
+                        "continued after provider-limit compaction".to_string(),
+                    ),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            Vec::new(),
+        )
+        .with_loop_config(ChatCompletionsBrainLoopConfig {
+            context_compaction: Some(BrainContextCompactionPolicy {
+                enabled: true,
+                auto_compaction_enabled: true,
+                strategy_id: "rolling_summary_compaction".to_string(),
+                context_window_tokens: 1_000_000,
+                compact_at_percent: 100,
+                target_percent_after_compaction: 55,
+            }),
+            ..ChatCompletionsBrainLoopConfig::default()
+        });
+        let messages = (0..30)
+            .map(|index| {
+                if index % 2 == 0 {
+                    ChatCompletionMessage::user(format!("historical user fact {index}"))
+                } else {
+                    ChatCompletionMessage::assistant(format!("historical assistant answer {index}"))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let first = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: messages.clone(),
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: None,
+            final_message_fallback: None,
+            compaction_intent: None,
+        });
+        assert!(first.yielded);
+        assert!(first.attention.is_none());
+        assert_eq!(first.provider_request_count, 1);
+        let checkpoint = chat_completions_continuation_state(
+            first
+                .continuation_state
+                .as_ref()
+                .expect("provider-limit compaction checkpoint"),
+        )
+        .expect("valid provider-limit checkpoint");
+        assert_eq!(checkpoint.durable_messages, messages);
+        assert_eq!(checkpoint.context_compaction.artifacts.len(), 1);
+        assert_eq!(
+            checkpoint.context_compaction.artifacts[0].trigger,
+            Some(rusty_crew_brain_runtime::BrainContextCompactionTrigger::ProviderLimit)
+        );
+
+        let second = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: Vec::new(),
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: first.continuation_state,
+            final_message_fallback: None,
+            compaction_intent: None,
+        });
+        assert!(second.completed);
+        assert!(events(&second.stream).contains(&BrainEvent::TextDelta {
+            text: "continued after provider-limit compaction".to_string(),
+        }));
+    }
+
+    #[test]
+    fn repeated_provider_context_rejections_are_bounded_and_preserve_one_logical_turn() {
+        let mut brain = loop_with(
+            (0..8)
+                .map(|_| {
+                    Err(ChatCompletionsStreamError::ProviderError(
+                        "maximum context length exceeded".to_string(),
+                    ))
+                })
+                .collect(),
+            Vec::new(),
+        )
+        .with_loop_config(ChatCompletionsBrainLoopConfig {
+            context_compaction: Some(BrainContextCompactionPolicy {
+                enabled: true,
+                auto_compaction_enabled: true,
+                strategy_id: "rolling_summary_compaction".to_string(),
+                context_window_tokens: 1_000_000,
+                compact_at_percent: 100,
+                target_percent_after_compaction: 55,
+            }),
+            ..ChatCompletionsBrainLoopConfig::default()
+        });
+        let messages = (0..30)
+            .map(|index| {
+                if index % 2 == 0 {
+                    ChatCompletionMessage::user(format!("historical user fact {index}"))
+                } else {
+                    ChatCompletionMessage::assistant(format!("historical assistant answer {index}"))
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut input = ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages: messages.clone(),
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: None,
+            final_message_fallback: None,
+            compaction_intent: None,
+        };
+        let mut attempts = 0;
+
+        let terminal = loop {
+            attempts += 1;
+            let output = brain.wake(input);
+            if output.attention.is_some() {
+                break output;
+            }
+            assert!(output.yielded, "recovery must yield or request attention");
+            assert!(attempts < 8, "provider-limit recovery must be bounded");
+            input = ChatCompletionsBrainLoopInput {
+                context: context(),
+                messages: Vec::new(),
+                input_images: Vec::new(),
+                provider_state: None,
+                continuation_state: output.continuation_state,
+                final_message_fallback: None,
+                compaction_intent: None,
+            };
+        };
+
+        assert!(
+            attempts <= 3,
+            "equivalent compaction retries must converge quickly"
+        );
+        assert_eq!(
+            terminal
+                .attention
+                .as_ref()
+                .map(|value| value.reason_code.as_str()),
+            Some("chat_completions_provider_context_limit_attention")
+        );
+        let checkpoint = chat_completions_continuation_state(
+            terminal
+                .continuation_state
+                .as_ref()
+                .expect("bounded recovery checkpoint"),
+        )
+        .expect("valid bounded recovery checkpoint");
+        assert_eq!(checkpoint.durable_messages, messages);
+        assert!(checkpoint.context_compaction.artifacts.len() <= 2);
     }
 
     #[test]

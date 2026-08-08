@@ -836,6 +836,8 @@ mod tests {
             "sse-loss-visible",
             "chat-projection-field-ratchet",
             "responses-projection-field-ratchet",
+            "incident-1049321-before-dispatch",
+            "provider-limit-recovery-bounded",
         ];
         let mut actual_ids = cases
             .iter()

@@ -307,6 +307,55 @@
       "testRefs": [
         "crates/brains/brain-runtime/src/context_accounting.rs::checked_in_schema_fingerprint_covers_snapshot_fields"
       ]
+    },
+    {
+      "id": "incident-1049321-before-dispatch",
+      "class": "admission_policy",
+      "sourceQuality": "serialized_estimate/approximate",
+      "fixture": {
+        "kind": "decision",
+        "policy": {
+          "enabled": true,
+          "autoCompactionEnabled": true,
+          "contextWindowTokens": 1048576,
+          "compactAtPercent": 100,
+          "targetPercentAfterCompaction": 55
+        },
+        "providerInputTokens": null,
+        "serializedModelContextBytes": 3147961,
+        "expected": "compact",
+        "expectedSource": "conservative_estimate"
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::oversized_assembled_request_compacts_before_first_provider_dispatch",
+        "crates/brains/openai-responses/src/lib.rs::oversized_assembled_responses_request_compacts_before_first_dispatch"
+      ]
+    },
+    {
+      "id": "provider-limit-recovery-bounded",
+      "class": "compaction_recovery",
+      "sourceQuality": "serialized_estimate/approximate",
+      "fixture": {
+        "kind": "event_order",
+        "events": [
+          "provider_context_limit",
+          "context_compaction_started",
+          "context_compaction_completed",
+          "resumable_continuation"
+        ]
+      },
+      "testRefs": [
+        "crates/brains/chat-completions/src/lib.rs::provider_context_rejection_compacts_and_resumes_same_logical_turn",
+        "crates/brains/chat-completions/src/lib.rs::repeated_provider_context_rejections_are_bounded_and_preserve_one_logical_turn",
+        "crates/brains/openai-responses/src/lib.rs::provider_context_rejection_compacts_replay_and_resumes_same_logical_turn",
+        "crates/brains/openai-responses/src/lib.rs::repeated_responses_context_rejections_are_bounded_for_one_logical_turn"
+      ],
+      "productionProbes": [
+        {
+          "package": "rusty-crew-chat-completions-brain",
+          "filter": "repeated_provider_context_rejections_are_bounded_and_preserve_one_logical_turn"
+        }
+      ]
     }
   ]
 }

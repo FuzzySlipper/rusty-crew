@@ -79,6 +79,18 @@ impl BrainContextUsageSnapshot {
         )
     }
 
+    /// Records an estimate derived from the exact provider request projection
+    /// that is about to be dispatched. The estimate may still be tokenizer-
+    /// approximate, but it must include the complete assembled request rather
+    /// than stale usage from an earlier provider round.
+    pub fn from_projection_estimate(input_tokens: u64, context_window_tokens: u64) -> Self {
+        Self::new(
+            input_tokens,
+            context_window_tokens,
+            BrainContextUsageSource::ConservativeEstimate,
+        )
+    }
+
     fn new(input_tokens: u64, context_window_tokens: u64, source: BrainContextUsageSource) -> Self {
         let fill_percent = if context_window_tokens == 0 {
             100
@@ -96,6 +108,29 @@ impl BrainContextUsageSnapshot {
             fill_percent,
             source,
         }
+    }
+}
+
+pub fn decide_context_compaction_for_projection(
+    policy: Option<&BrainContextCompactionPolicy>,
+    usage: BrainContextUsageSnapshot,
+) -> Result<BrainContextCompactionDecision, String> {
+    let Some(policy) = policy else {
+        return Ok(BrainContextCompactionDecision::Disabled);
+    };
+    policy.validate()?;
+    if !policy.enabled || !policy.auto_compaction_enabled {
+        return Ok(BrainContextCompactionDecision::Disabled);
+    }
+    if usage.context_window_tokens != policy.context_window_tokens {
+        return Err(
+            "context admission projection does not match the configured context window".to_string(),
+        );
+    }
+    if usage.fill_percent >= policy.compact_at_percent {
+        Ok(BrainContextCompactionDecision::Compact(usage))
+    } else {
+        Ok(BrainContextCompactionDecision::BelowThreshold(usage))
     }
 }
 
@@ -128,11 +163,7 @@ pub fn decide_context_compaction(
                 policy.context_window_tokens,
             )
         });
-    if usage.fill_percent >= policy.compact_at_percent {
-        Ok(BrainContextCompactionDecision::Compact(usage))
-    } else {
-        Ok(BrainContextCompactionDecision::BelowThreshold(usage))
-    }
+    decide_context_compaction_for_projection(Some(policy), usage)
 }
 
 pub fn is_context_limit_provider_error(message: &str) -> bool {
@@ -288,6 +319,26 @@ mod tests {
         assert!(matches!(
             decide_context_compaction(Some(&policy()), None, 321).unwrap(),
             BrainContextCompactionDecision::Compact(BrainContextUsageSnapshot {
+                source: BrainContextUsageSource::ConservativeEstimate,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn exact_oversized_projection_is_rejected_before_dispatch() {
+        let mut policy = policy();
+        policy.context_window_tokens = 1_048_576;
+        policy.compact_at_percent = 100;
+        let usage = BrainContextUsageSnapshot::from_projection_estimate(
+            1_049_321,
+            policy.context_window_tokens,
+        );
+        assert!(matches!(
+            decide_context_compaction_for_projection(Some(&policy), usage).unwrap(),
+            BrainContextCompactionDecision::Compact(BrainContextUsageSnapshot {
+                input_tokens: 1_049_321,
+                context_window_tokens: 1_048_576,
                 source: BrainContextUsageSource::ConservativeEstimate,
                 ..
             })
