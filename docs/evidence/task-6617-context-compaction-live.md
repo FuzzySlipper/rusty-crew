@@ -44,7 +44,8 @@ The profiles are deleted and the providers are archived after the run.
 
 The successful scenario uses a 16,384-token provider context and real
 provider-backed turns with one real terminal call per turn. It crosses the
-compaction boundary, verifies exact provider accounting, restarts the debug
+compaction boundary, verifies the serialized exact-request estimate separately
+from exact provider-reported usage, restarts the debug
 service, hydrates the same session and artifact, and completes a
 terminal-backed continuity turn. The durable transcript is kept separately
 from the compacted provider projection.

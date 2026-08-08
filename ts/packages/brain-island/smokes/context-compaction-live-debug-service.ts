@@ -126,13 +126,13 @@ try {
   );
   assert.equal(
     afterCompaction.promptProjection?.inputTokens?.source,
-    "provider",
-    "post-compaction request must carry provider input-token provenance",
+    "serialized_estimate",
+    "post-compaction admission must carry exact-request projection provenance",
   );
   assert.equal(
     afterCompaction.promptProjection?.inputTokens?.quality,
-    "exact",
-    "post-compaction request must carry exact input-token quality",
+    "approximate",
+    "serialized request token projection must retain approximate quality",
   );
   assert.equal(
     afterCompaction.providerUsage?.currentRequest?.inputTokens?.source,
