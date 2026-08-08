@@ -176,6 +176,8 @@ mod tests {
                         message: AgentMessage {
                             from: rusty_crew_core_protocol::AgentId::new("direct-rust"),
                             to: rusty_crew_core_protocol::AgentId::new("operator"),
+                            from_session_id: None,
+                            to_session_id: None,
                             body: "done".to_string(),
                             correlation_id: None,
                             projection: None,

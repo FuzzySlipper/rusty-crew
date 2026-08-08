@@ -112,6 +112,8 @@ fn ensure_configured_session_reactivates_archived_session_without_replacement() 
             message: AgentMessage {
                 from: AgentId::new("operator"),
                 to: created.agent_id.clone(),
+                from_session_id: None,
+                to_session_id: None,
                 body: "do not resurrect this stale message".to_string(),
                 correlation_id: None,
                 projection: None,
@@ -263,6 +265,8 @@ fn routing_message_to_active_session_requests_brain_wake() {
         .route_agent_message(AgentMessage {
             from: AgentId::new("planner"),
             to: worker.agent_id.clone(),
+            from_session_id: None,
+            to_session_id: None,
             body: "please wake".to_string(),
             correlation_id: None,
             projection: None,
@@ -305,6 +309,8 @@ fn routing_message_to_archived_session_does_not_request_brain_wake() {
         .route_agent_message(AgentMessage {
             from: AgentId::new("planner"),
             to: worker.agent_id,
+            from_session_id: None,
+            to_session_id: None,
             body: "do not wake".to_string(),
             correlation_id: None,
             projection: None,
@@ -344,6 +350,8 @@ fn hydrates_persisted_coordination_state_on_restart() {
                     message: AgentMessage {
                         from: planner.agent_id.clone(),
                         to: worker.agent_id.clone(),
+                        from_session_id: Some(planner.session_id.clone()),
+                        to_session_id: Some(worker.session_id.clone()),
                         body: "please keep working after restart".to_string(),
                         correlation_id: Some("persisted-message".to_string()),
                         projection: None,
@@ -460,6 +468,8 @@ fn restart_hydrates_many_agents_without_resurrecting_work() {
                     message: AgentMessage {
                         from: planner.agent_id.clone(),
                         to: reviewer.agent_id.clone(),
+                        from_session_id: Some(planner.session_id.clone()),
+                        to_session_id: Some(reviewer.session_id.clone()),
                         body: "please review restart hydration".to_string(),
                         correlation_id: Some("restart-review".to_string()),
                         projection: None,
@@ -491,6 +501,8 @@ fn restart_hydrates_many_agents_without_resurrecting_work() {
                 message: AgentMessage {
                     from: reviewer.agent_id.clone(),
                     to: planner.agent_id.clone(),
+                    from_session_id: Some(reviewer.session_id.clone()),
+                    to_session_id: Some(planner.session_id.clone()),
                     body: "restart review acknowledged".to_string(),
                     correlation_id: Some("restart-review".to_string()),
                     projection: None,

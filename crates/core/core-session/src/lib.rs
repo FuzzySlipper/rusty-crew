@@ -220,19 +220,34 @@ impl SessionRegistry {
     }
 
     pub fn get_session_by_agent(&self, agent_id: &AgentId) -> CoreResult<SessionState> {
-        self.inner
+        let mut candidates = self
+            .inner
             .sessions
             .lock()
             .map_err(|_| CoreError::new(CoreErrorKind::InternalError, "session lock poisoned"))?
             .values()
-            .find(|state| &state.agent_id == agent_id && state.status != SessionStatus::Archived)
+            .filter(|state| &state.agent_id == agent_id && state.status != SessionStatus::Archived)
             .cloned()
-            .ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorKind::NotFound,
-                    format!("active session for agent {agent_id} not found"),
-                )
-            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| left.session_id.0.cmp(&right.session_id.0));
+        match candidates.as_slice() {
+            [] => Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("active session for agent {agent_id} not found"),
+            )),
+            [session] => Ok(session.clone()),
+            _ => Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "agent_session_ambiguous: agent {agent_id} has multiple active sessions; specify session_id; candidate_session_ids=[{}]",
+                    candidates
+                        .iter()
+                        .map(|session| session.session_id.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            )),
+        }
     }
 
     pub fn all_sessions(&self) -> CoreResult<Vec<SessionState>> {

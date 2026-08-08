@@ -13248,6 +13248,8 @@ mod tests {
                     message: AgentMessage {
                         from: AgentId::new("agent-alpha"),
                         to: AgentId::new("agent-beta"),
+                        from_session_id: None,
+                        to_session_id: None,
                         body: "projected conformance message".to_string(),
                         correlation_id: Some("conformance-corr".to_string()),
                         projection: None,
@@ -13382,6 +13384,8 @@ mod tests {
             message: AgentMessage {
                 from: AgentId::new("operator"),
                 to: AgentId::new("agent-alpha"),
+                from_session_id: None,
+                to_session_id: None,
                 body: "ttl bounded conformance queue".to_string(),
                 correlation_id: Some("queue-conformance".to_string()),
                 projection: None,
@@ -13782,6 +13786,8 @@ mod tests {
                     message: AgentMessage {
                         from: AgentId::new("agent-alpha"),
                         to: AgentId::new("agent-beta"),
+                        from_session_id: None,
+                        to_session_id: None,
                         body: "counter message".to_string(),
                         correlation_id: None,
                         projection: None,
@@ -13842,6 +13848,8 @@ mod tests {
                 message: AgentMessage {
                     from: AgentId::new("operator"),
                     to: AgentId::new("agent-alpha"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "expire me".to_string(),
                     correlation_id: Some("maintenance".to_string()),
                     projection: None,
@@ -16648,6 +16656,8 @@ mod tests {
             message: rusty_crew_core_protocol::AgentMessage {
                 from: AgentId::new("requester-agent"),
                 to: session.agent_id.clone(),
+                from_session_id: None,
+                to_session_id: Some(session.session_id.clone()),
                 body: "review queued change".into(),
                 correlation_id: Some("queued-correlation-a".into()),
                 projection: None,

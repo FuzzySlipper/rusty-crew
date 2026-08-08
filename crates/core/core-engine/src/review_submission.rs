@@ -551,6 +551,8 @@ impl CoreEngine {
             message: AgentMessage {
                 from: AgentId::new("rusty-crew:review-submission"),
                 to: record.submitter_agent_id.clone(),
+                from_session_id: None,
+                to_session_id: Some(submitter_session_id.clone()),
                 body,
                 correlation_id: Some(record.submission_id.clone()),
                 projection: None,

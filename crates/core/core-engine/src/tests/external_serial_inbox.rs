@@ -251,6 +251,8 @@ fn restart_promotes_legacy_unreplyable_serial_follow_up() {
             message: AgentMessage {
                 from: AgentId::new("external-cli"),
                 to: reviewer.agent_id,
+                from_session_id: None,
+                to_session_id: None,
                 body: "legacy managed review 2".into(),
                 correlation_id: Some("legacy-review-2".into()),
                 projection: None,

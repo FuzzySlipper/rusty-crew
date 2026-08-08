@@ -349,6 +349,8 @@ mod tests {
                 message: AgentMessage {
                     from: AgentId::new("operator"),
                     to: AgentId::new("agent-alpha"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "expire once and never resurrect".to_string(),
                     correlation_id: None,
                     projection: None,

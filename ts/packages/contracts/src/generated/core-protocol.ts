@@ -170,8 +170,10 @@ export type AgentMessage = {
   body: string;
   correlationId?: string | null;
   from: AgentId;
+  fromSessionId?: string | null;
   projection?: AgentMessageProjectionHint | null;
   to: AgentId;
+  toSessionId?: string | null;
 };
 
 export type AgentMessageCommand = {

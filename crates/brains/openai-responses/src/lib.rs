@@ -8364,6 +8364,8 @@ mod tests {
         AgentMessage {
             from: AgentId::new(from),
             to: AgentId::new(to),
+            from_session_id: None,
+            to_session_id: None,
             body: body.to_string(),
             correlation_id: correlation_id.map(str::to_string),
             projection: None,

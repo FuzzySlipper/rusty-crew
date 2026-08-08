@@ -236,6 +236,8 @@ mod repository_conformance {
                         message: AgentMessage {
                             from: AgentId::new("agent-alpha"),
                             to: AgentId::new("agent-beta"),
+                            from_session_id: None,
+                            to_session_id: None,
                             body: "projected conformance message".to_string(),
                             correlation_id: Some("conformance-corr".to_string()),
                             projection: None,
@@ -306,6 +308,8 @@ mod repository_conformance {
                 message: AgentMessage {
                     from: AgentId::new("operator"),
                     to: AgentId::new("agent-alpha"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "ttl bounded conformance queue".to_string(),
                     correlation_id: Some("queue-conformance".to_string()),
                     projection: None,
@@ -520,6 +524,8 @@ mod repository_conformance {
                         message: AgentMessage {
                             from: AgentId::new("agent-alpha"),
                             to: AgentId::new("agent-beta"),
+                            from_session_id: None,
+                            to_session_id: None,
                             body: "counter conformance message".to_string(),
                             correlation_id: None,
                             projection: None,
@@ -631,6 +637,8 @@ mod repository_conformance {
                         message: AgentMessage {
                             from: AgentId::new("agent-alpha"),
                             to: AgentId::new("agent-beta"),
+                            from_session_id: None,
+                            to_session_id: None,
                             body: "needle event search".to_string(),
                             correlation_id: Some("search-conformance".to_string()),
                             projection: None,
@@ -646,6 +654,8 @@ mod repository_conformance {
                     message: AgentMessage {
                         from: AgentId::new("operator"),
                         to: AgentId::new("agent-alpha"),
+                        from_session_id: None,
+                        to_session_id: None,
                         body: "needle queue search".to_string(),
                         correlation_id: None,
                         projection: None,
@@ -1057,6 +1067,8 @@ fn sqlite_small_roleplay_deployment_storage_proof() {
                 message: AgentMessage {
                     from: AgentId::new("player-1"),
                     to: AgentId::new("agent-alpha"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "roleplay search needle: ask about the tavern ledger".to_string(),
                     correlation_id: Some("roleplay-search".to_string()),
                     projection: None,
@@ -1666,6 +1678,8 @@ fn sqlite_scale_fixture_reports_backend_move_pressure_without_resurrection() {
                     message: AgentMessage {
                         from: AgentId::new(format!("scale-agent-{:02}", turn % 36)),
                         to: AgentId::new(format!("scale-agent-{:02}", (turn + 1) % 36)),
+                        from_session_id: None,
+                        to_session_id: None,
                         body: format!("scale search row {turn}: roleplay lore needle"),
                         correlation_id: Some("scale-pressure".to_string()),
                         projection: None,
@@ -1725,6 +1739,8 @@ fn sqlite_scale_fixture_reports_backend_move_pressure_without_resurrection() {
                 message: AgentMessage {
                     from: AgentId::new("operator"),
                     to: AgentId::new("scale-agent-00"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: format!("scale queued message {index}"),
                     correlation_id: Some("scale-queue".to_string()),
                     projection: None,
@@ -2808,6 +2824,8 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
                 message: AgentMessage {
                     from: AgentId::new("agent-alpha"),
                     to: AgentId::new("agent-beta"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "profile purge message".to_string(),
                     correlation_id: Some("corr-profile-purge".to_string()),
                     projection: None,
@@ -4869,6 +4887,8 @@ fn event_log_projection_indexes_support_typed_queries() {
                 message: AgentMessage {
                     from: AgentId::new("agent-alpha"),
                     to: AgentId::new("agent-beta"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "hello".to_string(),
                     correlation_id: Some("corr-1".to_string()),
                     projection: None,
@@ -4946,6 +4966,8 @@ fn runtime_search_indexes_messages_and_session_configs() {
                 message: AgentMessage {
                     from: AgentId::new("agent-alpha"),
                     to: AgentId::new("agent-beta"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "hello nebula".to_string(),
                     correlation_id: Some("corr-search".to_string()),
                     projection: None,
@@ -5070,6 +5092,8 @@ fn runtime_counters_increment_by_scope_without_scanning_history() {
                 message: AgentMessage {
                     from: AgentId::new("agent-alpha"),
                     to: AgentId::new("agent-beta"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "counter message".to_string(),
                     correlation_id: None,
                     projection: None,
@@ -5172,6 +5196,8 @@ fn runtime_counter_reset_zeroes_selected_derived_rows() {
                 message: AgentMessage {
                     from: AgentId::new("agent-alpha"),
                     to: AgentId::new("agent-beta"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: "reset this derived projection".to_string(),
                     correlation_id: None,
                     projection: None,
@@ -5226,6 +5252,8 @@ fn queued_message_expiry_is_queryable_without_redelivery() {
         message: AgentMessage {
             from: AgentId::new("operator"),
             to: AgentId::new("agent-alpha"),
+            from_session_id: None,
+            to_session_id: None,
             body: "time boxed queue work".to_string(),
             correlation_id: Some("queue-corr".to_string()),
             projection: None,
@@ -5386,6 +5414,8 @@ fn runtime_state_query_apis_filter_and_page_without_raw_sql() {
                 message: AgentMessage {
                     from: alpha.agent_id.clone(),
                     to: beta.agent_id.clone(),
+                    from_session_id: Some(alpha.session_id.clone()),
+                    to_session_id: Some(beta.session_id.clone()),
                     body: "first query message".to_string(),
                     correlation_id: Some("query-corr".to_string()),
                     projection: None,
@@ -5400,6 +5430,8 @@ fn runtime_state_query_apis_filter_and_page_without_raw_sql() {
                 message: AgentMessage {
                     from: beta.agent_id.clone(),
                     to: alpha.agent_id.clone(),
+                    from_session_id: Some(beta.session_id.clone()),
+                    to_session_id: Some(alpha.session_id.clone()),
                     body: "second query message".to_string(),
                     correlation_id: Some("query-corr".to_string()),
                     projection: None,
@@ -6521,6 +6553,8 @@ fn maintenance_guardrails_cover_queue_retention_size_and_hot_indexes() {
                         message: AgentMessage {
                             from: agent_id.clone(),
                             to: AgentId::new(format!("agent-{:02}", (index + 1) % 30)),
+                            from_session_id: None,
+                            to_session_id: None,
                             body: format!("scale message {index}-{message_index}"),
                             correlation_id: Some("corr-alpha".to_string()),
                             projection: None,
@@ -6541,6 +6575,8 @@ fn maintenance_guardrails_cover_queue_retention_size_and_hot_indexes() {
                 message: AgentMessage {
                     from: AgentId::new("operator"),
                     to: AgentId::new("agent-00"),
+                    from_session_id: None,
+                    to_session_id: None,
                     body: format!("expired queue message {index}"),
                     correlation_id: Some("queue-scale".to_string()),
                     projection: None,
@@ -6564,6 +6600,8 @@ fn maintenance_guardrails_cover_queue_retention_size_and_hot_indexes() {
             message: AgentMessage {
                 from: AgentId::new("operator"),
                 to: AgentId::new("agent-00"),
+                from_session_id: None,
+                to_session_id: None,
                 body: "fresh queue message".to_string(),
                 correlation_id: Some("queue-scale".to_string()),
                 projection: None,
@@ -7130,6 +7168,8 @@ fn logical_queue_message(
         message: AgentMessage {
             from: AgentId::new("operator"),
             to: AgentId::new("agent-alpha"),
+            from_session_id: None,
+            to_session_id: None,
             body: format!("logical import queue {message_id}"),
             correlation_id: Some("logical-import-queue".to_string()),
             projection: None,

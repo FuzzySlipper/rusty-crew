@@ -101,14 +101,26 @@ impl CoreEngine {
                 .ok_or_else(|| {
                     CoreError::new(CoreErrorKind::NotFound, "agent_directory_entry_not_found")
                 })?;
+            let binding = entry
+                .binding_id
+                .as_ref()
+                .map(|binding_id| self.store.get_external_agent_binding(binding_id))
+                .transpose()?
+                .flatten();
             return Ok(AgentRouteResolution {
                 address: address.to_string(),
                 route: None,
                 routable: entry.routable,
                 reason_code: entry.routability_reason_code.clone(),
-                resolved_target: entry
-                    .routable
-                    .then(|| resolved_target_from_directory(&entry, None, None)),
+                resolved_target: entry.routable.then(|| {
+                    resolved_target_from_directory(
+                        &entry,
+                        binding.as_ref(),
+                        binding
+                            .as_ref()
+                            .map(|binding| binding.message_delivery_policy),
+                    )
+                }),
                 last_delivery: None,
             });
         };
@@ -238,6 +250,7 @@ impl CoreEngine {
             left.display_label
                 .cmp(&right.display_label)
                 .then_with(|| left.agent_id.0.cmp(&right.agent_id.0))
+                .then_with(|| left.session_id.0.cmp(&right.session_id.0))
         });
         Ok(entries)
     }
@@ -460,15 +473,11 @@ impl CoreEngine {
             .map(|target| target.agent_id.clone())
             .or_else(|| route_target_agent_id(address_resolution.route.as_ref()))
             .unwrap_or_else(|| AgentId::new(command.to_address.clone()));
-        let recipient = if address_resolution.route.is_some() {
-            address_resolution
-                .resolved_target
-                .as_ref()
-                .map(|target| self.sessions.get_session(&target.session_id))
-                .unwrap_or_else(|| self.sessions.get_session_by_agent(&recipient_agent_id))
-        } else {
-            self.sessions.get_session_by_agent(&recipient_agent_id)
-        };
+        let recipient = address_resolution
+            .resolved_target
+            .as_ref()
+            .map(|target| self.sessions.get_session(&target.session_id))
+            .unwrap_or_else(|| self.sessions.get_session_by_agent(&recipient_agent_id));
         let recipient_session_id = address_resolution
             .resolved_target
             .as_ref()
@@ -553,6 +562,8 @@ impl CoreEngine {
         let message = AgentMessage {
             from: sender_agent_id.clone(),
             to: recipient_agent_id.clone(),
+            from_session_id: pending.request.from_session_id.clone(),
+            to_session_id: pending.request.to_session_id.clone(),
             body: command.body.clone(),
             correlation_id: command.correlation_id.clone(),
             projection: None,
@@ -672,14 +683,11 @@ impl CoreEngine {
             created_at: command.created_at,
             expires_at: Some(command.expires_at),
         };
-        let activation = match (
-            address_resolution.route.as_ref(),
-            address_resolution.resolved_target.as_ref(),
-        ) {
-            (Some(_), Some(target)) => {
+        let activation = match address_resolution.resolved_target.as_ref() {
+            Some(target) => {
                 self.activate_agent_execution_for_resolved_target(activation_request, target)?
             }
-            _ => self.activate_agent_execution(activation_request)?,
+            None => self.activate_agent_execution(activation_request)?,
         };
         match &activation {
             AgentActivation::DirectBrainWakeRequested { session_id, .. } => {
@@ -998,10 +1006,7 @@ impl CoreEngine {
                 "agent_message_reply_sender_has_no_session",
             )
         })?;
-        let current_reply_session = match self
-            .sessions
-            .get_session_by_agent(&original.request.from_agent_id)
-        {
+        let current_reply_session = match self.sessions.get_session(&expected_reply_session) {
             Ok(session) => session,
             Err(error) if error.kind == CoreErrorKind::NotFound => {
                 return Err(CoreError::new(
@@ -1011,7 +1016,7 @@ impl CoreEngine {
             }
             Err(error) => return Err(error),
         };
-        if current_reply_session.session_id != expected_reply_session
+        if current_reply_session.agent_id != original.request.from_agent_id
             || current_reply_session.status == SessionStatus::Archived
         {
             return Err(CoreError::new(
@@ -1037,6 +1042,36 @@ impl CoreEngine {
         }
         let replied_to = command.in_reply_to_message_id.clone();
         let replied_at = command.created_at.clone();
+        let reply_entry = self
+            .list_agent_directory()?
+            .into_iter()
+            .find(|entry| entry.session_id == expected_reply_session)
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "agent_message_reply_sender_session_changed",
+                )
+            })?;
+        let reply_binding = reply_entry
+            .binding_id
+            .as_ref()
+            .map(|binding_id| self.store.get_external_agent_binding(binding_id))
+            .transpose()?
+            .flatten();
+        let reply_resolution = AgentRouteResolution {
+            address: original.request.from_agent_id.0.clone(),
+            route: None,
+            routable: reply_entry.routable,
+            reason_code: reply_entry.routability_reason_code.clone(),
+            resolved_target: Some(resolved_target_from_directory(
+                &reply_entry,
+                reply_binding.as_ref(),
+                reply_binding
+                    .as_ref()
+                    .map(|binding| binding.message_delivery_policy),
+            )),
+            last_delivery: None,
+        };
         let receipt = self.deliver_agent_message_with_reply(
             AgentMessageCommand {
                 caller: command.caller,
@@ -1056,7 +1091,7 @@ impl CoreEngine {
                 expires_at: command.expires_at,
             },
             Some(command.in_reply_to_message_id),
-            None,
+            Some(reply_resolution),
         )?;
         if receipt.status == AgentMessageDeliveryStatus::Accepted {
             self.mark_review_reply_terminal(&replied_to, &replied_at)?;
@@ -1409,91 +1444,5 @@ fn validate_agent_message_bounds(
 }
 
 #[cfg(test)]
-mod routed_agent_message_text_tests {
-    use super::*;
-    use rusty_crew_core_protocol::{AgentId, AgentMessageDeliveryId, SessionId};
-
-    #[test]
-    fn agent_sender_receives_reply_by_message_instruction() {
-        let text = agent_message_model_text(&request(
-            AgentMessageInputKind::RoutedAgentMessage,
-            Some("sender-session"),
-        ));
-
-        assert!(text.contains("from_session_id: sender-session"));
-        assert!(text.contains("to_agent_id: recipient"));
-        assert!(text.contains("to_session_id: recipient-session"));
-        assert!(text.contains("input_kind: routed_agent_message"));
-        assert!(text.contains(
-            "[Rusty Crew routed payload: begin]\ninspect this\n[Rusty Crew routed payload: end]"
-        ));
-        assert!(text.ends_with("[Rusty Crew routed message: end]"));
-        assert!(text.contains(
-            "reply_instruction: call rusty_crew.reply_agent_message with messageId=message-1 and your reply body"
-        ));
-    }
-
-    #[test]
-    fn operator_sender_does_not_receive_impossible_reply_instruction() {
-        let text =
-            agent_message_model_text(&request(AgentMessageInputKind::RoutedAgentMessage, None));
-
-        assert!(text.contains("from_session_id: none"));
-        assert!(text.contains(
-            "reply_instruction: unavailable (sender has no routable agent session; respond in this turn only)"
-        ));
-        assert!(text.contains(
-            "complete_routed_review is valid only when the payload explicitly begins with a Rusty Crew managed review submission identifier"
-        ));
-        assert!(!text.contains("call rusty_crew.reply_agent_message"));
-    }
-
-    #[test]
-    fn operator_input_is_projected_as_plain_user_text() {
-        let text = agent_message_model_text(&request(AgentMessageInputKind::Operator, None));
-
-        assert_eq!(text, "inspect this");
-        assert!(!text.contains("Rusty Crew routed message"));
-        assert!(!text.contains("reply_instruction"));
-    }
-
-    #[test]
-    fn routed_reply_does_not_request_an_acknowledgement_reply() {
-        let mut request = request(
-            AgentMessageInputKind::RoutedAgentMessage,
-            Some("sender-session"),
-        );
-        request.reply_to_message_id = Some("original-message".into());
-
-        let text = agent_message_model_text(&request);
-
-        assert!(text.contains("this message is already a reply"));
-        assert!(text.contains("do not acknowledge it with coordination tools"));
-        assert!(!text.contains("call rusty_crew.reply_agent_message"));
-    }
-
-    fn request(
-        input_kind: AgentMessageInputKind,
-        from_session_id: Option<&str>,
-    ) -> AgentMessageDeliveryRequest {
-        AgentMessageDeliveryRequest {
-            delivery_id: AgentMessageDeliveryId::new("delivery-1"),
-            idempotency_key: "delivery-1".into(),
-            message_id: "message-1".into(),
-            from_agent_id: AgentId::new("sender"),
-            from_session_id: from_session_id.map(SessionId::new),
-            requested_address: "recipient".into(),
-            to_agent_id: AgentId::new("recipient"),
-            to_session_id: Some(SessionId::new("recipient-session")),
-            routing: None,
-            reply_to_message_id: None,
-            input_kind,
-            body: "inspect this".into(),
-            collaboration_mode: None,
-            correlation_id: Some("correlation-1".into()),
-            require_wake: true,
-            created_at: "2026-07-15T00:00:00Z".into(),
-            expires_at: "2026-07-15T00:10:00Z".into(),
-        }
-    }
-}
+#[path = "tests/agent_coordination_text.rs"]
+mod routed_agent_message_text_tests;

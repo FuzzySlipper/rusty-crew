@@ -736,6 +736,10 @@ pub struct ReviewSubmissionQuery {
 pub struct AgentMessage {
     pub from: AgentId,
     pub to: AgentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_session_id: Option<SessionId>,
     pub body: String,
     pub correlation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2137,6 +2141,8 @@ mod tests {
         let private_message = AgentMessage {
             from: AgentId::new("planner"),
             to: AgentId::new("coder"),
+            from_session_id: None,
+            to_session_id: None,
             body: "internal note".to_string(),
             correlation_id: None,
             projection: None,
@@ -2147,6 +2153,8 @@ mod tests {
         let projected = AgentMessage {
             from: AgentId::new("planner"),
             to: AgentId::new("operator"),
+            from_session_id: Some(SessionId::new("planner-session")),
+            to_session_id: Some(SessionId::new("operator-session")),
             body: "ready for review".to_string(),
             correlation_id: Some("review-thread".to_string()),
             projection: Some(AgentMessageProjectionHint {
@@ -2165,6 +2173,8 @@ mod tests {
             }),
         };
         let json = serde_json::to_value(&projected).expect("serialize projected");
+        assert_eq!(json["from_session_id"], "planner-session");
+        assert_eq!(json["to_session_id"], "operator-session");
         assert_eq!(json["projection"]["visibility"], "user_visible");
         assert_eq!(json["projection"]["target_ref"]["system"], "den");
         assert_eq!(json["projection"]["work_ref"]["kind"], "task");

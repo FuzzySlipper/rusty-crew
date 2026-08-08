@@ -30,8 +30,16 @@ impl BodyProjector {
 
     pub fn project(&self, session_id: &SessionId) -> CoreResult<BodyState> {
         let session = self.sessions.get_session(session_id)?;
+        let accept_legacy_agent_only = self
+            .sessions
+            .get_session_by_agent(&session.agent_id)
+            .is_ok_and(|candidate| candidate.session_id == session.session_id);
         let pending_messages = apply_history_window(
-            self.bus.pending_messages_for_agent(&session.agent_id)?,
+            self.bus.pending_messages_for_session(
+                &session.session_id,
+                &session.agent_id,
+                accept_legacy_agent_only,
+            )?,
             session
                 .history_window
                 .as_ref()
@@ -128,7 +136,7 @@ impl BrainActionExecutor {
         for action in &batch.actions {
             match action {
                 BrainAction::SendMessage { message } => {
-                    self.publish_message(message.clone())?;
+                    self.publish_message(&session, message.clone())?;
                 }
                 BrainAction::RequestDelegation { .. } => {}
                 BrainAction::DeliverCompletion { packet } => {
@@ -149,7 +157,34 @@ impl BrainActionExecutor {
         })
     }
 
-    fn publish_message(&self, message: AgentMessage) -> CoreResult<EventReceipt> {
+    fn publish_message(
+        &self,
+        sender: &rusty_crew_core_protocol::SessionState,
+        mut message: AgentMessage,
+    ) -> CoreResult<EventReceipt> {
+        if message.from != sender.agent_id
+            || message
+                .from_session_id
+                .as_ref()
+                .is_some_and(|session_id| session_id != &sender.session_id)
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_sender_session_mismatch",
+            ));
+        }
+        let target = match message.to_session_id.as_ref() {
+            Some(session_id) => self.sessions.get_session(session_id)?,
+            None => self.sessions.get_session_by_agent(&message.to)?,
+        };
+        if target.agent_id != message.to || target.status == SessionStatus::Archived {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "agent_message_target_session_mismatch",
+            ));
+        }
+        message.from_session_id = Some(sender.session_id.clone());
+        message.to_session_id = Some(target.session_id);
         let sequence = self
             .bus
             .publish(CoreEvent::AgentMessageRouted { message })?;

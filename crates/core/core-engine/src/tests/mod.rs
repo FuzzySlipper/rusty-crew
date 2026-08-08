@@ -56,6 +56,7 @@ mod external_binding_restore;
 mod external_runtime;
 mod external_runtime_certification;
 mod external_runtime_controls;
+mod external_runtime_session_identity;
 mod external_serial_inbox;
 mod manual_compaction;
 mod profile_admin;

@@ -41,6 +41,8 @@ impl CoreEngine {
         let receipt = self.route_agent_message(AgentMessage {
             from: parent.agent_id,
             to: delegated.agent_id.clone(),
+            from_session_id: Some(parent.session_id),
+            to_session_id: Some(delegated.session_id.clone()),
             body: format!("Checkpoint requested: {}", reason.into()),
             correlation_id: Some(format!("checkpoint:{}", delegated.session_id)),
             projection: None,
@@ -347,6 +349,8 @@ impl CoreEngine {
                 message: AgentMessage {
                     from: parent.agent_id.clone(),
                     to: agent_id,
+                    from_session_id: Some(parent.session_id.clone()),
+                    to_session_id: Some(state.session_id.clone()),
                     body: prompt.clone(),
                     correlation_id: Some(correlation_id),
                     projection: None,
@@ -888,7 +892,12 @@ impl CoreEngine {
         let CoreEvent::AgentMessageRouted { message } = event else {
             return Ok(());
         };
-        let session = match self.sessions.get_session_by_agent(&message.to) {
+        let session = match message
+            .to_session_id
+            .as_ref()
+            .map(|session_id| self.sessions.get_session(session_id))
+            .unwrap_or_else(|| self.sessions.get_session_by_agent(&message.to))
+        {
             Ok(session) => session,
             Err(error) if error.kind == CoreErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),

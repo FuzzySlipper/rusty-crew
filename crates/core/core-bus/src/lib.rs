@@ -119,6 +119,8 @@ impl CoreBus {
         self.route_agent_message(AgentMessage {
             from,
             to,
+            from_session_id: None,
+            to_session_id: None,
             body: body.into(),
             correlation_id: None,
             projection: None,
@@ -182,7 +184,12 @@ impl CoreBus {
             .collect())
     }
 
-    pub fn pending_messages_for_agent(&self, agent_id: &AgentId) -> CoreResult<Vec<AgentMessage>> {
+    pub fn pending_messages_for_session(
+        &self,
+        session_id: &SessionId,
+        agent_id: &AgentId,
+        accept_legacy_agent_only: bool,
+    ) -> CoreResult<Vec<AgentMessage>> {
         let history =
             self.inner.history.lock().map_err(|_| {
                 CoreError::new(CoreErrorKind::InternalError, "history lock poisoned")
@@ -191,7 +198,12 @@ impl CoreBus {
         Ok(history
             .iter()
             .filter_map(|entry| match &entry.event {
-                CoreEvent::AgentMessageRouted { message } if &message.to == agent_id => {
+                CoreEvent::AgentMessageRouted { message }
+                    if message.to_session_id.as_ref() == Some(session_id)
+                        || (accept_legacy_agent_only
+                            && message.to_session_id.is_none()
+                            && &message.to == agent_id) =>
+                {
                     Some(message.clone())
                 }
                 _ => None,
@@ -264,10 +276,15 @@ fn event_mentions_session(event: &CoreEvent, session_id: &SessionId) -> bool {
             round.sender_session_id.as_ref() == Some(session_id)
                 || &round.recipient_session_id == session_id
         }
-        CoreEvent::AgentMessageRouted { .. }
-        | CoreEvent::AgentMessageDeliveryObserved { .. }
-        | CoreEvent::ExternalEventInjected { .. }
-        | CoreEvent::DenDataUpdated { .. } => false,
+        CoreEvent::AgentMessageRouted { message } => {
+            message.from_session_id.as_ref() == Some(session_id)
+                || message.to_session_id.as_ref() == Some(session_id)
+        }
+        CoreEvent::AgentMessageDeliveryObserved { receipt } => {
+            receipt.request.from_session_id.as_ref() == Some(session_id)
+                || receipt.request.to_session_id.as_ref() == Some(session_id)
+        }
+        CoreEvent::ExternalEventInjected { .. } | CoreEvent::DenDataUpdated { .. } => false,
     }
 }
 
@@ -362,6 +379,8 @@ mod tests {
         bus.route_agent_message(AgentMessage {
             from: AgentId::new("planner"),
             to: AgentId::new("operator"),
+            from_session_id: None,
+            to_session_id: None,
             body: "ready".to_string(),
             correlation_id: Some("handoff-1".to_string()),
             projection: Some(rusty_crew_core_protocol::AgentMessageProjectionHint {

@@ -32,6 +32,8 @@ impl NativeBridge {
             .route_agent_message(rusty_crew_core_bridge_api::AgentMessage {
                 from,
                 to,
+                from_session_id: None,
+                to_session_id: None,
                 body,
                 correlation_id,
                 projection: None,

@@ -113,10 +113,14 @@ import {
   type RawProfileRegistryRecord,
 } from "./profile-provider-wire.js";
 import {
+  toAgentMessage,
+  toNativeAgentMessage,
+  type RawAgentMessage,
+} from "./agent-message-wire.js";
+import {
   toNativeBodyState,
   toBodyState,
   toNativeSessionState,
-  toNativeAgentMessage,
   toNativeCoreEvent,
   toNativeBrainEventForJson,
   toNativeDelegatedCompletion,
@@ -131,7 +135,6 @@ import {
   toCoreEvent,
   toDelegatedSessionRuntimeStatus,
   toDelegatedResourceCleanupReport,
-  toAgentMessage,
   toBrainEvent,
   toNativeBrainEvent,
   toToolCallMetadata,
@@ -140,7 +143,6 @@ import {
   type RawDelegatedSessionRuntimeStatus,
   type RawDelegatedResourceCleanupReport,
   type RawBodyState,
-  type RawAgentMessage,
   type RawToolProfile,
   type RawDelegatedCompletion,
   type RawDelegatedFanOutGroup,

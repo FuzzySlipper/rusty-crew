@@ -86,6 +86,8 @@ impl CoreEngine {
             message: AgentMessage {
                 from: request.from_agent_id.clone(),
                 to: request.to_agent_id.clone(),
+                from_session_id: request.from_session_id.clone(),
+                to_session_id: request.to_session_id.clone(),
                 body,
                 correlation_id: request.correlation_id.clone(),
                 projection: None,
@@ -132,6 +134,8 @@ impl CoreEngine {
             message: AgentMessage {
                 from,
                 to: session.agent_id.clone(),
+                from_session_id: None,
+                to_session_id: Some(session.session_id.clone()),
                 body: body.into(),
                 correlation_id,
                 projection: None,

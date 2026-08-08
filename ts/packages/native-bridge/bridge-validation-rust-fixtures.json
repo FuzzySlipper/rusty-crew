@@ -23,6 +23,7 @@
             "body": "Bridge validation fixture message.",
             "correlation_id": "validation-correlation",
             "from": "validation-agent",
+            "from_session_id": "validation-session",
             "to": "operator"
           }
         ],
@@ -137,6 +138,7 @@
                     "body": "Bridge validation fixture message.",
                     "correlation_id": "validation-correlation",
                     "from": "validation-agent",
+                    "from_session_id": "validation-session",
                     "to": "operator"
                   },
                   "type": "send_message"

@@ -19,6 +19,14 @@ fn accepted_switchboard_message_reply_outlives_delivery_ttl_without_sender_route
             SessionKind::Full,
         ))
         .unwrap();
+    let sender_sibling = engine
+        .create_session(session_config(
+            "unrouted-sender-sibling",
+            "unrouted-sender",
+            "sender-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
     let reviewer = engine
         .create_session(session_config(
             "reviewer-session",
@@ -95,6 +103,7 @@ fn accepted_switchboard_message_reply_outlives_delivery_ttl_without_sender_route
     assert_eq!(reply.status, AgentMessageDeliveryStatus::Accepted);
     assert_eq!(reply.request.requested_address, sender.agent_id.0);
     assert_eq!(reply.request.to_session_id, Some(sender.session_id.clone()));
+    assert_ne!(reply.request.to_session_id, Some(sender_sibling.session_id));
     assert_eq!(
         reply.request.correlation_id.as_deref(),
         Some("review-correlation")
@@ -172,15 +181,18 @@ fn switchboard_routes_wake_the_exact_resolved_direct_session() {
             SessionKind::Full,
         ))
         .unwrap();
-    let agent_only_selection = engine
+    let ambiguity = engine
         .sessions
         .get_session_by_agent(&AgentId::new("shared-agent"))
-        .unwrap();
-    let target = if agent_only_selection.session_id == first.session_id {
-        second
-    } else {
-        first
-    };
+        .unwrap_err();
+    assert_eq!(ambiguity.kind, CoreErrorKind::ActionRejected);
+    assert!(ambiguity.message.contains("agent_session_ambiguous"));
+    assert!(ambiguity.message.contains(&first.session_id.0));
+    assert!(ambiguity.message.contains(&second.session_id.0));
+    let raw_resolution = engine.resolve_agent_address("shared-agent").unwrap_err();
+    assert_eq!(raw_resolution.kind, CoreErrorKind::ActionRejected);
+    assert_eq!(raw_resolution.message, ambiguity.message);
+    let target = second;
     engine
         .put_agent_route(AgentRouteWrite {
             route_key: AgentRouteKey::new("exact-direct"),
@@ -240,15 +252,15 @@ fn switchboard_routes_activate_the_exact_resolved_managed_session_and_binding() 
             SessionKind::Full,
         ))
         .unwrap();
-    let agent_only_selection = engine
+    let ambiguity = engine
         .sessions
         .get_session_by_agent(&AgentId::new("codex-agent"))
-        .unwrap();
-    let target = if agent_only_selection.session_id == first.session_id {
-        second
-    } else {
-        first
-    };
+        .unwrap_err();
+    assert_eq!(ambiguity.kind, CoreErrorKind::ActionRejected);
+    assert!(ambiguity.message.contains("agent_session_ambiguous"));
+    assert!(ambiguity.message.contains(&first.session_id.0));
+    assert!(ambiguity.message.contains(&second.session_id.0));
+    let target = second;
     engine.register_external_runtime(&runtime(), None).unwrap();
     let mut exact_binding = binding();
     exact_binding.session_id = Some(target.session_id.clone());
@@ -630,6 +642,101 @@ fn managed_switchboard_routes_fail_closed_on_policy_and_binding_revision_drift()
     assert_eq!(
         stale.reason_code.as_deref(),
         Some("agent_route_external_binding_replaced")
+    );
+}
+
+#[test]
+fn same_agent_sibling_routes_isolate_messages_and_session_event_streams() {
+    let engine = test_engine();
+    let first = engine
+        .create_session(session_config(
+            "sibling-first",
+            "sibling-agent",
+            "sibling-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let second = engine
+        .create_session(session_config(
+            "sibling-second",
+            "sibling-agent",
+            "sibling-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    for (key, session) in [("sibling-first", &first), ("sibling-second", &second)] {
+        engine
+            .put_agent_route(AgentRouteWrite {
+                route_key: AgentRouteKey::new(key),
+                label: key.into(),
+                description: None,
+                enabled: true,
+                target: AgentRouteTarget::DirectBrain {
+                    agent_id: session.agent_id.clone(),
+                    session_id: session.session_id.clone(),
+                },
+                required_runtime_kind: Some(AgentDirectoryRuntimeKind::DirectBrain),
+                required_delivery_policy: None,
+                expected_revision: None,
+                updated_at: "2026-06-19T00:00:00Z".into(),
+            })
+            .unwrap();
+    }
+    let (_, first_events) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::AgentMessageRouted],
+            session_id: Some(first.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+    let (_, second_events) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::AgentMessageRouted],
+            session_id: Some(second.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+
+    engine
+        .deliver_agent_message(route_message("sibling-first", "sibling-message-first"))
+        .unwrap();
+    let CoreEvent::AgentMessageRouted {
+        message: first_message,
+    } = first_events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("expected first sibling routed event");
+    };
+    assert_eq!(first_message.to_session_id, Some(first.session_id.clone()));
+    assert!(second_events.try_recv().is_err());
+
+    engine
+        .deliver_agent_message(route_message("sibling-second", "sibling-message-second"))
+        .unwrap();
+    let CoreEvent::AgentMessageRouted {
+        message: second_message,
+    } = second_events.recv_timeout(Duration::from_secs(1)).unwrap()
+    else {
+        panic!("expected second sibling routed event");
+    };
+    assert_eq!(
+        second_message.to_session_id,
+        Some(second.session_id.clone())
+    );
+    assert!(first_events.try_recv().is_err());
+
+    let first_body = engine.body_projector.project(&first.session_id).unwrap();
+    let second_body = engine.body_projector.project(&second.session_id).unwrap();
+    assert_eq!(first_body.pending_messages.len(), 1);
+    assert_eq!(second_body.pending_messages.len(), 1);
+    assert_eq!(
+        first_body.pending_messages[0].to_session_id,
+        Some(first.session_id)
+    );
+    assert_eq!(
+        second_body.pending_messages[0].to_session_id,
+        Some(second.session_id)
     );
 }
 

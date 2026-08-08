@@ -97,6 +97,8 @@ fn session_history_window_bounds_wake_messages_without_resurrecting_queue_overfl
             .route_agent_message(AgentMessage {
                 from: AgentId::new("operator"),
                 to: prime.agent_id.clone(),
+                from_session_id: None,
+                to_session_id: None,
                 body: format!("bus-message-{index}"),
                 correlation_id: Some(format!("bus-{index}")),
                 projection: None,
@@ -231,6 +233,8 @@ fn session_history_window_survives_engine_restart() {
         .route_agent_message(AgentMessage {
             from: AgentId::new("operator"),
             to: prime.agent_id.clone(),
+            from_session_id: None,
+            to_session_id: None,
             body: "first".to_string(),
             correlation_id: None,
             projection: None,
@@ -240,6 +244,8 @@ fn session_history_window_survives_engine_restart() {
         .route_agent_message(AgentMessage {
             from: AgentId::new("operator"),
             to: prime.agent_id.clone(),
+            from_session_id: None,
+            to_session_id: None,
             body: "second".to_string(),
             correlation_id: None,
             projection: None,

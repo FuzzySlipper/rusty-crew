@@ -60,6 +60,8 @@ fn chat_session_read_and_summary_choose_durable_sources_explicitly() {
         .route_agent_message(AgentMessage {
             from: AgentId::new("operator"),
             to: pending.agent_id.clone(),
+            from_session_id: None,
+            to_session_id: None,
             body: "pending hello".to_string(),
             correlation_id: Some("pending-correlation".to_string()),
             projection: None,
@@ -156,6 +158,8 @@ fn chat_session_read_sources_survive_engine_restart() {
         .route_agent_message(AgentMessage {
             from: AgentId::new("operator"),
             to: pending.agent_id.clone(),
+            from_session_id: None,
+            to_session_id: None,
             body: "pending across restart".to_string(),
             correlation_id: Some("restart-pending".to_string()),
             projection: None,

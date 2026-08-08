@@ -23,11 +23,14 @@ import type {
 } from "./public-api.js";
 
 import {
+  toAgentMessage,
+  toNativeAgentMessage,
+  type RawAgentMessage,
+} from "./agent-message-wire.js";
+import {
   toNativeBodyState,
   toNativeBrainEventForJson,
-  toAgentMessage,
   toBrainEvent,
-  type RawAgentMessage,
   type RawBrainEvent,
 } from "./event-body-wire.js";
 import type { RawResourceLimits } from "./runtime-config-wire.js";
@@ -57,12 +60,7 @@ export function toNativeBrainAction(action: BrainAction): unknown {
     case "send_message":
       return {
         type: action.type,
-        message: {
-          from: action.message.from,
-          to: action.message.to,
-          body: action.message.body,
-          correlation_id: action.message.correlationId,
-        },
+        message: toNativeAgentMessage(action.message),
       };
     case "request_delegation":
       return {

@@ -485,6 +485,8 @@ pub(crate) mod tests {
                     message: AgentMessage {
                         from: AgentId::new("agent-alpha"),
                         to: AgentId::new("agent-beta"),
+                        from_session_id: None,
+                        to_session_id: None,
                         body: "module-owned runtime counter test".to_string(),
                         correlation_id: None,
                         projection: None,

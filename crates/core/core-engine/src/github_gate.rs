@@ -148,6 +148,8 @@ impl CoreEngine {
             message: AgentMessage {
                 from: AgentId::new("rusty-crew:review-gate"),
                 to: session.agent_id,
+                from_session_id: None,
+                to_session_id: Some(wait.session_id.clone()),
                 body,
                 correlation_id: Some(format!("github-gate-event:{}", event.event_id)),
                 projection: None,

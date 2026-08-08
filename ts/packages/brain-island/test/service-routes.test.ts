@@ -192,6 +192,35 @@ test("coordination operator routes are deployment-bound and start system rounds"
   );
 });
 
+test("raw agent route resolution exposes typed session ambiguity", async () => {
+  const context = {
+    deploymentRole: "debug",
+    bridge: {
+      async resolveAgentAddress() {
+        throw new Error(
+          "ActionRejected: agent_session_ambiguous: agent shared has multiple active sessions; specify session_id; candidate_session_ids=[session-a,session-b]",
+        );
+      },
+    },
+    now: () => "2026-07-12T00:00:00.000Z",
+    requestId: () => "req-agent-session-ambiguity",
+    readJsonBody: async () => ({ address: "shared" }),
+  } as unknown as CoordinationOperatorRouteContext;
+
+  const result = (await handleCoordinationOperatorRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/debug/coordination/routes/resolve"),
+    context,
+  )) as AdminRouteResult;
+
+  assert.equal(result.status, 409);
+  assert.equal(errorReason(result), "agent_session_ambiguous");
+  assert.equal(result.body.ok, false);
+  if (!result.body.ok) {
+    assert.match(result.body.error.message, /session-a,session-b/);
+  }
+});
+
 test("coordination switchboard CRUD resolves and tests exact role-bound addresses", async () => {
   let requestBody: Record<string, unknown> = {};
   let savedRoute: Record<string, unknown> | undefined;

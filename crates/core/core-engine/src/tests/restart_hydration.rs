@@ -50,6 +50,8 @@ fn multi_agent_restart_search_queue_and_query_apis_prove_persistence_substrate()
                     message: AgentMessage {
                         from: planner.agent_id.clone(),
                         to: reviewer.agent_id.clone(),
+                        from_session_id: Some(planner.session_id.clone()),
+                        to_session_id: Some(reviewer.session_id.clone()),
                         body: "please review the persistent proof".to_string(),
                         correlation_id: Some("proof-thread".to_string()),
                         projection: None,
@@ -85,6 +87,8 @@ fn multi_agent_restart_search_queue_and_query_apis_prove_persistence_substrate()
                 message: AgentMessage {
                     from: reviewer.agent_id.clone(),
                     to: observer.agent_id.clone(),
+                    from_session_id: Some(reviewer.session_id.clone()),
+                    to_session_id: Some(observer.session_id.clone()),
                     body: "persistent proof review forwarded".to_string(),
                     correlation_id: Some("proof-thread".to_string()),
                     projection: None,
@@ -145,6 +149,8 @@ fn multi_agent_restart_search_queue_and_query_apis_prove_persistence_substrate()
             message: AgentMessage {
                 from: AgentId::new("operator"),
                 to: planner.agent_id.clone(),
+                from_session_id: None,
+                to_session_id: Some(planner.session_id.clone()),
                 body: "expired proof queue item".to_string(),
                 correlation_id: Some("proof-queue".to_string()),
                 projection: None,
@@ -167,6 +173,8 @@ fn multi_agent_restart_search_queue_and_query_apis_prove_persistence_substrate()
             message: AgentMessage {
                 from: AgentId::new("operator"),
                 to: planner.agent_id.clone(),
+                from_session_id: None,
+                to_session_id: Some(planner.session_id.clone()),
                 body: "future proof queue item".to_string(),
                 correlation_id: Some("proof-queue".to_string()),
                 projection: None,

@@ -131,6 +131,8 @@ const rawAgentMessageSchema = Type.Object(
   {
     from: Type.String(),
     to: Type.String(),
+    from_session_id: Type.Optional(Type.String()),
+    to_session_id: Type.Optional(Type.String()),
     body: Type.String(),
     correlation_id: Type.Optional(Type.String()),
     projection: Type.Optional(Type.Unknown()),
@@ -430,6 +432,10 @@ const agentMessageSchema = Type.Object(
   {
     from: Type.String(),
     to: Type.String(),
+    fromSessionId: Type.Optional(Type.String()),
+    toSessionId: Type.Optional(Type.String()),
+    from_session_id: Type.Optional(Type.String()),
+    to_session_id: Type.Optional(Type.String()),
     body: Type.String(),
     correlationId: Type.Optional(Type.String()),
     projection: Type.Optional(
@@ -1493,16 +1499,7 @@ const rawBrainActionSchema = Type.Union([
   Type.Object(
     {
       type: Type.Literal("send_message"),
-      message: Type.Object(
-        {
-          from: Type.String(),
-          to: Type.String(),
-          body: Type.String(),
-          correlation_id: Type.Optional(Type.String()),
-          projection: Type.Optional(Type.Unknown()),
-        },
-        { additionalProperties: true },
-      ),
+      message: rawAgentMessageSchema,
     },
     { additionalProperties: true },
   ),

@@ -87,12 +87,6 @@ impl CoreEngine {
                         ),
                     ));
                 }
-                reject_active_session_ambiguity(
-                    &sessions,
-                    &request.profile_id,
-                    &agent_id,
-                    Some(&session_id),
-                )?;
                 let config = load_engine_session_configs(&self.store)?
                     .into_iter()
                     .find(|config| config.session_id == session_id)
@@ -174,7 +168,6 @@ impl CoreEngine {
                 "fresh Crew brain sessions require a full-session profile",
             ));
         }
-        reject_active_session_ambiguity(&sessions, &request.profile_id, &agent_id, None)?;
         self.validate_agent_id_route_reservation(&agent_id)?;
 
         let configs = load_engine_session_configs(&self.store)?;
@@ -307,30 +300,6 @@ fn profile_registry_write(profile: &ProfileRegistryRecord, now: String) -> Profi
         import_export: profile.import_export.clone(),
         now,
     }
-}
-
-fn reject_active_session_ambiguity(
-    sessions: &[SessionState],
-    profile_id: &ProfileId,
-    agent_id: &AgentId,
-    allowed_session_id: Option<&SessionId>,
-) -> CoreResult<()> {
-    if let Some(existing) = sessions.iter().find(|session| {
-        session.status != SessionStatus::Archived
-            && session.kind == SessionKind::Full
-            && (session.profile_id == *profile_id || session.agent_id == *agent_id)
-            && allowed_session_id != Some(&session.session_id)
-    }) {
-        return Err(creation_error(
-            CoreErrorKind::AlreadyExists,
-            "active_session_conflict",
-            format!(
-                "profile or agent already has active Crew session {}",
-                existing.session_id
-            ),
-        ));
-    }
-    Ok(())
 }
 
 fn persisted_template_session_id(

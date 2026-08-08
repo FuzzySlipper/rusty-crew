@@ -485,6 +485,12 @@
         "from": {
           "type": "string"
         },
+        "from_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "projection": {
           "anyOf": [
             {
@@ -497,6 +503,12 @@
         },
         "to": {
           "type": "string"
+        },
+        "to_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

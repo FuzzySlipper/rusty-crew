@@ -548,6 +548,14 @@ function routeWriteFailure(
   if (message.includes("agent_route_not_found")) {
     return notFound(requestId, "agent_route_not_found");
   }
+  if (message.includes("agent_session_ambiguous")) {
+    return failure(409, requestId, {
+      code: "conflict",
+      reason_code: "agent_session_ambiguous",
+      message,
+      retryable: false,
+    });
+  }
   return invalidInput(requestId, error);
 }
 

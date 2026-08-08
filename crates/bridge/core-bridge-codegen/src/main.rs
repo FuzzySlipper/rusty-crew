@@ -3571,6 +3571,8 @@ fn sample_agent_message() -> AgentMessage {
     AgentMessage {
         from: sample_agent_id(),
         to: AgentId::new("operator"),
+        from_session_id: Some(sample_session_id()),
+        to_session_id: None,
         body: "Bridge validation fixture message.".to_owned(),
         correlation_id: Some("validation-correlation".to_owned()),
         projection: None,

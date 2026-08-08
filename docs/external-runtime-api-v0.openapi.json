@@ -1903,13 +1903,15 @@
           "body": { "type": "string" },
           "correlation_id": { "type": ["string", "null"] },
           "from": { "type": "string" },
+          "from_session_id": { "type": ["string", "null"] },
           "projection": {
             "anyOf": [
               { "$ref": "#/components/schemas/AgentMessageProjectionHint" },
               { "type": "null" }
             ]
           },
-          "to": { "type": "string" }
+          "to": { "type": "string" },
+          "to_session_id": { "type": ["string", "null"] }
         },
         "required": ["from", "to", "body"],
         "type": "object"

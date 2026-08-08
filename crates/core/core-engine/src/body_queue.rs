@@ -296,6 +296,8 @@ mod tests {
             message: AgentMessage {
                 from: AgentId::new("operator"),
                 to: AgentId::new("prime"),
+                from_session_id: None,
+                to_session_id: None,
                 body: format!("body {index}"),
                 correlation_id: None,
                 projection: None,

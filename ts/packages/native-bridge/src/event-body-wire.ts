@@ -1,7 +1,5 @@
 import type {
   AdapterId,
-  AgentId,
-  AgentMessage,
   BrainEvent,
   BodyState,
   CompletionPacket,
@@ -20,6 +18,11 @@ import type {
   TaskId,
   ToolCallMetadata,
 } from "@rusty-crew/contracts";
+import {
+  toAgentMessage,
+  toNativeAgentMessage,
+  type RawAgentMessage,
+} from "./agent-message-wire.js";
 
 import {
   toCoordinationObservedCoreEvent,
@@ -112,23 +115,6 @@ export function toNativeSessionState(session: SessionState): unknown {
     brain_turn_count: session.brainTurnCount,
     created_at: session.createdAt,
     last_active_at: session.lastActiveAt,
-  };
-}
-
-export function toNativeAgentMessage(message: AgentMessage): RawAgentMessage {
-  return {
-    from: message.from,
-    to: message.to,
-    body: message.body,
-    correlation_id: message.correlationId ?? undefined,
-    projection: message.projection
-      ? {
-          visibility: message.projection.visibility,
-          target_ref: message.projection.targetRef ?? undefined,
-          work_ref: message.projection.workRef ?? undefined,
-          reason: message.projection.reason ?? undefined,
-        }
-      : undefined,
   };
 }
 
@@ -482,23 +468,6 @@ export function toDelegatedResourceCleanupReport(
   };
 }
 
-export function toAgentMessage(message: RawAgentMessage): AgentMessage {
-  return {
-    from: message.from,
-    to: message.to,
-    body: message.body,
-    correlationId: message.correlation_id,
-    projection: message.projection
-      ? {
-          visibility: message.projection.visibility,
-          targetRef: message.projection.target_ref,
-          workRef: message.projection.work_ref,
-          reason: message.projection.reason,
-        }
-      : undefined,
-  };
-}
-
 export function toBrainEvent(event: RawBrainEvent): BrainEvent {
   switch (event.type) {
     case "started":
@@ -733,27 +702,6 @@ export interface RawBodyState {
     queue_owner: BodyState["deltaPolicy"]["queueOwner"];
     queued_message_ttl_ms: number;
     max_queued_messages: number;
-  };
-}
-
-export interface RawAgentMessage {
-  from: AgentId;
-  to: AgentId;
-  body: string;
-  correlation_id?: string;
-  projection?: {
-    visibility: "observation" | "user_visible";
-    target_ref?: {
-      system: string;
-      kind: string;
-      id: string;
-    };
-    work_ref?: {
-      system: string;
-      kind: string;
-      id: string;
-    };
-    reason?: string;
   };
 }
 

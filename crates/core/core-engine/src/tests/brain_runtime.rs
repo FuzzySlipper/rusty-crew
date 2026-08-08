@@ -3,6 +3,14 @@ use super::*;
 #[test]
 fn executes_valid_brain_actions_against_real_bus() {
     let engine = test_engine();
+    let planner = engine
+        .create_session(session_config(
+            "planner-session",
+            "planner",
+            "planner-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
     let worker = engine
         .create_session(session_config(
             "worker-session",
@@ -33,7 +41,9 @@ fn executes_valid_brain_actions_against_real_bus() {
                 BrainAction::SendMessage {
                     message: AgentMessage {
                         from: worker.agent_id.clone(),
-                        to: AgentId::new("planner"),
+                        to: planner.agent_id.clone(),
+                        from_session_id: Some(worker.session_id.clone()),
+                        to_session_id: Some(planner.session_id.clone()),
                         body: "done".to_string(),
                         correlation_id: Some("reply-1".to_string()),
                         projection: None,

@@ -130,7 +130,7 @@ fn crew_session_creation_recovers_archived_idempotent_session() {
 }
 
 #[test]
-fn crew_session_creation_rejects_changed_intent_stale_profile_and_ambiguity() {
+fn crew_session_creation_rejects_changed_intent_and_stale_profile() {
     let engine = test_engine();
     let first = engine
         .create_profile_registry_record(&profile_registry_write(
@@ -180,27 +180,99 @@ fn crew_session_creation_rejects_changed_intent_stale_profile_and_ambiguity() {
     assert!(stale
         .message
         .contains("crew_agent_session_creation_profile_revision_conflict"));
+}
 
-    engine
-        .create_session(session_config(
-            "second-active",
-            "second-profile",
-            "second-profile",
-            SessionKind::Full,
+#[test]
+fn same_profile_sessions_are_independent_ambiguous_by_agent_and_restart_durable() {
+    let data_dir = unique_data_dir("same-profile-sessions");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let profile = engine
+        .create_profile_registry_record(&profile_registry_write(
+            "shared-profile",
+            "tester-chat",
+            "missing-template",
         ))
         .unwrap();
-    let ambiguous = engine
+    let first = engine
         .create_crew_agent_session(&CrewAgentSessionCreationRequest {
-            idempotency_key: "ambiguous-key".to_string(),
-            profile_id: second.profile_id,
-            expected_profile_revision: second.revision,
-            workspace_cwd: "/home/dev/second".to_string(),
-            requested_at: "2026-06-19T00:01:03Z".to_string(),
+            idempotency_key: "shared-profile-first".to_string(),
+            profile_id: profile.profile_id.clone(),
+            expected_profile_revision: profile.revision,
+            workspace_cwd: "/home/dev/workspace-a".to_string(),
+            requested_at: "2026-06-19T00:01:00Z".to_string(),
         })
+        .unwrap();
+    let second = engine
+        .create_crew_agent_session(&CrewAgentSessionCreationRequest {
+            idempotency_key: "shared-profile-second".to_string(),
+            profile_id: profile.profile_id.clone(),
+            expected_profile_revision: first.profile_revision,
+            workspace_cwd: "/home/dev/workspace-b".to_string(),
+            requested_at: "2026-06-19T00:02:00Z".to_string(),
+        })
+        .unwrap();
+
+    assert_ne!(first.session.session_id, second.session.session_id);
+    assert_eq!(first.session.agent_id, second.session.agent_id);
+    assert_eq!(first.session.profile_id, second.session.profile_id);
+    assert_eq!(
+        first.session.workspace.as_ref().unwrap().cwd,
+        "/home/dev/workspace-a"
+    );
+    assert_eq!(
+        second.session.workspace.as_ref().unwrap().cwd,
+        "/home/dev/workspace-b"
+    );
+    let profile = engine
+        .get_profile_registry_record(&profile.profile_id)
+        .unwrap()
+        .unwrap();
+    let active_refs = profile
+        .derived_runtime_refs
+        .iter()
+        .filter(|reference| reference.ref_kind == "session" && reference.status == "active")
+        .map(|reference| reference.ref_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(active_refs.contains(&first.session.session_id.0.as_str()));
+    assert!(active_refs.contains(&second.session.session_id.0.as_str()));
+
+    let ambiguous = engine
+        .sessions
+        .get_session_by_agent(&first.session.agent_id)
         .unwrap_err();
-    assert!(ambiguous
-        .message
-        .contains("crew_agent_session_creation_active_session_conflict"));
+    assert_eq!(ambiguous.kind, CoreErrorKind::ActionRejected);
+    assert!(ambiguous.message.contains("agent_session_ambiguous"));
+    assert!(ambiguous.message.contains(&first.session.session_id.0));
+    assert!(ambiguous.message.contains(&second.session.session_id.0));
+
+    engine.archive_session(&first.session.session_id).unwrap();
+    assert_eq!(
+        engine
+            .sessions
+            .get_session_by_agent(&second.session.agent_id)
+            .unwrap()
+            .session_id,
+        second.session.session_id
+    );
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir);
+    assert_eq!(
+        restarted
+            .sessions
+            .get_session(&first.session.session_id)
+            .unwrap()
+            .status,
+        SessionStatus::Archived
+    );
+    assert_eq!(
+        restarted
+            .sessions
+            .get_session_by_agent(&second.session.agent_id)
+            .unwrap()
+            .session_id,
+        second.session.session_id
+    );
 }
 
 #[test]

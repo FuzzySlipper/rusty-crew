@@ -569,6 +569,8 @@ mod tests {
                     message: AgentMessage {
                         from: AgentId::new("agent-alpha"),
                         to: AgentId::new("agent-beta"),
+                        from_session_id: None,
+                        to_session_id: None,
                         body: "event repository query message".to_string(),
                         correlation_id: Some("corr-events".to_string()),
                         projection: None,
