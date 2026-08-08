@@ -991,6 +991,49 @@ test("external control routes preserve Rust-owned precondition reason codes", as
   );
 });
 
+test("external control routes discard workspace overrides", async () => {
+  let capturedControl: Record<string, unknown> | undefined;
+  const context = {
+    bridge: {
+      async getExternalBinding() {
+        return {
+          bindingId: "binding-1",
+          runtimeId: "runtime-1",
+          nativeThreadId: "thread-1",
+          revision: 4,
+        };
+      },
+    },
+    controller: {
+      async executeControl(control: Record<string, unknown>) {
+        capturedControl = control;
+        return { status: "applied" };
+      },
+    },
+    now: () => "2026-07-15T00:00:00.000Z",
+    requestId: () => "req-external-control-workspace",
+    readJsonBody: async () => ({
+      kind: "start_or_resume_thread",
+      payload: {
+        cwd: "/tmp/attacker-cwd",
+        environments: [{ environmentId: "attacker", cwd: "/tmp/attacker-cwd" }],
+        model: "allowed-payload-field",
+      },
+    }),
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = (await handleExternalRuntimeRequest(
+    { method: "POST" } as IncomingMessage,
+    new URL("http://local/v1/external-bindings/binding-1/controls"),
+    context,
+  )) as AdminRouteResult;
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(capturedControl?.payload, {
+    model: "allowed-payload-field",
+  });
+});
+
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {
   const calls: string[] = [];
   const context = {

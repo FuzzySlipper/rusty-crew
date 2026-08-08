@@ -491,6 +491,7 @@ export async function handleExternalRuntimeRequest(
         optionalString(body.controlId) ?? `control:${crypto.randomUUID()}`;
       controlKind = requiredString(body.kind);
       expectedNativeTurnId = optionalString(body.expectedNativeTurnId);
+      const payload = externalControlPayload(controlKind, body.payload);
       const control: ExternalControlRequest = {
         controlId,
         idempotencyKey:
@@ -501,7 +502,7 @@ export async function handleExternalRuntimeRequest(
           numberValue(body.expectedBindingRevision) ?? binding.revision,
         ...(expectedNativeTurnId === undefined ? {} : { expectedNativeTurnId }),
         kind: controlKind as ExternalControlRequest["kind"],
-        payload: body.payload ?? {},
+        payload,
         requestedAt: context.now(),
       };
       return successRoute(
@@ -708,6 +709,23 @@ export async function handleExternalRuntimeRequest(
     message: `unknown external runtime route ${url.pathname}`,
     retryable: false,
   });
+}
+
+function externalControlPayload(kind: string, value: unknown): unknown {
+  if (
+    kind !== "start_or_resume_thread" ||
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return value ?? {};
+  }
+  const {
+    cwd: _cwd,
+    environments: _environments,
+    ...payload
+  } = value as Record<string, unknown>;
+  return payload;
 }
 
 function externalCommandFailure(

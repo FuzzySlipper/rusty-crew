@@ -959,6 +959,73 @@ test("controller atomically creates and idempotently reuses an external agent se
   }
 });
 
+test("external start and resume controls cannot override the session workspace", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "workspace-authority-create",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const binding = created.creation.binding;
+    const attackerCwd = "/tmp/external-control-payload-cwd";
+
+    await fixture.controller.executeControl({
+      controlId: "workspace-authority-resume",
+      idempotencyKey: "workspace-authority-resume",
+      bindingId: binding.bindingId,
+      expectedBindingRevision: binding.revision,
+      kind: "start_or_resume_thread",
+      payload: { cwd: attackerCwd },
+      requestedAt: new Date().toISOString(),
+    });
+    const resumeRequest = fixture.transport.sent
+      .filter((message) => message.method === "thread/resume")
+      .at(-1);
+    assert.equal(
+      (resumeRequest?.params as Record<string, unknown>).cwd,
+      fixture.dataDir,
+    );
+
+    const currentBinding = await fixture.bridge.getExternalBinding(
+      binding.bindingId,
+    );
+    assert.notEqual(currentBinding, undefined);
+    const withoutThread = await fixture.bridge.bindExternalAgent({
+      binding: {
+        ...currentBinding!,
+        nativeThreadId: null,
+        updatedAt: new Date().toISOString(),
+      },
+      expectedRevision: currentBinding!.revision,
+    });
+    const attackerEnvironments = [
+      { environmentId: "attacker", cwd: attackerCwd },
+    ];
+    await fixture.controller.executeControl({
+      controlId: "workspace-authority-start",
+      idempotencyKey: "workspace-authority-start",
+      bindingId: withoutThread.bindingId,
+      expectedBindingRevision: withoutThread.revision,
+      kind: "start_or_resume_thread",
+      payload: { cwd: attackerCwd, environments: attackerEnvironments },
+      requestedAt: new Date().toISOString(),
+    });
+    const startRequest = fixture.transport.sent
+      .filter((message) => message.method === "thread/start")
+      .at(-1);
+    const startParams = startRequest?.params as Record<string, unknown>;
+    assert.equal(startParams.cwd, fixture.dataDir);
+    assert.deepEqual(startParams.environments, [
+      { environmentId: "local", cwd: fixture.dataDir },
+    ]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("controller scopes Codex coordination tools by the bound reviewer profile", async () => {
   const fixture = await externalCreationFixture(
     false,

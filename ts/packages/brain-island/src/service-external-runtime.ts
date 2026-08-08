@@ -3467,9 +3467,9 @@ export class ServiceExternalRuntimeController {
           );
           const developerInstructions = promptContext.developerInstructions;
           const resumed = await controlled.driver.threadResume({
+            ...(isRecord(request.payload) ? request.payload : {}),
             threadId: binding.nativeThreadId,
             cwd,
-            ...(isRecord(request.payload) ? request.payload : {}),
             baseInstructions: undefined,
             ...(developerInstructions === undefined
               ? {}
@@ -3486,12 +3486,12 @@ export class ServiceExternalRuntimeController {
         const developerInstructions =
           await this.#developerInstructionsForBinding(binding);
         const started = await controlled.driver.threadStart({
+          ...(isRecord(request.payload) ? request.payload : {}),
           cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          ...(isRecord(request.payload) ? request.payload : {}),
           dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
           baseInstructions: undefined,
           developerInstructions,
