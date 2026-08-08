@@ -864,6 +864,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "plan_background_memory_auto_mutations",
         protocol::BackgroundMemoryAutoMutationPlan
     );
+    schema!(
+        "manual_context_compaction",
+        protocol::ManualContextCompactionResponse
+    );
 
     schema!("save_message_variant", persistence::MessageVariantRecord);
     schema!(
@@ -1575,6 +1579,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "list_session_activity_digests",
         "save_context_compaction_artifact",
         "list_context_compaction_artifacts",
+        "manual_context_compaction",
         "record_memory_governance_decision",
     ];
     let memory_json_input_operations = vec![
@@ -1590,6 +1595,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "list_session_activity_digests",
         "save_context_compaction_artifact",
         "list_context_compaction_artifacts",
+        "manual_context_compaction",
         "record_memory_governance_decision",
     ];
     let profile_memory_direct_methods = vec![

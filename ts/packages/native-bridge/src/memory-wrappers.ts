@@ -1,6 +1,8 @@
 import type {
   ContextCompactionArtifact,
   ContextCompactionArtifactQuery,
+  ManualContextCompactionRequest,
+  ManualContextCompactionResponse,
   MemoryGovernanceDecisionInput,
   MemoryGovernanceDecisionRecord,
   MemoryProposalEnvelope,
@@ -204,10 +206,10 @@ export function createNativeBridgeMemoryMethods(
         ),
       });
     },
-    manualContextCompaction: async (request: unknown) =>
+    manualContextCompaction: async (request: ManualContextCompactionRequest) =>
       JSON.parse(
         binding.manualContextCompactionJson(JSON.stringify(request)),
-      ) as unknown,
+      ) as ManualContextCompactionResponse,
     recordMemoryGovernanceDecision: async (
       decision: MemoryGovernanceDecisionInput,
     ) =>

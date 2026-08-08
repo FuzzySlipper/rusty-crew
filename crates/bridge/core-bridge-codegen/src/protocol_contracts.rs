@@ -58,6 +58,8 @@ struct ProtocolContractRoots {
     session_activity_digest_query: SessionActivityDigestQuery,
     context_compaction_artifact: ContextCompactionArtifact,
     context_compaction_artifact_query: ContextCompactionArtifactQuery,
+    manual_context_compaction_request: ManualContextCompactionRequest,
+    manual_context_compaction_response: ManualContextCompactionResponse,
     runtime_activity_begin: RuntimeActivityBegin,
     runtime_activity_progress: RuntimeActivityProgress,
     runtime_activity_finish: RuntimeActivityFinish,

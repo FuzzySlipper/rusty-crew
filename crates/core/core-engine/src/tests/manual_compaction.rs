@@ -31,8 +31,8 @@ fn manual_context_compaction_no_fingerprint_failure_is_idempotent_and_preserves_
 
     // First call: no fingerprint → fallback must be `manual-{intent_key}` (hyphen) and must fail with durable failed artifact
     let first = engine.manual_context_compaction(&req_no_fp).unwrap();
-    assert_eq!(
-        first.idempotent, false,
+    assert!(
+        !first.idempotent,
         "first no-fp failure must not be idempotent"
     );
     assert_eq!(first.terminal_status, "failed");
@@ -50,7 +50,7 @@ fn manual_context_compaction_no_fingerprint_failure_is_idempotent_and_preserves_
         Some("manual_intent"),
         "trigger must be manual_intent"
     );
-    assert_eq!(first.artifact.enters_future_context, false);
+    assert!(!first.artifact.enters_future_context);
     assert_eq!(
         first.artifact.provider_chain_action.as_deref(),
         Some("preserve_prior_valid_projection")
@@ -77,8 +77,8 @@ fn manual_context_compaction_no_fingerprint_failure_is_idempotent_and_preserves_
 
     // Second call identical (no fingerprint) → idempotent retry must return same durable failed artifact, not create a second row
     let second = engine.manual_context_compaction(&req_no_fp).unwrap();
-    assert_eq!(
-        second.idempotent, true,
+    assert!(
+        second.idempotent,
         "retry with same intent_key and no fingerprint must be idempotent"
     );
     assert_eq!(second.artifact.artifact_id, first.artifact.artifact_id);
@@ -146,14 +146,14 @@ fn manual_context_compaction_no_fingerprint_success_is_idempotent() {
     };
 
     let first = engine.manual_context_compaction(&req).unwrap();
-    assert_eq!(first.idempotent, false);
+    assert!(!first.idempotent);
     assert_eq!(first.terminal_status, "completed");
     assert_eq!(
         first.artifact.source_projection_fingerprint.as_deref(),
         Some(format!("manual-{}", intent_key).as_str()),
         "success no-fp fingerprint must also be manual- hyphen"
     );
-    assert_eq!(first.artifact.enters_future_context, true);
+    assert!(first.artifact.enters_future_context);
     assert!(first
         .artifact
         .artifact_id
@@ -165,7 +165,7 @@ fn manual_context_compaction_no_fingerprint_success_is_idempotent() {
     );
 
     let second = engine.manual_context_compaction(&req).unwrap();
-    assert_eq!(second.idempotent, true);
+    assert!(second.idempotent);
     assert_eq!(second.artifact.artifact_id, first.artifact.artifact_id);
     assert_eq!(second.terminal_status, "completed");
 }

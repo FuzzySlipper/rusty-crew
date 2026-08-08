@@ -44,6 +44,8 @@ import type {
   LogicalTurnDiagnosticQuery,
   LogicalTurnResolutionAction,
   ManifestOperationName,
+  ManualContextCompactionRequest,
+  ManualContextCompactionResponse,
   MemoryGovernanceDecisionInput,
   MemoryGovernanceDecisionRecord,
   MemoryProposalEnvelope,
@@ -96,6 +98,7 @@ import type {
   ChatCompletionsInputImage,
 } from "./chat-completions-public-api.js";
 import type { NativeCrewSessionBridgeMethods } from "./crew-session-public-api.js";
+import type { NativeBrainContextCompactionPolicy } from "./context-compaction-public-api.js";
 import type {
   NativeExternalRuntimeEventRetentionReport,
   NativeRuntimeExternalEventStorageDiagnostics,
@@ -162,6 +165,7 @@ export type {
 export type {
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
+  ChatCompletionsToolRequest,
 } from "./chat-completions-public-api.js";
 export type {
   NativeExternalRuntimeEventRetentionReport,
@@ -169,6 +173,7 @@ export type {
   NativeRuntimeFilesystemHeadroom,
   NativeRuntimeMaintenancePolicy,
 } from "./external-event-retention-public-api.js";
+export type { NativeBrainContextCompactionPolicy } from "./context-compaction-public-api.js";
 
 export interface NativeSessionConfigInput {
   sessionId: string;
@@ -400,23 +405,6 @@ export interface ChatCompletionsBrainRunInput {
         baseUrl: string;
         apiKey?: string;
       };
-}
-
-export interface NativeBrainContextCompactionPolicy {
-  enabled: boolean;
-  autoCompactionEnabled: boolean;
-  strategyId: string;
-  contextWindowTokens: number;
-  compactAtPercent: number;
-  targetPercentAfterCompaction: number;
-}
-
-export interface ChatCompletionsToolRequest {
-  wakeId: string;
-  callId: string;
-  providerItemId?: string;
-  name: string;
-  argumentsJson: string;
 }
 
 export interface ChatCompletionsTransportMetrics extends OpenAiResponsesTransportMetrics {
@@ -2387,7 +2375,9 @@ export interface NativeBridgeModule
   listContextCompactionArtifacts(
     query: ContextCompactionArtifactQuery,
   ): Promise<ContextCompactionArtifact[]>;
-  manualContextCompaction(request: unknown): Promise<unknown>;
+  manualContextCompaction(
+    request: ManualContextCompactionRequest,
+  ): Promise<ManualContextCompactionResponse>;
   recordMemoryGovernanceDecision(
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;

@@ -13,3 +13,11 @@ export interface ChatCompletionsInputImage {
   bytesBase64: string;
   byteSize: number;
 }
+
+export interface ChatCompletionsToolRequest {
+  wakeId: string;
+  callId: string;
+  providerItemId?: string;
+  name: string;
+  argumentsJson: string;
+}

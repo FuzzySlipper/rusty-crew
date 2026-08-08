@@ -224,7 +224,6 @@ impl CoreEngine {
                     match record.phase {
                         rusty_crew_core_persistence::ToolCallPhase::Started => started += 1,
                         rusty_crew_core_persistence::ToolCallPhase::Finished => finished += 1,
-                        _ => {}
                     }
                 }
                 started > finished

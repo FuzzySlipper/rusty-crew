@@ -790,7 +790,8 @@ export const nativeMappingInventory = {
           "limit",
           "offset",
           "session_id",
-          "strategy_id"
+          "strategy_id",
+          "terminal_status"
         ],
         "MemoryGovernanceDecisionInput": [
           "actor",
@@ -972,6 +973,7 @@ export const nativeMappingInventory = {
         "listSessionActivityDigestsJson",
         "saveContextCompactionArtifactJson",
         "listContextCompactionArtifactsJson",
+        "manualContextCompactionJson",
         "recordMemoryGovernanceDecisionJson"
       ],
       "jsonInputWrappers": [
@@ -987,6 +989,7 @@ export const nativeMappingInventory = {
         "listSessionActivityDigests",
         "saveContextCompactionArtifact",
         "listContextCompactionArtifacts",
+        "manualContextCompaction",
         "recordMemoryGovernanceDecision"
       ],
       "operationNames": [
@@ -1003,6 +1006,7 @@ export const nativeMappingInventory = {
         "list_session_activity_digests",
         "save_context_compaction_artifact",
         "list_context_compaction_artifacts",
+        "manual_context_compaction",
         "record_memory_governance_decision"
       ],
       "passthroughWrappers": [
@@ -1019,6 +1023,7 @@ export const nativeMappingInventory = {
         "listSessionActivityDigests",
         "saveContextCompactionArtifact",
         "listContextCompactionArtifacts",
+        "manualContextCompaction",
         "recordMemoryGovernanceDecision"
       ],
       "rawMethods": [
@@ -1035,6 +1040,7 @@ export const nativeMappingInventory = {
         "listSessionActivityDigestsJson",
         "saveContextCompactionArtifactJson",
         "listContextCompactionArtifactsJson",
+        "manualContextCompactionJson",
         "recordMemoryGovernanceDecisionJson"
       ]
     },

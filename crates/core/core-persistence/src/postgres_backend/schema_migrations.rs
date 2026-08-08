@@ -1905,16 +1905,16 @@ fn apply_postgres_context_compaction_intent_unique(
     // Deduplicate legacy duplicates before adding the unique constraint.
     tx.batch_execute(&format!(
         "DELETE FROM {schema}.context_compaction_artifacts
-            WHERE (record_json->>'intent_key') IS NOT NULL
+            WHERE (record_json::jsonb->>'intent_key') IS NOT NULL
               AND ctid NOT IN (
                 SELECT MAX(ctid)
                 FROM {schema}.context_compaction_artifacts
-                WHERE (record_json->>'intent_key') IS NOT NULL
-                GROUP BY session_id, (record_json->>'intent_key')
+                WHERE (record_json::jsonb->>'intent_key') IS NOT NULL
+                GROUP BY session_id, (record_json::jsonb->>'intent_key')
               );
          CREATE UNIQUE INDEX IF NOT EXISTS context_compaction_session_intent_idx
-            ON {schema}.context_compaction_artifacts(session_id, (record_json->>'intent_key'))
-            WHERE record_json->>'intent_key' IS NOT NULL;"
+            ON {schema}.context_compaction_artifacts(session_id, (record_json::jsonb->>'intent_key'))
+            WHERE record_json::jsonb->>'intent_key' IS NOT NULL;"
     ))
     .map_err(|error| {
         postgres_error(
@@ -1931,16 +1931,16 @@ fn apply_postgres_context_compaction_intent_projection_aware(
     tx.batch_execute(&format!(
         "DROP INDEX IF EXISTS {schema}.context_compaction_session_intent_idx;
          DELETE FROM {schema}.context_compaction_artifacts
-            WHERE (record_json->>'intent_key') IS NOT NULL
+            WHERE (record_json::jsonb->>'intent_key') IS NOT NULL
               AND ctid NOT IN (
                 SELECT MAX(ctid)
                 FROM {schema}.context_compaction_artifacts
-                WHERE (record_json->>'intent_key') IS NOT NULL
-                GROUP BY session_id, (record_json->>'intent_key'), COALESCE(record_json->>'source_projection_fingerprint','')
+                WHERE (record_json::jsonb->>'intent_key') IS NOT NULL
+                GROUP BY session_id, (record_json::jsonb->>'intent_key'), COALESCE(record_json::jsonb->>'source_projection_fingerprint','')
               );
          CREATE UNIQUE INDEX IF NOT EXISTS context_compaction_session_intent_projection_idx
-            ON {schema}.context_compaction_artifacts(session_id, (record_json->>'intent_key'), COALESCE(record_json->>'source_projection_fingerprint',''))
-            WHERE record_json->>'intent_key' IS NOT NULL;"
+            ON {schema}.context_compaction_artifacts(session_id, (record_json::jsonb->>'intent_key'), COALESCE(record_json::jsonb->>'source_projection_fingerprint',''))
+            WHERE record_json::jsonb->>'intent_key' IS NOT NULL;"
     ))
     .map_err(|error| {
         postgres_error(

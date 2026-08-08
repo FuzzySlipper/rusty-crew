@@ -5094,6 +5094,34 @@
         ],
         "type": "object"
       },
+      "ManualContextCompactionRequest": {
+        "properties": {
+          "expect_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "intent_key": { "type": ["string", "null"] },
+          "session_id": { "type": "string" },
+          "source_projection_fingerprint": { "type": ["string", "null"] },
+          "strategy_id": { "type": ["string", "null"] },
+          "strategy_revision": { "type": ["string", "null"] }
+        },
+        "required": ["session_id"],
+        "type": "object"
+      },
+      "ManualContextCompactionResponse": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ContextCompactionArtifact"
+          },
+          "idempotent": { "type": "boolean" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "terminal_status": { "type": "string" }
+        },
+        "required": ["artifact", "terminal_status", "idempotent", "revision"],
+        "type": "object"
+      },
       "MemoryConflictPolicy": {
         "enum": [
           "expected_revision",

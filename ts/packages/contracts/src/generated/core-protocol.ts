@@ -1429,6 +1429,22 @@ export type LogicalTurnYieldRequest = {
   now: string;
 };
 
+export type ManualContextCompactionRequest = {
+  expectRevision?: number | null;
+  intentKey?: string | null;
+  sessionId: SessionId;
+  sourceProjectionFingerprint?: string | null;
+  strategyId?: string | null;
+  strategyRevision?: string | null;
+};
+
+export type ManualContextCompactionResponse = {
+  artifact: ContextCompactionArtifact;
+  idempotent: boolean;
+  revision: number;
+  terminalStatus: string;
+};
+
 export type MemoryConflictPolicy = "expected_revision" | "supersession" | "merge" | "immutable" | "domain_specific";
 
 export type MemoryDiagnosticsPolicy = {

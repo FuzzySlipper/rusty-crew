@@ -24310,6 +24310,164 @@ export const bridgeWireSchemaArtifact = {
       "title": "RuntimeActivityRecord",
       "type": "object"
     },
+    "rusty_crew_core_protocol::types::ManualContextCompactionResponse": {
+      "properties": {
+        "artifact": {
+          "description": "Durable record for a derived context-compaction summary.\n\nCompaction artifacts are not raw transcript storage and are not ordinary\nsession memory. They preserve provenance, model metadata, token estimates,\nand strategy decisions so future context strategies can decide whether and\nhow to project them into model context while keeping source transcript\nhistory intact.",
+          "properties": {
+            "after_tokens": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "artifact_id": {
+              "type": "string"
+            },
+            "before_tokens": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "branch_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "context_policy": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "enters_future_context": {
+              "type": "boolean"
+            },
+            "estimate_after_json": true,
+            "estimate_before_json": true,
+            "excised_item_count": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "execution_epoch_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "intent_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "logical_turn_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metadata_json": true,
+            "preserved_item_count": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "provider_chain_action": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_metadata_json": true,
+            "session_id": {
+              "type": "string"
+            },
+            "source_projection_fingerprint": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_refs_json": true,
+            "strategy_id": {
+              "type": "string"
+            },
+            "strategy_revision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "summary_text": {
+              "type": "string"
+            },
+            "terminal_status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trigger": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "artifact_id",
+            "session_id",
+            "strategy_id",
+            "source_refs_json",
+            "provider_metadata_json",
+            "estimate_before_json",
+            "summary_text",
+            "enters_future_context",
+            "context_policy",
+            "metadata_json",
+            "created_at",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "idempotent": {
+          "type": "boolean"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact",
+        "terminal_status",
+        "idempotent",
+        "revision"
+      ],
+      "title": "ManualContextCompactionResponse",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::types::ReviewSubmissionRecord": {
       "properties": {
         "baseCommit": {
@@ -27159,6 +27317,7 @@ export const bridgeWireSchemaArtifact = {
     "list_scheduled_jobs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput>",
     "list_scheduled_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "lore_entry_provenance_events": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreProvenanceEvent>",
+    "manual_context_compaction": "rusty_crew_core_protocol::types::ManualContextCompactionResponse",
     "mark_external_agent_session_native_starting": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "merge_roleplay_character": "rusty_crew_roleplay_core::RoleplayCharacter",
     "merge_roleplay_player_persona": "rusty_crew_roleplay_core::RoleplayPlayerPersona",
