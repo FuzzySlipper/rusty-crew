@@ -216,7 +216,11 @@ try {
   assert.equal(invalidReport.ok, false);
   assert.deepEqual(
     new Set(invalidReport.diagnostics.map((diagnostic) => diagnostic.code)),
-    new Set(["scheduled_job_not_executable", "binding_session_mismatch"]),
+    new Set([
+      "scheduled_job_not_executable",
+      "binding_session_mismatch",
+      "session_workspace_required",
+    ]),
   );
 
   console.log(

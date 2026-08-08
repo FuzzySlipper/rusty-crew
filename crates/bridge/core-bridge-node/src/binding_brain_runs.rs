@@ -951,6 +951,7 @@ mod tests {
                 profile_id: ProfileId::new("provider-operation-profile"),
                 kind: rusty_crew_core_bridge_api::SessionKind::Full,
                 delegation: None,
+                workspace: None,
                 resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
                     workdir: None,
                     max_duration_ms: None,
@@ -1062,6 +1063,7 @@ mod tests {
                 profile_id: ProfileId::new("operation-profile"),
                 kind: rusty_crew_core_bridge_api::SessionKind::Full,
                 delegation: None,
+                workspace: None,
                 resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
                     workdir: None,
                     max_duration_ms: None,

@@ -936,6 +936,15 @@ output = "core_protocol::SessionState"
 errors = "core_protocol::CoreError"
 summary = "Set or clear the Rust-owned reasoning-effort override for one durable session."
 
+[[operation]]
+name = "update_session_workspace"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionWorkspaceUpdate"
+output = "core_protocol::SessionWorkspaceUpdateRecord"
+errors = "core_protocol::CoreError"
+summary = "Revision-check and persist an idle session workspace switch without replacing the logical session."
+
 # Scheduler operator controls. The scheduler remains Rust-owned; these bridge
 # calls are deliberate host/admin entrypoints for registering wake jobs,
 # triggering ticks, manual runs, and pausing/resuming durable jobs.

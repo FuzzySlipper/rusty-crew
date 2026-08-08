@@ -336,6 +336,35 @@ pub struct ResourceLimits {
     pub max_delegation_depth: Option<u32>,
 }
 
+/// The canonical execution context for one logical session.
+///
+/// This is deliberately not a filesystem permission boundary. Ordinary full
+/// agents may still address absolute paths outside `cwd`; delegated workdir
+/// confinement remains a separate resource-limit concern.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionWorkspace {
+    pub cwd: String,
+    pub revision: u64,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkspaceUpdate {
+    pub session_id: SessionId,
+    pub cwd: String,
+    pub expected_revision: u64,
+    pub requested_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorkspaceUpdateRecord {
+    pub previous: SessionWorkspace,
+    pub current: SessionWorkspace,
+    pub session: SessionState,
+}
+
 pub const MAX_RESOURCE_DURATION_MS: u32 = 30 * 24 * 60 * 60 * 1_000;
 pub const MAX_RESOURCE_DELEGATION_DEPTH: u32 = 64;
 
@@ -423,6 +452,8 @@ pub struct SessionConfig {
     pub profile_id: ProfileId,
     pub kind: SessionKind,
     pub delegation: Option<DelegationLineage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<SessionWorkspace>,
     pub resource_limits: ResourceLimits,
     pub tool_profile: ToolProfile,
     pub history_window: Option<SessionHistoryWindow>,
@@ -442,6 +473,8 @@ pub struct SessionState {
     pub profile_id: ProfileId,
     pub kind: SessionKind,
     pub delegation: Option<DelegationLineage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<SessionWorkspace>,
     pub resource_limits: ResourceLimits,
     pub tool_profile: ToolProfile,
     pub history_window: Option<SessionHistoryWindow>,
@@ -746,6 +779,7 @@ pub struct EventSubscription {
 #[serde(rename_all = "snake_case")]
 pub enum CoreEventKind {
     SessionCreated,
+    SessionWorkspaceChanged,
     SessionArchived,
     AgentMessageRouted,
     AgentMessageDeliveryObserved,
@@ -765,6 +799,7 @@ impl CoreEventKind {
     pub const fn of(event: &CoreEvent) -> Self {
         match event {
             CoreEvent::SessionCreated { .. } => Self::SessionCreated,
+            CoreEvent::SessionWorkspaceChanged { .. } => Self::SessionWorkspaceChanged,
             CoreEvent::SessionArchived { .. } => Self::SessionArchived,
             CoreEvent::AgentMessageRouted { .. } => Self::AgentMessageRouted,
             CoreEvent::AgentMessageDeliveryObserved { .. } => Self::AgentMessageDeliveryObserved,
@@ -950,6 +985,11 @@ pub struct DelegatedResourceCleanupReport {
 pub enum CoreEvent {
     SessionCreated {
         state: Box<SessionState>,
+    },
+    SessionWorkspaceChanged {
+        session_id: SessionId,
+        previous: SessionWorkspace,
+        current: SessionWorkspace,
     },
     SessionArchived {
         session_id: SessionId,

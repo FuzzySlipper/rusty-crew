@@ -235,6 +235,10 @@ pub fn event_matches_filter(event: &CoreEvent, filter: &EventSubscription) -> bo
 fn event_mentions_session(event: &CoreEvent, session_id: &SessionId) -> bool {
     match event {
         CoreEvent::SessionCreated { state } => &state.session_id == session_id,
+        CoreEvent::SessionWorkspaceChanged {
+            session_id: changed,
+            ..
+        } => changed == session_id,
         CoreEvent::SessionArchived {
             session_id: archived,
         } => archived == session_id,
@@ -280,6 +284,7 @@ fn event_mentions_agent(event: &CoreEvent, agent_id: &AgentId) -> bool {
             &round.sender_agent_id == agent_id || &round.recipient_agent_id == agent_id
         }
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
@@ -299,6 +304,7 @@ fn event_mentions_adapter(
     match event {
         CoreEvent::ExternalEventInjected { event } => &event.adapter_id == adapter_id,
         CoreEvent::SessionCreated { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::SessionArchived { .. }
         | CoreEvent::AgentMessageRouted { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }

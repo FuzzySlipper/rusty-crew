@@ -20,6 +20,7 @@ export type AdminControlCommandName =
   | "decommission_profile"
   | "delete_profile"
   | "create_session"
+  | "switch_session_workspace"
   | "archive_session"
   | "new_session"
   | "set_session_effort"
@@ -124,6 +125,9 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   createSession?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  switchSessionWorkspace?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   archiveSession?(
@@ -573,6 +577,16 @@ function parseControlCommand(
         command: {
           ...commandBase,
           name: "archive_session",
+          target: { sessionId },
+        },
+      };
+    }
+    if (parts[5] === "workspace") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "switch_session_workspace",
           target: { sessionId },
         },
       };
@@ -1070,6 +1084,8 @@ function executorForCommand(
       return executor.deleteProfile;
     case "create_session":
       return executor.createSession;
+    case "switch_session_workspace":
+      return executor.switchSessionWorkspace;
     case "archive_session":
       return executor.archiveSession;
     case "new_session":

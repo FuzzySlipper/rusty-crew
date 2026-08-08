@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 66;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 67;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -348,6 +348,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 66,
         description: "add provider state compatibility lineage",
         apply: migrate_v66_add_provider_state_compatibility_lineage,
+    },
+    SchemaMigration {
+        version: 67,
+        description: "add first-class session workspace state",
+        apply: repos::sessions::migrate_v67_add_session_workspace,
     },
 ];
 

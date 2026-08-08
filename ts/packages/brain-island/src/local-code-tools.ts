@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import type { BrainTool } from "./brain-tool.js";
-import type { ResourceLimits, SessionState } from "@rusty-crew/contracts";
+import type { SessionState } from "@rusty-crew/contracts";
 import type {
   NativeBridgeModule,
   NativeLocalCodeResourcePolicyPlan,
@@ -11,11 +11,8 @@ import { Type, type Static } from "typebox";
 import { patchTool } from "./patch-tool.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 
-export const defaultLocalToolWorkdir = "/home";
-
 export const defaultLocalCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan =
   {
-    workdir: defaultLocalToolWorkdir,
     commandTimeoutMs: 30_000,
     maxReadBytes: 256 * 1024,
     maxSearchFileBytes: 256 * 1024,
@@ -189,7 +186,7 @@ export function createLocalCodeToolResolver(
   return ({ wake }) => {
     const context = localToolContext(
       input.resourcePolicy ?? defaultLocalCodeResourcePolicy,
-      wake.state.session.resourceLimits,
+      wake.state.session,
     );
     if (input.bridge !== undefined) {
       context.runtimeActivity = {
@@ -470,11 +467,18 @@ export function workerPatchTool(context: LocalToolContext): BrainTool {
 
 function localToolContext(
   policy: NativeLocalCodeResourcePolicyPlan,
-  limits: ResourceLimits,
+  session: SessionState,
 ): LocalToolContext {
+  const workspace = session.workspace;
+  if (workspace == null) {
+    throw new Error(
+      `session_workspace_missing: session ${session.sessionId} has no canonical workspace`,
+    );
+  }
+  const limits = session.resourceLimits;
   const maxDurationMs = limits.maxDurationMs ?? policy.maxDurationMs;
   return {
-    workdir: resolve(limits.workdir ?? policy.workdir),
+    workdir: resolve(workspace.cwd),
     maxReadBytes: policy.maxReadBytes,
     maxSearchFileBytes: policy.maxSearchFileBytes,
     maxCommandOutputBytes: policy.maxCommandOutputBytes,

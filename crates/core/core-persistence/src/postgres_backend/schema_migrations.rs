@@ -7,7 +7,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 49;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 50;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -265,7 +265,44 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add provider state compatibility lineage",
         apply: Some(apply_postgres_provider_state_compatibility_lineage),
     },
+    PostgresSchemaMigration {
+        version: 50,
+        description: "store first-class session workspace in session JSON",
+        apply: Some(apply_postgres_session_workspace),
+    },
 ];
+
+fn apply_postgres_session_workspace(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.sessions
+            SET state_json = jsonb_set(
+                state_json::jsonb #- '{{resource_limits,workdir}}',
+                '{{workspace}}',
+                jsonb_build_object(
+                    'cwd', state_json::jsonb #> '{{resource_limits,workdir}}',
+                    'revision', 1,
+                    'updated_at', last_active_at
+                )
+            )::text
+          WHERE kind = 'full'
+            AND state_json::jsonb -> 'workspace' IS NULL
+            AND state_json::jsonb #> '{{resource_limits,workdir}}' IS NOT NULL;
+         UPDATE {schema}.session_configs
+            SET record_json = jsonb_set(
+                record_json::jsonb #- '{{resource_limits,workdir}}',
+                '{{workspace}}',
+                jsonb_build_object(
+                    'cwd', record_json::jsonb #> '{{resource_limits,workdir}}',
+                    'revision', 1,
+                    'updated_at', created_at
+                )
+            )::text
+          WHERE kind = 'full'
+            AND record_json::jsonb -> 'workspace' IS NULL
+            AND record_json::jsonb #> '{{resource_limits,workdir}}' IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("migrate first-class session workspaces", error))
+}
 
 fn apply_postgres_provider_state_compatibility_lineage(
     tx: &mut Transaction<'_>,

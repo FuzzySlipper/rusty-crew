@@ -223,7 +223,6 @@ export const profileRuntimeGraphWireFieldPaths = [
   "profiles[].runtime.default_resource_limits",
   "profiles[].runtime.default_resource_limits.max_delegation_depth",
   "profiles[].runtime.default_resource_limits.max_duration_ms",
-  "profiles[].runtime.default_resource_limits.workdir",
   "profiles[].runtime.max_tokens_per_turn",
   "profiles[].session_defaults",
   "profiles[].session_defaults.max_history_messages",
@@ -851,9 +850,6 @@ function validateProfileConfig(
           maxTokensPerTurn: optionalNumber(parsed.runtime.maxTokensPerTurn),
           defaultResourceLimits: isRecord(parsed.runtime.defaultResourceLimits)
             ? {
-                workdir: optionalString(
-                  parsed.runtime.defaultResourceLimits.workdir,
-                ),
                 maxDurationMs: optionalNumber(
                   parsed.runtime.defaultResourceLimits.maxDurationMs,
                 ),

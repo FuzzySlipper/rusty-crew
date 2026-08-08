@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "manifest_version": 1,
-  "operation_count": 290,
+  "operation_count": 291,
   "schema_source": "rusty-crew-core-protocol serde wire fixtures",
   "fixtures": [
     {
@@ -48,7 +48,7 @@
           "resource_limits": {
             "max_delegation_depth": 3,
             "max_duration_ms": null,
-            "workdir": "/home"
+            "workdir": null
           },
           "session_id": "validation-session",
           "status": "idle",
@@ -60,6 +60,11 @@
                 "name": "send_message"
               }
             ]
+          },
+          "workspace": {
+            "cwd": "/home",
+            "revision": 1,
+            "updated_at": "2026-07-02T00:00:00.000Z"
           }
         }
       }
@@ -86,7 +91,7 @@
           "resource_limits": {
             "max_delegation_depth": 3,
             "max_duration_ms": null,
-            "workdir": "/home"
+            "workdir": null
           },
           "session_id": "validation-session",
           "status": "idle",
@@ -98,6 +103,11 @@
                 "name": "send_message"
               }
             ]
+          },
+          "workspace": {
+            "cwd": "/home",
+            "revision": 1,
+            "updated_at": "2026-07-02T00:00:00.000Z"
           }
         }
       ]

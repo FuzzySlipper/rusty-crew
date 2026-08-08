@@ -300,8 +300,13 @@ impl CoreEngine {
             profile_id: profile.profile_id.clone(),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: Some(SessionWorkspace {
+                cwd: cwd.clone(),
+                revision: 1,
+                updated_at: request.requested_at.clone(),
+            }),
             resource_limits: ResourceLimits {
-                workdir: Some(cwd.clone()),
+                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },
@@ -506,8 +511,13 @@ impl CoreEngine {
             profile_id: current.session.profile_id.clone(),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: Some(SessionWorkspace {
+                cwd: current.request.cwd.clone(),
+                revision: 1,
+                updated_at: current.request.requested_at.clone(),
+            }),
             resource_limits: ResourceLimits {
-                workdir: Some(current.request.cwd.clone()),
+                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: None,
             },

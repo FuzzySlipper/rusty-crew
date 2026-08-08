@@ -720,6 +720,10 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         protocol::CrewAgentSessionCreationRecord
     );
     schema!(
+        "update_session_workspace",
+        protocol::SessionWorkspaceUpdateRecord
+    );
+    schema!(
         "restore_external_agent_binding",
         protocol::ExternalAgentBindingRestoreReceipt
     );
@@ -1461,7 +1465,6 @@ fn core_config_facade_artifact() -> Result<CoreConfigFacadeArtifact> {
         serialized_enum_values(&[
             RuntimeGraphDefaultSource::CanonicalProfileDefault,
             RuntimeGraphDefaultSource::ServiceDefault,
-            RuntimeGraphDefaultSource::HostDefaultWorkdir,
             RuntimeGraphDefaultSource::ProfileRuntimeDefault,
             RuntimeGraphDefaultSource::ProfileSessionDefault,
         ])?,
@@ -2545,6 +2548,7 @@ fn sample_session_config_draft() -> SessionConfigDraft {
         agent_id: AgentId::new("field-sample-agent"),
         profile_id: ProfileId::new("field-sample-profile"),
         kind: SessionKind::Full,
+        workspace_cwd: Some("/tmp/field-sample-workspace".to_owned()),
         resource_limits: Some(sample_resource_limits()),
         owner_id: Some("field-owner".to_owned()),
         history_window: Some(SessionHistoryWindow {
@@ -3531,8 +3535,13 @@ fn sample_session_state() -> SessionState {
         profile_id: sample_profile_id(),
         kind: SessionKind::Full,
         delegation: None,
+        workspace: Some(rusty_crew_core_protocol::SessionWorkspace {
+            cwd: "/home".to_owned(),
+            revision: 1,
+            updated_at: sample_timestamp(),
+        }),
         resource_limits: ResourceLimits {
-            workdir: Some("/home".to_owned()),
+            workdir: None,
             max_duration_ms: None,
             max_delegation_depth: Some(3),
         },

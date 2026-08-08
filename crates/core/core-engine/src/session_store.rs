@@ -102,7 +102,7 @@ pub(crate) fn save_engine_session_with_config(
 mod tests {
     use super::*;
     use rusty_crew_core_protocol::{
-        AgentId, ProfileId, ResourceLimits, SessionId, SessionKind, ToolProfile,
+        AgentId, ProfileId, ResourceLimits, SessionId, SessionKind, SessionWorkspace, ToolProfile,
     };
     use rusty_crew_core_session::SessionRegistry;
     use std::sync::Mutex;
@@ -200,8 +200,13 @@ mod tests {
             profile_id: ProfileId::new(profile_id),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: Some(SessionWorkspace {
+                cwd: "/home/dev/rusty-crew".to_string(),
+                revision: 1,
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            }),
             resource_limits: ResourceLimits {
-                workdir: Some("/home/dev/rusty-crew".to_string()),
+                workdir: None,
                 max_duration_ms: Some(60_000),
                 max_delegation_depth: Some(1),
             },

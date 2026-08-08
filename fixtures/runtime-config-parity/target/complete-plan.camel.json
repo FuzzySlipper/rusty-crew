@@ -33,8 +33,8 @@
         "agentId": "parity-runner",
         "profileId": "parity-runner",
         "kind": "full",
+        "workspaceCwd": "__FIXTURE_ROOT__/work",
         "resourceLimits": {
-          "workdir": "__FIXTURE_ROOT__/work",
           "maxDurationMs": 60000,
           "maxDelegationDepth": 4
         },
@@ -135,10 +135,6 @@
     {
       "path": "sessions[parity-runner-session].resourceLimits",
       "source": "profile_runtime_default"
-    },
-    {
-      "path": "sessions[parity-runner-session].resourceLimits.workdir",
-      "source": "host_default_workdir"
     }
   ],
   "diagnostics": []

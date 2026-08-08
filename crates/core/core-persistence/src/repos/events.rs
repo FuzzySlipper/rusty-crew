@@ -381,7 +381,8 @@ fn load_event_index_values(
 pub(crate) fn event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
     match event {
         CoreEvent::SessionCreated { state } => vec![state.session_id.clone()],
-        CoreEvent::SessionArchived { session_id } => vec![session_id.clone()],
+        CoreEvent::SessionArchived { session_id }
+        | CoreEvent::SessionWorkspaceChanged { session_id, .. } => vec![session_id.clone()],
         CoreEvent::DelegationLifecycleObserved { lifecycle } => vec![
             lifecycle.parent_session_id.clone(),
             lifecycle.delegated_session_id.clone(),
@@ -422,6 +423,7 @@ pub(crate) fn event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
             round.recipient_agent_id.clone(),
         ],
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
@@ -450,6 +452,7 @@ fn event_correlation_ids(event: &CoreEvent) -> Vec<String> {
         }
         CoreEvent::AgentRoundObserved { round } => vec![round.correlation_id.clone()],
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
@@ -478,6 +481,7 @@ fn event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
             execution.wake_id.clone().into_iter().collect()
         }
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::AgentMessageRouted { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::AgentRoundObserved { .. }

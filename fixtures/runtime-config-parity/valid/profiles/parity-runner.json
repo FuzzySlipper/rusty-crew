@@ -13,7 +13,6 @@
   },
   "runtime": {
     "defaultResourceLimits": {
-      "workdir": "__FIXTURE_ROOT__/work",
       "maxDurationMs": 60000,
       "maxDelegationDepth": 4
     },

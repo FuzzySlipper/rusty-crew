@@ -663,6 +663,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     deleteAgentRoute: unavailable("delete_agent_route"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
     createCrewAgentSession: unavailable("create_crew_agent_session"),
+    updateSessionWorkspace: unavailable("update_session_workspace"),
     archiveSession: unavailable("archive_session"),
     setSessionReasoningEffort: unavailable("set_session_reasoning_effort"),
     ensureConfiguredSession: unavailable("ensure_configured_session"),
@@ -1281,6 +1282,7 @@ function createNativeBridgeModule(
   >();
   const nativeSessionConfig = (config: NativeSessionConfigInput) => ({
     ...config,
+    workspace: config.workspace ?? undefined,
     resourceLimits: config.resourceLimits
       ? {
           workdir: config.resourceLimits.workdir ?? undefined,

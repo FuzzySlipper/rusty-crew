@@ -182,6 +182,8 @@ function summarizeCoreEvent(event: CoreEvent): string {
       return `session created for ${event.state.agentId}`;
     case "session_archived":
       return `session archived ${event.sessionId}`;
+    case "session_workspace_changed":
+      return `session workspace changed to ${event.current.cwd}`;
     case "agent_message_routed":
       if (event.message.correlationId?.startsWith("checkpoint:")) {
         return `delegation checkpoint routed to ${event.message.to}`;

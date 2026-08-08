@@ -1565,6 +1565,7 @@ async function handleHttpRequest(
               idempotencyKey: input.idempotencyKey,
               profileId: input.profileId as ProfileId,
               expectedProfileRevision: input.expectedProfileRevision,
+              workspaceCwd: input.workspaceCwd,
               requestedAt: state.now(),
             }),
           ),
@@ -3997,6 +3998,7 @@ function createServiceControlExecutor(
       const sessionId = requiredBodyString(command, "sessionId");
       const agentId = requiredBodyString(command, "agentId");
       const profileId = requiredBodyString(command, "profileId");
+      const workspaceCwd = requiredBodyString(command, "workspaceCwd");
       const kind = optionalBodyString(command, "kind") ?? "full";
       if (kind !== "full" && kind !== "worker" && kind !== "delegated") {
         throw new Error("session kind must be full, worker, or delegated");
@@ -4010,6 +4012,11 @@ function createServiceControlExecutor(
         agentId,
         profileId,
         kind,
+        workspace: {
+          cwd: workspaceCwd,
+          revision: 1,
+          updatedAt: state.now(),
+        },
         resourceLimits: createSessionResourceLimits(command),
         ...(profileSession === undefined
           ? {}
@@ -4020,6 +4027,35 @@ function createServiceControlExecutor(
         summary: `session ${session.sessionId} created`,
         affectedIds: { sessionId: session.sessionId },
         result: session,
+      };
+    },
+    switchSessionWorkspace: async (command) => {
+      const sessionId = command.target.sessionId as SessionId | undefined;
+      if (sessionId === undefined) {
+        throw new Error("session_workspace_session_id_required");
+      }
+      const cwd = requiredBodyString(command, "cwd");
+      const expectedRevision = command.body.expectedRevision;
+      if (
+        !Number.isSafeInteger(expectedRevision) ||
+        Number(expectedRevision) < 1
+      ) {
+        throw new Error("expectedRevision must be a positive integer");
+      }
+      const result = await state.bridge.updateSessionWorkspace({
+        sessionId,
+        cwd,
+        expectedRevision: Number(expectedRevision),
+        requestedAt: state.now(),
+      });
+      return {
+        status: "completed",
+        summary: `session ${sessionId} workspace is ${result.current.cwd}`,
+        affectedIds: {
+          sessionId,
+          workspaceRevision: result.current.revision,
+        },
+        result,
       };
     },
     archiveSession: async (command) => {
@@ -5015,14 +5051,9 @@ function createSessionResourceLimits(
   if (!isRecord(value)) {
     throw new Error("control body field resourceLimits must be an object");
   }
-  const workdir = value.workdir;
-  if (workdir !== undefined && typeof workdir !== "string") {
-    throw new Error("resourceLimits.workdir must be a string");
-  }
   const maxDurationMs = resourceLimitInteger(value, "maxDurationMs");
   const maxDelegationDepth = resourceLimitInteger(value, "maxDelegationDepth");
   return {
-    ...(workdir === undefined ? {} : { workdir }),
     ...(maxDurationMs === undefined ? {} : { maxDurationMs }),
     ...(maxDelegationDepth === undefined ? {} : { maxDelegationDepth }),
   };

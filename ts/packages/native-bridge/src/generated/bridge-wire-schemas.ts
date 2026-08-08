@@ -9626,6 +9626,12 @@ export const bridgeWireSchemaArtifact = {
             },
             "session_id": {
               "type": "string"
+            },
+            "workspace_cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -11196,6 +11202,12 @@ export const bridgeWireSchemaArtifact = {
                   },
                   "session_id": {
                     "type": "string"
+                  },
+                  "workspace_cwd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -11287,7 +11299,6 @@ export const bridgeWireSchemaArtifact = {
                 "enum": [
                   "canonical_profile_default",
                   "service_default",
-                  "host_default_workdir",
                   "profile_runtime_default",
                   "profile_session_default"
                 ],
@@ -11684,6 +11695,12 @@ export const bridgeWireSchemaArtifact = {
                     "type": "string"
                   },
                   "session_memory_prompt_profile_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "workspace_cwd": {
                     "type": [
                       "string",
                       "null"
@@ -13370,6 +13387,31 @@ export const bridgeWireSchemaArtifact = {
                 "tools"
               ],
               "type": "object"
+            },
+            "workspace": {
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "properties": {
+                "cwd": {
+                  "type": "string"
+                },
+                "revision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cwd",
+                "revision",
+                "updated_at"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
             }
           },
           "required": [
@@ -13688,6 +13730,31 @@ export const bridgeWireSchemaArtifact = {
                           "tools"
                         ],
                         "type": "object"
+                      },
+                      "workspace": {
+                        "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+                        "properties": {
+                          "cwd": {
+                            "type": "string"
+                          },
+                          "revision": {
+                            "format": "uint64",
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "updated_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "cwd",
+                          "revision",
+                          "updated_at"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
@@ -19993,6 +20060,31 @@ export const bridgeWireSchemaArtifact = {
                 "tools"
               ],
               "type": "object"
+            },
+            "workspace": {
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "properties": {
+                "cwd": {
+                  "type": "string"
+                },
+                "revision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cwd",
+                "revision",
+                "updated_at"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
             }
           },
           "required": [
@@ -21669,6 +21761,31 @@ export const bridgeWireSchemaArtifact = {
                 "tools"
               ],
               "type": "object"
+            },
+            "workspace": {
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "properties": {
+                "cwd": {
+                  "type": "string"
+                },
+                "revision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cwd",
+                "revision",
+                "updated_at"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
             }
           },
           "required": [
@@ -24844,6 +24961,272 @@ export const bridgeWireSchemaArtifact = {
       "title": "ReviewSubmissionRecord",
       "type": "object"
     },
+    "rusty_crew_core_protocol::types::SessionWorkspaceUpdateRecord": {
+      "properties": {
+        "current": {
+          "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd",
+            "revision",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "previous": {
+          "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd",
+            "revision",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "session": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "brain_turn_count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "delegation": {
+              "properties": {
+                "correlation_id": {
+                  "type": "string"
+                },
+                "parent_agent_id": {
+                  "type": "string"
+                },
+                "parent_session_id": {
+                  "type": "string"
+                },
+                "requested_task_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_action_index": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "source_wake_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "parent_session_id",
+                "parent_agent_id",
+                "source_wake_id",
+                "source_action_index",
+                "correlation_id"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "handle": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "history_window": {
+              "properties": {
+                "max_messages": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "inference_overrides": {
+              "default": {},
+              "properties": {
+                "reasoning_effort": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "full",
+                "worker",
+                "delegated"
+              ],
+              "type": "string"
+            },
+            "last_active_at": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            },
+            "resource_limits": {
+              "properties": {
+                "max_delegation_depth": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max_duration_ms": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "workdir": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "active",
+                "idle",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "tool_profile": {
+              "properties": {
+                "tools": {
+                  "items": {
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "input_schema": {
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "description"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "tools"
+              ],
+              "type": "object"
+            },
+            "workspace": {
+              "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+              "properties": {
+                "cwd": {
+                  "type": "string"
+                },
+                "revision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cwd",
+                "revision",
+                "updated_at"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "agent_id",
+            "profile_id",
+            "kind",
+            "resource_limits",
+            "tool_profile",
+            "status",
+            "brain_turn_count",
+            "created_at",
+            "last_active_at"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "previous",
+        "current",
+        "session"
+      ],
+      "title": "SessionWorkspaceUpdateRecord",
+      "type": "object"
+    },
     "rusty_crew_core_tool_registry::LocalCodeResourcePolicyPlan": {
       "properties": {
         "commandTimeoutMs": {
@@ -24921,13 +25304,9 @@ export const bridgeWireSchemaArtifact = {
             "type": "object"
           },
           "type": "array"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "workdir",
         "commandTimeoutMs",
         "maxReadBytes",
         "maxSearchFileBytes",
@@ -27420,6 +27799,7 @@ export const bridgeWireSchemaArtifact = {
     "update_lore_layer": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord",
     "update_roleplay_mechanic_diagnostic_outcome": "rusty_crew_core_persistence::contracts::RoleplayMechanicDiagnosticRecord",
     "update_roleplay_mechanic_session_attachment": "rusty_crew_core_persistence::contracts::RoleplayMechanicSessionAssociationRecord",
+    "update_session_workspace": "rusty_crew_core_protocol::types::SessionWorkspaceUpdateRecord",
     "validate_runtime_config_draft": "rusty_crew_core_config::RuntimeConfigValidationResult",
     "write_roleplay_character": "rusty_crew_roleplay_core::RoleplayCharacter",
     "write_roleplay_player_persona": "rusty_crew_roleplay_core::RoleplayPlayerPersona"

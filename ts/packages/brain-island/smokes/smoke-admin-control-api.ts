@@ -141,6 +141,17 @@ const executor: AdminControlExecutor = {
       affectedIds: { sessionId: command.target.sessionId ?? "" },
     };
   },
+  switchSessionWorkspace(command) {
+    return {
+      status: "completed",
+      summary: `Switched ${command.target.sessionId}.`,
+      affectedIds: { sessionId: command.target.sessionId ?? "" },
+      result: {
+        cwd: command.body.cwd,
+        expectedRevision: command.body.expectedRevision,
+      },
+    };
+  },
   setSessionEffort(command) {
     return {
       status: "completed",
@@ -357,6 +368,23 @@ assert.equal(auditSink.events[1]?.phase, "completed");
 assert.equal(observationSink.events.length, 2);
 assert.equal(observationSink.events[0]?.event_type, "admin_command_started");
 assert.equal(observationSink.events[1]?.event_type, "admin_command_completed");
+
+const switchWorkspace = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/sessions/session-alpha/workspace",
+    headers: authHeaders(),
+    body: { cwd: "/home/dev/second-repo", expectedRevision: 4 },
+  },
+  context,
+);
+assert.equal(switchWorkspace.status, 200);
+const switchWorkspaceData = okData<AdminControlResponse>(switchWorkspace);
+assert.equal(switchWorkspaceData.command.name, "switch_session_workspace");
+assert.deepEqual(switchWorkspaceData.outcome.result, {
+  cwd: "/home/dev/second-repo",
+  expectedRevision: 4,
+});
 
 const setEffort = await handleAdminControlRequest(
   {

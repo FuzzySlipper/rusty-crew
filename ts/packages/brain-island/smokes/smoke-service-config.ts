@@ -20,7 +20,6 @@ import {
   RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER,
   RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ORIGINATOR,
   RUSTY_CREW_DEFAULT_OPENAI_OAUTH_REDIRECT_URI,
-  RUSTY_CREW_DEFAULT_WORKDIR,
 } from "../src/service-config.js";
 import { loadRustyCrewRuntimeConfig } from "../src/service-runtime-config.js";
 
@@ -39,7 +38,6 @@ const defaultConfig = loadRustyCrewServiceConfig({
 });
 assert.equal(defaultConfig.paths.dataDir, RUSTY_CREW_DEFAULT_DATA_DIR);
 assert.equal(defaultConfig.deploymentRole, "production");
-assert.equal(defaultConfig.paths.defaultWorkdir, RUSTY_CREW_DEFAULT_WORKDIR);
 assert.equal(
   defaultConfig.paths.staticDir,
   existsSync(join(RUSTY_CREW_DEFAULT_DATA_DIR, "site"))
@@ -101,7 +99,6 @@ try {
   const config = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
     RUSTY_CREW_DEPLOYMENT_ROLE: "debug",
-    RUSTY_CREW_DEFAULT_WORKDIR: join(root, "work"),
     RUSTY_CREW_ADMIN_PORT: "19447",
     RUSTY_CREW_ADMIN_TOKEN: "local-token",
     RUSTY_CREW_OPENAI_OAUTH_ISSUER: "http://127.0.0.1:18001",
@@ -150,7 +147,6 @@ try {
   assert.equal(config.paths.runDir, join(root, "run"));
   assert.equal(config.paths.artifactDir, join(root, "artifacts"));
   assert.equal(config.paths.backupDir, join(root, "backups"));
-  assert.equal(config.paths.defaultWorkdir, join(root, "work"));
   assert.equal(config.paths.staticDir, undefined);
   assert.equal(config.admin.authMode, "bearer");
   assert.equal(config.admin.token, "local-token");

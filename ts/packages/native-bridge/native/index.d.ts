@@ -279,6 +279,7 @@ export declare class NativeBridgeBinding {
   createSession(config: JsSessionConfig): JsSessionState
   ensureConfiguredSession(config: JsSessionConfig): JsSessionState
   createCrewAgentSessionJson(inputJson: string): string
+  updateSessionWorkspaceJson(inputJson: string): string
   archiveSession(sessionId: string): JsSessionState
   setSessionReasoningEffort(sessionId: string, reasoningEffort?: string | undefined | null): JsSessionState
   listSessionsJson(): string
@@ -816,6 +817,7 @@ export interface JsSessionConfig {
   agentId: string
   profileId: string
   kind: string
+  workspace?: JsSessionWorkspace
   resourceLimits?: JsResourceLimits
   toolProfile?: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
@@ -844,10 +846,17 @@ export interface JsSessionState {
   profileId: string
   kind: string
   status: string
+  workspace?: JsSessionWorkspace
   resourceLimits: JsResourceLimits
   toolProfile: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
   reasoningEffort?: string
+}
+
+export interface JsSessionWorkspace {
+  cwd: string
+  revision: number
+  updatedAt: string
 }
 
 export interface JsShutdownSummary {

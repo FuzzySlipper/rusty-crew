@@ -217,6 +217,11 @@ function activitySummary(event: CoreEvent): {
         text: `Session archived ${event.sessionId}`,
         severity: "warning",
       };
+    case "session_workspace_changed":
+      return {
+        text: `Session workspace changed to ${event.current.cwd}`,
+        severity: "info",
+      };
     case "agent_message_routed":
       return {
         text: `Message routed ${event.message.from} -> ${event.message.to}`,

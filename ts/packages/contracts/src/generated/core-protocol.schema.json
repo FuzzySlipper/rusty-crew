@@ -2716,6 +2716,30 @@
         },
         {
           "properties": {
+            "current": {
+              "$ref": "#/$defs/SessionWorkspace"
+            },
+            "previous": {
+              "$ref": "#/$defs/SessionWorkspace"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_workspace_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "previous",
+            "current"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "session_id": {
               "type": "string"
             },
@@ -2943,6 +2967,7 @@
     "CoreEventKind": {
       "enum": [
         "session_created",
+        "session_workspace_changed",
         "session_archived",
         "agent_message_routed",
         "agent_message_delivery_observed",
@@ -3013,12 +3038,16 @@
         },
         "requestedAt": {
           "type": "string"
+        },
+        "workspaceCwd": {
+          "type": "string"
         }
       },
       "required": [
         "idempotencyKey",
         "profileId",
         "expectedProfileRevision",
+        "workspaceCwd",
         "requestedAt"
       ],
       "type": "object"
@@ -8654,6 +8683,16 @@
         },
         "tool_profile": {
           "$ref": "#/$defs/ToolProfile"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8862,6 +8901,16 @@
         },
         "tool_profile": {
           "$ref": "#/$defs/ToolProfile"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8944,6 +8993,72 @@
         "input",
         "provenance",
         "createdAt"
+      ],
+      "type": "object"
+    },
+    "SessionWorkspace": {
+      "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cwd",
+        "revision",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "SessionWorkspaceUpdate": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "cwd",
+        "expectedRevision",
+        "requestedAt"
+      ],
+      "type": "object"
+    },
+    "SessionWorkspaceUpdateRecord": {
+      "properties": {
+        "current": {
+          "$ref": "#/$defs/SessionWorkspace"
+        },
+        "previous": {
+          "$ref": "#/$defs/SessionWorkspace"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionState"
+        }
+      },
+      "required": [
+        "previous",
+        "current",
+        "session"
       ],
       "type": "object"
     },
@@ -9536,6 +9651,12 @@
     "session_state": {
       "$ref": "#/$defs/SessionState"
     },
+    "session_workspace_update": {
+      "$ref": "#/$defs/SessionWorkspaceUpdate"
+    },
+    "session_workspace_update_record": {
+      "$ref": "#/$defs/SessionWorkspaceUpdateRecord"
+    },
     "subscription_handle": {
       "format": "uint64",
       "minimum": 0,
@@ -9572,6 +9693,8 @@
     "resource_limits",
     "session_config",
     "session_state",
+    "session_workspace_update",
+    "session_workspace_update_record",
     "delegated_session_runtime_status",
     "delegated_resource_cleanup_report",
     "event_subscription",

@@ -213,7 +213,11 @@ impl CoreEngine {
                     .unwrap_or(""),
             ),
             session_workspace: fingerprint_text(
-                session.resource_limits.workdir.as_deref().unwrap_or(""),
+                session
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.cwd.as_str())
+                    .unwrap_or(""),
             ),
         }))
     }

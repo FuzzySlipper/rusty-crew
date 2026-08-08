@@ -32,6 +32,9 @@ import {
 import { createChatCompletionsBrain } from "./support/chat-completions-test-harness.js";
 
 const workdir = mkdtempSync(join(tmpdir(), "rusty-crew-local-tools-"));
+const secondWorkdir = mkdtempSync(
+  join(tmpdir(), "rusty-crew-local-tools-second-"),
+);
 const outsideDir = mkdtempSync(
   join(tmpdir(), "rusty-crew-local-tools-outside-"),
 );
@@ -50,6 +53,17 @@ writeFileSync(
   "utf8",
 );
 writeFileSync(outsideReadPath, "hello from outside local tools\n", "utf8");
+writeFileSync(
+  join(secondWorkdir, "note.txt"),
+  "hello from second workspace\n",
+  "utf8",
+);
+mkdirSync(join(secondWorkdir, "nested"), { recursive: true });
+writeFileSync(
+  join(secondWorkdir, "nested", "search-note.txt"),
+  "needle appears in the second workspace\n",
+  "utf8",
+);
 
 const sessionId = "local-tools-session" as SessionId;
 const agentId = "local-tools-agent" as AgentId;
@@ -185,8 +199,12 @@ try {
         agentId,
         profileId: "local-tools-profile" as ProfileId,
         kind: "full",
+        workspace: {
+          cwd: workdir,
+          revision: 1,
+          updatedAt: "2026-06-20T00:00:00Z",
+        },
         resourceLimits: {
-          workdir,
           maxDurationMs: 5_000,
         },
         toolProfile: {
@@ -267,6 +285,47 @@ try {
     "completed",
   );
 
+  await brain.wake({
+    wakeId: "wake-local-tools-second-workspace",
+    sessionId,
+    systemPrompt: "system",
+    roleAssembly: { instructions: "invoke selected local tools" },
+    state: {
+      session: {
+        handle: 1 as SessionHandle,
+        sessionId,
+        agentId,
+        profileId: "local-tools-profile" as ProfileId,
+        kind: "full",
+        workspace: {
+          cwd: secondWorkdir,
+          revision: 2,
+          updatedAt: "2026-06-20T00:01:00Z",
+        },
+        resourceLimits: { maxDurationMs: 5_000 },
+        toolProfile: {
+          tools: [
+            ...selection.toolProfile.tools,
+            ...searchSelection.toolProfile.tools,
+          ],
+        },
+        status: "idle",
+        brainTurnCount: 0,
+        createdAt: "2026-06-20T00:00:00Z",
+        lastActiveAt: "2026-06-20T00:01:00Z",
+      },
+      pendingMessages: [],
+      recentEvents: [],
+      childCompletions: [],
+      fanOutGroups: [],
+      deltaPolicy: defaultBodyDeltaPolicy,
+    },
+  });
+  assert.match(
+    textResult(toolResults.read_file),
+    /hello from second workspace/,
+  );
+
   console.log(
     JSON.stringify(
       {
@@ -289,6 +348,7 @@ try {
   );
 } finally {
   rmSync(workdir, { force: true, recursive: true });
+  rmSync(secondWorkdir, { force: true, recursive: true });
   rmSync(outsideDir, { force: true, recursive: true });
 }
 

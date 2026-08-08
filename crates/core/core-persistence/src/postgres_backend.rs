@@ -2398,7 +2398,10 @@ impl PostgresBackendStore {
                     record_json,
                     created_at
                  ) VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT(session_id) DO NOTHING"
+                 ON CONFLICT(session_id) DO UPDATE SET
+                    profile_id = EXCLUDED.profile_id,
+                    kind = EXCLUDED.kind,
+                    record_json = EXCLUDED.record_json"
             ),
             &[
                 &config.session_id.0,
@@ -3032,7 +3035,8 @@ fn postgres_should_persist_event(event: &CoreEvent) -> bool {
 fn postgres_event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
     match event {
         CoreEvent::SessionCreated { state } => vec![state.session_id.clone()],
-        CoreEvent::SessionArchived { session_id } => vec![session_id.clone()],
+        CoreEvent::SessionArchived { session_id }
+        | CoreEvent::SessionWorkspaceChanged { session_id, .. } => vec![session_id.clone()],
         CoreEvent::DelegationLifecycleObserved { lifecycle } => vec![
             lifecycle.parent_session_id.clone(),
             lifecycle.delegated_session_id.clone(),
@@ -3073,6 +3077,7 @@ fn postgres_event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
             round.recipient_agent_id.clone(),
         ],
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
@@ -3101,6 +3106,7 @@ fn postgres_event_correlation_ids(event: &CoreEvent) -> Vec<String> {
         }
         CoreEvent::AgentRoundObserved { round } => vec![round.correlation_id.clone()],
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::DelegationLifecycleObserved { .. }
         | CoreEvent::ExternalEventInjected { .. }
         | CoreEvent::DenDataUpdated { .. }
@@ -3129,6 +3135,7 @@ fn postgres_event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
             execution.wake_id.clone().into_iter().collect()
         }
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::AgentMessageRouted { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::AgentRoundObserved { .. }
@@ -3183,6 +3190,7 @@ fn postgres_event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> 
         },
         CoreEvent::CompletionPacketDelivered { .. } => vec![(COUNTER_COMPLETIONS, 1)],
         CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::SessionCreated { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::AgentRoundObserved { .. }
@@ -13313,6 +13321,7 @@ mod tests {
             profile_id: ProfileId::new("full-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: backend_resource_limits(),
             tool_profile: backend_tool_profile(),
             history_window: None,
@@ -13333,6 +13342,7 @@ mod tests {
             profile_id: ProfileId::new("full-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: backend_resource_limits(),
             tool_profile: backend_tool_profile(),
             history_window: None,
@@ -16253,6 +16263,7 @@ mod tests {
             profile_id: ProfileId::new("codex-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -16694,6 +16705,7 @@ mod tests {
             profile_id: ProfileId::new("recipient-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -16901,6 +16913,7 @@ mod tests {
             profile_id: ProfileId::new("retention-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,

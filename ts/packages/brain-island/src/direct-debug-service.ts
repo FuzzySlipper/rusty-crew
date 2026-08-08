@@ -335,7 +335,7 @@ function sessionSummary(
     createdAt: session.createdAt,
     lastActiveAt: session.lastActiveAt,
     toolCount: session.toolProfile.tools.length,
-    workdir: session.resourceLimits.workdir ?? undefined,
+    workdir: session.workspace?.cwd,
     effectiveDefaults: diagnostics?.effectiveDefaults,
   };
 }

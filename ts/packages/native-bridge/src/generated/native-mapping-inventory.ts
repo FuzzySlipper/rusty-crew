@@ -2140,7 +2140,8 @@ export const nativeMappingInventory = {
           "owner_id",
           "profile_id",
           "resource_limits",
-          "session_id"
+          "session_id",
+          "workspace_cwd"
         ]
       },
       "namedTypeScriptInterfaces": [

@@ -178,7 +178,11 @@ const api = await handleRustyViewChatRequest(
     method: "POST",
     url: "/v1/chat/sessions",
     headers: { "Idempotency-Key": "browser-create" },
-    body: { profile_id: "prime", expected_profile_revision: 4 },
+    body: {
+      profile_id: "prime",
+      expected_profile_revision: 4,
+      workspace_cwd: "/home/dev/rusty-crew",
+    },
     requestId: "browser-request",
   },
   {

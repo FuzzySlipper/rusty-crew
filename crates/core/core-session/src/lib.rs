@@ -2,11 +2,11 @@
 
 use rusty_crew_core_protocol::{
     AgentId, CoreError, CoreErrorKind, CoreResult, IsoTimestamp, ProfileId, SessionConfig,
-    SessionHandle, SessionId, SessionState, SessionStatus, MAX_RESOURCE_DELEGATION_DEPTH,
-    MAX_RESOURCE_DURATION_MS,
+    SessionHandle, SessionId, SessionKind, SessionState, SessionStatus, SessionWorkspace,
+    SessionWorkspaceUpdate, MAX_RESOURCE_DELEGATION_DEPTH, MAX_RESOURCE_DURATION_MS,
 };
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -51,9 +51,10 @@ impl SessionRegistry {
 
     pub fn create_session(
         &self,
-        config: SessionConfig,
+        mut config: SessionConfig,
         now: IsoTimestamp,
     ) -> CoreResult<SessionState> {
+        normalize_session_config_workspace(&mut config)?;
         validate_session_resource_limits(&config)?;
         let mut sessions =
             self.inner.sessions.lock().map_err(|_| {
@@ -74,6 +75,7 @@ impl SessionRegistry {
             profile_id: config.profile_id,
             kind: config.kind,
             delegation: config.delegation,
+            workspace: config.workspace,
             resource_limits: config.resource_limits,
             tool_profile: config.tool_profile,
             history_window: config.history_window,
@@ -103,7 +105,9 @@ impl SessionRegistry {
     }
 
     pub fn apply_config(&self, config: &SessionConfig) -> CoreResult<SessionState> {
-        validate_session_resource_limits(config)?;
+        let mut config = config.clone();
+        normalize_session_config_workspace(&mut config)?;
+        validate_session_resource_limits(&config)?;
         let mut sessions =
             self.inner.sessions.lock().map_err(|_| {
                 CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
@@ -115,6 +119,9 @@ impl SessionRegistry {
             )
         })?;
         state.resource_limits = config.resource_limits.clone();
+        if state.workspace.is_none() && config.workspace.is_some() {
+            state.workspace = config.workspace.clone();
+        }
         state.tool_profile = config.tool_profile.clone();
         state.history_window = config.history_window.clone();
         Ok(state.clone())
@@ -147,6 +154,69 @@ impl SessionRegistry {
         state.inference_overrides.reasoning_effort = reasoning_effort;
         state.last_active_at = now;
         Ok(state.clone())
+    }
+
+    pub fn update_workspace(
+        &self,
+        update: &SessionWorkspaceUpdate,
+    ) -> CoreResult<(SessionWorkspace, SessionState)> {
+        let mut sessions =
+            self.inner.sessions.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
+            })?;
+        let state = sessions.get_mut(&update.session_id).ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session {} not found", update.session_id),
+            )
+        })?;
+        if state.status == SessionStatus::Archived {
+            return Err(CoreError::new(
+                CoreErrorKind::SessionExpired,
+                "session_workspace_archived: archived sessions cannot switch workspace",
+            ));
+        }
+        if state.status != SessionStatus::Idle {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "session_workspace_busy: finish or cancel the active turn before switching workspace",
+            ));
+        }
+        let previous = state.workspace.clone().ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session_workspace_missing: session has no canonical workspace",
+            )
+        })?;
+        if previous.revision != update.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "session_workspace_revision_conflict: expected {}, found {}",
+                    update.expected_revision, previous.revision
+                ),
+            ));
+        }
+        let cwd = normalize_session_workspace_cwd(&update.cwd)?;
+        if cwd == previous.cwd {
+            return Ok((previous, state.clone()));
+        }
+        state.workspace = Some(SessionWorkspace {
+            cwd,
+            revision: previous.revision + 1,
+            updated_at: update.requested_at.clone(),
+        });
+        state.last_active_at = update.requested_at.clone();
+        Ok((previous, state.clone()))
+    }
+
+    pub fn restore_state(&self, state: SessionState) -> CoreResult<()> {
+        self.inner
+            .sessions
+            .lock()
+            .map_err(|_| CoreError::new(CoreErrorKind::InternalError, "session lock poisoned"))?
+            .insert(state.session_id.clone(), state);
+        Ok(())
     }
 
     pub fn get_session_by_agent(&self, agent_id: &AgentId) -> CoreResult<SessionState> {
@@ -311,7 +381,67 @@ impl SessionRegistry {
     }
 }
 
+pub fn normalize_session_workspace_cwd(cwd: &str) -> CoreResult<String> {
+    let trimmed = cwd.trim();
+    if trimmed.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session workspace cwd must not be blank",
+        ));
+    }
+    let path = Path::new(trimmed);
+    if !path.is_absolute() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session workspace cwd must be an absolute path",
+        ));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(Path::new("/")),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized.into_os_string().into_string().map_err(|_| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session workspace cwd must be valid UTF-8",
+        )
+    })
+}
+
+fn normalize_session_config_workspace(config: &mut SessionConfig) -> CoreResult<()> {
+    if let Some(workspace) = config.workspace.as_mut() {
+        workspace.cwd = normalize_session_workspace_cwd(&workspace.cwd)?;
+        if workspace.revision == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session workspace revision must be greater than zero",
+            ));
+        }
+        if workspace.updated_at.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session workspace updatedAt must not be blank",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_session_resource_limits(config: &SessionConfig) -> CoreResult<()> {
+    if config.kind == SessionKind::Full && config.resource_limits.workdir.is_some() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session_workspace_resource_limit_forbidden: full sessions use workspace, not resourceLimits.workdir",
+        ));
+    }
     if let Some(workdir) = config.resource_limits.workdir.as_deref() {
         if workdir.trim().is_empty() {
             return Err(CoreError::new(
@@ -369,8 +499,13 @@ mod tests {
             profile_id: ProfileId::new("resource-limits-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: workdir.map(|cwd| SessionWorkspace {
+                cwd: cwd.to_string(),
+                revision: 1,
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            }),
             resource_limits: ResourceLimits {
-                workdir: workdir.map(str::to_string),
+                workdir: None,
                 max_duration_ms: Some(60_000),
                 max_delegation_depth: Some(2),
             },
@@ -380,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_session_with_explicit_absolute_workdir() {
+    fn creates_session_with_explicit_absolute_workspace() {
         let registry = SessionRegistry::new();
         let state = registry
             .create_session(
@@ -390,18 +525,22 @@ mod tests {
             .expect("absolute workdir should be accepted");
 
         assert_eq!(
-            state.resource_limits.workdir.as_deref(),
+            state
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.cwd.as_str()),
             Some("/home/dev/goblinbench-fixture")
         );
+        assert_eq!(state.resource_limits.workdir, None);
     }
 
     #[test]
-    fn preserves_omitted_workdir_and_rejects_blank_or_relative_values() {
+    fn preserves_omitted_workspace_and_rejects_blank_or_relative_values() {
         let registry = SessionRegistry::new();
         let state = registry
             .create_session(config(None), "2026-07-15T00:00:00Z".to_string())
             .expect("omitted workdir should preserve default resolution");
-        assert_eq!(state.resource_limits.workdir, None);
+        assert_eq!(state.workspace, None);
 
         for invalid in ["", "   ", "relative/workdir"] {
             let error = SessionRegistry::new()
@@ -409,6 +548,50 @@ mod tests {
                 .expect_err("invalid workdir should be rejected");
             assert_eq!(error.kind, CoreErrorKind::InvalidInput);
         }
+    }
+
+    #[test]
+    fn switches_idle_workspace_with_revision_and_preserves_session_identity() {
+        let registry = SessionRegistry::new();
+        let original = registry
+            .create_session(
+                config(Some("/home/dev/one/./repo")),
+                "2026-07-15T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        let update = SessionWorkspaceUpdate {
+            session_id: original.session_id.clone(),
+            cwd: "/home/dev/two/../three".to_string(),
+            expected_revision: 1,
+            requested_at: "2026-07-15T00:01:00Z".to_string(),
+        };
+        let (previous, current) = registry.update_workspace(&update).unwrap();
+        assert_eq!(previous.cwd, "/home/dev/one/repo");
+        assert_eq!(current.session_id, original.session_id);
+        assert_eq!(current.agent_id, original.agent_id);
+        assert_eq!(current.profile_id, original.profile_id);
+        assert_eq!(current.workspace.as_ref().unwrap().cwd, "/home/dev/three");
+        assert_eq!(current.workspace.as_ref().unwrap().revision, 2);
+
+        let stale = registry.update_workspace(&update).unwrap_err();
+        assert_eq!(stale.kind, CoreErrorKind::ActionRejected);
+        assert!(stale
+            .message
+            .contains("session_workspace_revision_conflict"));
+
+        let mut busy = current;
+        busy.status = SessionStatus::Active;
+        registry.restore_state(busy).unwrap();
+        let busy_error = registry
+            .update_workspace(&SessionWorkspaceUpdate {
+                session_id: original.session_id,
+                cwd: "/home/dev/four".to_string(),
+                expected_revision: 2,
+                requested_at: "2026-07-15T00:02:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(busy_error.kind, CoreErrorKind::ActionRejected);
+        assert!(busy_error.message.contains("session_workspace_busy"));
     }
 
     #[test]

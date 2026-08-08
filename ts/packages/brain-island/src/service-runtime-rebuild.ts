@@ -996,8 +996,8 @@ function runtimeConfigSessionEntryFromState(
     agentId: session.agentId,
     profileId: session.profileId,
     kind: session.kind,
+    workspaceCwd: session.workspace?.cwd,
     resourceLimits: compactRecord({
-      workdir: session.resourceLimits.workdir,
       maxDurationMs: session.resourceLimits.maxDurationMs,
       maxDelegationDepth: session.resourceLimits.maxDelegationDepth,
     }),

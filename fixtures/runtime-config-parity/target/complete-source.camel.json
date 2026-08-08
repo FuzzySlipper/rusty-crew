@@ -2,7 +2,6 @@
   "hostFacts": {
     "configDir": "__FIXTURE_ROOT__/config",
     "engineDataDir": "__FIXTURE_ROOT__/engine",
-    "defaultWorkdir": "__FIXTURE_ROOT__/work",
     "postgresDatabaseUrlEnvPresent": true
   },
   "serviceDefaults": {},
@@ -33,7 +32,8 @@
       {
         "sessionId": "parity-runner-session",
         "agentId": "parity-runner",
-        "profileId": "parity-runner"
+        "profileId": "parity-runner",
+        "workspaceCwd": "__FIXTURE_ROOT__/work"
       }
     ],
     "scheduledJobs": [

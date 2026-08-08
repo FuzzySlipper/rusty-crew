@@ -421,6 +421,7 @@ export function toNativeCreateProfilePlan(
           agentId: plan.runtime_session.agent_id,
           profileId: plan.runtime_session.profile_id,
           kind: plan.runtime_session.kind,
+          workspaceCwd: plan.runtime_session.workspace_cwd ?? undefined,
           resourceLimits: toResourceLimits(
             plan.runtime_session.resource_limits,
           ),
@@ -476,6 +477,7 @@ export function toRuntimeConfigDraft(
       agentId: session.agent_id,
       profileId: session.profile_id,
       kind: session.kind,
+      workspaceCwd: session.workspace_cwd ?? undefined,
       resourceLimits: toResourceLimits(session.resource_limits),
       ownerId: session.owner_id ?? undefined,
       historyWindow: session.history_window
@@ -599,6 +601,7 @@ export interface RawCreateProfilePlan {
     agent_id: string;
     profile_id: string;
     kind: "full" | "worker" | "delegated";
+    workspace_cwd?: string;
     resource_limits?: RawResourceLimits;
     owner_id?: string;
     history_window?: {
@@ -781,6 +784,7 @@ export interface RawSessionConfigDraft {
   agent_id: string;
   profile_id: string;
   kind: "full" | "worker" | "delegated";
+  workspace_cwd?: string;
   resource_limits?: RawResourceLimits;
   owner_id?: string;
   history_window?: {

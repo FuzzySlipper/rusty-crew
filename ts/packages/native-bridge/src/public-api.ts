@@ -182,6 +182,7 @@ export interface NativeSessionConfigInput {
   agentId: string;
   profileId: string;
   kind: "full" | "worker" | "delegated";
+  workspace?: SessionState["workspace"];
   resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
   historyWindow?: SessionState["historyWindow"];
@@ -1152,7 +1153,6 @@ export interface NativeToolAvailabilityPlan {
 
 export interface NativeLocalCodeResourcePolicyInput {
   resourceLimits?: {
-    workdir?: string;
     maxDurationMs?: number;
   };
 }
@@ -1170,7 +1170,6 @@ export interface NativeLocalCodeToolResourcePolicy {
 }
 
 export interface NativeLocalCodeResourcePolicyPlan {
-  workdir: string;
   maxDurationMs?: number;
   commandTimeoutMs: number;
   maxReadBytes: number;
@@ -1235,7 +1234,6 @@ export interface NativeRuntimeGraphPlanInput {
   hostFacts: {
     configDir: string;
     engineDataDir: string;
-    defaultWorkdir?: string;
     postgresDatabaseUrlEnvPresent: boolean;
   };
   serviceDefaults: {
@@ -1308,7 +1306,6 @@ export interface NativeRuntimeGraphPlan {
     source:
       | "canonical_profile_default"
       | "service_default"
-      | "host_default_workdir"
       | "profile_runtime_default"
       | "profile_session_default";
   }>;
@@ -1335,6 +1332,7 @@ export interface NativeSessionConfigDraft {
   agentId: string;
   profileId: string;
   kind: "full" | "worker" | "delegated";
+  workspaceCwd?: string;
   resourceLimits?: ResourceLimits;
   ownerId?: string;
   historyWindow?: SessionState["historyWindow"];

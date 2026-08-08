@@ -63,6 +63,7 @@ mod restart_hydration;
 mod roleplay_proposals;
 mod runtime_activity;
 mod scheduler;
+mod session_workspace;
 
 fn test_engine() -> CoreEngine {
     test_engine_with_data_dir(unique_data_dir("engine"))
@@ -138,8 +139,13 @@ fn session_config(
         profile_id: ProfileId::new(profile_id),
         kind,
         delegation: None,
+        workspace: Some(SessionWorkspace {
+            cwd: "/home/dev/rusty-crew".to_string(),
+            revision: 1,
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }),
         resource_limits: ResourceLimits {
-            workdir: Some("/home/dev/rusty-crew".to_string()),
+            workdir: None,
             max_duration_ms: Some(60_000),
             max_delegation_depth: Some(1),
         },

@@ -499,7 +499,6 @@ function runtimeGraphPlanningFacts(
     hostFacts: {
       configDir: serviceConfig.paths.configDir,
       engineDataDir: serviceConfig.paths.engineDataDir,
-      defaultWorkdir: serviceConfig.paths.defaultWorkdir,
       postgresDatabaseUrlEnvPresent:
         serviceConfig.environmentVariablePresent(databaseUrlEnv),
     },
@@ -725,6 +724,7 @@ function runtimeConfigFromGraphPlan(
         agentId: session.agentId as AgentId,
         profileId: session.profileId as ProfileId,
         kind: session.kind,
+        workspaceCwd: session.workspaceCwd,
         resourceLimits: session.resourceLimits,
         ownerId: session.ownerId,
         historyWindow: session.historyWindow,
@@ -982,11 +982,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   );
   for (const session of runtimeConfig.sessions) {
     const profile = await loadProfile(session.profileId);
-    const configuredSession = sessionWithProfileDefaults(
-      session,
-      profile,
-      input.serviceConfig.paths.defaultWorkdir,
-    );
+    const configuredSession = sessionWithProfileDefaults(session, profile);
     const existing = existingSessionsById.get(session.sessionId);
     if (!existing && !createMissingSessions) {
       result.sessionsMissing += 1;
@@ -1294,31 +1290,26 @@ export async function registerConfiguredScheduledJobs(input: {
 export function sessionWithProfileDefaults(
   session: RustyCrewConfiguredSession,
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
-  defaultWorkdir?: string,
 ): RustyCrewConfiguredSession {
   const defaults = effectiveSessionDefaults(session, profile.profile);
   return {
     ...session,
-    resourceLimits: resourceLimitsWithDefaultWorkdir(
+    resourceLimits: sessionResourceLimits(
+      session.kind,
       session.resourceLimits ?? profile.profile.runtime?.defaultResourceLimits,
-      defaultWorkdir,
     ),
     toolProfile: session.toolProfile ?? profile.toolSelection.toolProfile,
     ...defaults,
   };
 }
 
-function resourceLimitsWithDefaultWorkdir(
+function sessionResourceLimits(
+  kind: RustyCrewConfiguredSession["kind"],
   limits: ResourceLimits | undefined,
-  defaultWorkdir: string | undefined,
 ): ResourceLimits | undefined {
-  if (defaultWorkdir === undefined) {
-    return limits;
-  }
-  return {
-    ...limits,
-    workdir: limits?.workdir ?? defaultWorkdir,
-  };
+  if (limits === undefined || kind !== "full") return limits;
+  const { workdir: _profileOrLegacyWorkdir, ...coordinationLimits } = limits;
+  return coordinationLimits;
 }
 
 export function effectiveSessionDefaults(
@@ -1348,12 +1339,21 @@ function nativeSessionConfig(session: RustyCrewConfiguredSession): {
   resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
   historyWindow?: { maxMessages?: number };
+  workspace?: { cwd: string; revision: number; updatedAt: string };
 } {
   return {
     sessionId: session.sessionId,
     agentId: session.agentId,
     profileId: session.profileId,
     kind: session.kind,
+    workspace:
+      session.workspaceCwd === undefined
+        ? undefined
+        : {
+            cwd: session.workspaceCwd,
+            revision: 1,
+            updatedAt: new Date().toISOString(),
+          },
     resourceLimits: session.resourceLimits,
     toolProfile: session.toolProfile,
     historyWindow:

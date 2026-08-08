@@ -8,6 +8,7 @@ pub struct CrewAgentSessionCreationRequest {
     pub idempotency_key: String,
     pub profile_id: ProfileId,
     pub expected_profile_revision: u64,
+    pub workspace_cwd: String,
     pub requested_at: IsoTimestamp,
 }
 

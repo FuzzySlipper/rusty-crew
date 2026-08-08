@@ -22,7 +22,6 @@ const profile = {
   },
   runtime: {
     defaultResourceLimits: {
-      workdir: "/home/dev/rusty-crew",
       maxDurationMs: 30_000,
     },
   },
@@ -49,17 +48,6 @@ const profileContext = {
   },
 };
 
-const profileWithoutResourceLimits = {
-  ...profileContext,
-  profile: {
-    ...profile,
-    runtime: {
-      ...profile.runtime,
-      defaultResourceLimits: undefined,
-    },
-  },
-};
-
 const inherited = sessionWithProfileDefaults(
   {
     sessionId: "runner-session" as SessionId,
@@ -71,20 +59,9 @@ const inherited = sessionWithProfileDefaults(
 );
 assert.equal(inherited.ownerId, "owner:profile");
 assert.equal(inherited.maxHistoryMessages, 200);
-assert.equal(inherited.resourceLimits?.workdir, "/home/dev/rusty-crew");
+assert.equal(inherited.resourceLimits?.workdir, undefined);
+assert.equal(inherited.resourceLimits?.maxDurationMs, 30_000);
 assert.equal(inherited.toolProfile?.tools[0]?.name, "read_file");
-
-const serviceDefaultWorkdir = sessionWithProfileDefaults(
-  {
-    sessionId: "default-workdir-session" as SessionId,
-    agentId: "runner" as AgentId,
-    profileId: "runner-profile" as ProfileId,
-    kind: "full",
-  },
-  profileWithoutResourceLimits,
-  "/home",
-);
-assert.equal(serviceDefaultWorkdir.resourceLimits?.workdir, "/home");
 
 const explicitSessionWorkdir = sessionWithProfileDefaults(
   {
@@ -95,12 +72,8 @@ const explicitSessionWorkdir = sessionWithProfileDefaults(
     resourceLimits: { workdir: "/tmp/session-workdir" },
   },
   profileContext,
-  "/home",
 );
-assert.equal(
-  explicitSessionWorkdir.resourceLimits?.workdir,
-  "/tmp/session-workdir",
-);
+assert.equal(explicitSessionWorkdir.resourceLimits?.workdir, undefined);
 
 const explicit = {
   sessionId: "explicit-session" as SessionId,
@@ -178,6 +151,11 @@ function session(sessionId: string): SessionState {
     agentId: "runner" as AgentId,
     profileId: "runner-profile" as ProfileId,
     kind: "full",
+    workspace: {
+      cwd: "/home/dev/rusty-crew",
+      revision: 1,
+      updatedAt: "2026-06-22T00:00:00.000Z",
+    },
     resourceLimits: {},
     toolProfile: {
       tools: [{ name: "read_file", description: "Read a file." }],

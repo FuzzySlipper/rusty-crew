@@ -307,11 +307,13 @@ export interface ChatActor {
 export interface CreateCrewChatSessionRequest {
   profile_id: string;
   expected_profile_revision: number;
+  workspace_cwd: string;
 }
 
 export interface CreateCrewChatSessionInput {
   profileId: string;
   expectedProfileRevision: number;
+  workspaceCwd: string;
   idempotencyKey: string;
   requestId: string;
 }
@@ -1611,6 +1613,7 @@ async function handleCreateCrewSession(
     const result = await context.createSession({
       profileId: parsed.value.profile_id,
       expectedProfileRevision: parsed.value.expected_profile_revision,
+      workspaceCwd: parsed.value.workspace_cwd,
       idempotencyKey,
       requestId,
     });
@@ -1670,6 +1673,7 @@ function parseCreateCrewSessionRequest(
   const record = value as Record<string, unknown>;
   const profileId = stringValue(record.profile_id);
   const revision = record.expected_profile_revision;
+  const workspaceCwd = stringValue(record.workspace_cwd);
   if (profileId === undefined || profileId.trim() === "") {
     return {
       ok: false,
@@ -1684,11 +1688,19 @@ function parseCreateCrewSessionRequest(
       message: "expected_profile_revision must be a positive integer.",
     };
   }
+  if (workspaceCwd === undefined || !workspaceCwd.startsWith("/")) {
+    return {
+      ok: false,
+      reasonCode: "crew_agent_session_creation_workspace_cwd_invalid",
+      message: "workspace_cwd must be an absolute path.",
+    };
+  }
   return {
     ok: true,
     value: {
       profile_id: profileId,
       expected_profile_revision: revision as number,
+      workspace_cwd: workspaceCwd,
     },
   };
 }

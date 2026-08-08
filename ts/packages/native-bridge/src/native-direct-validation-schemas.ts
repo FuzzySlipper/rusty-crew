@@ -63,6 +63,16 @@ export const nativeSessionStateSummarySchema = Type.Object(
       Type.Literal("worker"),
       Type.Literal("delegated"),
     ]),
+    workspace: Type.Optional(
+      Type.Object(
+        {
+          cwd: Type.String(),
+          revision: Type.Number({ minimum: 1 }),
+          updatedAt: Type.String(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     status: Type.Union([
       Type.Literal("active"),
       Type.Literal("idle"),

@@ -967,7 +967,7 @@
     "/v1/admin/control/sessions": {
       "post": {
         "operationId": "adminControlSessionsCreate",
-        "summary": "Create a runtime session with optional bounded resourceLimits, including an absolute workdir.",
+        "summary": "Create a runtime session with an explicit absolute workspaceCwd and optional bounded resource limits.",
         "tags": ["session"],
         "security": [{ "AdminBearer": [] }],
         "responses": {
@@ -1171,6 +1171,33 @@
         "x-rusty-crew-stability": "stable",
         "x-rusty-crew-contract-detail": "capability",
         "x-rusty-crew-command-name": "resume_runtime"
+      }
+    },
+    "/v1/admin/control/sessions/{session_id}/workspace": {
+      "post": {
+        "operationId": "adminControlSessionsWorkspace",
+        "summary": "Switch an idle session to an absolute workspace cwd using its expected workspace revision.",
+        "tags": ["session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.control.sessions.workspace",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability",
+        "x-rusty-crew-command-name": "switch_session_workspace"
       }
     },
     "/v1/admin/control/shutdown": {
@@ -5740,7 +5767,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 231,
+    "capability_count": 232,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

@@ -656,6 +656,11 @@ export type CoreEvent = {
   state: SessionState;
   type: "session_created";
 } | {
+  current: SessionWorkspace;
+  previous: SessionWorkspace;
+  sessionId: SessionId;
+  type: "session_workspace_changed";
+} | {
   sessionId: SessionId;
   type: "session_archived";
 } | {
@@ -699,7 +704,7 @@ export type CoreEvent = {
   type: "completion_packet_delivered";
 };
 
-export type CoreEventKind = "session_created" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "session_execution_observed" | "logical_turn_lifecycle_observed" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
+export type CoreEventKind = "session_created" | "session_workspace_changed" | "session_archived" | "agent_message_routed" | "agent_message_delivery_observed" | "agent_round_observed" | "delegation_lifecycle_observed" | "external_event_injected" | "den_data_updated" | "brain_wake_requested" | "session_execution_observed" | "logical_turn_lifecycle_observed" | "brain_event_observed" | "brain_actions_accepted" | "completion_packet_delivered";
 
 export type CrewAgentSessionCreationOutcome = "created" | "replayed" | "recovered";
 
@@ -716,6 +721,7 @@ export type CrewAgentSessionCreationRequest = {
   idempotencyKey: string;
   profileId: string;
   requestedAt: string;
+  workspaceCwd: string;
 };
 
 export type DelegatedCompletion = {
@@ -2012,6 +2018,7 @@ export type SessionConfig = {
   resourceLimits: ResourceLimits;
   sessionId: SessionId;
   toolProfile: ToolProfile;
+  workspace?: SessionWorkspace | null;
 };
 
 export type SessionExecutionOutcome = "completed" | "failed" | "cancelled" | "interrupted";
@@ -2061,6 +2068,7 @@ export type SessionState = {
   sessionId: SessionId;
   status: SessionStatus;
   toolProfile: ToolProfile;
+  workspace?: SessionWorkspace | null;
 };
 
 export type SessionStatus = "active" | "idle" | "archived";
@@ -2076,6 +2084,25 @@ export type SessionTurnRequested = {
   requestId: string;
   runId?: string | null;
   sessionId: string;
+};
+
+export type SessionWorkspace = {
+  cwd: string;
+  revision: number;
+  updatedAt: string;
+};
+
+export type SessionWorkspaceUpdate = {
+  cwd: string;
+  expectedRevision: number;
+  requestedAt: string;
+  sessionId: string;
+};
+
+export type SessionWorkspaceUpdateRecord = {
+  current: SessionWorkspace;
+  previous: SessionWorkspace;
+  session: SessionState;
 };
 
 export type ToolCallMetadata = {

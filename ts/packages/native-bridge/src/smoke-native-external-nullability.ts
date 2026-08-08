@@ -71,7 +71,7 @@ try {
     agentId,
     profileId: "nullability-profile",
     kind: "full",
-    resourceLimits: { workdir: dataDir },
+    workspace: { cwd: dataDir, revision: 1, updatedAt: now },
     toolProfile: { tools: [] },
   });
 

@@ -114,7 +114,8 @@ use rusty_crew_core_protocol::{
     ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
     ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery, SessionConfig,
     SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind,
-    SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    SessionState, SessionStatus, SessionWorkspace, SourceSystemReference, TaskId, ToolCallMetadata,
+    ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;

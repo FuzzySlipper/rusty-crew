@@ -26,6 +26,13 @@ impl NativeBridge {
         self.engine()?.list_sessions()
     }
 
+    pub fn update_session_workspace(
+        &self,
+        update: rusty_crew_core_bridge_api::SessionWorkspaceUpdate,
+    ) -> CoreResult<rusty_crew_core_bridge_api::SessionWorkspaceUpdateRecord> {
+        self.engine()?.update_session_workspace(&update)
+    }
+
     pub fn set_session_reasoning_effort(
         &self,
         session_id: SessionId,
@@ -59,6 +66,11 @@ pub(crate) fn to_js_session_state(
         profile_id: state.profile_id.0,
         kind: format!("{:?}", state.kind).to_ascii_lowercase(),
         status: format!("{:?}", state.status).to_ascii_lowercase(),
+        workspace: state.workspace.map(|workspace| JsSessionWorkspace {
+            cwd: workspace.cwd,
+            revision: workspace.revision as f64,
+            updated_at: workspace.updated_at,
+        }),
         resource_limits: JsResourceLimits {
             workdir: state.resource_limits.workdir,
             max_duration_ms: state.resource_limits.max_duration_ms,
@@ -109,6 +121,13 @@ pub(crate) fn js_session_config(
         profile_id: rusty_crew_core_bridge_api::ProfileId::new(config.profile_id),
         kind: parse_session_kind(&config.kind)?,
         delegation: None,
+        workspace: config
+            .workspace
+            .map(|workspace| rusty_crew_core_bridge_api::SessionWorkspace {
+                cwd: workspace.cwd,
+                revision: workspace.revision as u64,
+                updated_at: workspace.updated_at,
+            }),
         resource_limits: match resource_limits {
             Some(limits) => rusty_crew_core_bridge_api::ResourceLimits {
                 workdir: limits.workdir,

@@ -2313,13 +2313,25 @@
         "id": "admin.control.sessions.create",
         "method": "POST",
         "path_template": "/v1/admin/control/sessions",
-        "description": "Create a runtime session with optional bounded resourceLimits, including an absolute workdir.",
+        "description": "Create a runtime session with an explicit absolute workspaceCwd and optional bounded resource limits.",
         "auth": "admin",
         "mutation": "control",
         "stability": "stable",
         "tags": ["session"],
         "public": true,
         "command_name": "create_session"
+      },
+      {
+        "id": "admin.control.sessions.workspace",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/workspace",
+        "description": "Switch an idle session to an absolute workspace cwd using its expected workspace revision.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["session"],
+        "public": true,
+        "command_name": "switch_session_workspace"
       },
       {
         "id": "admin.control.sessions.archive",
@@ -4126,6 +4138,13 @@
         "capability_id": "admin.control.sessions.create",
         "method": "POST",
         "path_template": "/v1/admin/control/sessions",
+        "route_id": "admin.control",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.control.sessions.workspace",
+        "method": "POST",
+        "path_template": "/v1/admin/control/sessions/{session_id}/workspace",
         "route_id": "admin.control",
         "auth_phase": "after_auth"
       },

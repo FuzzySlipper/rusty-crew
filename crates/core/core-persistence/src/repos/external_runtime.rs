@@ -3019,6 +3019,7 @@ mod tests {
             profile_id: ProfileId::new(format!("{agent_id}-profile")),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,

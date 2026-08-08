@@ -37,6 +37,13 @@ pub struct JsResourceLimits {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsSessionWorkspace {
+    pub cwd: String,
+    pub revision: f64,
+    pub updated_at: String,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsBrainModelConfig {
     pub provider: String,
     pub model_name: String,
@@ -146,6 +153,7 @@ pub struct JsSessionConfig {
     pub agent_id: String,
     pub profile_id: String,
     pub kind: String,
+    pub workspace: Option<JsSessionWorkspace>,
     pub resource_limits: Option<JsResourceLimits>,
     pub tool_profile: Option<JsToolProfile>,
     pub history_window: Option<JsSessionHistoryWindow>,
@@ -159,6 +167,7 @@ pub struct JsSessionState {
     pub profile_id: String,
     pub kind: String,
     pub status: String,
+    pub workspace: Option<JsSessionWorkspace>,
     pub resource_limits: JsResourceLimits,
     pub tool_profile: JsToolProfile,
     pub history_window: Option<JsSessionHistoryWindow>,

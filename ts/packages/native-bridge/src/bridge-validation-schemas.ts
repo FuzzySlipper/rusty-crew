@@ -3,6 +3,22 @@ import { Type } from "typebox";
 const unknownRecord = Type.Record(Type.String(), Type.Unknown());
 const nullableNumber = Type.Union([Type.Number(), Type.Null()]);
 const nullableString = Type.Union([Type.String(), Type.Null()]);
+const sessionWorkspaceSchema = Type.Object(
+  {
+    cwd: Type.String(),
+    revision: Type.Number(),
+    updatedAt: Type.String(),
+  },
+  { additionalProperties: true },
+);
+const rawSessionWorkspaceSchema = Type.Object(
+  {
+    cwd: Type.String(),
+    revision: Type.Number(),
+    updated_at: Type.String(),
+  },
+  { additionalProperties: true },
+);
 
 const providerStateInputSchema = Type.Object(
   {
@@ -44,6 +60,7 @@ export const sessionStateSchema = Type.Object(
       Type.Literal("worker"),
       Type.Literal("delegated"),
     ]),
+    workspace: Type.Optional(sessionWorkspaceSchema),
     resourceLimits: unknownRecord,
     toolProfile: toolProfileSchema,
     inferenceOverrides: Type.Optional(
@@ -246,6 +263,9 @@ export const rawSessionStateSchema = Type.Object(
       Type.Literal("delegated"),
     ]),
     delegation: Type.Optional(Type.Unknown()),
+    workspace: Type.Optional(
+      Type.Union([rawSessionWorkspaceSchema, Type.Null()]),
+    ),
     resource_limits: Type.Optional(rawResourceLimitsSchema),
     tool_profile: Type.Optional(rawToolProfileSchema),
     history_window: Type.Optional(

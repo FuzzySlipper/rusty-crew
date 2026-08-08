@@ -319,6 +319,7 @@ fn event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> {
         },
         CoreEvent::CompletionPacketDelivered { .. } => vec![(COUNTER_COMPLETIONS, 1)],
         CoreEvent::SessionCreated { .. }
+        | CoreEvent::SessionWorkspaceChanged { .. }
         | CoreEvent::SessionArchived { .. }
         | CoreEvent::AgentMessageDeliveryObserved { .. }
         | CoreEvent::AgentRoundObserved { .. }

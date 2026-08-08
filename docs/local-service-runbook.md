@@ -402,7 +402,8 @@ Minimal shape:
       "sessionId": "prime-session",
       "agentId": "prime",
       "profileId": "prime",
-      "kind": "full"
+      "kind": "full",
+      "workspaceCwd": "/home/dev/rusty-crew"
     }
   ]
 }

@@ -230,7 +230,12 @@ const crewCreation = toCrewAgentSessionCreationRecord({
     agent_id: "agent-1" as never,
     profile_id: "profile-1" as never,
     kind: "full",
-    resource_limits: { workdir: "/home", max_delegation_depth: 2 },
+    workspace: {
+      cwd: "/home/dev/repo",
+      revision: 1,
+      updated_at: "2026-07-10T00:00:00Z",
+    },
+    resource_limits: { max_delegation_depth: 2 },
     tool_profile: { tools: [] },
     status: "idle",
     brain_turn_count: 0,
@@ -239,7 +244,8 @@ const crewCreation = toCrewAgentSessionCreationRecord({
   },
 });
 assert.equal(crewCreation.session.sessionId, "crew-session-1");
-assert.equal(crewCreation.session.resourceLimits.workdir, "/home");
+assert.equal(crewCreation.session.workspace?.cwd, "/home/dev/repo");
+assert.equal(crewCreation.session.resourceLimits.workdir, undefined);
 assert.equal(crewCreation.profileRevision, 7);
 
 assert.equal(new Set(directBridgeValidatedOperations).size, 29);

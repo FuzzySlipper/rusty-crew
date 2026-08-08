@@ -582,6 +582,7 @@ pub struct SessionConfigDraft {
     pub agent_id: AgentId,
     pub profile_id: ProfileId,
     pub kind: SessionKind,
+    pub workspace_cwd: Option<String>,
     pub resource_limits: Option<ResourceLimits>,
     pub owner_id: Option<String>,
     pub history_window: Option<SessionHistoryWindow>,
@@ -1606,6 +1607,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         agent_id: agent_id.clone(),
         profile_id: profile_id.clone(),
         kind,
+        workspace_cwd: None,
         resource_limits: None,
         owner_id: None,
         history_window: None,
@@ -3002,6 +3004,7 @@ impl<'a> RuntimeConfigValidator<'a> {
                 &format!("sessions[{index}].profileId"),
                 "session",
             );
+            validate_session_workspace(self, index, session);
             validate_resource_limits(
                 self,
                 &format!("sessions[{index}].resourceLimits"),
@@ -3332,6 +3335,45 @@ fn validate_resource_limits(
         limits.max_delegation_depth,
         MAX_RESOURCE_DELEGATION_DEPTH,
     );
+}
+
+fn validate_session_workspace(
+    validator: &mut RuntimeConfigValidator<'_>,
+    index: usize,
+    session: &SessionConfigDraft,
+) {
+    let path = format!("sessions[{index}].workspaceCwd");
+    match session.workspace_cwd.as_deref() {
+        Some(cwd) if cwd.trim().is_empty() => validator.error(
+            "invalid_session_workspace",
+            path,
+            "workspaceCwd must not be blank",
+        ),
+        Some(cwd) if !Path::new(cwd).is_absolute() => validator.error(
+            "invalid_session_workspace",
+            path,
+            "workspaceCwd must be an absolute path",
+        ),
+        None if session.kind == SessionKind::Full => validator.error(
+            "session_workspace_required",
+            path,
+            "full sessions require an explicit workspaceCwd",
+        ),
+        _ => {}
+    }
+    if session.kind == SessionKind::Full
+        && session
+            .resource_limits
+            .as_ref()
+            .and_then(|limits| limits.workdir.as_ref())
+            .is_some()
+    {
+        validator.error(
+            "session_workspace_resource_limit_forbidden",
+            format!("sessions[{index}].resourceLimits.workdir"),
+            "full-session workdir belongs in workspaceCwd, not resourceLimits",
+        );
+    }
 }
 
 fn validate_context_policy(
@@ -4246,6 +4288,7 @@ mod tests {
                 agent_id: AgentId::new("runner-agent"),
                 profile_id: ProfileId::new("runner"),
                 kind: SessionKind::Full,
+                workspace_cwd: Some("/tmp/rusty-crew/work".to_string()),
                 resource_limits: None,
                 owner_id: None,
                 history_window: None,
@@ -4541,6 +4584,7 @@ mod tests {
                 agent_id: AgentId::new("field-created-profile"),
                 profile_id: ProfileId::new("field-created-profile"),
                 kind: SessionKind::Full,
+                workspace_cwd: None,
                 resource_limits: None,
                 owner_id: None,
                 history_window: None,
@@ -4894,8 +4938,9 @@ mod tests {
                 agent_id: AgentId::new("runner-agent"),
                 profile_id: ProfileId::new("runner"),
                 kind: SessionKind::Full,
+                workspace_cwd: Some("/tmp/rusty-crew/work".to_string()),
                 resource_limits: Some(ResourceLimits {
-                    workdir: Some("/tmp/rusty-crew/work".to_string()),
+                    workdir: None,
                     max_duration_ms: Some(60_000),
                     max_delegation_depth: Some(4),
                 }),

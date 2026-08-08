@@ -368,6 +368,21 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn update_session_workspace_json(&self, input_json: String) -> napi::Result<String> {
+        let request = parse_json::<rusty_crew_core_protocol::SessionWorkspaceUpdate>(
+            &input_json,
+            "session workspace update",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .update_session_workspace(request)
+                .map_err(to_napi_error)?,
+            "session workspace update record",
+        )
+    }
+
+    #[napi]
     pub fn archive_session(&self, session_id: String) -> napi::Result<JsSessionState> {
         let bridge = self.bridge()?;
         let state = bridge

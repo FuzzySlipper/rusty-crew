@@ -103,6 +103,65 @@ impl CoreEngine {
         Ok(state)
     }
 
+    pub fn update_session_workspace(
+        &self,
+        update: &SessionWorkspaceUpdate,
+    ) -> CoreResult<SessionWorkspaceUpdateRecord> {
+        if update.requested_at.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session_workspace_requested_at_required: requestedAt is required",
+            ));
+        }
+        let original = self.sessions.get_session(&update.session_id)?;
+        if original.status != SessionStatus::Archived
+            && self.project_session_execution(original.clone())?.status != SessionStatus::Idle
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "session_workspace_busy: finish or cancel the active turn before switching workspace",
+            ));
+        }
+        let mut config = load_engine_session_configs(&self.store)?
+            .into_iter()
+            .find(|config| config.session_id == update.session_id)
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    "session_workspace_config_missing: persisted session configuration was not found",
+                )
+            })?;
+        let (previous, state) = self.sessions.update_workspace(update)?;
+        let current = state.workspace.clone().ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "updated session workspace was not retained",
+            )
+        })?;
+        if current == previous {
+            return Ok(SessionWorkspaceUpdateRecord {
+                previous,
+                current,
+                session: state,
+            });
+        }
+        config.workspace = Some(current.clone());
+        if let Err(error) = save_engine_session_with_config(&self.store, &state, &config) {
+            self.sessions.restore_state(original)?;
+            return Err(error);
+        }
+        self.bus.publish(CoreEvent::SessionWorkspaceChanged {
+            session_id: update.session_id.clone(),
+            previous: previous.clone(),
+            current: current.clone(),
+        })?;
+        Ok(SessionWorkspaceUpdateRecord {
+            previous,
+            current,
+            session: state,
+        })
+    }
+
     pub fn archive_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
         let now = self.now();
         self.archive_active_external_bindings_for_session(session_id, &now)?;

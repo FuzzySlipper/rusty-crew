@@ -3193,6 +3193,11 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       agentId: "interaction-agent",
       profileId: "interaction-profile",
       kind: "full",
+      workspace: {
+        cwd: "/home/dev/rusty-crew",
+        revision: 1,
+        updatedAt: now(),
+      },
       toolProfile: { tools: [] },
     });
     await bridge.bindExternalAgent({
@@ -3208,6 +3213,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
         messageDeliveryPolicy: "immediate_steer",
         purpose: "crew_agent",
         nativeThreadId: "native-thread-1",
+        cwd: "/home/dev/rusty-crew",
         effectiveConfigFingerprint: "interaction-test",
         status: "active",
         revision: 0,
@@ -3281,7 +3287,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
     );
     assert.deepEqual(
       (turnStart?.params as Record<string, unknown>)?.environments,
-      [{ environmentId: "local", cwd: "/home" }],
+      [{ environmentId: "local", cwd: "/home/dev/rusty-crew" }],
     );
     assert.deepEqual((turnStart?.params as Record<string, unknown>)?.input, [
       {
@@ -3464,7 +3470,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
     );
     assert.deepEqual(
       (defaultTurnStart?.params as Record<string, unknown>)?.environments,
-      [{ environmentId: "local", cwd: "/home" }],
+      [{ environmentId: "local", cwd: "/home/dev/rusty-crew" }],
     );
   } finally {
     await controller.stop().catch(() => undefined);

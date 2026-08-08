@@ -14,8 +14,8 @@
         "agent_id": "parity-runner",
         "profile_id": "parity-runner",
         "kind": "full",
+        "workspace_cwd": "__FIXTURE_ROOT__/work",
         "resource_limits": {
-          "workdir": "__FIXTURE_ROOT__/work",
           "max_duration_ms": 60000,
           "max_delegation_depth": 4
         },
@@ -103,7 +103,6 @@
       },
       "runtime": {
         "default_resource_limits": {
-          "workdir": "__FIXTURE_ROOT__/work",
           "max_duration_ms": 60000,
           "max_delegation_depth": 4
         },

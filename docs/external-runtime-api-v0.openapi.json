@@ -3113,6 +3113,16 @@
           },
           {
             "properties": {
+              "current": { "$ref": "#/components/schemas/SessionWorkspace" },
+              "previous": { "$ref": "#/components/schemas/SessionWorkspace" },
+              "session_id": { "type": "string" },
+              "type": { "const": "session_workspace_changed", "type": "string" }
+            },
+            "required": ["type", "session_id", "previous", "current"],
+            "type": "object"
+          },
+          {
+            "properties": {
               "session_id": { "type": "string" },
               "type": { "const": "session_archived", "type": "string" }
             },
@@ -3246,6 +3256,7 @@
       "CoreEventKind": {
         "enum": [
           "session_created",
+          "session_workspace_changed",
           "session_archived",
           "agent_message_routed",
           "agent_message_delivery_observed",
@@ -3297,12 +3308,14 @@
           },
           "idempotencyKey": { "type": "string" },
           "profileId": { "type": "string" },
-          "requestedAt": { "type": "string" }
+          "requestedAt": { "type": "string" },
+          "workspaceCwd": { "type": "string" }
         },
         "required": [
           "idempotencyKey",
           "profileId",
           "expectedProfileRevision",
+          "workspaceCwd",
           "requestedAt"
         ],
         "type": "object"
@@ -6542,7 +6555,13 @@
           "profile_id": { "type": "string" },
           "resource_limits": { "$ref": "#/components/schemas/ResourceLimits" },
           "session_id": { "type": "string" },
-          "tool_profile": { "$ref": "#/components/schemas/ToolProfile" }
+          "tool_profile": { "$ref": "#/components/schemas/ToolProfile" },
+          "workspace": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionWorkspace" },
+              { "type": "null" }
+            ]
+          }
         },
         "required": [
           "session_id",
@@ -6650,7 +6669,13 @@
           "resource_limits": { "$ref": "#/components/schemas/ResourceLimits" },
           "session_id": { "type": "string" },
           "status": { "$ref": "#/components/schemas/SessionStatus" },
-          "tool_profile": { "$ref": "#/components/schemas/ToolProfile" }
+          "tool_profile": { "$ref": "#/components/schemas/ToolProfile" },
+          "workspace": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionWorkspace" },
+              { "type": "null" }
+            ]
+          }
         },
         "required": [
           "handle",
@@ -6701,6 +6726,39 @@
           "provenance",
           "createdAt"
         ],
+        "type": "object"
+      },
+      "SessionWorkspace": {
+        "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; delegated workdir\nconfinement remains a separate resource-limit concern.",
+        "properties": {
+          "cwd": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "updated_at": { "type": "string" }
+        },
+        "required": ["cwd", "revision", "updated_at"],
+        "type": "object"
+      },
+      "SessionWorkspaceUpdate": {
+        "properties": {
+          "cwd": { "type": "string" },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requestedAt": { "type": "string" },
+          "sessionId": { "type": "string" }
+        },
+        "required": ["sessionId", "cwd", "expectedRevision", "requestedAt"],
+        "type": "object"
+      },
+      "SessionWorkspaceUpdateRecord": {
+        "properties": {
+          "current": { "$ref": "#/components/schemas/SessionWorkspace" },
+          "previous": { "$ref": "#/components/schemas/SessionWorkspace" },
+          "session": { "$ref": "#/components/schemas/SessionState" }
+        },
+        "required": ["previous", "current", "session"],
         "type": "object"
       },
       "ToolCallMetadata": {

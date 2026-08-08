@@ -187,7 +187,8 @@ use rusty_crew_core_protocol::{
     ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
     SessionActivityDigestQuery, SessionConfig, SessionExecutionOutcome, SessionExecutionPhase,
     SessionExecutionSource, SessionExecutionState, SessionId, SessionKind, SessionLifecycleStatus,
-    SessionState, SessionStatus, ShutdownSummary, ToolProfile, TurnProjectionId,
+    SessionState, SessionStatus, SessionWorkspace, SessionWorkspaceUpdate,
+    SessionWorkspaceUpdateRecord, ShutdownSummary, ToolProfile, TurnProjectionId,
     WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;

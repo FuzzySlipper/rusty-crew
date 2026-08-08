@@ -5,6 +5,14 @@ import type {
   SessionState,
   TaskId,
 } from "@rusty-crew/contracts";
+import {
+  toSessionWorkspace,
+  type RawSessionWorkspace,
+} from "./session-workspace-wire.js";
+import {
+  toSessionResourceLimits,
+  type RawSessionResourceLimits,
+} from "./session-resource-wire.js";
 
 export interface RawSessionState {
   handle: number;
@@ -20,11 +28,8 @@ export interface RawSessionState {
     requested_task_id?: TaskId;
     correlation_id: string;
   };
-  resource_limits?: {
-    workdir?: string;
-    max_duration_ms?: number;
-    max_delegation_depth?: number;
-  };
+  workspace?: RawSessionWorkspace | null;
+  resource_limits?: RawSessionResourceLimits;
   tool_profile?: {
     tools: Array<{
       name: string;
@@ -61,11 +66,9 @@ export function toSessionState(state: RawSessionState): SessionState {
           correlationId: state.delegation.correlation_id,
         }
       : undefined,
-    resourceLimits: {
-      workdir: state.resource_limits?.workdir,
-      maxDurationMs: state.resource_limits?.max_duration_ms,
-      maxDelegationDepth: state.resource_limits?.max_delegation_depth,
-    },
+    workspace:
+      state.workspace == null ? undefined : toSessionWorkspace(state.workspace),
+    resourceLimits: toSessionResourceLimits(state.resource_limits),
     toolProfile: {
       tools:
         state.tool_profile?.tools.map((tool) => ({

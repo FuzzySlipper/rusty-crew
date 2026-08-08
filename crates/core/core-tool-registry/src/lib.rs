@@ -351,7 +351,6 @@ pub struct LocalCodeResourcePolicyInput {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCodeResourceLimitsInput {
-    pub workdir: Option<String>,
     pub max_duration_ms: Option<u32>,
 }
 
@@ -383,7 +382,6 @@ pub struct LocalCodeToolResourcePolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCodeResourcePolicyPlan {
-    pub workdir: String,
     pub max_duration_ms: Option<u32>,
     pub command_timeout_ms: u32,
     pub max_read_bytes: u32,
@@ -580,7 +578,6 @@ pub fn plan_local_code_resource_policy(
         .map(|value| clamp_value(value, 1_000, 24 * 60 * 60 * 1_000));
     let command_timeout_ms = max_duration_ms.unwrap_or(30_000);
     LocalCodeResourcePolicyPlan {
-        workdir: normalize_local_code_workdir(input.resource_limits.workdir.as_deref()),
         max_duration_ms,
         command_timeout_ms,
         max_read_bytes: 256 * 1_024,
@@ -675,18 +672,6 @@ pub fn plan_local_code_resource_policy(
             "patch_non_unique_match".to_string(),
             "syntax_check_failed".to_string(),
         ],
-    }
-}
-
-fn normalize_local_code_workdir(workdir: Option<&str>) -> String {
-    let Some(workdir) = workdir else {
-        return "/home".to_string();
-    };
-    let trimmed = workdir.trim();
-    if trimmed.is_empty() {
-        "/home".to_string()
-    } else {
-        trimmed.to_string()
     }
 }
 
@@ -2353,7 +2338,6 @@ mod tests {
             resource_limits: LocalCodeResourceLimitsInput::default(),
         });
 
-        assert_eq!(plan.workdir, "/home");
         assert_eq!(plan.max_duration_ms, None);
         assert_eq!(plan.command_timeout_ms, 30_000);
         assert_eq!(plan.max_read_bytes, 256 * 1_024);
@@ -2404,23 +2388,19 @@ mod tests {
     fn plans_local_code_resource_policy_from_session_limits() {
         let plan = plan_local_code_resource_policy(&LocalCodeResourcePolicyInput {
             resource_limits: LocalCodeResourceLimitsInput {
-                workdir: Some("  /srv/work ".to_string()),
                 max_duration_ms: Some(500),
             },
         });
 
-        assert_eq!(plan.workdir, "/srv/work");
         assert_eq!(plan.max_duration_ms, Some(1_000));
         assert_eq!(plan.command_timeout_ms, 1_000);
 
         let long_plan = plan_local_code_resource_policy(&LocalCodeResourcePolicyInput {
             resource_limits: LocalCodeResourceLimitsInput {
-                workdir: Some("".to_string()),
                 max_duration_ms: Some(100_000_000),
             },
         });
 
-        assert_eq!(long_plan.workdir, "/home");
         assert_eq!(long_plan.max_duration_ms, Some(24 * 60 * 60 * 1_000));
         assert_eq!(long_plan.command_timeout_ms, 24 * 60 * 60 * 1_000);
     }

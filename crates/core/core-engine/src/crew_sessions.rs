@@ -1,8 +1,9 @@
 use super::*;
 use rusty_crew_core_protocol::{
     CrewAgentSessionCreationOutcome, CrewAgentSessionCreationRecord,
-    CrewAgentSessionCreationRequest, ProfileRegistryLifecycleStatus,
+    CrewAgentSessionCreationRequest, ProfileRegistryLifecycleStatus, SessionWorkspace,
 };
+use rusty_crew_core_session::normalize_session_workspace_cwd;
 use sha2::{Digest, Sha256};
 
 const CREW_SESSION_CREATION_FINGERPRINT_KEY: &str = "crewSessionCreationFingerprint";
@@ -27,6 +28,8 @@ impl CoreEngine {
                 "requestedAt is required",
             ));
         }
+        let workspace_cwd = normalize_session_workspace_cwd(&request.workspace_cwd)
+            .map_err(|error| creation_error(error.kind, "workspace_cwd_invalid", error.message))?;
 
         let fingerprint = creation_fingerprint(request)?;
         let session_suffix = sha256_hex(idempotency_key.as_bytes())[..24].to_owned();
@@ -188,6 +191,11 @@ impl CoreEngine {
             profile_id: request.profile_id.clone(),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: Some(SessionWorkspace {
+                cwd: workspace_cwd,
+                revision: 1,
+                updated_at: request.requested_at.clone(),
+            }),
             resource_limits: template
                 .map(|config| config.resource_limits.clone())
                 .unwrap_or(ResourceLimits {
@@ -368,6 +376,7 @@ fn creation_fingerprint(request: &CrewAgentSessionCreationRequest) -> CoreResult
     let bytes = serde_json::to_vec(&json!({
         "profileId": request.profile_id,
         "expectedProfileRevision": request.expected_profile_revision,
+        "workspaceCwd": normalize_session_workspace_cwd(&request.workspace_cwd)?,
     }))
     .map_err(|error| {
         CoreError::new(

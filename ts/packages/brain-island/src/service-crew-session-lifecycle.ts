@@ -298,8 +298,8 @@ function runtimeSessionEntry(session: SessionState): Record<string, unknown> {
     agentId: session.agentId,
     profileId: session.profileId,
     kind: session.kind,
+    workspaceCwd: session.workspace?.cwd,
     resourceLimits: compact({
-      workdir: session.resourceLimits.workdir,
       maxDurationMs: session.resourceLimits.maxDurationMs,
       maxDelegationDepth: session.resourceLimits.maxDelegationDepth,
     }),

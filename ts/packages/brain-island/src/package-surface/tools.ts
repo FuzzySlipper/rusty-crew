@@ -3,7 +3,6 @@ export {
   defaultLocalCodeResourcePolicy,
   gitDiffTool,
   gitStatusTool,
-  defaultLocalToolWorkdir,
   readFileTool,
   resolveToolPath,
   resolveLocalCodeTools,

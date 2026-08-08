@@ -29,6 +29,7 @@ export function runtimeConfigValidationInput(
         agentId: session.agentId,
         profileId: session.profileId,
         kind: session.kind,
+        workspaceCwd: session.workspaceCwd,
         resourceLimits: session.resourceLimits,
         ownerId: session.ownerId,
         historyWindow: session.historyWindow,

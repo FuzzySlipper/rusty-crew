@@ -279,6 +279,7 @@ export interface NativeBridgeBinding {
   createSession(config: JsSessionConfig): JsSessionState
   ensureConfiguredSession(config: JsSessionConfig): JsSessionState
   createCrewAgentSessionJson(inputJson: string): string
+  updateSessionWorkspaceJson(inputJson: string): string
   archiveSession(sessionId: string): JsSessionState
   setSessionReasoningEffort(sessionId: string, reasoningEffort?: string | undefined | null): JsSessionState
   listSessionsJson(): string
@@ -814,6 +815,7 @@ export interface JsSessionConfig {
   agentId: string
   profileId: string
   kind: string
+  workspace?: JsSessionWorkspace
   resourceLimits?: JsResourceLimits
   toolProfile?: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
@@ -842,10 +844,17 @@ export interface JsSessionState {
   profileId: string
   kind: string
   status: string
+  workspace?: JsSessionWorkspace
   resourceLimits: JsResourceLimits
   toolProfile: JsToolProfile
   historyWindow?: JsSessionHistoryWindow
   reasoningEffort?: string
+}
+
+export interface JsSessionWorkspace {
+  cwd: string
+  revision: number
+  updatedAt: string
 }
 
 export interface JsShutdownSummary {
@@ -905,7 +914,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 290,
+  "manifestOperationCount": 291,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -3106,6 +3115,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "create_crew_agent_session"
+    },
+    {
+      "name": "updateSessionWorkspaceJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "update_session_workspace"
     },
     {
       "name": "archiveSession",

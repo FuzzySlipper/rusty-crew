@@ -91,7 +91,8 @@ impl CoordinationStore {
                     created_at,
                     last_active_at,
                     history_window_json,
-                    inference_overrides_json
+                    inference_overrides_json,
+                    workspace_json
                 FROM sessions
                 ORDER BY handle ASC",
             )
@@ -139,7 +140,8 @@ fn query_sessions(conn: &Connection, query: &SessionQuery) -> CoreResult<Vec<Ses
                 created_at,
                 last_active_at,
                 history_window_json,
-                inference_overrides_json
+                inference_overrides_json,
+                workspace_json
              FROM sessions
              WHERE (?1 IS NULL OR agent_id = ?1)
                AND (?2 IS NULL OR profile_id = ?2)
@@ -167,6 +169,7 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
     let status_json: String = row.get(8)?;
     let history_window_json: Option<String> = row.get(12)?;
     let inference_overrides_json: Option<String> = row.get(13)?;
+    let workspace_json: Option<String> = row.get(14)?;
     Ok(SessionState {
         session_id: SessionId(row.get(0)?),
         handle: SessionHandle::new(row.get::<_, i64>(1)? as u64),
@@ -176,6 +179,11 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
         delegation: delegation_json
             .as_deref()
             .map(from_json_text::<DelegationLineage>)
+            .transpose()
+            .map_err(to_sql_error)?,
+        workspace: workspace_json
+            .as_deref()
+            .map(from_json_text::<SessionWorkspace>)
             .transpose()
             .map_err(to_sql_error)?,
         resource_limits: resource_limits_json
@@ -320,6 +328,7 @@ fn save_session_state_in_tx(
         .map(to_json_text)
         .transpose()?;
     let inference_overrides_json = to_json_text(&state.inference_overrides)?;
+    let workspace_json = state.workspace.as_ref().map(to_json_text).transpose()?;
     let delegation_json = state.delegation.as_ref().map(to_json_text).transpose()?;
     tx.execute(
         "INSERT INTO sessions (
@@ -336,8 +345,9 @@ fn save_session_state_in_tx(
             created_at,
             last_active_at,
             history_window_json,
-            inference_overrides_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            inference_overrides_json,
+            workspace_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ON CONFLICT(session_id) DO UPDATE SET
             handle = excluded.handle,
             agent_id = excluded.agent_id,
@@ -348,6 +358,7 @@ fn save_session_state_in_tx(
             tool_profile_json = excluded.tool_profile_json,
             history_window_json = excluded.history_window_json,
             inference_overrides_json = excluded.inference_overrides_json,
+            workspace_json = excluded.workspace_json,
             status_json = excluded.status_json,
             brain_turn_count = excluded.brain_turn_count,
             last_active_at = excluded.last_active_at",
@@ -366,6 +377,7 @@ fn save_session_state_in_tx(
             state.last_active_at,
             history_window_json,
             inference_overrides_json,
+            workspace_json,
         ],
     )
     .map_err(|error| persistence_error("save session", error))?;
@@ -376,6 +388,48 @@ pub(crate) fn migrate_v51_add_session_inference_overrides(
     tx: &rusqlite::Transaction<'_>,
 ) -> CoreResult<()> {
     add_missing_column(tx, "sessions", "inference_overrides_json", "TEXT")
+}
+
+pub(crate) fn migrate_v67_add_session_workspace(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column(tx, "sessions", "workspace_json", "TEXT")?;
+    tx.execute(
+        "UPDATE sessions
+            SET workspace_json = json_object(
+                'cwd', json_extract(resource_limits_json, '$.workdir'),
+                'revision', 1,
+                'updated_at', last_active_at
+            )
+          WHERE workspace_json IS NULL
+            AND json_extract(resource_limits_json, '$.workdir') IS NOT NULL",
+        [],
+    )
+    .map_err(|error| persistence_error("migrate legacy session workdir to workspace", error))?;
+    tx.execute(
+        "UPDATE sessions
+            SET resource_limits_json = json_remove(resource_limits_json, '$.workdir')
+          WHERE json_extract(kind_json, '$') = 'full'
+            AND workspace_json IS NOT NULL",
+        [],
+    )
+    .map_err(|error| persistence_error("remove legacy full-session workdir", error))?;
+    tx.execute(
+        "UPDATE session_configs
+            SET config_json = json_set(
+                json_remove(config_json, '$.resource_limits.workdir'),
+                '$.workspace', json_object(
+                    'cwd', json_extract(config_json, '$.resource_limits.workdir'),
+                    'revision', 1,
+                    'updated_at', created_at
+                )
+            ),
+                resource_limits_json = json_remove(resource_limits_json, '$.workdir')
+          WHERE kind = 'full'
+            AND json_extract(config_json, '$.workspace') IS NULL
+            AND json_extract(config_json, '$.resource_limits.workdir') IS NOT NULL",
+        [],
+    )
+    .map_err(|error| persistence_error("migrate legacy full-session config workspace", error))?;
+    Ok(())
 }
 
 fn save_session_config_in_tx(
@@ -396,7 +450,12 @@ fn save_session_config_in_tx(
             config_json,
             created_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        ON CONFLICT(session_id) DO NOTHING",
+        ON CONFLICT(session_id) DO UPDATE SET
+            profile_id = excluded.profile_id,
+            kind = excluded.kind,
+            resource_limits_json = excluded.resource_limits_json,
+            tool_profile_json = excluded.tool_profile_json,
+            config_json = excluded.config_json",
         params![
             config.session_id.0,
             config.profile_id.0,
@@ -849,6 +908,64 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn legacy_full_session_workdir_migrates_to_workspace_without_becoming_a_limit() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (
+                session_id TEXT PRIMARY KEY,
+                kind_json TEXT NOT NULL,
+                resource_limits_json TEXT NOT NULL,
+                last_active_at TEXT NOT NULL
+             );
+             CREATE TABLE session_configs (
+                session_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                resource_limits_json TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+             );
+             INSERT INTO sessions VALUES (
+                'legacy', '\"full\"',
+                '{\"workdir\":\"/home/dev/legacy\",\"max_duration_ms\":60000}',
+                '2026-08-08T00:00:00Z'
+             );
+             INSERT INTO session_configs VALUES (
+                'legacy', 'full',
+                '{\"workdir\":\"/home/dev/legacy\",\"max_duration_ms\":60000}',
+                '{\"session_id\":\"legacy\",\"kind\":\"full\",\"resource_limits\":{\"workdir\":\"/home/dev/legacy\",\"max_duration_ms\":60000}}',
+                '2026-08-08T00:00:00Z'
+             );",
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        migrate_v67_add_session_workspace(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let (workspace, limits): (String, String) = conn
+            .query_row(
+                "SELECT workspace_json, resource_limits_json FROM sessions WHERE session_id = 'legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<JsonValue>(&workspace).unwrap()["cwd"],
+            "/home/dev/legacy"
+        );
+        assert!(serde_json::from_str::<JsonValue>(&limits).unwrap()["workdir"].is_null());
+        let config_json: String = conn
+            .query_row(
+                "SELECT config_json FROM session_configs WHERE session_id = 'legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let config: JsonValue = serde_json::from_str(&config_json).unwrap();
+        assert_eq!(config["workspace"]["cwd"], "/home/dev/legacy");
+        assert!(config["resource_limits"]["workdir"].is_null());
+    }
+
+    #[test]
     fn session_repo_rehydrates_config_and_default_identity_records() {
         let db_path = std::env::temp_dir().join(format!(
             "rusty-crew-session-repo-{}.sqlite3",
@@ -866,6 +983,7 @@ mod tests {
             profile_id: config.profile_id.clone(),
             kind: config.kind.clone(),
             delegation: config.delegation.clone(),
+            workspace: config.workspace.clone(),
             resource_limits: config.resource_limits.clone(),
             tool_profile: config.tool_profile.clone(),
             history_window: config.history_window.clone(),
@@ -924,8 +1042,13 @@ mod tests {
             profile_id: ProfileId::new("profile-repo-alpha"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: Some(SessionWorkspace {
+                cwd: "/home/dev/rusty-crew".to_string(),
+                revision: 1,
+                updated_at: "2026-07-02T01:00:00Z".to_string(),
+            }),
             resource_limits: ResourceLimits {
-                workdir: Some("/home/dev/rusty-crew".to_string()),
+                workdir: None,
                 max_duration_ms: None,
                 max_delegation_depth: Some(2),
             },

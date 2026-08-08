@@ -83,6 +83,13 @@ export function toNativeSessionState(session: SessionState): unknown {
           correlation_id: session.delegation.correlationId,
         }
       : undefined,
+    workspace: session.workspace
+      ? {
+          cwd: session.workspace.cwd,
+          revision: session.workspace.revision,
+          updated_at: session.workspace.updatedAt,
+        }
+      : undefined,
     resource_limits: {
       workdir: session.resourceLimits.workdir,
       max_duration_ms: session.resourceLimits.maxDurationMs,

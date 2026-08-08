@@ -30,6 +30,8 @@ struct ProtocolContractRoots {
     resource_limits: ResourceLimits,
     session_config: SessionConfig,
     session_state: SessionState,
+    session_workspace_update: SessionWorkspaceUpdate,
+    session_workspace_update_record: SessionWorkspaceUpdateRecord,
     delegated_session_runtime_status: DelegatedSessionRuntimeStatus,
     delegated_resource_cleanup_report: DelegatedResourceCleanupReport,
     event_subscription: EventSubscription,

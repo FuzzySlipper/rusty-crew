@@ -79,6 +79,7 @@ try {
   const creationBody = {
     profile_id: profileId,
     expected_profile_revision: profileRevision,
+    workspace_cwd: "/home/dev/rusty-crew",
   };
   const fresh = await request("POST", "/v1/chat/sessions", creationBody, {
     "Idempotency-Key": creationKey,
@@ -112,6 +113,7 @@ try {
     {
       ...creationBody,
       expected_profile_revision: profileRevision + 1,
+      workspace_cwd: "/home/dev/rusty-crew",
     },
     { "Idempotency-Key": creationKey },
   );
@@ -127,6 +129,7 @@ try {
     {
       profile_id: profileId,
       expected_profile_revision: profileRevision,
+      workspace_cwd: "/home/dev/rusty-crew",
     },
     { "Idempotency-Key": `stale-${suffix}` },
   );

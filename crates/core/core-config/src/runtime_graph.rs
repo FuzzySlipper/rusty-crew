@@ -30,7 +30,6 @@ pub struct RuntimeGraphPlanInput {
 pub struct RuntimeGraphHostFacts {
     pub config_dir: String,
     pub engine_data_dir: String,
-    pub default_workdir: Option<String>,
     #[serde(default)]
     pub postgres_database_url_env_present: bool,
 }
@@ -69,6 +68,7 @@ pub struct RuntimeGraphSessionSource {
     pub agent_id: String,
     pub profile_id: String,
     pub kind: Option<SessionKind>,
+    pub workspace_cwd: Option<String>,
     pub resource_limits: Option<ResourceLimits>,
     pub owner_id: Option<String>,
     pub history_window: Option<SessionHistoryWindow>,
@@ -176,6 +176,7 @@ pub struct RuntimeGraphSessionPlan {
     pub agent_id: AgentId,
     pub profile_id: ProfileId,
     pub kind: SessionKind,
+    pub workspace_cwd: Option<String>,
     pub resource_limits: ResourceLimits,
     pub owner_id: Option<String>,
     pub history_window: Option<SessionHistoryWindow>,
@@ -256,7 +257,6 @@ pub struct RuntimeGraphDefaultRecord {
 pub enum RuntimeGraphDefaultSource {
     CanonicalProfileDefault,
     ServiceDefault,
-    HostDefaultWorkdir,
     ProfileRuntimeDefault,
     ProfileSessionDefault,
 }
@@ -273,7 +273,12 @@ pub fn plan_runtime_graph(input: &RuntimeGraphPlanInput) -> RuntimeGraphPlan {
         .collect();
     let storage = plan_storage(input, &mut diagnostics);
     let brains = plan_brains(input, &mut defaults_applied, &mut diagnostics);
-    let sessions = plan_sessions(input, &profiles_by_id, &mut defaults_applied);
+    let sessions = plan_sessions(
+        input,
+        &profiles_by_id,
+        &mut defaults_applied,
+        &mut diagnostics,
+    );
     let (scheduled_jobs, mut derived_jobs) = plan_scheduled_jobs(input, &profiles_by_id, &sessions);
     let (mcp_bindings, mut derived_mcp) = plan_mcp_bindings(input, &profiles_by_id, &sessions);
     let mut channel_bindings = input.runtime_config.channel_bindings.clone();
@@ -290,6 +295,7 @@ pub fn plan_runtime_graph(input: &RuntimeGraphPlanInput) -> RuntimeGraphPlan {
                 agent_id: session.agent_id.clone(),
                 profile_id: session.profile_id.clone(),
                 kind: session.kind.clone(),
+                workspace_cwd: session.workspace_cwd.clone(),
                 resource_limits: Some(session.resource_limits.clone()),
                 owner_id: session.owner_id.clone(),
                 history_window: session.history_window.clone(),
@@ -402,6 +408,7 @@ fn plan_sessions(
     input: &RuntimeGraphPlanInput,
     profiles: &HashMap<ProfileId, &RuntimeGraphProfileSource>,
     defaults: &mut Vec<RuntimeGraphDefaultRecord>,
+    diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
 ) -> Vec<RuntimeGraphSessionPlan> {
     let mut sessions: Vec<_> = input
         .runtime_config
@@ -441,14 +448,36 @@ fn plan_sessions(
                     source: RuntimeGraphDefaultSource::ProfileRuntimeDefault,
                 });
             }
-            if resource_limits.workdir.is_none() {
-                if let Some(workdir) = input.host_facts.default_workdir.clone() {
-                    resource_limits.workdir = Some(workdir);
-                    defaults.push(RuntimeGraphDefaultRecord {
-                        path: format!("sessions[{}].resourceLimits.workdir", session.session_id),
-                        source: RuntimeGraphDefaultSource::HostDefaultWorkdir,
-                    });
+            let workspace_cwd = session.workspace_cwd.clone().or_else(|| {
+                session
+                    .resource_limits
+                    .as_ref()
+                    .and_then(|limits| limits.workdir.clone())
+            });
+            if session.kind.as_ref().unwrap_or(&kind) == &SessionKind::Full {
+                resource_limits.workdir = None;
+                if workspace_cwd.is_none() {
+                    diagnostics.push(RuntimeConfigDiagnostic::error(
+                        "session_workspace_required",
+                        format!("sessions[{}].workspaceCwd", session.session_id),
+                        "full sessions require an explicit workspaceCwd",
+                    ));
                 }
+            }
+            if profile
+                .and_then(|profile| profile.runtime.as_ref())
+                .and_then(|runtime| runtime.default_resource_limits.as_ref())
+                .and_then(|limits| limits.workdir.as_ref())
+                .is_some()
+            {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "profile_workspace_forbidden",
+                    format!(
+                        "profiles[{}].runtime.defaultResourceLimits.workdir",
+                        session.profile_id
+                    ),
+                    "profiles cannot define a workspace cwd; set sessions[].workspaceCwd",
+                ));
             }
             let profile_defaults = profile.and_then(|profile| profile.session_defaults.as_ref());
             let owner_id = session
@@ -469,6 +498,7 @@ fn plan_sessions(
                 agent_id: AgentId::new(session.agent_id.clone()),
                 profile_id: profile_id.clone(),
                 kind,
+                workspace_cwd,
                 resource_limits,
                 owner_id,
                 history_window: session.history_window.clone(),
@@ -867,8 +897,9 @@ mod tests {
         let mut input = source_fixture("complete-source.camel.json");
         let session = &mut input.runtime_config.sessions[0];
         session.local_tool_profile_id = Some("session-tools".to_string());
+        session.workspace_cwd = Some("/explicit".to_string());
         session.resource_limits = Some(ResourceLimits {
-            workdir: Some("/explicit".to_string()),
+            workdir: None,
             max_duration_ms: Some(10_000),
             max_delegation_depth: Some(1),
         });
@@ -878,10 +909,8 @@ mod tests {
             session.local_tool_profile_id.as_deref(),
             Some("session-tools")
         );
-        assert_eq!(
-            session.resource_limits.workdir.as_deref(),
-            Some("/explicit")
-        );
+        assert_eq!(session.workspace_cwd.as_deref(), Some("/explicit"));
+        assert_eq!(session.resource_limits.workdir, None);
     }
 
     #[test]

@@ -263,17 +263,28 @@ impl CoreEngine {
                 requested_task_id: task_id.clone(),
                 correlation_id: correlation_id.clone(),
             };
+            let delegated_resource_limits = resource_limits.clone().unwrap_or(ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: Some(0),
+            });
+            let workspace = delegated_resource_limits
+                .workdir
+                .as_ref()
+                .map(|cwd| SessionWorkspace {
+                    cwd: cwd.clone(),
+                    revision: 1,
+                    updated_at: self.now(),
+                })
+                .or_else(|| parent.workspace.clone());
             let config = SessionConfig {
                 session_id: session_id.clone(),
                 agent_id: agent_id.clone(),
                 profile_id: profile_id.clone(),
                 kind: SessionKind::Delegated,
                 delegation: Some(lineage.clone()),
-                resource_limits: resource_limits.clone().unwrap_or(ResourceLimits {
-                    workdir: None,
-                    max_duration_ms: None,
-                    max_delegation_depth: Some(0),
-                }),
+                workspace,
+                resource_limits: delegated_resource_limits,
                 tool_profile: self.tool_profile_for_profile(profile_id)?,
                 history_window: parent.history_window.clone(),
             };

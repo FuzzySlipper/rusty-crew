@@ -24,6 +24,7 @@
       "agentId": "parity-runner",
       "profileId": "parity-runner",
       "kind": "full",
+      "workspaceCwd": "__FIXTURE_ROOT__/work",
       "historyWindow": {
         "maxMessages": 12
       },

@@ -154,6 +154,7 @@ impl CoreEngine {
                     ExternalBindingStatus::Archived => 0,
                 });
 
+            let workspace_cwd = session.workspace.as_ref().map(|w| w.cwd.clone());
             let (
                 runtime_kind,
                 runtime_id,
@@ -193,7 +194,7 @@ impl CoreEngine {
                     Some(binding.binding_id.clone()),
                     Some(binding.status),
                     binding.task_ref.clone(),
-                    binding.cwd.clone(),
+                    workspace_cwd.clone(),
                     reason_code.is_none(),
                     reason_code,
                 )
@@ -204,7 +205,7 @@ impl CoreEngine {
                     None,
                     None,
                     None,
-                    session.resource_limits.workdir.clone(),
+                    workspace_cwd,
                     true,
                     None,
                 )

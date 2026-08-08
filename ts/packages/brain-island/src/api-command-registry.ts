@@ -280,8 +280,16 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     "admin.control.sessions.create",
     "POST",
     "/v1/admin/control/sessions",
-    "Create a runtime session with optional bounded resourceLimits, including an absolute workdir.",
+    "Create a runtime session with an explicit absolute workspaceCwd and optional bounded resource limits.",
     "create_session",
+    ["session"],
+  ),
+  controlCapability(
+    "admin.control.sessions.workspace",
+    "POST",
+    "/v1/admin/control/sessions/{session_id}/workspace",
+    "Switch an idle session to an absolute workspace cwd using its expected workspace revision.",
+    "switch_session_workspace",
     ["session"],
   ),
   controlCapability(

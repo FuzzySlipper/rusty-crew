@@ -6,8 +6,8 @@ use rusty_crew_core_bridge_api::{
     CoreEventKind, EventSubscription, ProfileId, ProviderStateAbsenceReason,
     ProviderStateCompatibilityAction, ProviderStateCompatibilityClass,
     ProviderStateCompatibilityFacts, ProviderStateCompatibilityPlan, ProviderStateMode,
-    ResourceLimits, SessionConfig, SessionId, SessionKind, ShutdownRequest, ToolDescriptor,
-    ToolProfile,
+    ResourceLimits, SessionConfig, SessionId, SessionKind, SessionWorkspace,
+    SessionWorkspaceUpdate, ShutdownRequest, ToolDescriptor, ToolProfile,
 };
 use rusty_crew_core_protocol::{
     BrainEvent, ModelProviderSecretEnvelope, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
@@ -60,6 +60,7 @@ fn openai_responses_bridge_uses_oauth_bearer_and_headers_without_secret_update()
             profile_id: ProfileId::new("responses-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -353,6 +354,7 @@ fn native_bridge_mirrors_registered_tool_profiles_into_delegated_sessions() {
             profile_id: ProfileId::new("planner-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -627,7 +629,11 @@ fn provider_state_compatibility_preserves_benign_session_and_profile_refreshes()
     let handle = bridge.register_brain_implementation(baseline).unwrap();
     let mut session =
         provider_state_session_config("compatibility-session", "compatibility-profile");
-    session.resource_limits.workdir = Some("/workspace/one".to_string());
+    session.workspace = Some(SessionWorkspace {
+        cwd: "/workspace/one".to_string(),
+        revision: 1,
+        updated_at: "2026-08-08T12:00:00Z".to_string(),
+    });
     bridge.create_session(session.clone()).unwrap();
     bridge
         .apply_provider_state_output(
@@ -648,8 +654,14 @@ fn provider_state_compatibility_preserves_benign_session_and_profile_refreshes()
         )
         .unwrap();
 
-    session.resource_limits.workdir = Some("/workspace/two".to_string());
-    bridge.ensure_configured_session(session.clone()).unwrap();
+    bridge
+        .update_session_workspace(SessionWorkspaceUpdate {
+            session_id: session.session_id.clone(),
+            cwd: "/workspace/two".to_string(),
+            expected_revision: 1,
+            requested_at: "2026-08-08T12:01:00Z".to_string(),
+        })
+        .unwrap();
     bridge
         .set_session_reasoning_effort(session.session_id.clone(), Some("high".to_string()))
         .unwrap();
@@ -893,6 +905,7 @@ fn native_bridge_shutdown_reports_and_clears_subscriptions() {
             profile_id: ProfileId::new("shutdown-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -953,6 +966,7 @@ fn native_bridge_shutdown_cleans_buffered_brain_runs() {
             profile_id: ProfileId::new("shutdown-buffered-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -1331,6 +1345,7 @@ fn openai_responses_buffered_bridge_yields_and_resumes_without_repeating_tools()
             profile_id: ProfileId::new("responses-continuation-profile"),
             kind: SessionKind::Full,
             delegation: None,
+            workspace: None,
             resource_limits: ResourceLimits {
                 workdir: None,
                 max_duration_ms: None,
@@ -1641,6 +1656,7 @@ fn binding_runtime_census_tracks_native_wake_provider_and_tool_topology() {
             agent_id: "activity-native-agent".into(),
             profile_id: "activity-native-profile".into(),
             kind: "full".into(),
+            workspace: None,
             resource_limits: None,
             tool_profile: None,
             history_window: None,
@@ -1854,6 +1870,7 @@ fn provider_state_session_config(session_id: &str, profile_id: &str) -> SessionC
         profile_id: ProfileId::new(profile_id),
         kind: SessionKind::Full,
         delegation: None,
+        workspace: None,
         resource_limits: ResourceLimits {
             workdir: None,
             max_duration_ms: None,

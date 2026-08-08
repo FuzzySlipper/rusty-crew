@@ -144,6 +144,7 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].resource_limits.max_duration_ms",
       "runtime_config.sessions[].resource_limits.workdir",
       "runtime_config.sessions[].session_id",
+      "runtime_config.sessions[].workspace_cwd",
       "runtime_config.skills_dir"
     ],
     "RuntimeConfigValidationInput": [
@@ -245,6 +246,7 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].resource_limits.max_duration_ms",
       "runtime_config.sessions[].resource_limits.workdir",
       "runtime_config.sessions[].session_id",
+      "runtime_config.sessions[].workspace_cwd",
       "runtime_config.skills_dir"
     ],
     "RuntimeGraphPlan": [
@@ -313,6 +315,7 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].resource_limits.workdir",
       "runtime_config.sessions[].session_id",
       "runtime_config.sessions[].session_memory_prompt_profile_id",
+      "runtime_config.sessions[].workspace_cwd",
       "runtime_config.skills_dir",
       "runtime_config.storage",
       "runtime_config.storage.backend",
@@ -333,7 +336,6 @@ export const coreConfigFacadeArtifact = {
     "RuntimeGraphPlanInput": [
       "host_facts",
       "host_facts.config_dir",
-      "host_facts.default_workdir",
       "host_facts.engine_data_dir",
       "host_facts.postgres_database_url_env_present",
       "profiles",
@@ -425,6 +427,7 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.sessions[].profile_id",
       "runtime_config.sessions[].resource_limits",
       "runtime_config.sessions[].session_id",
+      "runtime_config.sessions[].workspace_cwd",
       "runtime_config.skills_dir",
       "runtime_config.storage",
       "runtime_config.storage.backend",
@@ -446,7 +449,6 @@ export const coreConfigFacadeArtifact = {
     "RuntimeGraphDefaultSource": [
       "canonical_profile_default",
       "service_default",
-      "host_default_workdir",
       "profile_runtime_default",
       "profile_session_default"
     ],

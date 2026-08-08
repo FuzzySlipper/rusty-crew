@@ -27,7 +27,6 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_ARTIFACT_DIR?: string;
   RUSTY_CREW_BACKUP_DIR?: string;
   RUSTY_CREW_STATIC_DIR?: string;
-  RUSTY_CREW_DEFAULT_WORKDIR?: string;
   RUSTY_CREW_DEPLOYMENT_ROLE?: string;
   RUSTY_CREW_SOURCE_REVISION?: string;
   RUSTY_CREW_ADMIN_HOST?: string;
@@ -92,7 +91,6 @@ export interface RustyCrewServicePaths {
   artifactDir: string;
   backupDir: string;
   staticDir?: string;
-  defaultWorkdir: string;
   lockFile: string;
 }
 
@@ -209,7 +207,6 @@ export interface RustyCrewServiceLock {
 }
 
 export const RUSTY_CREW_DEFAULT_DATA_DIR = "/home/system/rusty-crew";
-export const RUSTY_CREW_DEFAULT_WORKDIR = "/home";
 export const RUSTY_CREW_DEFAULT_ADMIN_HOST = "0.0.0.0";
 export const RUSTY_CREW_DEFAULT_ADMIN_PORT = 9347;
 export const RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_URL =
@@ -245,10 +242,6 @@ export function loadRustyCrewServiceConfig(
     ),
     backupDir: resolvePath(env.RUSTY_CREW_BACKUP_DIR, join(dataDir, "backups")),
     staticDir: resolveStaticDir(env.RUSTY_CREW_STATIC_DIR, dataDir),
-    defaultWorkdir: resolvePath(
-      env.RUSTY_CREW_DEFAULT_WORKDIR,
-      RUSTY_CREW_DEFAULT_WORKDIR,
-    ),
     lockFile: "",
   };
   paths.serviceConfigFile = join(paths.configDir, "service.json");

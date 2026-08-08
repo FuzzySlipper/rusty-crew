@@ -28,6 +28,7 @@ fn crew_session_creation_is_rust_owned_idempotent_and_restart_durable() {
         idempotency_key: "browser-create-1".to_string(),
         profile_id: ProfileId::new("planner-profile"),
         expected_profile_revision: profile.revision,
+        workspace_cwd: "/home/dev/rusty-crew".to_string(),
         requested_at: "2026-06-19T00:01:00Z".to_string(),
     };
 
@@ -77,6 +78,7 @@ fn crew_session_creation_recovers_archived_idempotent_session() {
         idempotency_key: "recover-key".to_string(),
         profile_id: ProfileId::new("recover-profile"),
         expected_profile_revision: profile.revision,
+        workspace_cwd: "/home/dev/rusty-crew".to_string(),
         requested_at: "2026-06-19T00:01:00Z".to_string(),
     };
     let created = engine.create_crew_agent_session(&request).unwrap();
@@ -148,6 +150,7 @@ fn crew_session_creation_rejects_changed_intent_stale_profile_and_ambiguity() {
         idempotency_key: "shared-key".to_string(),
         profile_id: first.profile_id.clone(),
         expected_profile_revision: first.revision,
+        workspace_cwd: "/home/dev/rusty-crew".to_string(),
         requested_at: "2026-06-19T00:01:00Z".to_string(),
     };
     engine.create_crew_agent_session(&first_request).unwrap();
@@ -157,6 +160,7 @@ fn crew_session_creation_rejects_changed_intent_stale_profile_and_ambiguity() {
             idempotency_key: "shared-key".to_string(),
             profile_id: second.profile_id.clone(),
             expected_profile_revision: second.revision,
+            workspace_cwd: "/home/dev/second".to_string(),
             requested_at: "2026-06-19T00:01:01Z".to_string(),
         })
         .unwrap_err();
@@ -169,6 +173,7 @@ fn crew_session_creation_rejects_changed_intent_stale_profile_and_ambiguity() {
             idempotency_key: "stale-key".to_string(),
             profile_id: second.profile_id.clone(),
             expected_profile_revision: second.revision + 1,
+            workspace_cwd: "/home/dev/second".to_string(),
             requested_at: "2026-06-19T00:01:02Z".to_string(),
         })
         .unwrap_err();
@@ -189,6 +194,7 @@ fn crew_session_creation_rejects_changed_intent_stale_profile_and_ambiguity() {
             idempotency_key: "ambiguous-key".to_string(),
             profile_id: second.profile_id,
             expected_profile_revision: second.revision,
+            workspace_cwd: "/home/dev/second".to_string(),
             requested_at: "2026-06-19T00:01:03Z".to_string(),
         })
         .unwrap_err();
@@ -208,6 +214,7 @@ fn crew_session_creation_rejects_inactive_profiles() {
             idempotency_key: "paused-key".to_string(),
             profile_id: profile.profile_id,
             expected_profile_revision: profile.revision,
+            workspace_cwd: "/home/dev/rusty-crew".to_string(),
             requested_at: "2026-06-19T00:01:00Z".to_string(),
         })
         .unwrap_err();

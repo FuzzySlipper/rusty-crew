@@ -1440,7 +1440,7 @@ export class ServiceExternalRuntimeController {
       ...binding,
       nativeThreadId: binding.nativeThreadId,
     }).catch(() => undefined);
-    const cwd = binding.cwd ?? "/home";
+    const cwd = await this.#sessionWorkspaceCwd(binding);
     const threadSource = `rusty-crew:profile-refresh:${binding.bindingId}:${profile.promptHash}:${binding.nativeThreadId}`;
     let nextThreadId: string | undefined;
     let nextSettings: ControlledThreadSettings | undefined;
@@ -2156,7 +2156,7 @@ export class ServiceExternalRuntimeController {
       controlled,
       binding,
     ).catch(() => undefined);
-    const cwd = binding.cwd ?? "/home";
+    const cwd = await this.#sessionWorkspaceCwd(binding);
     const threadSource = `rusty-crew:dynamic-tools-refresh:${binding.bindingId}:${dynamicToolCatalogFingerprint}:${previousNativeThreadId}`;
     let nextNativeThreadId: string | undefined;
     let nextSettings: ControlledThreadSettings | undefined;
@@ -2789,7 +2789,7 @@ export class ServiceExternalRuntimeController {
       now: this.#now().toISOString(),
     });
     try {
-      const cwd = currentBinding.cwd ?? "/home";
+      const cwd = await this.#sessionWorkspaceCwd(currentBinding);
       const started = await controlled.driver.turnStart({
         threadId: turn.nativeThreadId,
         input: turn.request.input.map((part) =>
@@ -3200,7 +3200,7 @@ export class ServiceExternalRuntimeController {
     }
     const currentNativeThreadId = currentBinding.nativeThreadId;
     let previousNativeThreadId = currentNativeThreadId;
-    const cwd = currentBinding.cwd ?? "/home";
+    const cwd = await this.#sessionWorkspaceCwd(currentBinding);
     const developerInstructions = promptContext.developerInstructions;
     const previousSettings =
       controlled.threadSettings.get(previousNativeThreadId) ??
@@ -3434,6 +3434,24 @@ export class ServiceExternalRuntimeController {
     };
   }
 
+  async #sessionWorkspaceCwd(binding: ExternalAgentBinding): Promise<string> {
+    if (binding.sessionId == null) {
+      throw new Error(
+        `external binding ${binding.bindingId} has no Crew session workspace authority`,
+      );
+    }
+    const session = (await this.#bridge.listSessions()).find(
+      (candidate) => candidate.sessionId === binding.sessionId,
+    );
+    const cwd = session?.workspace?.cwd;
+    if (typeof cwd !== "string" || cwd.length === 0) {
+      throw new Error(
+        `session_workspace_missing: session ${binding.sessionId} has no canonical workspace`,
+      );
+    }
+    return cwd;
+  }
+
   async #applyControl(
     controlled: ControlledRuntime,
     binding: ExternalAgentBinding,
@@ -3441,6 +3459,7 @@ export class ServiceExternalRuntimeController {
   ): Promise<unknown> {
     switch (request.kind) {
       case "start_or_resume_thread": {
+        const cwd = await this.#sessionWorkspaceCwd(binding);
         if (typeof binding.nativeThreadId === "string") {
           const promptContext = await this.#bindingPromptContext(
             binding,
@@ -3449,6 +3468,7 @@ export class ServiceExternalRuntimeController {
           const developerInstructions = promptContext.developerInstructions;
           const resumed = await controlled.driver.threadResume({
             threadId: binding.nativeThreadId,
+            cwd,
             ...(isRecord(request.payload) ? request.payload : {}),
             baseInstructions: undefined,
             ...(developerInstructions === undefined
@@ -3465,7 +3485,6 @@ export class ServiceExternalRuntimeController {
         }
         const developerInstructions =
           await this.#developerInstructionsForBinding(binding);
-        const cwd = binding.cwd ?? "/home";
         const started = await controlled.driver.threadStart({
           cwd,
           approvalPolicy: "never",
@@ -4582,7 +4601,7 @@ function projectExternalThread(
     createdAt: nativeNumber(thread.createdAt) ?? 0,
     updatedAt: nativeNumber(thread.updatedAt) ?? 0,
     status: projectNativeStatus(thread.status),
-    cwd: nativeString(thread.cwd) ?? "/home",
+    cwd: requireNativeString(thread.cwd, "thread.cwd"),
     cliVersion: nativeString(thread.cliVersion) ?? "unknown",
     name:
       managedLabel === undefined

@@ -4,6 +4,14 @@
     "RuntimeConfigValidationInput": {
       "exemptFieldPaths": [
         {
+          "path": "profiles[].runtime.default_resource_limits.workdir",
+          "reason": "The shared ResourceLimits shape retains delegated-worker workdir, but profile workdirs are semantically forbidden and therefore absent from valid fixtures."
+        },
+        {
+          "path": "runtime_config.sessions[].resource_limits.workdir",
+          "reason": "The shared ResourceLimits shape retains delegated-worker workdir, but full-session cwd is modeled by workspace_cwd and resource-limit workdir is forbidden."
+        },
+        {
           "path": "profiles[].background_review.capture_max_proposals",
           "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
         },
@@ -43,6 +51,14 @@
     },
     "CreateProfilePlanInput": {
       "exemptFieldPaths": [
+        {
+          "path": "profiles[].runtime.default_resource_limits.workdir",
+          "reason": "The shared ResourceLimits shape retains delegated-worker workdir, but profile workdirs are semantically forbidden and therefore absent from valid fixtures."
+        },
+        {
+          "path": "runtime_config.sessions[].resource_limits.workdir",
+          "reason": "The shared ResourceLimits shape retains delegated-worker workdir, but full-session cwd is modeled by workspace_cwd and resource-limit workdir is forbidden."
+        },
         {
           "path": "profiles[].background_review.capture_max_proposals",
           "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
@@ -85,7 +101,7 @@
       "exemptFieldPaths": [
         {
           "path": "profiles[].runtime.default_resource_limits.workdir",
-          "reason": "Intentionally omitted to prove the host default-workdir branch; explicit resource workdirs are covered by RuntimeConfigValidationInput."
+          "reason": "The shared ResourceLimits shape retains delegated-worker workdir, but profile workdirs are semantically forbidden and therefore absent from valid fixtures."
         },
         {
           "path": "runtime_config.brains[].implementation_id",
@@ -163,6 +179,10 @@
     },
     "RuntimeGraphPlan": {
       "exemptFieldPaths": [
+        {
+          "path": "runtime_config.sessions[].resource_limits.workdir",
+          "reason": "The shared ResourceLimits shape retains delegated-worker workdir, but the full-session target fixture uses workspace_cwd and intentionally omits resource-limit workdir."
+        },
         {
           "path": "runtime_config.channel_bindings[].conversation_channel_id",
           "reason": "Optional channel projection metadata remains absent when it is not authored; its explicit wire form is covered by RuntimeConfigValidationInput."
