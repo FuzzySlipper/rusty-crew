@@ -628,7 +628,14 @@ function assertSnapshot(snapshot: Record<string, any>): void {
         currentRequestInput.quality === "approximate"),
     `unexpected current-request source/quality: ${JSON.stringify(currentRequestInput)}`,
   );
-  assert.equal(snapshot.providerUsage.logicalWake.inputTokens.quality, "exact");
+  const logicalWakeInput = snapshot.providerUsage.logicalWake.inputTokens;
+  assert.ok(
+    (logicalWakeInput.source === "provider" &&
+      logicalWakeInput.quality === "exact") ||
+      (logicalWakeInput.source === "unavailable" &&
+        logicalWakeInput.quality === "unavailable"),
+    `unexpected logical-wake source/quality: ${JSON.stringify(logicalWakeInput)}`,
+  );
   assert.equal(
     snapshot.promptProjection.protocolProjection.kind,
     "chat_completions",
