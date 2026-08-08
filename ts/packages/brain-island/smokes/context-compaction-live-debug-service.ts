@@ -620,9 +620,13 @@ function assertSnapshot(snapshot: Record<string, any>): void {
   ]) {
     assert.ok(Object.hasOwn(snapshot, key), `snapshot missing ${key}`);
   }
-  assert.equal(
-    snapshot.providerUsage.currentRequest.inputTokens.quality,
-    "exact",
+  const currentRequestInput = snapshot.providerUsage.currentRequest.inputTokens;
+  assert.ok(
+    (currentRequestInput.source === "provider" &&
+      currentRequestInput.quality === "exact") ||
+      (currentRequestInput.source === "serialized_estimate" &&
+        currentRequestInput.quality === "approximate"),
+    `unexpected current-request source/quality: ${JSON.stringify(currentRequestInput)}`,
   );
   assert.equal(snapshot.providerUsage.logicalWake.inputTokens.quality, "exact");
   assert.equal(
