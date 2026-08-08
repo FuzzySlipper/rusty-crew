@@ -2,7 +2,6 @@ import type {
   ContextCompactionArtifact,
   ContextCompactionArtifactQuery,
   ManualContextCompactionRequest,
-  ManualContextCompactionResponse,
   MemoryGovernanceDecisionInput,
   MemoryGovernanceDecisionRecord,
   MemoryProposalEnvelope,
@@ -22,6 +21,11 @@ import {
   rawSessionActivityDigestQuerySchema,
   rawSessionActivityDigestSchema,
 } from "./bridge-validation-schemas.js";
+import {
+  toManualContextCompactionResponse,
+  toRawManualContextCompactionRequest,
+  type RawManualContextCompactionResponse,
+} from "./context-compaction-wire.js";
 import type {
   NativeBranchAwareSessionMemoryQuery,
   NativeBridgeModule,
@@ -207,9 +211,13 @@ export function createNativeBridgeMemoryMethods(
       });
     },
     manualContextCompaction: async (request: ManualContextCompactionRequest) =>
-      JSON.parse(
-        binding.manualContextCompactionJson(JSON.stringify(request)),
-      ) as ManualContextCompactionResponse,
+      toManualContextCompactionResponse(
+        JSON.parse(
+          binding.manualContextCompactionJson(
+            JSON.stringify(toRawManualContextCompactionRequest(request)),
+          ),
+        ) as RawManualContextCompactionResponse,
+      ),
     recordMemoryGovernanceDecision: async (
       decision: MemoryGovernanceDecisionInput,
     ) =>

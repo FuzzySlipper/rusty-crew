@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { SessionId } from "@rusty-crew/contracts";
+import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 import { nativeBridgeBindingSurface } from "./generated/native-binding-surface.js";
 import { nativeMappingInventory } from "./generated/native-mapping-inventory.js";
 
@@ -56,6 +58,7 @@ assertJsonInputWrappers(
   memory.jsonInputRawMethods,
 );
 assertDirectNativeMethods("memory", memory.directNativeMethods);
+await assertManualContextCompactionWire();
 assertGeneratedDtoFieldsNonEmpty("brain/provider", brainProvider.dtoFields);
 assertWrapperCalls(
   "brain/provider",
@@ -88,6 +91,70 @@ assertRawReads("toRawBrainWakeStreamItem", "item", [
   "item.failure.kind",
   "item.failure.message",
 ]);
+
+async function assertManualContextCompactionWire() {
+  let rawInput: unknown;
+  const rawArtifact = {
+    artifact_id: "artifact-manual-wire",
+    session_id: "session-1",
+    strategy_id: "rolling_summary_compaction",
+    estimate_before_json: {},
+    source_refs_json: {},
+    provider_metadata_json: {},
+    summary_text: "manual compaction completed",
+    enters_future_context: true,
+    context_policy: "summary_context",
+    metadata_json: {},
+    created_at: "2026-08-08T00:00:00Z",
+    updated_at: "2026-08-08T00:00:00Z",
+  };
+  const binding = new Proxy(
+    {
+      manualContextCompactionJson(inputJson: string): string {
+        rawInput = JSON.parse(inputJson);
+        return JSON.stringify({
+          artifact: rawArtifact,
+          terminal_status: "completed",
+          idempotent: false,
+          revision: 7,
+        });
+      },
+    },
+    {
+      get(target, property) {
+        if (property in target) return Reflect.get(target, property);
+        return () => {
+          throw new Error(`unexpected native memory call ${String(property)}`);
+        };
+      },
+    },
+  ) as unknown as Parameters<typeof createNativeBridgeMemoryMethods>[0];
+  const methods = createNativeBridgeMemoryMethods(binding);
+  const response = await methods.manualContextCompaction({
+    sessionId: "session-1" as SessionId,
+    intentKey: "intent-1",
+    strategyId: "rolling_summary_compaction",
+    strategyRevision: "7",
+    sourceProjectionFingerprint: "projection-1",
+    expectRevision: 6,
+  });
+
+  assert.deepEqual(rawInput, {
+    session_id: "session-1",
+    intent_key: "intent-1",
+    strategy_id: "rolling_summary_compaction",
+    strategy_revision: "7",
+    source_projection_fingerprint: "projection-1",
+    expect_revision: 6,
+  });
+  assert.deepEqual(response, {
+    artifact: rawArtifact,
+    terminalStatus: "completed",
+    idempotent: false,
+    revision: 7,
+  });
+  assert.equal("terminal_status" in response, false);
+}
 assertRawReads("toBrainWakeProviderStateOutput", "output", [
   "output.state.module_id",
   "output.state.strategy_id",

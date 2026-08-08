@@ -397,33 +397,24 @@ export async function runManualContextCompaction(
       msg2.includes("napi value Undefined");
     if (!isNoBrain2) throw wakeError;
   }
-  const typed = (await deps.bridge.manualContextCompaction({
-    session_id: input.session.sessionId,
-    intent_key: input.intentKey,
-    strategy_id: input.strategyId,
-    strategy_revision: input.strategyRevision,
-    source_projection_fingerprint: input.sourceProjectionFingerprint,
-    expect_revision: input.expectRevision ?? null,
-  } as unknown as never)) as unknown as {
-    artifact: {
-      artifact_id: string;
-      session_id: string;
-      strategy_id: string;
-      terminal_status: string;
-      created_at: string;
-      strategy_revision?: string | null;
-      [key: string]: unknown;
-    };
-    terminal_status: string;
-    revision: number;
-    idempotent?: boolean;
+  const typed = await deps.bridge.manualContextCompaction({
+    sessionId: input.session.sessionId,
+    intentKey: input.intentKey,
+    strategyId: input.strategyId,
+    strategyRevision: input.strategyRevision,
+    sourceProjectionFingerprint: input.sourceProjectionFingerprint,
+    expectRevision: input.expectRevision ?? null,
+  });
+  const artifact = {
+    ...typed.artifact,
+    terminal_status: typed.artifact.terminal_status ?? typed.terminalStatus,
   };
   return {
     ok: true as const,
     session_id: typed.artifact.session_id,
-    artifact: typed.artifact,
-    terminal_status: typed.terminal_status,
-    idempotent: typed.idempotent ?? false,
+    artifact,
+    terminal_status: typed.terminalStatus,
+    idempotent: typed.idempotent,
     revision: typed.revision,
   };
 }
