@@ -39,6 +39,13 @@ managed review submission. A plain Den `request_review` packet or an ordinary
 reply. A routable `@reviewer` address alone does not create a managed review
 submission.
 
+If `complete_routed_review` rejects a category or payload size locally and
+explicitly states that no review result was persisted, correct the structured
+input and call it again. This narrow correction path is not a retry of a Den
+side effect. Never retry after Crew persists the result, attempts Den
+finalization, or returns an ambiguous completion receipt; operator readback
+must resolve those cases.
+
 Queued work is Crew-owned. Expired and failed requests are terminal and are not
 silently retried. Do not manually start another queued review in this turn.
 ```

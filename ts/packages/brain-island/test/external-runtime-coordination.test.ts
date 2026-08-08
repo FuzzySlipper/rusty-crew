@@ -190,6 +190,82 @@ test("Codex review completion rejects only half of an explicit target", async ()
   );
 });
 
+test("Codex review completion accepts only Den finding categories", async () => {
+  const acceptedCategories = [
+    "blocking_bug",
+    "acceptance_gap",
+    "test_weakness",
+    "follow_up_candidate",
+  ] as const;
+  const calls: unknown[] = [];
+  for (const category of acceptedCategories) {
+    const result = await resolveCodexCoordinationToolCall({
+      params: {
+        threadId: "thread-review-categories",
+        turnId: "turn-review-categories",
+        callId: `call-${category}`,
+        namespace: "rusty_crew",
+        tool: "complete_routed_review",
+        arguments: {
+          verdict: "changes_requested",
+          newFindings: [{ category, summary: `${category} summary` }],
+        },
+      },
+      binding: {
+        runtimeId: "codex-local",
+        bindingId: "binding-review-categories",
+        controllerInstanceId: "controller-review-categories",
+        controllerGeneration: 11,
+        reviewerSessionId: "reviewer-session",
+      },
+      port: new RecordingPort(),
+      onReviewCompletion: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          taskId: 6702,
+          commitSha: "a".repeat(40),
+          summary: "accepted",
+        };
+      },
+    });
+    assert.equal(result?.success, true);
+  }
+  assert.equal(calls.length, acceptedCategories.length);
+
+  const rejected = await resolveCodexCoordinationToolCall({
+    params: {
+      threadId: "thread-review-categories",
+      turnId: "turn-review-categories",
+      callId: "call-correctness",
+      namespace: "rusty_crew",
+      tool: "complete_routed_review",
+      arguments: {
+        verdict: "changes_requested",
+        newFindings: [{ category: "correctness", summary: "invalid" }],
+      },
+    },
+    binding: {
+      runtimeId: "codex-local",
+      bindingId: "binding-review-categories",
+      controllerInstanceId: "controller-review-categories",
+      controllerGeneration: 11,
+      reviewerSessionId: "reviewer-session",
+    },
+    port: new RecordingPort(),
+    onReviewCompletion: async () => {
+      throw new Error("invalid category must not reach review completion");
+    },
+  });
+  assert.equal(rejected?.success, false);
+  assert.match(
+    rejected?.contentItems[0]?.type === "inputText"
+      ? rejected.contentItems[0].text
+      : "",
+    /category must be blocking_bug/,
+  );
+});
+
 test("Codex coordination lists routes separately from raw same-service diagnostics", async () => {
   const port = new RecordingPort();
   const result = await resolveCodexCoordinationToolCall({

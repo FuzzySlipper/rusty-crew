@@ -23,6 +23,7 @@ import type {
   ReviewSubmissionToolReceipt,
   SubmitTaskForReviewParameters,
 } from "./review-submission-tools.js";
+import { isReviewNewFindingCategory } from "./review-submission-tools.js";
 
 const COORDINATION_NAMESPACE = "rusty_crew";
 const MAX_ROUND_TIMEOUT_MS = 300_000;
@@ -403,14 +404,13 @@ function parseReviewCompletionArguments(
         if (typeof item !== "object" || item === null) return true;
         const finding = item as Record<string, unknown>;
         return (
-          typeof finding.category !== "string" ||
-          finding.category.trim() === "" ||
+          !isReviewNewFindingCategory(finding.category) ||
           typeof finding.summary !== "string" ||
           finding.summary.trim() === ""
         );
       }))
   ) {
-    return "newFindings contains an invalid finding";
+    return "newFindings contains an invalid finding; category must be blocking_bug, acceptance_gap, test_weakness, or follow_up_candidate";
   }
   return record as unknown as CompleteRoutedReviewParameters;
 }

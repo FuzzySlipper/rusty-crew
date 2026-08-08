@@ -7,6 +7,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   createServiceReviewSubmissionRuntime,
+  denReviewRequestByteLength,
   parseExternalReviewSubmissionRequest,
   parseReviewProjectIds,
   reconcileReviewSubmissions,
@@ -15,6 +16,83 @@ import {
   selectRoutedReviewRecord,
   submitExternalReview,
 } from "../src/service-review-submission.js";
+
+test("Den finalization request sizing matches the 4096-byte boundary", () => {
+  const request = {
+    review_round_id: 4150,
+    verdict: "changes_requested",
+    decided_by: "@reviewer",
+    notes: "",
+  };
+  const emptyBytes = denReviewRequestByteLength(request);
+  const atLimit = {
+    ...request,
+    notes: "x".repeat(4_096 - emptyBytes),
+  };
+  assert.equal(denReviewRequestByteLength(atLimit), 4_096);
+  assert.equal(
+    denReviewRequestByteLength({ ...atLimit, notes: `${atLimit.notes}x` }),
+    4_097,
+  );
+  assert.equal(
+    denReviewRequestByteLength({ notes: "<>&\u2028\u2029" }),
+    new TextEncoder().encode('{"notes":"\\u003c\\u003e\\u0026\\u2028\\u2029"}')
+      .length,
+  );
+});
+
+test("oversized managed review result is rejected before persistence", async () => {
+  const pending = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "review_submission",
+      submissionId: "review-oversized",
+    }),
+    submissionId: "review-oversized",
+    phase: "reviewer_dispatched",
+    reviewerSessionId: "reviewer-session",
+    reviewRoundId: 4150,
+    revision: 7,
+  } as ReviewSubmissionRecord;
+  const transitions: unknown[] = [];
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [pending],
+      transitionReviewSubmission: async (request: unknown) => {
+        transitions.push(request);
+        throw new Error("oversized result must not transition");
+      },
+    } as never,
+    reviewProjectIds: ["rusty-crew"],
+    runtimeConfig: {
+      sessions: [
+        {
+          sessionId: "reviewer-session",
+          agentId: "reviewer-agent",
+          profileId: "reviewer",
+        },
+      ],
+      mcpBindings: [],
+      mcpServers: [],
+    } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-08T10:00:00.000Z",
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "changes_requested",
+    taskId: 6662,
+    commitSha: pending.commitSha,
+    notes: "x".repeat(4_096),
+    caller: { type: "review_submission", submissionId: pending.submissionId },
+    reviewerSessionId: "reviewer-session",
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reasonCode, "review_result_too_large");
+  assert.match(result.summary, /no review result was persisted/);
+  assert.deepEqual(transitions, []);
+});
 
 test("review dispatch identity changes only with resolved route authority", () => {
   const resolution = {

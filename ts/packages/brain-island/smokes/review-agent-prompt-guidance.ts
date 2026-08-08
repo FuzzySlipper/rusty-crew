@@ -52,6 +52,9 @@ for (const heading of [
   assert.match(guidance, new RegExp(`^${heading}$`, "m"));
 }
 
+assert.match(guidance, /no review result was persisted/);
+assert.match(guidance, /Never retry after Crew persists the result/);
+
 const codexToolSpecs = CODEX_COORDINATION_DYNAMIC_TOOLS.flatMap((entry) =>
   entry.type === "namespace" ? entry.tools : [],
 );

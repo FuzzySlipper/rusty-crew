@@ -18,6 +18,7 @@ import type {
   CompleteRoutedReviewToolReceipt,
   SubmitTaskForReviewParameters,
 } from "./review-submission-tools.js";
+import { isReviewNewFindingCategory } from "./review-submission-tools.js";
 import {
   buildServiceMcpEndpointConfig,
   callConfiguredMcpTool,
@@ -447,6 +448,16 @@ async function completeReview(
     correlationId?: string;
   },
 ): Promise<CompleteRoutedReviewToolReceipt> {
+  const invalidFinding = input.newFindings?.find(
+    (finding) => !isReviewNewFindingCategory(finding.category),
+  );
+  if (invalidFinding !== undefined) {
+    return {
+      ok: false,
+      reasonCode: "review_finding_category_invalid",
+      summary: `Finding category ${JSON.stringify(invalidFinding.category)} is invalid. Use blocking_bug, acceptance_gap, test_weakness, or follow_up_candidate; no review result was persisted.`,
+    };
+  }
   if ((input.taskId === undefined) !== (input.commitSha === undefined)) {
     return {
       ok: false,
@@ -607,6 +618,58 @@ interface CanonicalReviewResult {
   json: string;
 }
 
+const DEN_FINALIZATION_REQUEST_MAX_BYTES = 4_096;
+
+export function denReviewRequestByteLength(value: unknown): number {
+  const json = JSON.stringify(value);
+  if (json === undefined) return 0;
+  const encoded = json.replace(
+    /[<>&\u2028\u2029]/g,
+    (character) =>
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+  return new TextEncoder().encode(encoded).length;
+}
+
+function denFinalizationPayload(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+  result: CanonicalReviewResult,
+): Record<string, unknown> {
+  return {
+    review_round_id: record.reviewRoundId,
+    verdict: result.verdict,
+    decided_by: reviewerAgentId(context, record) ?? record.reviewer,
+    ...(result.notes === undefined ? {} : { notes: result.notes }),
+    ...(result.priorFindingResolutions.length === 0
+      ? {}
+      : {
+          prior_finding_resolutions: result.priorFindingResolutions.map(
+            (finding) => ({
+              finding_id: finding.findingId,
+              status: finding.status,
+              verification_note: finding.verificationNote,
+            }),
+          ),
+        }),
+    ...(result.newFindings.length === 0
+      ? {}
+      : {
+          new_findings: result.newFindings.map((finding) => ({
+            category: finding.category,
+            summary: finding.summary,
+            ...(finding.notes === undefined ? {} : { notes: finding.notes }),
+            ...(finding.fileReferences === undefined
+              ? {}
+              : { file_references: finding.fileReferences }),
+            ...(finding.testCommands === undefined
+              ? {}
+              : { test_commands: finding.testCommands }),
+          })),
+        }),
+  };
+}
+
 function canonicalReviewResult(
   input: CompleteRoutedReviewParameters,
 ): CanonicalReviewResult {
@@ -625,7 +688,7 @@ function canonicalReviewResult(
       .sort((left, right) => left.findingId - right.findingId),
     newFindings: [...(input.newFindings ?? [])]
       .map((finding) => ({
-        category: finding.category.trim(),
+        category: finding.category,
         summary: finding.summary.trim(),
         ...(finding.notes?.trim() ? { notes: finding.notes.trim() } : {}),
         ...(finding.fileReferences?.length
@@ -675,6 +738,22 @@ async function resumeRoutedReview(
             "A structured review result is required for this routed review.",
         };
       }
+      const finalizationPayload = denFinalizationPayload(
+        context,
+        record,
+        suppliedResult,
+      );
+      const finalizationBytes = denReviewRequestByteLength(finalizationPayload);
+      if (finalizationBytes > DEN_FINALIZATION_REQUEST_MAX_BYTES) {
+        return {
+          ok: false,
+          submissionId: record.submissionId,
+          taskId: Number(record.taskId),
+          commitSha: record.commitSha,
+          reasonCode: "review_result_too_large",
+          summary: `The structured review result encodes to ${finalizationBytes} bytes, exceeding Den's ${DEN_FINALIZATION_REQUEST_MAX_BYTES}-byte finalize_review limit. Shorten notes/evidence or split non-blocking findings into follow-up work; no review result was persisted.`,
+        };
+      }
       record = await context.bridge.transitionReviewSubmission({
         submissionId: record.submissionId,
         expectedRevision: record.revision,
@@ -722,30 +801,12 @@ async function resumeRoutedReview(
         return completedReceipt(record);
       }
       const result = parseStoredReviewResult(record.reviewResultJson);
-      const payload = await denCall(context, binding, "finalize_review", {
-        review_round_id: record.reviewRoundId,
-        verdict: result.verdict,
-        decided_by: reviewerAgentId(context, record) ?? record.reviewer,
-        ...(result.notes === undefined ? {} : { notes: result.notes }),
-        prior_finding_resolutions: result.priorFindingResolutions.map(
-          (finding) => ({
-            finding_id: finding.findingId,
-            status: finding.status,
-            verification_note: finding.verificationNote,
-          }),
-        ),
-        new_findings: result.newFindings.map((finding) => ({
-          category: finding.category,
-          summary: finding.summary,
-          ...(finding.notes === undefined ? {} : { notes: finding.notes }),
-          ...(finding.fileReferences === undefined
-            ? {}
-            : { file_references: finding.fileReferences }),
-          ...(finding.testCommands === undefined
-            ? {}
-            : { test_commands: finding.testCommands }),
-        })),
-      });
+      const payload = await denCall(
+        context,
+        binding,
+        "finalize_review",
+        denFinalizationPayload(context, record, result),
+      );
       const receipt = parseFinalizationReceipt(payload, record);
       record = await context.bridge.transitionReviewSubmission({
         submissionId: record.submissionId,
@@ -1554,6 +1615,7 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
     `Ref: ${record.gitRef}`,
     `Review round: ${record.reviewRoundId ?? "unknown"}`,
     `If this reviewer session has multiple queued reviews, call complete_routed_review with taskId ${record.taskId} and commitSha ${record.commitSha} to select this review explicitly.`,
+    "If complete_routed_review rejects local validation and explicitly says that no review result was persisted, correct the structured input and call it again. Do not retry after persistence, a Den request, or an ambiguous completion receipt.",
     "",
     record.reviewSummaryMd,
     "",

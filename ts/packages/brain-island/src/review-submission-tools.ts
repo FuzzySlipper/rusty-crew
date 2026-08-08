@@ -31,7 +31,12 @@ const reviewFindingResolution = Type.Object(
 
 const reviewNewFinding = Type.Object(
   {
-    category: Type.String({ minLength: 1 }),
+    category: Type.Union([
+      Type.Literal("blocking_bug"),
+      Type.Literal("acceptance_gap"),
+      Type.Literal("test_weakness"),
+      Type.Literal("follow_up_candidate"),
+    ]),
     summary: Type.String({ minLength: 1 }),
     notes: Type.Optional(Type.String()),
     fileReferences: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
@@ -39,6 +44,21 @@ const reviewNewFinding = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export type ReviewNewFindingCategory = Static<
+  typeof reviewNewFinding
+>["category"];
+
+export function isReviewNewFindingCategory(
+  value: unknown,
+): value is ReviewNewFindingCategory {
+  return (
+    value === "blocking_bug" ||
+    value === "acceptance_gap" ||
+    value === "test_weakness" ||
+    value === "follow_up_candidate"
+  );
+}
 
 const completeRoutedReviewParameters = Type.Object(
   {
