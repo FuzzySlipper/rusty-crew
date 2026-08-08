@@ -3497,6 +3497,17 @@
             "null"
           ]
         },
+        "lineage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalAgentBindingLineage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "messageDeliveryPolicy": {
           "$ref": "#/$defs/ExternalMessageDeliveryPolicy",
           "default": "immediate_steer"
@@ -3580,6 +3591,37 @@
         "revision",
         "createdAt",
         "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ExternalAgentBindingLineage": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "predecessorBindingId": {
+          "type": "string"
+        },
+        "predecessorNativeThreadId": {
+          "type": "string"
+        },
+        "predecessorSessionId": {
+          "type": "string"
+        },
+        "reasonCode": {
+          "type": "string"
+        },
+        "transitionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "predecessorBindingId",
+        "predecessorSessionId",
+        "predecessorNativeThreadId",
+        "transitionId",
+        "reasonCode",
+        "createdAt"
       ],
       "type": "object"
     },

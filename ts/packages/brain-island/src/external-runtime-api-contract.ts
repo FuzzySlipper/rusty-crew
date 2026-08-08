@@ -1,11 +1,12 @@
 import type {
   DenRuntimeReference,
+  ExternalAgentBindingLineage,
   ExternalAgentSessionCreationRecord,
   ExternalControlReceipt,
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.16.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.17.0";
 
 export const EXTERNAL_BINDING_PROFILE_REFRESH_API_REASON_CODES = [
   "external_binding_profile_refresh_invalid_request",
@@ -130,6 +131,10 @@ export interface ExternalThreadTurnErrorProjection {
 export interface ExternalThreadProjection {
   readonly threadId: string;
   readonly sessionId: string;
+  readonly bindingId: string | null;
+  readonly crewSessionId: string | null;
+  readonly lineage: ExternalAgentBindingLineage | null;
+  readonly nativeMaterialized: boolean;
   readonly parentThreadId: string | null;
   readonly preview: string;
   readonly ephemeral: boolean;
@@ -304,6 +309,8 @@ export interface ExternalRuntimeThreadReplacementResult {
   readonly cwd: string;
   readonly label: string | null;
   readonly taskRef: DenRuntimeReference | null;
+  readonly previousBindingId: string;
+  readonly previousSessionId: string | null;
   readonly previousNativeThreadId: string;
   readonly nativeThreadId: string;
   readonly previousNativeThreadArchived: boolean;
@@ -1459,6 +1466,8 @@ function routeSchemas(): Record<string, JsonSchema> {
         "cwd",
         "label",
         "taskRef",
+        "previousBindingId",
+        "previousSessionId",
         "previousNativeThreadId",
         "nativeThreadId",
         "previousNativeThreadArchived",
@@ -1478,6 +1487,8 @@ function routeSchemas(): Record<string, JsonSchema> {
             { type: "null" },
           ],
         },
+        previousBindingId: { type: "string" },
+        previousSessionId: nullableString,
         previousNativeThreadId: { type: "string" },
         nativeThreadId: { type: "string" },
         previousNativeThreadArchived: { type: "boolean" },
@@ -1764,6 +1775,10 @@ function routeSchemas(): Record<string, JsonSchema> {
       required: [
         "threadId",
         "sessionId",
+        "bindingId",
+        "crewSessionId",
+        "lineage",
+        "nativeMaterialized",
         "parentThreadId",
         "preview",
         "ephemeral",
@@ -1782,6 +1797,15 @@ function routeSchemas(): Record<string, JsonSchema> {
       properties: {
         threadId: { type: "string" },
         sessionId: { type: "string" },
+        bindingId: nullableString,
+        crewSessionId: nullableString,
+        lineage: {
+          anyOf: [
+            { $ref: "#/components/schemas/ExternalAgentBindingLineage" },
+            { type: "null" },
+          ],
+        },
+        nativeMaterialized: { type: "boolean" },
         parentThreadId: nullableString,
         preview: { type: "string" },
         ephemeral: { type: "boolean" },

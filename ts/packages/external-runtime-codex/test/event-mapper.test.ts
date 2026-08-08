@@ -7,6 +7,21 @@ import {
 } from "../src/error-diagnostics.js";
 import { mapNotification } from "../src/event-mapper.js";
 
+test("thread lifecycle notifications recover the native id from the thread payload", () => {
+  const event = mapNotification(
+    {
+      method: "thread/started",
+      params: { thread: { id: "app-server-thread-1" } },
+    },
+    1,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.kind, "thread_lifecycle");
+  assert.equal(event.threadId, "app-server-thread-1");
+});
+
 for (const [itemType, expectedKind] of [
   ["commandExecution", "command_activity"],
   ["fileChange", "file_activity"],

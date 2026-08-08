@@ -11,6 +11,7 @@
   "scripts": {
     "service:preflight": "tsx src/preflight.ts",
     "service:start": "tsx src/start.ts",
+    "config:migrate-session-workspaces": "tsx src/migrate-session-workspaces.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "smoke:admin-diagnostics-api": "tsx ../brain-island/smokes/smoke-admin-diagnostics-api.ts",
     "smoke:admin-profile-create-concurrency": "tsx smokes/admin-profile-create-concurrency.ts",

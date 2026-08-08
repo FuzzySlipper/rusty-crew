@@ -186,14 +186,19 @@ const restarted = await command(binding.bindingId, "/new", `${runId}:new`);
 assert.equal(restarted.status, "applied");
 const replacement = restarted.result.threadReplacement;
 assert.ok(replacement);
-assert.equal(replacement.bindingId, binding.bindingId);
+assert.notEqual(replacement.bindingId, binding.bindingId);
+assert.equal(replacement.previousBindingId, binding.bindingId);
+assert.equal(
+  replacement.previousSessionId,
+  bindingBeforeRestart.sessionId ?? null,
+);
 assert.equal(replacement.previousNativeThreadId, binding.nativeThreadId);
 assert.notEqual(replacement.nativeThreadId, binding.nativeThreadId);
 assert.equal(replacement.cwd, bindingBeforeRestart.cwd);
 assert.equal(replacement.label, bindingBeforeRestart.label ?? null);
 assert.deepEqual(replacement.taskRef, bindingBeforeRestart.taskRef ?? null);
 const postRestartTurn = await deliverLiveTurn(
-  binding.bindingId,
+  replacement.bindingId,
   `${runId}:post-restart-turn`,
 );
 assert.equal(postRestartTurn.phase, "completed");
@@ -439,6 +444,16 @@ interface CommandExecution {
       usage: unknown;
     };
     settings?: { model: string; modelProvider: string; effort: string | null };
+    threadReplacement?: {
+      bindingId: string;
+      previousBindingId: string;
+      previousSessionId: string | null;
+      previousNativeThreadId: string;
+      nativeThreadId: string;
+      cwd: string;
+      label: string | null;
+      taskRef: unknown;
+    };
   };
 }
 

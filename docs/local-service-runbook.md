@@ -411,6 +411,33 @@ Minimal shape:
 
 Profile files live at `${profilesDir}/${profileId}.json`.
 
+### Legacy session workspace migration
+
+Full sessions authored before first-class session workspaces may have no
+`workspaceCwd`. Startup rejects that ambiguity instead of inventing a cwd. An
+operator must choose one explicit absolute migration value, inspect the dry
+run, and then write a recoverable update:
+
+```bash
+cd /home/dev/rusty-crew
+npm run config:migrate-session-workspaces -w @rusty-crew/service-host -- \
+  --config /home/system/rusty-crew-debug/config/service.json \
+  --workspace-cwd /home
+
+npm run config:migrate-session-workspaces -w @rusty-crew/service-host -- \
+  --config /home/system/rusty-crew-debug/config/service.json \
+  --workspace-cwd /home \
+  --write
+```
+
+`--write` creates an exclusive timestamped `service.json.pre-workspace-*`
+backup before atomically replacing the config. Use `--backup <absolute-path>`
+to select the rollback path. The migration writes only missing full-session
+`workspaceCwd` values and removes the retired full-session
+`resourceLimits.workdir`; it does not read profiles or alter delegated
+workdirs. Repeat with the production config only after deliberately selecting
+its migration cwd. This is execution context, not filesystem confinement.
+
 Logical turns have no finite service, session, or profile lifetime. They yield
 through brain-specific scheduling quanta and continue until completion,
 operator attention, or explicit cancellation. Retired whole-turn deadline

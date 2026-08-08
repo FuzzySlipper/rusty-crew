@@ -2787,6 +2787,7 @@ fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
         cwd: Some("/home/dev/rusty-crew".into()),
         label: None,
         task_ref: None,
+        lineage: None,
         effective_config_fingerprint: "profile-purge-config".into(),
         status: rusty_crew_core_protocol::ExternalBindingStatus::Archived,
         revision: 0,

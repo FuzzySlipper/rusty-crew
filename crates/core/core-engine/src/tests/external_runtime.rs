@@ -16,7 +16,6 @@ use rusty_crew_core_protocol::{
     ExternalTurnPhase, ExternalTurnRequestId, TurnInputProvenance, TurnInputProvenanceKind,
 };
 use serde_json::json;
-
 #[test]
 fn external_binding_metadata_is_revisioned_and_survives_restart() {
     let data_dir = unique_data_dir("external-binding-metadata");
@@ -1719,6 +1718,7 @@ pub(super) fn binding() -> ExternalAgentBinding {
         cwd: Some("/home/dev/rusty-crew".into()),
         label: None,
         task_ref: None,
+        lineage: None,
         effective_config_fingerprint: "config-fingerprint".into(),
         status: ExternalBindingStatus::Active,
         revision: 0,

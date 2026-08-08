@@ -343,6 +343,7 @@ impl CoreEngine {
             cwd: Some(cwd),
             label: None,
             task_ref: None,
+            lineage: None,
             effective_config_fingerprint: external_agent_effective_config_fingerprint(
                 &runtime, &profile, &request,
             )?,

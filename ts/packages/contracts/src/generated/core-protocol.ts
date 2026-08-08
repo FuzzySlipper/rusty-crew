@@ -825,6 +825,7 @@ export type ExternalAgentBinding = {
   dynamicToolCatalogFingerprint?: string | null;
   effectiveConfigFingerprint: string;
   label?: string | null;
+  lineage?: ExternalAgentBindingLineage | null;
   messageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   nativeThreadId?: string | null;
   profileId?: string | null;
@@ -838,6 +839,15 @@ export type ExternalAgentBinding = {
   status: ExternalBindingStatus;
   taskRef?: DenRuntimeReference | null;
   updatedAt: string;
+};
+
+export type ExternalAgentBindingLineage = {
+  createdAt: string;
+  predecessorBindingId: string;
+  predecessorNativeThreadId: string;
+  predecessorSessionId: string;
+  reasonCode: string;
+  transitionId: string;
 };
 
 export type ExternalAgentBindingMetadataWrite = {

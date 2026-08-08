@@ -175,6 +175,7 @@
     "smoke:external-binding-metadata-live-debug-service": "tsx smokes/external-binding-metadata-live-debug-service.ts",
     "smoke:external-binding-restore-live-debug-service": "tsx smokes/external-binding-restore-live-debug-service.ts",
     "smoke:external-runtime-commands-live": "tsx smokes/external-runtime-commands-live.ts",
+    "smoke:external-thread-lineage-live": "tsx smokes/external-thread-lineage-live-debug-service.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
     "agent:coordination": "tsx src/coordination-operator-production-cli.ts",

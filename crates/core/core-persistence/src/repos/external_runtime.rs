@@ -3053,6 +3053,7 @@ mod tests {
             cwd: Some("/home/dev/rusty-crew".into()),
             label: None,
             task_ref: None,
+            lineage: None,
             effective_config_fingerprint: "config-a".into(),
             status: ExternalBindingStatus::Active,
             revision: 0,

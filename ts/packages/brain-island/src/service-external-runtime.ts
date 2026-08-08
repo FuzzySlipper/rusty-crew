@@ -35,8 +35,6 @@ import {
   type CodexServerRequestContext,
   type NeutralExternalRuntimeEvent,
   type ServerRequestResolution,
-  type Thread,
-  type ThreadItem,
 } from "@rusty-crew/external-runtime-codex";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { resolveCodexCoordinationToolCall } from "./external-runtime-coordination.js";
@@ -69,11 +67,6 @@ const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
 const DEFAULT_RECOVERY_BASE_DELAY_MS = 5_000;
 const DEFAULT_RECOVERY_MAX_DELAY_MS = 60_000;
-const DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES = 256 * 1024;
-const DYNAMIC_TOOL_REFRESH_LINEAGE_EVENT_LIMIT = 1_000;
-const DYNAMIC_TOOL_REFRESH_LINEAGE_MAX_DEPTH = 64;
-const DYNAMIC_TOOL_REFRESH_HANDOFF_TAG =
-  "RUSTY_CREW_DYNAMIC_TOOL_REFRESH_HANDOFF";
 export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
   "external_agent_creation_idempotency_key_required",
   "external_agent_creation_idempotency_conflict",
@@ -565,7 +558,9 @@ export class ServiceExternalRuntimeController {
     const result = await controlled.driver.threadList(input);
     const bindingsByThread = await this.#bindingsByThread(runtimeId);
     const items: ExternalThreadProjection[] = [];
+    const nativeThreadIds = new Set<string>();
     for (const thread of result.data) {
+      nativeThreadIds.add(thread.id);
       if (input.archived === true) {
         controlled.archivedThreadIds.add(thread.id);
       } else {
@@ -580,6 +575,24 @@ export class ServiceExternalRuntimeController {
         ),
       );
     }
+    // Binding-backed empty threads are absent from Codex's native list. Overlay
+    // them only on the first page so opaque native cursors cannot repeat the
+    // same synthetic row on every subsequent page.
+    if (input.cursor == null) {
+      for (const binding of bindingsByThread.values()) {
+        if (
+          nativeThreadIds.has(binding.nativeThreadId ?? "") ||
+          (input.archived === true
+            ? binding.status !== "archived"
+            : binding.status === "archived")
+        ) {
+          continue;
+        }
+        items.push(
+          this.#projectUnmaterializedBindingThread(controlled, binding),
+        );
+      }
+    }
     return {
       items,
       nextCursor: result.nextCursor,
@@ -593,18 +606,38 @@ export class ServiceExternalRuntimeController {
   ): Promise<ExternalThreadReadResult> {
     const controlled = await this.#requireControlled(runtimeId);
     const input = params as Parameters<CodexAppServerDriver["threadRead"]>[0];
-    const result = await controlled.driver
-      .threadRead(input)
-      .catch(async (error: unknown) => {
-        if (input.includeTurns !== false && isUnmaterializedThreadRead(error)) {
-          return controlled.driver.threadRead({
-            ...input,
-            includeTurns: false,
-          });
-        }
-        throw error;
-      });
     const bindingsByThread = await this.#bindingsByThread(runtimeId);
+    const expectedBinding = bindingsByThread.get(input.threadId);
+    let result: Awaited<ReturnType<CodexAppServerDriver["threadRead"]>>;
+    try {
+      result = await controlled.driver
+        .threadRead(input)
+        .catch(async (error: unknown) => {
+          if (
+            input.includeTurns !== false &&
+            isUnmaterializedThreadRead(error)
+          ) {
+            return controlled.driver.threadRead({
+              ...input,
+              includeTurns: false,
+            });
+          }
+          throw error;
+        });
+    } catch (error) {
+      if (
+        expectedBinding === undefined ||
+        !isUnavailableNativeThreadRead(error)
+      ) {
+        throw error;
+      }
+      return {
+        thread: this.#projectUnmaterializedBindingThread(
+          controlled,
+          expectedBinding,
+        ),
+      };
+    }
     const binding = bindingsByThread.get(result.thread.id);
     const projected = await this.#projectExternalThread(
       controlled,
@@ -612,114 +645,7 @@ export class ServiceExternalRuntimeController {
       false,
       binding,
     );
-    return {
-      thread: await this.#restoreDynamicToolRefreshHistory(
-        controlled,
-        projected,
-        binding,
-      ),
-    };
-  }
-
-  /**
-   * Dynamic-tool refreshes must replace the native Codex thread because the
-   * app-server tool catalog is immutable. The replacement receives a bounded
-   * developer-instruction handoff, but that handoff is intentionally not a
-   * visible native transcript. Reattach the durable predecessor turns when a
-   * browser reads the managed replacement so a refresh does not look like a
-   * blank session.
-   */
-  async #restoreDynamicToolRefreshHistory(
-    controlled: ControlledRuntime,
-    thread: ExternalThreadProjection,
-    binding: ExternalAgentBinding | undefined,
-  ): Promise<ExternalThreadProjection> {
-    if (binding === undefined) return thread;
-
-    let predecessorIds: string[];
-    try {
-      predecessorIds = await this.#dynamicToolRefreshLineage(
-        controlled,
-        binding,
-        thread.threadId,
-      );
-    } catch {
-      // Transcript recovery is an additive projection. A temporary event
-      // store failure must not make the native thread unreadable.
-      return thread;
-    }
-    if (predecessorIds.length === 0) return thread;
-
-    const historicalTurns: ExternalThreadTurnProjection[] = [];
-    let historicalPreview = thread.preview;
-    for (const predecessorId of predecessorIds) {
-      try {
-        const predecessor = await controlled.driver.threadRead({
-          threadId: predecessorId,
-          includeTurns: true,
-        });
-        const projected = projectExternalThread(predecessor.thread, null);
-        if (historicalPreview.length === 0 && projected.preview.length > 0) {
-          historicalPreview = projected.preview;
-        }
-        historicalTurns.push(...projected.turns);
-      } catch {
-        // A deleted or unavailable predecessor should not hide newer native
-        // turns that are still readable.
-      }
-    }
-    if (historicalTurns.length === 0) return thread;
-
-    const currentTurnIds = new Set(thread.turns.map((turn) => turn.turnId));
-    return {
-      ...thread,
-      preview: historicalPreview,
-      turns: [
-        ...historicalTurns.filter((turn) => !currentTurnIds.has(turn.turnId)),
-        ...thread.turns,
-      ],
-    };
-  }
-
-  async #dynamicToolRefreshLineage(
-    controlled: ControlledRuntime,
-    binding: ExternalAgentBinding,
-    currentThreadId: string,
-  ): Promise<string[]> {
-    const events = await this.#bridge.queryExternalRuntimeEvents({
-      runtimeId: controlled.registration.runtimeId,
-      afterSequence: 0,
-      limit: DYNAMIC_TOOL_REFRESH_LINEAGE_EVENT_LIMIT,
-      tail: true,
-    });
-    const predecessorByReplacement = new Map<string, string>();
-    for (const event of events) {
-      if (event.kind !== "dynamic_tool_catalog_refreshed") continue;
-      if (!isRecord(event.payload)) continue;
-      if (event.payload.bindingId !== binding.bindingId) continue;
-      const replacementId = stringValue(event.payload.nativeThreadId);
-      const predecessorId = stringValue(event.payload.previousNativeThreadId);
-      if (replacementId === undefined || predecessorId === undefined) {
-        continue;
-      }
-      predecessorByReplacement.set(replacementId, predecessorId);
-    }
-
-    const lineage: string[] = [];
-    const seen = new Set([currentThreadId]);
-    let replacementId = currentThreadId;
-    for (
-      let depth = 0;
-      depth < DYNAMIC_TOOL_REFRESH_LINEAGE_MAX_DEPTH;
-      depth += 1
-    ) {
-      const predecessorId = predecessorByReplacement.get(replacementId);
-      if (predecessorId === undefined || seen.has(predecessorId)) break;
-      lineage.push(predecessorId);
-      seen.add(predecessorId);
-      replacementId = predecessorId;
-    }
-    return lineage.reverse();
+    return { thread: projected };
   }
 
   async updateBindingMetadata(input: {
@@ -1424,165 +1350,42 @@ export class ServiceExternalRuntimeController {
 
     const controlled = await this.#requireControlled(binding.runtimeId);
     try {
-      await this.#assertThreadHasNoCrewWork(
-        binding.runtimeId,
-        binding.nativeThreadId,
-        [binding],
-      );
-    } catch (error) {
-      throw new ExternalBindingProfileRefreshError(
-        "external_binding_profile_refresh_thread_busy",
-        error instanceof Error ? error.message : String(error),
+      const replacement = await this.#createDistinctThreadSuccessor(
+        controlled,
+        bindingWithThread,
+        `profile-refresh:${binding.bindingId}:${profile.promptHash}:${binding.nativeThreadId}`,
+        "profile_prompt_refresh",
         true,
       );
-    }
-    const previousSettings = await this.#effectiveThreadSettings(controlled, {
-      ...binding,
-      nativeThreadId: binding.nativeThreadId,
-    }).catch(() => undefined);
-    const cwd = await this.#sessionWorkspaceCwd(binding);
-    const threadSource = `rusty-crew:profile-refresh:${binding.bindingId}:${profile.promptHash}:${binding.nativeThreadId}`;
-    let nextThreadId: string | undefined;
-    let nextSettings: ControlledThreadSettings | undefined;
-    let candidateMayBeDeleted = false;
-    let saved: ExternalAgentBinding | undefined;
-    try {
-      const recovered = await this.#findThreadBySource(
-        controlled,
-        threadSource,
-      );
-      if (recovered === undefined) {
-        const started = await controlled.driver.threadStart({
-          ...(previousSettings === undefined
-            ? {}
-            : {
-                model: previousSettings.model,
-                modelProvider: previousSettings.modelProvider,
-                ...(previousSettings.reasoning_effort === null
-                  ? {}
-                  : {
-                      config: {
-                        model_reasoning_effort:
-                          previousSettings.reasoning_effort,
-                      },
-                    }),
-              }),
-          cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          ephemeral: false,
-          environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
-          threadSource,
-          developerInstructions: profile.developerInstructions,
-        });
-        nextThreadId = started.thread.id;
-        candidateMayBeDeleted = true;
-        nextSettings = {
-          model: started.model,
-          modelProvider: started.modelProvider,
-          reasoning_effort: started.reasoningEffort,
-          developer_instructions: profile.developerInstructions,
-        };
-      } else {
-        nextThreadId = recovered.id;
-        candidateMayBeDeleted = true;
-        const resumed = await controlled.driver.threadResume({
-          threadId: nextThreadId,
-          cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          excludeTurns: true,
-          developerInstructions: profile.developerInstructions,
-        });
-        nextSettings = {
-          ...threadSettingsFromResume(resumed),
-          developer_instructions: profile.developerInstructions,
-        };
-      }
+      return {
+        outcome: "thread_replaced",
+        binding: replacement.binding,
+        previousNativeThreadId: binding.nativeThreadId,
+        nativeThreadId: replacement.nativeThreadId,
+        previousNativeThreadArchived: replacement.previousNativeThreadArchived,
+        profileState: await this.#bindingProfileState(
+          replacement.binding,
+          profile,
+        ),
+      };
+    } catch (error) {
       if (
-        previousSettings !== undefined &&
-        nextSettings.modelProvider !== previousSettings.modelProvider
+        error instanceof ExternalThreadLifecycleError &&
+        (error.reasonCode === "external_thread_active" ||
+          error.reasonCode === "external_thread_interaction_pending")
       ) {
-        throw new Error(
-          `fresh Codex thread selected provider ${nextSettings.modelProvider}; expected ${previousSettings.modelProvider}`,
+        throw new ExternalBindingProfileRefreshError(
+          "external_binding_profile_refresh_thread_busy",
+          error.message,
+          true,
         );
       }
-      if (
-        previousSettings !== undefined &&
-        (nextSettings.model !== previousSettings.model ||
-          nextSettings.reasoning_effort !== previousSettings.reasoning_effort)
-      ) {
-        await controlled.driver.threadSettingsUpdate({
-          threadId: nextThreadId,
-          model: previousSettings.model,
-          effort: previousSettings.reasoning_effort,
-        });
-        nextSettings = {
-          ...(await this.#refreshThreadSettings(controlled, nextThreadId, {
-            model: previousSettings.model,
-            effort: previousSettings.reasoning_effort,
-          })),
-          developer_instructions: profile.developerInstructions,
-        };
-      }
-      if (typeof binding.label === "string") {
-        await controlled.driver.threadSetName({
-          threadId: nextThreadId,
-          name: binding.label,
-        });
-      }
-      const latestProfile = await this.#profileDeveloperInstructions(
-        binding.profileId,
-      );
-      this.#assertExpectedProfileRefresh(latestProfile, input);
-      saved = await this.#bridge.bindExternalAgent({
-        binding: {
-          ...binding,
-          nativeThreadId: nextThreadId,
-          profileRevision: profile.revision,
-          profilePromptHash: profile.promptHash,
-          profilePromptSnapshot: storedProfilePromptSnapshot(profile),
-          dynamicToolCatalogFingerprint:
-            codexCoordinationDynamicToolCatalogFingerprint(binding),
-          updatedAt: this.#now().toISOString(),
-        },
-        expectedRevision: binding.revision,
-      });
-      candidateMayBeDeleted = false;
-    } catch (error) {
-      if (nextThreadId !== undefined && candidateMayBeDeleted) {
-        await controlled.driver
-          .threadDelete({ threadId: nextThreadId })
-          .catch(() => undefined);
-      }
-      if (error instanceof ExternalBindingProfileRefreshError) throw error;
       throw new ExternalBindingProfileRefreshError(
-        nextThreadId === undefined
-          ? "external_binding_profile_refresh_native_failed"
-          : "external_binding_profile_refresh_persist_failed",
+        "external_binding_profile_refresh_native_failed",
         error instanceof Error ? error.message : String(error),
         true,
       );
     }
-    controlled.threadSettings.delete(binding.nativeThreadId);
-    controlled.threadUsage.delete(binding.nativeThreadId);
-    controlled.threadSettings.set(nextThreadId, nextSettings);
-    const previousNativeThreadArchived = await controlled.driver
-      .threadArchive({ threadId: binding.nativeThreadId })
-      .then(() => {
-        controlled.archivedThreadIds.add(binding.nativeThreadId as string);
-        return true;
-      })
-      .catch(() => false);
-    return {
-      outcome: "thread_replaced",
-      binding: saved,
-      previousNativeThreadId: binding.nativeThreadId,
-      nativeThreadId: nextThreadId,
-      previousNativeThreadArchived,
-      profileState: await this.#bindingProfileState(saved, profile),
-    };
   }
 
   async restoreBinding(input: {
@@ -2144,200 +1947,20 @@ export class ServiceExternalRuntimeController {
     readonly nativeThreadId: string;
     readonly settings: ControlledThreadSettings;
     readonly previousNativeThreadArchived: boolean;
-    readonly historyHandoff: DynamicToolRefreshHistoryHandoff | null;
   }> {
-    await this.#assertThreadHasNoCrewWork(
-      binding.runtimeId,
-      binding.nativeThreadId,
-      [binding],
-    );
-    const previousNativeThreadId = binding.nativeThreadId;
-    const previousSettings = await this.#effectiveThreadSettings(
+    void developerInstructions;
+    const replacement = await this.#createDistinctThreadSuccessor(
       controlled,
       binding,
-    ).catch(() => undefined);
-    const cwd = await this.#sessionWorkspaceCwd(binding);
-    const threadSource = `rusty-crew:dynamic-tools-refresh:${binding.bindingId}:${dynamicToolCatalogFingerprint}:${previousNativeThreadId}`;
-    let nextNativeThreadId: string | undefined;
-    let nextSettings: ControlledThreadSettings | undefined;
-    let candidateMayBeDeleted = false;
-    let saved: ExternalAgentBinding | undefined;
-    let historyHandoff: DynamicToolRefreshHistoryHandoff | null = null;
-    try {
-      const recovered = await this.#findThreadBySource(
-        controlled,
-        threadSource,
-      );
-      if (recovered === undefined) {
-        let previousThread: Thread;
-        try {
-          previousThread = (
-            await controlled.driver.threadRead({
-              threadId: previousNativeThreadId,
-              includeTurns: true,
-            })
-          ).thread;
-        } catch (error) {
-          throw new ExternalThreadLifecycleError(
-            "external_thread_context_unavailable",
-            `cannot reconstruct native thread ${previousNativeThreadId} before dynamic-tool refresh: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-        historyHandoff = buildDynamicToolRefreshHistoryHandoff(
-          previousThread,
-          developerInstructions,
-        );
-        const started = await controlled.driver.threadStart({
-          ...(previousSettings === undefined
-            ? {}
-            : {
-                model: previousSettings.model,
-                modelProvider: previousSettings.modelProvider,
-                ...(previousSettings.reasoning_effort === null
-                  ? {}
-                  : {
-                      config: {
-                        model_reasoning_effort:
-                          previousSettings.reasoning_effort,
-                      },
-                    }),
-              }),
-          cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          ephemeral: false,
-          environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
-          threadSource,
-          developerInstructions: historyHandoff.developerInstructions,
-        });
-        nextNativeThreadId = started.thread.id;
-        candidateMayBeDeleted = true;
-        nextSettings = {
-          model: started.model,
-          modelProvider: started.modelProvider,
-          reasoning_effort: started.reasoningEffort,
-          developer_instructions: historyHandoff.developerInstructions,
-        };
-      } else {
-        nextNativeThreadId = recovered.id;
-        candidateMayBeDeleted = true;
-        const resumed = await controlled.driver.threadResume({
-          threadId: recovered.id,
-          cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          excludeTurns: true,
-          developerInstructions,
-        });
-        nextSettings = {
-          ...threadSettingsFromResume(resumed),
-          developer_instructions: developerInstructions,
-        };
-      }
-      if (
-        previousSettings !== undefined &&
-        nextSettings.modelProvider !== previousSettings.modelProvider
-      ) {
-        throw new Error(
-          `fresh Codex thread selected provider ${nextSettings.modelProvider}; expected ${previousSettings.modelProvider}`,
-        );
-      }
-      if (
-        previousSettings !== undefined &&
-        (nextSettings.model !== previousSettings.model ||
-          nextSettings.reasoning_effort !== previousSettings.reasoning_effort)
-      ) {
-        await controlled.driver.threadSettingsUpdate({
-          threadId: nextNativeThreadId,
-          model: previousSettings.model,
-          effort: previousSettings.reasoning_effort,
-        });
-        nextSettings = {
-          ...(await this.#refreshThreadSettings(
-            controlled,
-            nextNativeThreadId,
-            {
-              model: previousSettings.model,
-              effort: previousSettings.reasoning_effort,
-            },
-          )),
-          developer_instructions:
-            historyHandoff?.developerInstructions ?? developerInstructions,
-        };
-      }
-      if (typeof binding.label === "string") {
-        await controlled.driver.threadSetName({
-          threadId: nextNativeThreadId,
-          name: binding.label,
-        });
-      }
-      saved = await this.#bridge.bindExternalAgent({
-        binding: {
-          ...binding,
-          nativeThreadId: nextNativeThreadId,
-          dynamicToolCatalogFingerprint,
-          updatedAt: this.#now().toISOString(),
-        },
-        expectedRevision: binding.revision,
-      });
-      candidateMayBeDeleted = false;
-    } catch (error) {
-      if (nextNativeThreadId !== undefined && candidateMayBeDeleted) {
-        await controlled.driver
-          .threadDelete({ threadId: nextNativeThreadId })
-          .catch(() => undefined);
-      }
-      throw error;
-    }
-    controlled.threadSettings.delete(previousNativeThreadId);
-    controlled.threadUsage.delete(previousNativeThreadId);
-    controlled.threadSettings.set(nextNativeThreadId, nextSettings);
-    const previousNativeThreadArchived = await controlled.driver
-      .threadArchive({ threadId: previousNativeThreadId })
-      .then(() => {
-        controlled.archivedThreadIds.add(previousNativeThreadId);
-        return true;
-      })
-      .catch(() => false);
-    await this.#bridge
-      .recordExternalRuntimeEvent({
-        controller: this.#controllerContext(controlled),
-        event: {
-          eventId: `dynamic-tool-catalog:${binding.bindingId}:${saved.revision}`,
-          sessionId: binding.sessionId,
-          createdAt: this.#now().toISOString(),
-          kind: "dynamic_tool_catalog_refreshed",
-          runtimeId: binding.runtimeId,
-          nativeThreadId: nextNativeThreadId,
-          nativeTurnId: null,
-          itemId: null,
-          requestId: null,
-          payload: {
-            nativeMethod: "rustyCrew/dynamicToolCatalogRefresh",
-            bindingId: binding.bindingId,
-            previousNativeThreadId,
-            nativeThreadId: nextNativeThreadId,
-            dynamicToolCatalogFingerprint,
-            previousNativeThreadArchived,
-            historyHandoffApplied: historyHandoff !== null,
-            historyHandoffDigest: historyHandoff?.digest ?? null,
-            historyHandoffTurnCount: historyHandoff?.turnCount ?? null,
-            historyHandoffItemCount: historyHandoff?.itemCount ?? null,
-            historyHandoffTruncated: historyHandoff?.truncated ?? null,
-          },
-          rawDetailRef: null,
-        },
-      })
-      .catch(() => undefined);
+      `dynamic-tools:${binding.bindingId}:${dynamicToolCatalogFingerprint}:${binding.nativeThreadId}`,
+      "dynamic_tool_catalog_refresh",
+      true,
+    );
     return {
-      binding: saved,
-      nativeThreadId: nextNativeThreadId,
-      settings: nextSettings,
-      previousNativeThreadArchived,
-      historyHandoff,
+      binding: replacement.binding,
+      nativeThreadId: replacement.nativeThreadId,
+      settings: replacement.settings,
+      previousNativeThreadArchived: replacement.previousNativeThreadArchived,
     };
   }
 
@@ -2965,14 +2588,49 @@ export class ServiceExternalRuntimeController {
       effectiveModel,
       binding === undefined ? undefined : (binding.label ?? null),
     );
-    if (projected.turns.length === 0) return projected;
+    const identified = projectBindingIdentity(projected, binding, true);
+    if (identified.turns.length === 0) return identified;
     return reconcileExternalThreadProjection(
-      projected,
+      identified,
       await this.#bridge.listExternalTurnsForNativeThread(
         controlled.registration.runtimeId,
         threadId,
       ),
     );
+  }
+
+  #projectUnmaterializedBindingThread(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding,
+  ): ExternalThreadProjection {
+    if (typeof binding.nativeThreadId !== "string") {
+      throw new Error(
+        `external binding ${binding.bindingId} has no native thread`,
+      );
+    }
+    const settings = controlled.threadSettings.get(binding.nativeThreadId);
+    return {
+      threadId: binding.nativeThreadId,
+      sessionId: binding.sessionId ?? binding.bindingId,
+      bindingId: binding.bindingId,
+      crewSessionId: binding.sessionId ?? null,
+      lineage: binding.lineage ?? null,
+      nativeMaterialized: false,
+      parentThreadId: null,
+      preview: "",
+      ephemeral: false,
+      modelProvider: settings?.modelProvider ?? "unknown",
+      effectiveModel: settings?.model ?? null,
+      createdAt: timestampSeconds(binding.createdAt),
+      updatedAt: timestampSeconds(binding.updatedAt),
+      status: binding.status === "active" ? "unmaterialized" : binding.status,
+      cwd: binding.cwd ?? "",
+      cliVersion: controlled.registration.observedCliVersion ?? "unknown",
+      name: binding.label ?? null,
+      agentNickname: null,
+      agentRole: null,
+      turns: [],
+    };
   }
 
   async #bindingsByThread(
@@ -3165,23 +2823,47 @@ export class ServiceExternalRuntimeController {
       );
     }
 
-    let promptContext: {
-      binding: ExternalAgentBinding;
-      developerInstructions: string | null;
-    };
     try {
-      const resolved = await this.#bindingPromptContext(
+      const promptContext = await this.#bindingPromptContext(
         binding,
         "require_current",
       );
-      if (resolved.developerInstructions === undefined) {
+      if (typeof promptContext.binding.nativeThreadId !== "string") {
         throw new Error(
-          `external binding ${binding.bindingId} has no applied developer instructions`,
+          `external binding ${binding.bindingId} lost its native thread during profile repair`,
         );
       }
-      promptContext = {
-        binding: resolved.binding,
-        developerInstructions: resolved.developerInstructions,
+      const currentBinding = promptContext.binding as ExternalAgentBinding & {
+        nativeThreadId: string;
+      };
+      const replacement = await this.#createDistinctThreadSuccessor(
+        controlled,
+        currentBinding,
+        controlId,
+        "external_command_new_session",
+        false,
+      );
+      return {
+        message: `Started a distinct Codex session for ${currentBinding.label ?? currentBinding.bindingId}; the predecessor remains readable.`,
+        result: {
+          threadReplacement: {
+            bindingId: replacement.binding.bindingId,
+            bindingRevision: replacement.binding.revision,
+            sessionId: replacement.binding.sessionId ?? null,
+            profileId: replacement.binding.profileId ?? null,
+            cwd: replacement.cwd,
+            label: replacement.binding.label ?? null,
+            taskRef: replacement.binding.taskRef ?? null,
+            previousBindingId: currentBinding.bindingId,
+            previousSessionId: currentBinding.sessionId ?? null,
+            previousNativeThreadId: currentBinding.nativeThreadId,
+            nativeThreadId: replacement.nativeThreadId,
+            previousNativeThreadArchived:
+              replacement.previousNativeThreadArchived,
+            settingsPreserved: replacement.settingsPreserved,
+            settings: projectThreadSettings(replacement.settings),
+          },
+        },
       };
     } catch (error) {
       throw new ExternalRuntimeCommandError(
@@ -3190,195 +2872,209 @@ export class ServiceExternalRuntimeController {
         true,
       );
     }
-    const currentBinding = promptContext.binding;
-    if (typeof currentBinding.nativeThreadId !== "string") {
-      throw new ExternalRuntimeCommandError(
-        "external_command_restart_failed",
-        `external binding ${currentBinding.bindingId} lost its native thread during profile repair`,
-        true,
+  }
+
+  async #createDistinctThreadSuccessor(
+    controlled: ControlledRuntime,
+    predecessor: ExternalAgentBinding & { nativeThreadId: string },
+    transitionId: string,
+    reasonCode: string,
+    archivePredecessor: boolean,
+  ): Promise<{
+    readonly binding: ExternalAgentBinding;
+    readonly nativeThreadId: string;
+    readonly cwd: string;
+    readonly settings: ControlledThreadSettings;
+    readonly settingsPreserved: boolean;
+    readonly previousNativeThreadArchived: boolean;
+  }> {
+    if (predecessor.sessionId == null || predecessor.profileId == null) {
+      throw new Error(
+        `external binding ${predecessor.bindingId} lacks Crew lineage identity`,
       );
     }
-    const currentNativeThreadId = currentBinding.nativeThreadId;
-    let previousNativeThreadId = currentNativeThreadId;
-    const cwd = await this.#sessionWorkspaceCwd(currentBinding);
-    const developerInstructions = promptContext.developerInstructions;
-    const previousSettings =
-      controlled.threadSettings.get(previousNativeThreadId) ??
-      (await this.#effectiveThreadSettings(controlled, {
-        ...currentBinding,
-        nativeThreadId: currentNativeThreadId,
-      }).catch(() => undefined));
-    const threadSourcePrefix = `rusty-crew:command:${controlId}:replace:`;
-    const threadSource = `${threadSourcePrefix}${previousNativeThreadId}`;
-    let nativeThreadId: string | undefined;
-    let nextSettings: ControlledThreadSettings | undefined;
-    let rebound: ExternalAgentBinding | undefined;
-    let bindingAlreadyRebound = false;
-    let candidateMayBeDeleted = false;
-
-    try {
-      const recovered = await this.#findThreadBySource(
-        controlled,
-        threadSourcePrefix,
-        "prefix",
-      );
-      if (recovered === undefined) {
-        const started = await controlled.driver.threadStart({
-          ...(previousSettings === undefined
-            ? {}
-            : {
-                model: previousSettings.model,
-                modelProvider: previousSettings.modelProvider,
-                ...(previousSettings.reasoning_effort === null
-                  ? {}
-                  : {
-                      config: {
-                        model_reasoning_effort:
-                          previousSettings.reasoning_effort,
-                      },
-                    }),
-              }),
-          cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          ephemeral: false,
-          environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
-          threadSource,
-          developerInstructions,
-        });
-        nativeThreadId = started.thread.id;
-        candidateMayBeDeleted = true;
-        nextSettings = {
-          model: started.model,
-          modelProvider: started.modelProvider,
-          reasoning_effort: started.reasoningEffort,
-          developer_instructions: developerInstructions,
-        };
-      } else {
-        if (
-          typeof recovered.threadSource !== "string" ||
-          !recovered.threadSource.startsWith(threadSourcePrefix)
-        ) {
-          throw new Error(
-            `recovered Codex thread ${recovered.id} has invalid replacement provenance`,
-          );
-        }
-        previousNativeThreadId = recovered.threadSource.slice(
-          threadSourcePrefix.length,
-        );
-        if (previousNativeThreadId.length === 0) {
-          throw new Error(
-            `recovered Codex thread ${recovered.id} has no replaced thread identity`,
-          );
-        }
-        nativeThreadId = recovered.id;
-        bindingAlreadyRebound = currentBinding.nativeThreadId === recovered.id;
-        candidateMayBeDeleted = !bindingAlreadyRebound;
-        const resumed = await controlled.driver.threadResume({
-          threadId: recovered.id,
-          cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          excludeTurns: true,
-          developerInstructions,
-        });
-        nextSettings = threadSettingsFromResume(resumed);
-      }
-
-      if (
-        previousSettings !== undefined &&
-        nextSettings.modelProvider !== previousSettings.modelProvider
-      ) {
-        throw new Error(
-          `fresh Codex thread selected provider ${nextSettings.modelProvider}; expected ${previousSettings.modelProvider}`,
-        );
-      }
-      if (
-        previousSettings !== undefined &&
-        (nextSettings.model !== previousSettings.model ||
-          nextSettings.reasoning_effort !== previousSettings.reasoning_effort)
-      ) {
-        await controlled.driver.threadSettingsUpdate({
-          threadId: nativeThreadId,
-          model: previousSettings.model,
-          effort: previousSettings.reasoning_effort,
-        });
-        nextSettings = await this.#refreshThreadSettings(
-          controlled,
-          nativeThreadId,
-          {
-            model: previousSettings.model,
-            effort: previousSettings.reasoning_effort,
-          },
-        );
-      }
-      if (typeof currentBinding.label === "string") {
-        await controlled.driver.threadSetName({
-          threadId: nativeThreadId,
-          name: currentBinding.label,
-        });
-      }
-      if (bindingAlreadyRebound) {
-        rebound = currentBinding;
-      } else {
-        rebound = await this.#bridge.bindExternalAgent({
+    await this.#assertThreadHasNoCrewWork(
+      predecessor.runtimeId,
+      predecessor.nativeThreadId,
+      [predecessor],
+    );
+    const cwd = await this.#sessionWorkspaceCwd(predecessor);
+    const previousSettings = await this.#effectiveThreadSettings(
+      controlled,
+      predecessor,
+    ).catch(() => undefined);
+    const created = await this.createAgentSession({
+      idempotencyKey: `thread-lineage:${transitionId}`,
+      runtimeId: predecessor.runtimeId,
+      profileId: predecessor.profileId,
+      cwd,
+      ...(predecessor.taskRef == null ? {} : { taskRef: predecessor.taskRef }),
+      ...(predecessor.label == null ? {} : { label: predecessor.label }),
+      requestedAt: predecessor.updatedAt,
+    });
+    let successor = created.creation.binding;
+    const expectedLineage = {
+      predecessorBindingId: predecessor.bindingId,
+      predecessorSessionId: predecessor.sessionId,
+      predecessorNativeThreadId: predecessor.nativeThreadId,
+      transitionId,
+      reasonCode,
+      createdAt: predecessor.updatedAt,
+    };
+    if (successor.lineage == null) {
+      try {
+        successor = await this.#bridge.bindExternalAgent({
           binding: {
-            ...currentBinding,
-            nativeThreadId,
-            dynamicToolCatalogFingerprint:
-              codexCoordinationDynamicToolCatalogFingerprint(currentBinding),
+            ...successor,
+            lineage: expectedLineage,
             updatedAt: this.#now().toISOString(),
           },
-          expectedRevision: currentBinding.revision,
+          expectedRevision: successor.revision,
         });
-        candidateMayBeDeleted = false;
+      } catch (error) {
+        const concurrentlyUpdated = await this.#bridge.getExternalBinding(
+          successor.bindingId,
+        );
+        if (
+          concurrentlyUpdated == null ||
+          !bindingLineageMatches(concurrentlyUpdated, expectedLineage)
+        ) {
+          throw error;
+        }
+        successor = concurrentlyUpdated;
       }
-    } catch (error) {
-      if (nativeThreadId !== undefined && candidateMayBeDeleted) {
-        await controlled.driver
-          .threadDelete({ threadId: nativeThreadId })
-          .catch(() => undefined);
-      }
-      throw new ExternalRuntimeCommandError(
-        "external_command_restart_failed",
-        error instanceof Error ? error.message : String(error),
-        true,
+    } else if (!bindingLineageMatches(successor, expectedLineage)) {
+      throw new Error(
+        `external binding ${successor.bindingId} has conflicting lineage`,
       );
     }
-
-    controlled.threadSettings.delete(previousNativeThreadId);
-    controlled.threadUsage.delete(previousNativeThreadId);
-    controlled.threadSettings.set(nativeThreadId, nextSettings);
-    const previousNativeThreadArchived =
-      previousNativeThreadId === nativeThreadId
-        ? false
-        : await controlled.driver
-            .threadArchive({ threadId: previousNativeThreadId })
-            .then(() => {
-              controlled.archivedThreadIds.add(previousNativeThreadId);
-              return true;
-            })
-            .catch(() => false);
-    return {
-      message: `Started a fresh Codex thread for ${currentBinding.label ?? currentBinding.bindingId}.`,
-      result: {
-        threadReplacement: {
-          bindingId: rebound.bindingId,
-          bindingRevision: rebound.revision,
-          sessionId: rebound.sessionId ?? null,
-          profileId: rebound.profileId ?? null,
-          cwd,
-          label: rebound.label ?? null,
-          taskRef: rebound.taskRef ?? null,
-          previousNativeThreadId,
-          nativeThreadId,
-          previousNativeThreadArchived,
-          settingsPreserved: previousSettings !== undefined,
-          settings: projectThreadSettings(nextSettings),
+    const nativeThreadId = created.thread.threadId;
+    let settings = await this.#effectiveThreadSettings(controlled, {
+      ...successor,
+      nativeThreadId,
+    });
+    if (
+      previousSettings !== undefined &&
+      (settings.model !== previousSettings.model ||
+        settings.modelProvider !== previousSettings.modelProvider ||
+        settings.reasoning_effort !== previousSettings.reasoning_effort)
+    ) {
+      if (settings.modelProvider !== previousSettings.modelProvider) {
+        throw new Error(
+          `successor Codex thread selected provider ${settings.modelProvider}; expected ${previousSettings.modelProvider}`,
+        );
+      }
+      await controlled.driver.threadSettingsUpdate({
+        threadId: nativeThreadId,
+        model: previousSettings.model,
+        effort: previousSettings.reasoning_effort,
+      });
+      settings = await this.#refreshThreadSettings(controlled, nativeThreadId, {
+        model: previousSettings.model,
+        effort: previousSettings.reasoning_effort,
+      });
+    }
+    const movedRoutes = await this.#moveCuratedRoutesToSuccessor(
+      predecessor,
+      successor,
+    );
+    let previousNativeThreadArchived = false;
+    if (archivePredecessor) {
+      const archive = await this.archiveThread(
+        predecessor.runtimeId,
+        predecessor.nativeThreadId,
+      );
+      previousNativeThreadArchived = archive.nativeArchived;
+    }
+    await this.#bridge.recordExternalRuntimeEvent({
+      controller: this.#controllerContext(controlled),
+      event: {
+        eventId: `thread-lineage:${transitionId}`,
+        sessionId: successor.sessionId ?? undefined,
+        createdAt: this.#now().toISOString(),
+        kind: "thread_lineage_replaced",
+        runtimeId: successor.runtimeId,
+        nativeThreadId,
+        requestId: transitionId,
+        payload: {
+          nativeMethod: "rustyCrew/threadLineageReplacement",
+          reasonCode,
+          predecessorBindingId: predecessor.bindingId,
+          predecessorSessionId: predecessor.sessionId,
+          predecessorNativeThreadId: predecessor.nativeThreadId,
+          successorBindingId: successor.bindingId,
+          successorSessionId: successor.sessionId,
+          successorNativeThreadId: nativeThreadId,
+          predecessorLifecycle: archivePredecessor ? "archived" : "retained",
+          movedRouteCount: movedRoutes,
         },
       },
+    });
+    return {
+      binding: successor,
+      nativeThreadId,
+      cwd,
+      settings,
+      settingsPreserved: previousSettings !== undefined,
+      previousNativeThreadArchived,
     };
+  }
+
+  async #moveCuratedRoutesToSuccessor(
+    predecessor: ExternalAgentBinding,
+    successor: ExternalAgentBinding,
+  ): Promise<number> {
+    if (successor.agentId == null) {
+      throw new Error(
+        `successor binding ${successor.bindingId} lacks an agent identity`,
+      );
+    }
+    const resolutions = await this.#bridge.listAgentRouteResolutions();
+    let moved = 0;
+    for (const resolution of [...resolutions].sort((left, right) =>
+      left.address.localeCompare(right.address),
+    )) {
+      const route = resolution.route;
+      if (
+        route == null ||
+        route.target.type !== "managed_external" ||
+        route.target.bindingId !== predecessor.bindingId
+      ) {
+        continue;
+      }
+      try {
+        await this.#bridge.putAgentRoute({
+          routeKey: route.routeKey,
+          label: route.label,
+          description: route.description,
+          enabled: route.enabled,
+          target: {
+            type: "managed_external",
+            agentId: successor.agentId,
+            bindingId: successor.bindingId,
+            bindingRevision: successor.revision,
+          },
+          requiredRuntimeKind: route.requiredRuntimeKind,
+          requiredDeliveryPolicy: route.requiredDeliveryPolicy,
+          expectedRevision: route.revision,
+          updatedAt: this.#now().toISOString(),
+        });
+      } catch (error) {
+        const concurrentlyUpdated = await this.#bridge.getAgentRouteResolution(
+          route.routeKey,
+        );
+        if (
+          concurrentlyUpdated?.route?.target.type !== "managed_external" ||
+          concurrentlyUpdated.route.target.bindingId !== successor.bindingId ||
+          concurrentlyUpdated.route.target.bindingRevision !==
+            successor.revision
+        ) {
+          throw error;
+        }
+      }
+      moved += 1;
+    }
+    return moved;
   }
 
   async #refreshThreadSettings(
@@ -4273,7 +3969,20 @@ export class ServiceExternalRuntimeController {
     const active = await this.#findThread(controlled, threadId, false);
     if (active !== undefined) return { thread: active };
     const archived = await this.#findThread(controlled, threadId, true);
-    return archived === undefined ? undefined : "archived";
+    if (archived !== undefined) return "archived";
+    // Codex does not return a newly started thread from thread/list until its
+    // first user turn materializes a rollout. A direct turn-free read remains
+    // authoritative for lifecycle operations on that empty thread.
+    try {
+      const direct = await controlled.driver.threadRead({
+        threadId,
+        includeTurns: false,
+      });
+      return { thread: direct.thread };
+    } catch (error) {
+      if (isUnavailableNativeThreadRead(error)) return undefined;
+      throw error;
+    }
   }
 
   async #findThread(
@@ -4593,6 +4302,10 @@ function projectExternalThread(
   return {
     threadId: requireNativeString(thread.id, "thread.id"),
     sessionId: requireNativeString(thread.sessionId, "thread.sessionId"),
+    bindingId: null,
+    crewSessionId: null,
+    lineage: null,
+    nativeMaterialized: true,
     parentThreadId: nullableNativeString(thread.parentThreadId),
     preview: nativeString(thread.preview) ?? "",
     ephemeral: thread.ephemeral === true,
@@ -4613,6 +4326,25 @@ function projectExternalThread(
       ? thread.turns.map(projectExternalThreadTurn)
       : [],
   };
+}
+
+function projectBindingIdentity(
+  thread: ExternalThreadProjection,
+  binding: ExternalAgentBinding | undefined,
+  nativeMaterialized: boolean,
+): ExternalThreadProjection {
+  return {
+    ...thread,
+    bindingId: binding?.bindingId ?? null,
+    crewSessionId: binding?.sessionId ?? null,
+    lineage: binding?.lineage ?? null,
+    nativeMaterialized,
+  };
+}
+
+function timestampSeconds(value: string): number {
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? milliseconds / 1_000 : 0;
 }
 
 function projectExternalThreadTurn(
@@ -4750,6 +4482,16 @@ function isUnmaterializedThreadRead(error: unknown): boolean {
     error.message.includes(
       "is not materialized yet; includeTurns is unavailable before first user message",
     )
+  );
+}
+
+function isUnavailableNativeThreadRead(error: unknown): boolean {
+  return (
+    isUnmaterializedThreadRead(error) ||
+    (error instanceof CodexRpcError &&
+      (error.message.includes("no rollout found for thread id") ||
+        error.message.includes("thread not found") ||
+        error.message.includes("thread not loaded")))
   );
 }
 
@@ -4953,184 +4695,20 @@ function appliedDeveloperInstructions(
     : binding.profilePromptSnapshot;
 }
 
-interface DynamicToolRefreshHistoryHandoff {
-  readonly developerInstructions: string;
-  readonly digest: string;
-  readonly turnCount: number;
-  readonly itemCount: number;
-  readonly truncated: boolean;
-}
-
-function takeUtf8Prefix(value: string, maxBytes: number): string {
-  let result = "";
-  let bytes = 0;
-  for (const character of value) {
-    const characterBytes = Buffer.byteLength(character, "utf8");
-    if (bytes + characterBytes > maxBytes) break;
-    result += character;
-    bytes += characterBytes;
-  }
-  return result;
-}
-
-function takeUtf8Suffix(value: string, maxBytes: number): string {
-  const characters = [...value];
-  let result = "";
-  let bytes = 0;
-  for (let index = characters.length - 1; index >= 0; index -= 1) {
-    const character = characters[index];
-    if (character === undefined) continue;
-    const characterBytes = Buffer.byteLength(character, "utf8");
-    if (bytes + characterBytes > maxBytes) break;
-    result = character + result;
-    bytes += characterBytes;
-  }
-  return result;
-}
-
-function boundHistoryText(value: string): {
-  readonly text: string;
-  readonly truncated: boolean;
-} {
-  if (
-    Buffer.byteLength(value, "utf8") <= DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES
-  ) {
-    return { text: value, truncated: false };
-  }
-  const omission =
-    "\n[history handoff middle omitted at the Rusty Crew reconstruction boundary]\n";
-  const available = Math.max(
-    0,
-    DYNAMIC_TOOL_REFRESH_HANDOFF_LIMIT_BYTES -
-      Buffer.byteLength(omission, "utf8"),
+function bindingLineageMatches(
+  binding: ExternalAgentBinding,
+  expected: NonNullable<ExternalAgentBinding["lineage"]>,
+): boolean {
+  const lineage = binding.lineage;
+  return (
+    lineage != null &&
+    lineage.predecessorBindingId === expected.predecessorBindingId &&
+    lineage.predecessorSessionId === expected.predecessorSessionId &&
+    lineage.predecessorNativeThreadId === expected.predecessorNativeThreadId &&
+    lineage.transitionId === expected.transitionId &&
+    lineage.reasonCode === expected.reasonCode &&
+    lineage.createdAt === expected.createdAt
   );
-  const prefixBytes = Math.floor(available / 2);
-  const suffixBytes = available - prefixBytes;
-  return {
-    text:
-      takeUtf8Prefix(value, prefixBytes) +
-      omission +
-      takeUtf8Suffix(value, suffixBytes),
-    truncated: true,
-  };
-}
-
-function boundedHistoryValue(value: unknown, maxBytes = 32 * 1024): string {
-  return captureBoundedRawDetail(value, maxBytes).json;
-}
-
-function userInputText(item: ThreadItem): string {
-  if (item.type !== "userMessage") return "";
-  const text = item.content
-    .filter((content) => content.type === "text")
-    .map((content) => content.text)
-    .join("\n");
-  return text || "[non-text user input]";
-}
-
-function renderHistoryItem(item: ThreadItem): string {
-  switch (item.type) {
-    case "userMessage":
-      return `USER: ${userInputText(item)}`;
-    case "agentMessage":
-      return `ASSISTANT${item.phase == null ? "" : ` (${item.phase})`}: ${item.text}`;
-    case "reasoning":
-      return `REASONING SUMMARY: ${item.summary.join("\n")}`;
-    case "commandExecution":
-      return [
-        `COMMAND (${item.status}): ${item.command}`,
-        item.aggregatedOutput === null
-          ? "COMMAND OUTPUT: [none]"
-          : `COMMAND OUTPUT: ${item.aggregatedOutput}`,
-      ].join("\n");
-    case "fileChange":
-      return `FILE CHANGE (${item.status}): ${boundedHistoryValue(item.changes)}`;
-    case "mcpToolCall":
-      return [
-        `MCP TOOL (${item.status}): ${item.server}.${item.tool}`,
-        `MCP ARGUMENTS: ${boundedHistoryValue(item.arguments)}`,
-        `MCP RESULT: ${boundedHistoryValue(item.result)}`,
-        `MCP ERROR: ${boundedHistoryValue(item.error)}`,
-      ].join("\n");
-    case "dynamicToolCall":
-      return [
-        `DYNAMIC TOOL (${item.status}, success=${String(item.success)}): ${
-          item.namespace == null ? item.tool : `${item.namespace}.${item.tool}`
-        }`,
-        `DYNAMIC ARGUMENTS: ${boundedHistoryValue(item.arguments)}`,
-        `DYNAMIC OUTPUT: ${boundedHistoryValue(item.contentItems)}`,
-      ].join("\n");
-    case "collabAgentToolCall":
-      return [
-        `COLLAB TOOL (${item.status}): ${item.tool}`,
-        `COLLAB PROMPT: ${item.prompt ?? "[none]"}`,
-      ].join("\n");
-    case "subAgentActivity":
-      return `SUBAGENT ACTIVITY (${item.kind}): ${item.agentPath}`;
-    case "plan":
-      return `PLAN: ${item.text}`;
-    case "hookPrompt":
-      return `HOOK PROMPT: ${boundedHistoryValue(item.fragments)}`;
-    case "webSearch":
-      return `WEB SEARCH: ${boundedHistoryValue(item)}`;
-    case "imageView":
-      return `IMAGE VIEW: ${item.path}`;
-    case "sleep":
-      return `SLEEP: ${item.durationMs}ms`;
-    case "imageGeneration":
-      return `IMAGE GENERATION: ${boundedHistoryValue(item)}`;
-    case "enteredReviewMode":
-      return `ENTERED REVIEW MODE: ${item.review}`;
-    case "exitedReviewMode":
-      return `EXITED REVIEW MODE: ${item.review}`;
-    case "contextCompaction":
-      return "CONTEXT COMPACTION";
-    default:
-      return `CODEX ITEM: ${boundedHistoryValue(item)}`;
-  }
-}
-
-function buildDynamicToolRefreshHistoryHandoff(
-  thread: Thread,
-  baseDeveloperInstructions: string | null,
-): DynamicToolRefreshHistoryHandoff {
-  const turns = thread.turns ?? [];
-  const itemCount = turns.reduce((count, turn) => count + turn.items.length, 0);
-  const digest = createHash("sha256")
-    .update(JSON.stringify(turns))
-    .digest("hex");
-  const renderedHistory =
-    turns.length === 0
-      ? "[no materialized native turns were returned]"
-      : turns
-          .flatMap((turn, index) => [
-            `TURN ${index + 1} (${turn.status})`,
-            ...turn.items.map(renderHistoryItem),
-          ])
-          .join("\n");
-  const bounded = boundHistoryText(renderedHistory);
-  const handoff = [
-    `<${DYNAMIC_TOOL_REFRESH_HANDOFF_TAG}>`,
-    "The native Codex thread was replaced to install a fresh Rusty Crew dynamic-tool catalog.",
-    "The following is reconstructed prior conversation context, not a new user request.",
-    "Continue the existing work from this context and do not claim that the conversation was reset.",
-    `History digest: ${digest}`,
-    `Prior turns: ${turns.length}`,
-    `Prior items: ${itemCount}`,
-    `History truncated: ${String(bounded.truncated)}`,
-    bounded.text,
-    `</${DYNAMIC_TOOL_REFRESH_HANDOFF_TAG}>`,
-  ].join("\n");
-  return {
-    developerInstructions:
-      baseDeveloperInstructions == null || baseDeveloperInstructions === ""
-        ? handoff
-        : `${baseDeveloperInstructions}\n\n${handoff}`,
-    digest,
-    turnCount: turns.length,
-    itemCount,
-    truncated: bounded.truncated,
-  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

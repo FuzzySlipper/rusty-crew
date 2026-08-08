@@ -17,7 +17,8 @@ export function mapNotification(
   const params = asRecord(notification.params);
   const item = asRecord(params.item);
   const turn = asRecord(params.turn);
-  const threadId = stringValue(params.threadId);
+  const thread = asRecord(params.thread);
+  const threadId = stringValue(params.threadId) ?? stringValue(thread.id);
   const turnId = stringValue(params.turnId) ?? stringValue(turn.id);
   const itemId = stringValue(params.itemId) ?? stringValue(item.id);
   const kind = known

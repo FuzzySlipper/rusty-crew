@@ -520,6 +520,17 @@ pub enum ExternalMessageDeliveryPolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct ExternalAgentBindingLineage {
+    pub predecessor_binding_id: ExternalBindingId,
+    pub predecessor_session_id: SessionId,
+    pub predecessor_native_thread_id: String,
+    pub transition_id: String,
+    pub reason_code: String,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ExternalAgentBinding {
     pub binding_id: ExternalBindingId,
     pub runtime_id: ExternalRuntimeId,
@@ -545,6 +556,8 @@ pub struct ExternalAgentBinding {
     pub cwd: Option<String>,
     pub label: Option<String>,
     pub task_ref: Option<DenRuntimeReference>,
+    #[serde(default)]
+    pub lineage: Option<ExternalAgentBindingLineage>,
     pub effective_config_fingerprint: String,
     pub status: ExternalBindingStatus,
     pub revision: u64,
@@ -656,6 +669,29 @@ impl ExternalAgentBinding {
                 CoreErrorKind::InvalidInput,
                 "imported_observer external binding cannot be routable",
             ));
+        }
+        if let Some(lineage) = &self.lineage {
+            validate_non_empty(
+                "lineage_predecessor_binding_id",
+                &lineage.predecessor_binding_id.0,
+            )?;
+            validate_non_empty(
+                "lineage_predecessor_session_id",
+                &lineage.predecessor_session_id.0,
+            )?;
+            validate_non_empty(
+                "lineage_predecessor_native_thread_id",
+                &lineage.predecessor_native_thread_id,
+            )?;
+            validate_non_empty("lineage_transition_id", &lineage.transition_id)?;
+            validate_non_empty("lineage_reason_code", &lineage.reason_code)?;
+            validate_non_empty("lineage_created_at", &lineage.created_at)?;
+            if lineage.predecessor_binding_id == self.binding_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "external binding lineage cannot name itself as predecessor",
+                ));
+            }
         }
         Ok(())
     }
@@ -1679,6 +1715,7 @@ mod tests {
             cwd: None,
             label: None,
             task_ref: None,
+            lineage: None,
             effective_config_fingerprint: "config".into(),
             status: ExternalBindingStatus::Active,
             revision: 1,

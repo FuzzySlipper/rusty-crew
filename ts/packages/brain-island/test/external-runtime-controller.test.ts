@@ -13,6 +13,7 @@ import type {
 import {
   CODEX_ERROR_DIAGNOSTIC_LIMITS,
   CODEX_APP_SERVER_PROTOCOL,
+  codexCoordinationDynamicToolCatalogFingerprint,
   CodexAppServerDriver,
   type CodexJsonRpcTransport,
   type CodexTransportHandlers,
@@ -182,7 +183,7 @@ class FakeTransport implements CodexJsonRpcTransport {
         id: parsed.id,
         result: {
           thread: {
-            id: "native-thread-1",
+            id: threadId,
             extra: null,
             sessionId: "native-session-1",
             forkedFromId: null,
@@ -319,10 +320,12 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       this.emit({
         id: parsed.id,
         result: {
-          data: this.threads.filter((thread) =>
-            params.archived === true
-              ? this.archivedThreadIds.has(String(thread.id))
-              : !this.archivedThreadIds.has(String(thread.id)),
+          data: this.threads.filter(
+            (thread) =>
+              !this.unmaterializedThreadIds.has(String(thread.id)) &&
+              (params.archived === true
+                ? this.archivedThreadIds.has(String(thread.id))
+                : !this.archivedThreadIds.has(String(thread.id))),
           ),
           nextCursor: null,
           backwardsCursor: null,
@@ -1135,6 +1138,9 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
         ],
       },
     ];
+    fixture.transport.unmaterializedThreadIds.delete(
+      before.nativeThreadId as string,
+    );
     const stale = await fixture.bridge.bindExternalAgent({
       binding: {
         ...before,
@@ -1155,56 +1161,44 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
     });
     await recoveredController.connect(fixture.runtimeId);
 
-    const after = await fixture.bridge.getExternalBinding(stale.bindingId);
+    const predecessor = await fixture.bridge.getExternalBinding(
+      stale.bindingId,
+    );
+    const after = (await fixture.bridge.listExternalBindings()).find(
+      (binding) => binding.lineage?.predecessorBindingId === stale.bindingId,
+    );
+    assert.ok(predecessor);
     assert.ok(after);
+    assert.equal(predecessor.nativeThreadId, before.nativeThreadId);
+    assert.equal(predecessor.status, "archived");
     assert.notEqual(after.nativeThreadId, before.nativeThreadId);
     assert.equal(
       after.dynamicToolCatalogFingerprint,
       before.dynamicToolCatalogFingerprint,
     );
-    assert.equal(after.sessionId, before.sessionId);
-    assert.equal(after.agentId, before.agentId);
+    assert.notEqual(after.sessionId, before.sessionId);
+    assert.notEqual(after.agentId, before.agentId);
     assert.equal(after.label, before.label);
     assert.ok(
       fixture.transport.archivedThreadIds.has(before.nativeThreadId as string),
     );
 
-    const refreshStart = [...fixture.transport.sent]
-      .reverse()
-      .find(
-        (message) =>
-          message.method === "thread/start" &&
-          String(
-            (message.params as Record<string, unknown>).threadSource,
-          ).startsWith("rusty-crew:dynamic-tools-refresh:"),
-      );
+    const refreshStart = fixture.transport.sent
+      .filter((message) => message.method === "thread/start")
+      .at(-1);
     assert.ok(refreshStart);
-    const refreshRead = [...fixture.transport.sent]
-      .reverse()
-      .find(
-        (message) =>
-          message.method === "thread/read" &&
-          (message.params as Record<string, unknown>).threadId ===
-            before.nativeThreadId,
-      );
-    assert.ok(refreshRead);
-    assert.equal(
-      (refreshRead?.params as Record<string, unknown>).includeTurns,
-      true,
-    );
     const replacementDeveloperInstructions = String(
       (refreshStart.params as Record<string, unknown>).developerInstructions,
     );
     assert.match(
       replacementDeveloperInstructions,
-      /RUSTY_CREW_DYNAMIC_TOOL_REFRESH_HANDOFF/,
-    );
-    assert.match(
-      replacementDeveloperInstructions,
       /CREATION_PROFILE_SOUL_MARKER/,
     );
-    assert.match(replacementDeveloperInstructions, /LONG_LIVED_CONTEXT_MARKER/);
-    assert.match(replacementDeveloperInstructions, /send_agent_message/);
+    assert.equal((previousThread.turns as unknown[]).length, 1);
+    const successorThread = fixture.transport.threads.find(
+      (thread) => thread.id === after.nativeThreadId,
+    );
+    assert.deepEqual(successorThread?.turns, []);
     const dynamicTools = (refreshStart.params as Record<string, unknown>)
       .dynamicTools as Array<{
       type?: string;
@@ -1229,31 +1223,16 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
     assert.ok(
       refreshEvents.some(
         (event) =>
-          event.kind === "dynamic_tool_catalog_refreshed" &&
+          event.kind === "thread_lineage_replaced" &&
           typeof event.payload === "object" &&
           event.payload !== null &&
-          (event.payload as Record<string, unknown>).previousNativeThreadId ===
-            before.nativeThreadId &&
-          (event.payload as Record<string, unknown>).nativeThreadId ===
-            after.nativeThreadId,
+          (event.payload as Record<string, unknown>)
+            .predecessorNativeThreadId === before.nativeThreadId &&
+          (event.payload as Record<string, unknown>).successorNativeThreadId ===
+            after.nativeThreadId &&
+          (event.payload as Record<string, unknown>).reasonCode ===
+            "dynamic_tool_catalog_refresh",
       ),
-    );
-    const refreshEvent = refreshEvents.find(
-      (event) => event.kind === "dynamic_tool_catalog_refreshed",
-    );
-    assert.equal(
-      (refreshEvent?.payload as Record<string, unknown>).historyHandoffApplied,
-      true,
-    );
-    assert.equal(
-      (refreshEvent?.payload as Record<string, unknown>)
-        .historyHandoffTurnCount,
-      1,
-    );
-    assert.equal(
-      (refreshEvent?.payload as Record<string, unknown>)
-        .historyHandoffItemCount,
-      3,
     );
 
     const startCount = fixture.transport.sent.filter(
@@ -1272,7 +1251,7 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
   }
 });
 
-test("profile prompt refresh replaces the native thread and preserves Crew identity", async () => {
+test("profile prompt refresh creates a lineaged Crew session and preserves its predecessor", async () => {
   const fixture = await externalCreationFixture(false);
   try {
     const created = await fixture.controller.createAgentSession({
@@ -1283,6 +1262,9 @@ test("profile prompt refresh replaces the native thread and preserves Crew ident
       requestedAt: new Date().toISOString(),
     });
     const before = created.creation.binding;
+    fixture.transport.unmaterializedThreadIds.add(
+      before.nativeThreadId as string,
+    );
     const current = await fixture.bridge.getProfileRegistryRecord(
       fixture.profileId,
     );
@@ -1321,12 +1303,26 @@ test("profile prompt refresh replaces the native thread and preserves Crew ident
         .digest("hex"),
     });
     assert.equal(receipt.outcome, "thread_replaced");
-    const after = await fixture.bridge.getExternalBinding(before.bindingId);
+    const after = receipt.binding;
+    const predecessor = await fixture.bridge.getExternalBinding(
+      before.bindingId,
+    );
     assert.ok(after);
-    assert.equal(after.sessionId, before.sessionId);
-    assert.equal(after.agentId, before.agentId);
+    assert.ok(predecessor);
+    assert.notEqual(after.bindingId, before.bindingId);
+    assert.notEqual(after.sessionId, before.sessionId);
+    assert.notEqual(after.agentId, before.agentId);
     assert.notEqual(after.nativeThreadId, before.nativeThreadId);
     assert.equal(after.profileRevision, updated.revision);
+    assert.equal(predecessor.nativeThreadId, before.nativeThreadId);
+    assert.equal(predecessor.status, "archived");
+    assert.equal(after.lineage?.predecessorBindingId, before.bindingId);
+    assert.equal(after.lineage?.predecessorSessionId, before.sessionId);
+    assert.equal(
+      after.lineage?.predecessorNativeThreadId,
+      before.nativeThreadId,
+    );
+    assert.equal(after.lineage?.reasonCode, "profile_prompt_refresh");
     assert.equal(receipt.profileState.state, "current");
     const replacementRequest = fixture.transport.sent.filter(
       (message) => message.method === "thread/start",
@@ -1355,7 +1351,7 @@ test("profile prompt refresh replaces the native thread and preserves Crew ident
         expectedProfileRevision: updated.revision,
         expectedProfilePromptHash: after.profilePromptHash as string,
       }),
-      /external_binding_profile_refresh_revision_conflict/,
+      /external_binding_profile_refresh_inactive/,
     );
     await assert.rejects(
       fixture.controller.refreshBindingProfileInstructions({
@@ -1804,6 +1800,31 @@ test("external commands use native catalogs and settings without creating turns"
     const bindingBeforeRestart =
       await fixture.bridge.getExternalBinding(bindingId);
     assert.ok(bindingBeforeRestart);
+    const predecessorThread = fixture.transport.threads.find(
+      (thread) => thread.id === threadId,
+    );
+    assert.ok(predecessorThread);
+    predecessorThread.turns = [
+      {
+        id: "predecessor-turn-1",
+        items: [],
+        itemsView: "full",
+        status: "completed",
+        error: null,
+      },
+    ];
+    await fixture.bridge.putAgentRoute({
+      routeKey: "creation-reviewer",
+      label: "Creation reviewer",
+      enabled: true,
+      target: {
+        type: "managed_external",
+        agentId: bindingBeforeRestart.agentId ?? "missing-agent",
+        bindingId,
+        bindingRevision: bindingBeforeRestart.revision,
+      },
+      updatedAt: new Date().toISOString(),
+    });
     const restart = await fixture.controller.executeCommand({
       bindingId,
       commandInput: "/restart",
@@ -1813,10 +1834,15 @@ test("external commands use native catalogs and settings without creating turns"
     assert.equal(restart.command, "restart");
     const replacement = restart.result.threadReplacement;
     assert.ok(replacement);
-    assert.equal(replacement.bindingId, bindingId);
+    assert.notEqual(replacement.bindingId, bindingId);
+    assert.equal(replacement.previousBindingId, bindingId);
+    assert.equal(
+      replacement.previousSessionId,
+      bindingBeforeRestart.sessionId ?? null,
+    );
     assert.equal(replacement.previousNativeThreadId, threadId);
     assert.notEqual(replacement.nativeThreadId, threadId);
-    assert.equal(replacement.previousNativeThreadArchived, true);
+    assert.equal(replacement.previousNativeThreadArchived, false);
     assert.equal(replacement.settingsPreserved, true);
     assert.equal(replacement.settings.model, "gpt-5.4-mini");
     assert.equal(replacement.settings.effort, "medium");
@@ -1824,23 +1850,65 @@ test("external commands use native catalogs and settings without creating turns"
     assert.equal(replacement.label, bindingBeforeRestart.label ?? null);
     assert.equal(replacement.profileId, fixture.profileId);
     assert.deepEqual(replacement.taskRef, bindingBeforeRestart.taskRef ?? null);
-    const bindingAfterRestart =
+    const predecessorBinding =
       await fixture.bridge.getExternalBinding(bindingId);
-    assert.ok(bindingAfterRestart);
-    assert.equal(bindingAfterRestart.sessionId, bindingBeforeRestart.sessionId);
-    assert.equal(bindingAfterRestart.profileId, bindingBeforeRestart.profileId);
-    assert.equal(bindingAfterRestart.cwd, bindingBeforeRestart.cwd);
-    assert.equal(bindingAfterRestart.label, bindingBeforeRestart.label);
-    assert.deepEqual(bindingAfterRestart.taskRef, bindingBeforeRestart.taskRef);
-    assert.equal(
-      bindingAfterRestart.nativeThreadId,
-      replacement.nativeThreadId,
+    const successorBinding = await fixture.bridge.getExternalBinding(
+      replacement.bindingId,
     );
-    assert.ok(fixture.transport.archivedThreadIds.has(threadId));
+    assert.ok(predecessorBinding);
+    assert.ok(successorBinding);
+    assert.equal(predecessorBinding.nativeThreadId, threadId);
+    assert.notEqual(successorBinding.sessionId, predecessorBinding.sessionId);
+    assert.equal(successorBinding.profileId, predecessorBinding.profileId);
+    assert.equal(successorBinding.cwd, predecessorBinding.cwd);
+    assert.equal(successorBinding.label, predecessorBinding.label);
+    assert.deepEqual(successorBinding.taskRef, predecessorBinding.taskRef);
+    assert.equal(successorBinding.nativeThreadId, replacement.nativeThreadId);
+    assert.deepEqual(successorBinding.lineage, {
+      predecessorBindingId: bindingId,
+      predecessorSessionId: predecessorBinding.sessionId,
+      predecessorNativeThreadId: threadId,
+      transitionId: restart.commandId,
+      reasonCode: "external_command_new_session",
+      createdAt: predecessorBinding.updatedAt,
+    });
+    assert.equal(fixture.transport.archivedThreadIds.has(threadId), false);
+    assert.equal((predecessorThread.turns as unknown[]).length, 1);
     const replacementNativeThread = fixture.transport.threads.find(
       (thread) => thread.id === replacement.nativeThreadId,
     );
     assert.deepEqual(replacementNativeThread?.turns, []);
+    fixture.transport.unmaterializedThreadIds.add(replacement.nativeThreadId);
+    const independentlyVisible = await fixture.controller.listThreads(
+      fixture.runtimeId,
+      { limit: 10, archived: false },
+    );
+    assert.ok(
+      independentlyVisible.items.some((item) => item.threadId === threadId),
+    );
+    assert.ok(
+      independentlyVisible.items.some(
+        (item) => item.threadId === replacement.nativeThreadId,
+      ),
+    );
+    const readablePredecessor = await fixture.controller.readThread(
+      fixture.runtimeId,
+      { threadId, includeTurns: true },
+    );
+    const readableSuccessor = await fixture.controller.readThread(
+      fixture.runtimeId,
+      { threadId: replacement.nativeThreadId, includeTurns: true },
+    );
+    assert.equal(readablePredecessor.thread.turns.length, 1);
+    assert.equal(readableSuccessor.thread.turns.length, 0);
+    const movedRoute =
+      await fixture.bridge.getAgentRouteResolution("creation-reviewer");
+    assert.equal(
+      movedRoute?.route?.target.type === "managed_external"
+        ? movedRoute.route.target.bindingId
+        : null,
+      replacement.bindingId,
+    );
     const replacementStart = fixture.transport.sent
       .filter((message) => message.method === "thread/start")
       .at(-1);
@@ -1848,50 +1916,24 @@ test("external commands use native catalogs and settings without creating turns"
       (replacementStart?.params as Record<string, unknown>).cwd,
       bindingBeforeRestart.cwd,
     );
-    assert.equal(
-      (replacementStart?.params as Record<string, unknown>).model,
-      "gpt-5.4-mini",
-    );
-    assert.deepEqual(
-      (replacementStart?.params as Record<string, unknown>).config,
-      { model_reasoning_effort: "medium" },
-    );
+    const replacementSettingsUpdate = fixture.transport.sent
+      .filter((message) => message.method === "thread/settings/update")
+      .at(-1);
+    assert.deepEqual(replacementSettingsUpdate?.params, {
+      threadId: replacement.nativeThreadId,
+      model: "gpt-5.4-mini",
+      effort: "medium",
+    });
     assert.equal(
       (replacementStart?.params as Record<string, unknown>)
         .developerInstructions,
       "CREATION_PROFILE_SOUL_MARKER",
     );
 
-    const recoveryIdempotencyKey = "command-restart-after-rebind-crash";
-    const recoveryControlId = `external-command:${createHash("sha256")
-      .update(`${bindingId}\0${recoveryIdempotencyKey}`)
-      .digest("hex")
-      .slice(0, 32)}`;
-    const recoveryThreadId = "created-thread-recovered-after-rebind";
-    fixture.transport.threads.push(
-      fakeCreationThread(
-        recoveryThreadId,
-        bindingAfterRestart.cwd ?? fixture.dataDir,
-        `rusty-crew:command:${recoveryControlId}:replace:${replacement.nativeThreadId}`,
-      ),
-    );
-    fixture.transport.threadSettings.set(recoveryThreadId, {
-      model: "gpt-5.4-mini",
-      modelProvider: "openai",
-      effort: "medium",
-    });
-    await fixture.bridge.bindExternalAgent({
-      binding: {
-        ...bindingAfterRestart,
-        nativeThreadId: recoveryThreadId,
-        updatedAt: new Date().toISOString(),
-      },
-      expectedRevision: bindingAfterRestart.revision,
-    });
     const recoveredRestart = await fixture.controller.executeCommand({
       bindingId,
-      commandInput: "/new",
-      idempotencyKey: recoveryIdempotencyKey,
+      commandInput: "/restart",
+      idempotencyKey: "command-restart",
     });
     assert.equal(
       recoveredRestart.status,
@@ -1899,24 +1941,12 @@ test("external commands use native catalogs and settings without creating turns"
       JSON.stringify(recoveredRestart),
     );
     assert.equal(
-      recoveredRestart.result.threadReplacement?.previousNativeThreadId,
-      replacement.nativeThreadId,
+      recoveredRestart.result.threadReplacement?.bindingId,
+      replacement.bindingId,
     );
     assert.equal(
       recoveredRestart.result.threadReplacement?.nativeThreadId,
-      recoveryThreadId,
-    );
-    assert.ok(
-      fixture.transport.archivedThreadIds.has(replacement.nativeThreadId),
-    );
-    assert.equal(
-      fixture.transport.archivedThreadIds.has(recoveryThreadId),
-      false,
-      "crash recovery archived the already rebound current thread",
-    );
-    assert.equal(
-      (await fixture.bridge.getExternalBinding(bindingId))?.nativeThreadId,
-      recoveryThreadId,
+      replacement.nativeThreadId,
     );
     await waitUntil(async () => {
       const events = await fixture.bridge.queryExternalRuntimeEvents({
@@ -1941,6 +1971,63 @@ test("external commands use native catalogs and settings without creating turns"
   }
 });
 
+test("app-server-originated threads remain unbound and cannot retarget a Crew session", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "app-server-thread-isolation",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const original = created.creation.binding;
+    const appServerThread = fakeCreationThread(
+      "app-server-originated-thread",
+      fixture.dataDir,
+      "app-server:new",
+    );
+    fixture.transport.threads.push(appServerThread);
+    fixture.transport.emit({
+      method: "thread/started",
+      params: { thread: appServerThread },
+    });
+
+    await waitUntil(async () => {
+      const events = await fixture.bridge.queryExternalRuntimeEvents({
+        runtimeId: fixture.runtimeId,
+        afterSequence: 0,
+        limit: 1_000,
+      });
+      return events.some(
+        (event) =>
+          event.kind === "thread_lifecycle" &&
+          event.nativeThreadId === "app-server-originated-thread",
+      );
+    }, "unbound app-server thread lifecycle event");
+
+    const bindings = await fixture.bridge.listExternalBindings();
+    assert.equal(bindings.length, 1);
+    assert.equal(bindings[0]?.bindingId, original.bindingId);
+    assert.equal(bindings[0]?.sessionId, original.sessionId);
+    assert.equal(bindings[0]?.nativeThreadId, original.nativeThreadId);
+    const event = (
+      await fixture.bridge.queryExternalRuntimeEvents({
+        runtimeId: fixture.runtimeId,
+        afterSequence: 0,
+        limit: 1_000,
+      })
+    ).find(
+      (candidate) =>
+        candidate.nativeThreadId === "app-server-originated-thread",
+    );
+    assert.ok(event);
+    assert.equal(event.sessionId, null);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("thread list and read project the authoritative next-effective model", async () => {
   const fixture = await externalCreationFixture(false);
   try {
@@ -1952,6 +2039,7 @@ test("thread list and read project the authoritative next-effective model", asyn
       requestedAt: new Date().toISOString(),
     });
     const threadId = created.thread.threadId;
+    fixture.transport.unmaterializedThreadIds.delete(threadId);
 
     const initialList = await fixture.controller.listThreads(
       fixture.runtimeId,
@@ -3617,9 +3705,16 @@ test("controller expires undispatched turns and reports ambiguous native starts 
         profileRevision: 1,
         profilePromptHash:
           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        profilePromptSnapshot: "",
+        dynamicToolCatalogFingerprint:
+          codexCoordinationDynamicToolCatalogFingerprint({
+            agentId,
+            profileId: "dispatch-profile",
+          }),
         messageDeliveryPolicy: "immediate_steer",
         purpose: "crew_agent",
         nativeThreadId: "dispatch-thread",
+        cwd: "/home",
         effectiveConfigFingerprint: "dispatch-test",
         status: "active",
         revision: 0,
@@ -3675,16 +3770,20 @@ test("controller expires undispatched turns and reports ambiguous native starts 
         ? ambiguous.activation.requestId
         : "";
     const terminal = await bridge.getExternalTurn(requestId);
-    assert.equal(terminal?.phase, "outcome_unknown");
-    assert.equal(
-      terminal?.terminalReasonCode,
-      "external_turn_start_outcome_unknown",
-    );
     const events = await bridge.queryExternalRuntimeEvents({
       runtimeId,
       afterSequence: 0,
       limit: 1_000,
     });
+    assert.equal(
+      terminal?.phase,
+      "outcome_unknown",
+      JSON.stringify({ terminal, events }),
+    );
+    assert.equal(
+      terminal?.terminalReasonCode,
+      "external_turn_start_outcome_unknown",
+    );
     assert.ok(
       events.some(
         (event) =>

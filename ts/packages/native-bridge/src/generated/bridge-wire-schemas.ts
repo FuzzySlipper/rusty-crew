@@ -4694,6 +4694,41 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "lineage": {
+            "default": null,
+            "properties": {
+              "createdAt": {
+                "type": "string"
+              },
+              "predecessorBindingId": {
+                "type": "string"
+              },
+              "predecessorNativeThreadId": {
+                "type": "string"
+              },
+              "predecessorSessionId": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": "string"
+              },
+              "transitionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "predecessorBindingId",
+              "predecessorSessionId",
+              "predecessorNativeThreadId",
+              "transitionId",
+              "reasonCode",
+              "createdAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "messageDeliveryPolicy": {
             "default": "immediate_steer",
             "enum": [
@@ -8009,6 +8044,41 @@ export const bridgeWireSchemaArtifact = {
         "label": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "lineage": {
+          "default": null,
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "predecessorBindingId": {
+              "type": "string"
+            },
+            "predecessorNativeThreadId": {
+              "type": "string"
+            },
+            "predecessorSessionId": {
+              "type": "string"
+            },
+            "reasonCode": {
+              "type": "string"
+            },
+            "transitionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "predecessorBindingId",
+            "predecessorSessionId",
+            "predecessorNativeThreadId",
+            "transitionId",
+            "reasonCode",
+            "createdAt"
+          ],
+          "type": [
+            "object",
             "null"
           ]
         },
@@ -21324,6 +21394,41 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "lineage": {
+          "default": null,
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "predecessorBindingId": {
+              "type": "string"
+            },
+            "predecessorNativeThreadId": {
+              "type": "string"
+            },
+            "predecessorSessionId": {
+              "type": "string"
+            },
+            "reasonCode": {
+              "type": "string"
+            },
+            "transitionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "predecessorBindingId",
+            "predecessorSessionId",
+            "predecessorNativeThreadId",
+            "transitionId",
+            "reasonCode",
+            "createdAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "messageDeliveryPolicy": {
           "default": "immediate_steer",
           "enum": [
@@ -21470,6 +21575,41 @@ export const bridgeWireSchemaArtifact = {
             "label": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "lineage": {
+              "default": null,
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "predecessorBindingId": {
+                  "type": "string"
+                },
+                "predecessorNativeThreadId": {
+                  "type": "string"
+                },
+                "predecessorSessionId": {
+                  "type": "string"
+                },
+                "reasonCode": {
+                  "type": "string"
+                },
+                "transitionId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "predecessorBindingId",
+                "predecessorSessionId",
+                "predecessorNativeThreadId",
+                "transitionId",
+                "reasonCode",
+                "createdAt"
+              ],
+              "type": [
+                "object",
                 "null"
               ]
             },
@@ -21849,6 +21989,41 @@ export const bridgeWireSchemaArtifact = {
             "label": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "lineage": {
+              "default": null,
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "predecessorBindingId": {
+                  "type": "string"
+                },
+                "predecessorNativeThreadId": {
+                  "type": "string"
+                },
+                "predecessorSessionId": {
+                  "type": "string"
+                },
+                "reasonCode": {
+                  "type": "string"
+                },
+                "transitionId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "predecessorBindingId",
+                "predecessorSessionId",
+                "predecessorNativeThreadId",
+                "transitionId",
+                "reasonCode",
+                "createdAt"
+              ],
+              "type": [
+                "object",
                 "null"
               ]
             },

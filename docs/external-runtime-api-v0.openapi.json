@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.16.0",
+    "version": "0.17.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -3550,6 +3550,13 @@
           },
           "effectiveConfigFingerprint": { "type": "string" },
           "label": { "type": ["string", "null"] },
+          "lineage": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalAgentBindingLineage" },
+              { "type": "null" }
+            ],
+            "default": null
+          },
           "messageDeliveryPolicy": {
             "$ref": "#/components/schemas/ExternalMessageDeliveryPolicy",
             "default": "immediate_steer"
@@ -3589,6 +3596,25 @@
           "revision",
           "createdAt",
           "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalAgentBindingLineage": {
+        "properties": {
+          "createdAt": { "type": "string" },
+          "predecessorBindingId": { "type": "string" },
+          "predecessorNativeThreadId": { "type": "string" },
+          "predecessorSessionId": { "type": "string" },
+          "reasonCode": { "type": "string" },
+          "transitionId": { "type": "string" }
+        },
+        "required": [
+          "predecessorBindingId",
+          "predecessorSessionId",
+          "predecessorNativeThreadId",
+          "transitionId",
+          "reasonCode",
+          "createdAt"
         ],
         "type": "object"
       },
@@ -7564,6 +7590,8 @@
           "cwd",
           "label",
           "taskRef",
+          "previousBindingId",
+          "previousSessionId",
           "previousNativeThreadId",
           "nativeThreadId",
           "previousNativeThreadArchived",
@@ -7583,6 +7611,8 @@
               { "type": "null" }
             ]
           },
+          "previousBindingId": { "type": "string" },
+          "previousSessionId": { "type": ["string", "null"] },
           "previousNativeThreadId": { "type": "string" },
           "nativeThreadId": { "type": "string" },
           "previousNativeThreadArchived": { "type": "boolean" },
@@ -7854,6 +7884,10 @@
         "required": [
           "threadId",
           "sessionId",
+          "bindingId",
+          "crewSessionId",
+          "lineage",
+          "nativeMaterialized",
           "parentThreadId",
           "preview",
           "ephemeral",
@@ -7872,6 +7906,15 @@
         "properties": {
           "threadId": { "type": "string" },
           "sessionId": { "type": "string" },
+          "bindingId": { "type": ["string", "null"] },
+          "crewSessionId": { "type": ["string", "null"] },
+          "lineage": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalAgentBindingLineage" },
+              { "type": "null" }
+            ]
+          },
+          "nativeMaterialized": { "type": "boolean" },
           "parentThreadId": { "type": ["string", "null"] },
           "preview": { "type": "string" },
           "ephemeral": { "type": "boolean" },
