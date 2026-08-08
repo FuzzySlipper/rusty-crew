@@ -116,9 +116,14 @@ try {
     isRecord(compactionStarted.usage),
     "compaction started event must carry the pressure accounting usage",
   );
-  const afterCompaction = firstSnapshotAfterMetadata(
+  const afterCompaction = snapshotsAfterMetadata(
     successfulEvents,
     "context_compaction_completed",
+  ).find(
+    (snapshot) =>
+      snapshot.admission?.state !== "requires_compaction" &&
+      typeof snapshot.admission?.fillPercent === "number" &&
+      snapshot.admission.fillPercent < successfulCompactAtPercent,
   );
   assert.ok(
     afterCompaction,
@@ -655,23 +660,24 @@ function snapshotsFromEvents(events: ChatEvent[]): Record<string, any>[] {
   });
 }
 
-function firstSnapshotAfterMetadata(
+function snapshotsAfterMetadata(
   events: ChatEvent[],
   metadataKind: string,
-): Record<string, any> | undefined {
+): Record<string, any>[] {
   const completionIndex = events.findIndex((event) =>
     eventMetadataKinds(event).includes(metadataKind),
   );
-  if (completionIndex < 0) return undefined;
-  for (const event of events.slice(completionIndex + 1)) {
-    const snapshot = eventMetadata(event).find(
-      (metadata) =>
+  if (completionIndex < 0) return [];
+  return events
+    .slice(completionIndex + 1)
+    .flatMap((event) =>
+      eventMetadata(event).flatMap((metadata) =>
         metadata.kind === "context_accounting_snapshot" &&
-        isRecord(metadata.snapshot),
-    )?.snapshot;
-    if (isRecord(snapshot)) return snapshot as Record<string, any>;
-  }
-  return undefined;
+        isRecord(metadata.snapshot)
+          ? [metadata.snapshot as Record<string, any>]
+          : [],
+      ),
+    );
 }
 
 function orderEvents(events: ChatEvent[]): ChatEvent[] {
