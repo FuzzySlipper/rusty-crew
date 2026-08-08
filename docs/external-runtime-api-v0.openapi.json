@@ -2726,6 +2726,24 @@
         ],
         "type": "object"
       },
+      "BrainWakeCompactionIntent": {
+        "properties": {
+          "intentKey": { "type": "string" },
+          "kind": {
+            "$ref": "#/components/schemas/BrainWakeCompactionIntentKind"
+          },
+          "sourceProjectionFingerprint": { "type": ["string", "null"] },
+          "strategyId": { "type": ["string", "null"] },
+          "strategyRevision": { "type": ["string", "null"] },
+          "trigger": { "type": ["string", "null"] }
+        },
+        "required": ["intentKey", "kind"],
+        "type": "object"
+      },
+      "BrainWakeCompactionIntentKind": {
+        "enum": ["manual", "auto"],
+        "type": "string"
+      },
       "BrainWakeFailure": {
         "properties": {
           "kind": { "$ref": "#/components/schemas/CoreErrorKind" },
@@ -2836,6 +2854,12 @@
         "properties": {
           "body_state": { "format": "uint64", "minimum": 0, "type": "integer" },
           "brain": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "compaction_intent": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/BrainWakeCompactionIntent" },
+              { "type": "null" }
+            ]
+          },
           "continuation_state": {
             "anyOf": [
               { "$ref": "#/components/schemas/BrainContinuationPayload" },
@@ -2953,19 +2977,47 @@
       "ContextCompactionArtifact": {
         "description": "Durable record for a derived context-compaction summary.\n\nCompaction artifacts are not raw transcript storage and are not ordinary\nsession memory. They preserve provenance, model metadata, token estimates,\nand strategy decisions so future context strategies can decide whether and\nhow to project them into model context while keeping source transcript\nhistory intact.",
         "properties": {
+          "after_tokens": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
           "artifact_id": { "type": "string" },
+          "before_tokens": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
           "branch_id": { "type": ["string", "null"] },
           "context_policy": { "type": "string" },
           "created_at": { "type": "string" },
           "enters_future_context": { "type": "boolean" },
           "estimate_after_json": true,
           "estimate_before_json": true,
+          "excised_item_count": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "execution_epoch_id": { "type": ["string", "null"] },
+          "intent_key": { "type": ["string", "null"] },
+          "logical_turn_id": { "type": ["string", "null"] },
           "metadata_json": true,
+          "preserved_item_count": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "provider_chain_action": { "type": ["string", "null"] },
           "provider_metadata_json": true,
           "session_id": { "type": "string" },
+          "source_projection_fingerprint": { "type": ["string", "null"] },
           "source_refs_json": true,
           "strategy_id": { "type": "string" },
+          "strategy_revision": { "type": ["string", "null"] },
           "summary_text": { "type": "string" },
+          "terminal_status": { "type": ["string", "null"] },
+          "trigger": { "type": ["string", "null"] },
           "updated_at": { "type": "string" }
         },
         "required": [
@@ -3000,7 +3052,8 @@
             "type": ["integer", "null"]
           },
           "session_id": { "type": ["string", "null"] },
-          "strategy_id": { "type": ["string", "null"] }
+          "strategy_id": { "type": ["string", "null"] },
+          "terminal_status": { "type": ["string", "null"] }
         },
         "required": ["latest_only"],
         "type": "object"
