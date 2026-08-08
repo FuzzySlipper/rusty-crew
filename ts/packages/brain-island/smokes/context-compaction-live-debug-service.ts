@@ -136,13 +136,23 @@ try {
   );
   assert.equal(
     afterCompaction.providerUsage?.currentRequest?.inputTokens?.source,
-    "provider",
-    "post-compaction current request must be provider-reported",
+    "serialized_estimate",
+    "post-compaction preflight request must retain projection provenance",
   );
   assert.equal(
     afterCompaction.providerUsage?.currentRequest?.inputTokens?.quality,
-    "exact",
-    "post-compaction current request must be exact",
+    "approximate",
+    "post-compaction preflight request must retain approximate token quality",
+  );
+  assert.ok(
+    successfulSnapshots.some(
+      (snapshot) =>
+        snapshot.providerUsage?.currentRequest?.inputTokens?.source ===
+          "provider" &&
+        snapshot.providerUsage?.currentRequest?.inputTokens?.quality ===
+          "exact",
+    ),
+    "successful run must also retain exact provider-reported request usage",
   );
   assert.notEqual(
     afterCompaction.admission?.state,
