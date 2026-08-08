@@ -221,6 +221,48 @@ test("raw agent route resolution exposes typed session ambiguity", async () => {
   }
 });
 
+test("raw agent message and round submissions expose typed session ambiguity", async () => {
+  const ambiguity =
+    "ActionRejected: agent_session_ambiguous: agent shared has multiple active sessions; specify session_id; candidate_session_ids=[session-a,session-b]";
+  const context = {
+    deploymentRole: "debug",
+    bridge: {
+      async deliverAgentMessage() {
+        throw new Error(ambiguity);
+      },
+      async beginAgentRound() {
+        throw new Error(ambiguity);
+      },
+    },
+    now: () => "2026-07-12T00:00:00.000Z",
+    requestId: () => "req-agent-session-ambiguity",
+    readJsonBody: async () => ({
+      toAddress: "shared",
+      body: "route this exactly",
+      idempotencyKey: "ambiguity-key",
+      messageId: "ambiguity-message",
+    }),
+    settleDelivery() {
+      throw new Error("ambiguous delivery must not settle");
+    },
+  } as unknown as CoordinationOperatorRouteContext;
+
+  for (const path of ["messages", "rounds"]) {
+    const result = (await handleCoordinationOperatorRequest(
+      { method: "POST" } as IncomingMessage,
+      new URL(`http://local/v1/debug/coordination/${path}`),
+      context,
+    )) as AdminRouteResult;
+
+    assert.equal(result.status, 409);
+    assert.equal(errorReason(result), "agent_session_ambiguous");
+    assert.equal(result.body.ok, false);
+    if (!result.body.ok) {
+      assert.match(result.body.error.message, /session-a,session-b/);
+    }
+  }
+});
+
 test("coordination switchboard CRUD resolves and tests exact role-bound addresses", async () => {
   let requestBody: Record<string, unknown> = {};
   let savedRoute: Record<string, unknown> | undefined;

@@ -94,7 +94,7 @@ export async function handleCoordinationOperatorRequest(
         ),
       });
     } catch (error) {
-      return routeWriteFailure(requestId, error);
+      return coordinationFailure(requestId, error);
     }
   }
 
@@ -109,7 +109,7 @@ export async function handleCoordinationOperatorRequest(
         ),
       });
     } catch (error) {
-      return routeWriteFailure(requestId, error);
+      return coordinationFailure(requestId, error);
     }
   }
 
@@ -136,7 +136,7 @@ export async function handleCoordinationOperatorRequest(
           resolution: await context.bridge.getAgentRouteResolution(routeKey),
         });
       } catch (error) {
-        return routeWriteFailure(requestId, error);
+        return coordinationFailure(requestId, error);
       }
     }
     if (method === "DELETE") {
@@ -153,7 +153,7 @@ export async function handleCoordinationOperatorRequest(
           }),
         });
       } catch (error) {
-        return routeWriteFailure(requestId, error);
+        return coordinationFailure(requestId, error);
       }
     }
     return methodNotAllowed(requestId);
@@ -186,7 +186,7 @@ export async function handleCoordinationOperatorRequest(
       const receipt = await context.settleDelivery(initialReceipt);
       return operatorDeliveryResult(requestId, context.deploymentRole, receipt);
     } catch (error) {
-      return invalidInput(requestId, error);
+      return coordinationFailure(requestId, error);
     }
   }
 
@@ -255,7 +255,7 @@ export async function handleCoordinationOperatorRequest(
       const receipt = await context.settleDelivery(initialReceipt);
       return operatorDeliveryResult(requestId, context.deploymentRole, receipt);
     } catch (error) {
-      return invalidInput(requestId, error);
+      return coordinationFailure(requestId, error);
     }
   }
 
@@ -289,7 +289,7 @@ export async function handleCoordinationOperatorRequest(
       });
       return operatorRoundResult(requestId, context.deploymentRole, started);
     } catch (error) {
-      return invalidInput(requestId, error);
+      return coordinationFailure(requestId, error);
     }
   }
 
@@ -527,7 +527,7 @@ function invalidInput(requestId: string, error: unknown): ServiceRouteResult {
   });
 }
 
-function routeWriteFailure(
+function coordinationFailure(
   requestId: string,
   error: unknown,
 ): ServiceRouteResult {
