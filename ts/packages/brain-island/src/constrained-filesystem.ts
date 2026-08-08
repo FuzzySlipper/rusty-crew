@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
+import { open, realpath, type FileHandle } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
 function isOutside(root: string, target: string): boolean {
@@ -11,83 +11,123 @@ function isOutside(root: string, target: string): boolean {
   );
 }
 
-async function rejectSymlinkComponents(
-  root: string,
-  target: string,
-): Promise<void> {
-  const pathFromRoot = relative(root, target);
-  let current = root;
-  for (const component of pathFromRoot.split(sep).filter(Boolean)) {
-    current = resolve(current, component);
-    const metadata = await lstat(current).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return undefined;
-        throw error;
-      },
+function procFileDescriptorPath(handle: FileHandle, child?: string): string {
+  const descriptorPath = `/proc/self/fd/${handle.fd}`;
+  return child === undefined ? descriptorPath : `${descriptorPath}/${child}`;
+}
+
+function delegatedOpenError(component: string, error: unknown): Error {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ELOOP" || code === "ENOTDIR") {
+    return new Error(
+      `delegated workspace path contains symlink or invalid directory: ${component}`,
     );
-    if (metadata === undefined) return;
-    if (metadata.isSymbolicLink()) {
-      throw new Error(`delegated workspace path contains symlink: ${current}`);
-    }
   }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+async function closeAll(handles: readonly FileHandle[]): Promise<void> {
+  await Promise.all(handles.map((handle) => handle.close().catch(() => {})));
 }
 
 /**
- * Open a delegated-workspace file without following its final component, then
- * verify the opened filesystem object is still rooted beneath the canonical
- * constraint. Callers mutate through the returned descriptor rather than
- * resolving the pathname a second time.
+ * Open a delegated-workspace file relative to pinned directory descriptors.
+ * Every directory component and the final file use O_NOFOLLOW, so replacing a
+ * checked parent pathname cannot redirect creation or mutation outside the
+ * descriptor-rooted tree.
  */
 export async function openConstrainedMutableFile(
   root: string,
   target: string,
   create: boolean,
 ): Promise<FileHandle> {
-  const canonicalRoot = await realpath(root);
-  if (isOutside(resolve(root), resolve(target))) {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  if (isOutside(resolvedRoot, resolvedTarget)) {
     throw new Error(`path escapes delegated workspace: ${target}`);
   }
-  await rejectSymlinkComponents(resolve(root), resolve(target));
 
-  const targetExists = await lstat(target)
-    .then(() => true)
-    .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return false;
-      throw error;
-    });
-  if (!targetExists && !create) {
-    throw new Error(`delegated workspace target does not exist: ${target}`);
+  const canonicalRoot = await realpath(resolvedRoot);
+  const pathFromRoot = relative(resolvedRoot, resolvedTarget);
+  const components = pathFromRoot.split(sep).filter(Boolean);
+  if (components.length === 0) {
+    throw new Error(`delegated workspace target is not a file: ${target}`);
   }
 
-  const flags =
-    constants.O_RDWR |
-    constants.O_NOFOLLOW |
-    (!targetExists && create ? constants.O_CREAT | constants.O_EXCL : 0);
-  const handle = await open(target, flags, 0o666);
+  const directories: FileHandle[] = [];
   try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile()) {
-      throw new Error(
-        `delegated workspace target is not a regular file: ${target}`,
-      );
+    let directory = await open(
+      resolvedRoot,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    directories.push(directory);
+    if ((await realpath(procFileDescriptorPath(directory))) !== canonicalRoot) {
+      throw new Error(`delegated workspace root changed during open: ${root}`);
     }
-    if (metadata.nlink !== 1) {
-      throw new Error(
-        `delegated workspace target has multiple hard links: ${target}`,
+
+    for (const component of components.slice(0, -1)) {
+      try {
+        directory = await open(
+          procFileDescriptorPath(directory, component),
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+      } catch (error) {
+        throw delegatedOpenError(component, error);
+      }
+      directories.push(directory);
+    }
+
+    const leafPath = procFileDescriptorPath(
+      directory,
+      components[components.length - 1],
+    );
+    let handle: FileHandle;
+    try {
+      handle = await open(leafPath, constants.O_RDWR | constants.O_NOFOLLOW);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+        throw delegatedOpenError(components[components.length - 1], error);
+      }
+      if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      handle = await open(
+        leafPath,
+        constants.O_RDWR |
+          constants.O_NOFOLLOW |
+          constants.O_CREAT |
+          constants.O_EXCL,
+        0o666,
       );
     }
 
-    const openedPath = await realpath(`/proc/self/fd/${handle.fd}`);
-    if (isOutside(canonicalRoot, openedPath) || openedPath === canonicalRoot) {
-      throw new Error(`path escapes delegated workspace: ${target}`);
-    }
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile()) {
+        throw new Error(
+          `delegated workspace target is not a regular file: ${target}`,
+        );
+      }
+      if (metadata.nlink !== 1) {
+        throw new Error(
+          `delegated workspace target has multiple hard links: ${target}`,
+        );
+      }
 
-    // Catch a parent component replacement between the first walk and open.
-    await rejectSymlinkComponents(resolve(root), resolve(target));
-    return handle;
-  } catch (error) {
-    await handle.close();
-    throw error;
+      const openedPath = await realpath(procFileDescriptorPath(handle));
+      if (
+        isOutside(canonicalRoot, openedPath) ||
+        openedPath === canonicalRoot
+      ) {
+        throw new Error(`path escapes delegated workspace: ${target}`);
+      }
+      return handle;
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+  } finally {
+    await closeAll(directories);
   }
 }
 

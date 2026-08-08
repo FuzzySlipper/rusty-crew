@@ -3,7 +3,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -309,6 +311,38 @@ try {
     readFileSync(join(workdir, "nested", "delegated-created.txt"), "utf8"),
     "created inside constraint\n",
   );
+
+  const raceDirectory = join(workdir, "race-parent");
+  const heldRaceDirectory = join(workdir, "race-parent-held");
+  mkdirSync(raceDirectory);
+  let stopParentSwap = false;
+  const parentSwapper = (async () => {
+    while (!stopParentSwap) {
+      renameSync(raceDirectory, heldRaceDirectory);
+      symlinkSync(outsideDir, raceDirectory, "dir");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      rmSync(raceDirectory);
+      renameSync(heldRaceDirectory, raceDirectory);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  })();
+  try {
+    for (let attempt = 0; attempt < 250; attempt += 1) {
+      await constrainedWorkerWrite
+        .execute(`constrained-worker-write-race-${attempt}`, {
+          path: `race-parent/race-created-${attempt}.txt`,
+          content: "must remain descriptor-rooted\n",
+        })
+        .catch(() => undefined);
+    }
+  } finally {
+    stopParentSwap = true;
+    await parentSwapper;
+  }
+  assert.deepEqual(
+    readdirSync(outsideDir).filter((name) => name.startsWith("race-created-")),
+    [],
+  );
   assert.match(textResult(toolResults.terminal), /local-tools-ok/);
   assert.equal(
     (toolResults.terminal.details as { exitCode: number }).exitCode,
@@ -385,6 +419,7 @@ try {
         fullSessionWorkerWriteUnrestricted: true,
         delegatedConstraintDeniedEscape: true,
         delegatedConstraintDeniedSymlinkEscape: true,
+        delegatedConstraintParentSwapSafe: true,
         terminalExit: (toolResults.terminal.details as { exitCode: number })
           .exitCode,
         runtimeActivity: terminalProcess.activityId,
