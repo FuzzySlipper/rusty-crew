@@ -410,7 +410,7 @@ function parseReviewCompletionArguments(
         );
       }))
   ) {
-    return "newFindings contains an invalid finding; category must be blocking_bug, acceptance_gap, test_weakness, or follow_up_candidate";
+    return "newFindings contains an invalid finding; category must be blocking_bug, acceptance_gap, test_weakness, or follow_up_candidate. This request was rejected before the review completion callback; no review result was persisted.";
   }
   return record as unknown as CompleteRoutedReviewParameters;
 }

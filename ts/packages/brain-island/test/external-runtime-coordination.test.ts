@@ -264,6 +264,12 @@ test("Codex review completion accepts only Den finding categories", async () => 
       : "",
     /category must be blocking_bug/,
   );
+  assert.match(
+    rejected?.contentItems[0]?.type === "inputText"
+      ? rejected.contentItems[0].text
+      : "",
+    /no review result was persisted/,
+  );
 });
 
 test("Codex coordination lists routes separately from raw same-service diagnostics", async () => {
