@@ -16549,6 +16549,22 @@ mod tests {
                 },
                 CoreErrorKind::ActionRejected,
             ),
+            (
+                {
+                    let mut candidate = lineaged.clone();
+                    candidate.native_thread_id = Some(String::new());
+                    candidate
+                },
+                CoreErrorKind::InvalidInput,
+            ),
+            (
+                {
+                    let mut candidate = lineaged.clone();
+                    candidate.native_thread_id = Some(" \t".to_string());
+                    candidate
+                },
+                CoreErrorKind::InvalidInput,
+            ),
         ] {
             invalid.updated_at = "2026-07-10T00:00:04Z".into();
             assert_eq!(

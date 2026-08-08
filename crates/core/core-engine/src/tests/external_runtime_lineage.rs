@@ -81,12 +81,18 @@ fn external_binding_lineage_is_rust_validated_immutable_idempotent_and_restartab
     reused_predecessor_session.session_id = predecessor.session_id.clone();
     let mut missing_successor_thread = successor_seed.clone();
     missing_successor_thread.native_thread_id = None;
+    let mut empty_successor_thread = successor_seed.clone();
+    empty_successor_thread.native_thread_id = Some(String::new());
+    let mut blank_successor_thread = successor_seed.clone();
+    blank_successor_thread.native_thread_id = Some(" \t".to_string());
     let mut reused_predecessor_thread = successor_seed.clone();
     reused_predecessor_thread.native_thread_id = predecessor.native_thread_id.clone();
     for (mut invalid, expected_kind) in [
         (missing_successor_session, CoreErrorKind::InvalidInput),
         (reused_predecessor_session, CoreErrorKind::ActionRejected),
         (missing_successor_thread, CoreErrorKind::ActionRejected),
+        (empty_successor_thread, CoreErrorKind::InvalidInput),
+        (blank_successor_thread, CoreErrorKind::InvalidInput),
         (reused_predecessor_thread, CoreErrorKind::ActionRejected),
     ] {
         invalid.lineage = Some(authoritative_lineage.clone());

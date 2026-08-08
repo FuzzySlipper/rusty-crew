@@ -650,6 +650,9 @@ impl ExternalAgentBinding {
         if let Some(fingerprint) = &self.dynamic_tool_catalog_fingerprint {
             validate_non_empty("dynamic_tool_catalog_fingerprint", fingerprint)?;
         }
+        if let Some(native_thread_id) = &self.native_thread_id {
+            validate_non_empty("native_thread_id", native_thread_id)?;
+        }
         if self.purpose == ExternalBindingPurpose::CrewAgent
             && (self.session_id.is_none()
                 || self.agent_id.is_none()
