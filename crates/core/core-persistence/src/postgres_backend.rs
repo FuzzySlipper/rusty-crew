@@ -1940,6 +1940,8 @@ impl PostgresBackendStore {
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start load PostgreSQL provider wire state", error))?;
+        let prior_key_record =
+            load_current_provider_wire_state_for_session_except_key(&mut tx, &schema, &lookup.key)?;
         invalidate_provider_wire_states_for_session_except_in_tx(
             &mut tx,
             &schema,
@@ -1948,6 +1950,19 @@ impl PostgresBackendStore {
         )?;
         let Some(record) = load_current_provider_wire_state_by_key(&mut tx, &schema, &lookup.key)?
         else {
+            if let Some(prior) = prior_key_record {
+                let prior = load_provider_wire_state_by_row_id(&mut tx, &schema, prior.row_id)?;
+                tx.commit().map_err(|error| {
+                    postgres_error(
+                        "commit changed-key PostgreSQL provider wire state lookup",
+                        error,
+                    )
+                })?;
+                return Ok(ProviderWireStateWakeResult {
+                    record: Some(prior),
+                    absence_reason: None,
+                });
+            }
             tx.commit().map_err(|error| {
                 postgres_error(
                     "commit missing PostgreSQL provider wire state lookup",
@@ -2281,6 +2296,40 @@ impl PostgresBackendStore {
             .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
             .map_err(|error| postgres_error("drop PostgreSQL durable backend schema", error))
     }
+}
+
+fn load_current_provider_wire_state_for_session_except_key(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    key: &ProviderWireStateKey,
+) -> CoreResult<Option<ProviderWireStateRecord>> {
+    let row = tx
+        .query_opt(
+            &format!(
+                "SELECT
+                    row_id, session_id, module_id, strategy_id,
+                    profile_fingerprint, provider_fingerprint,
+                    payload_version, payload_json, payload_encoding,
+                    created_at, updated_at, expires_at, last_wake_id,
+                    invalidated_at, invalidation_reason, compatibility_snapshot_json
+                 FROM {schema}.provider_wire_states
+                 WHERE session_id = $1
+                   AND invalidated_at IS NULL
+                   AND (module_id != $2 OR strategy_id != $3)
+                 ORDER BY updated_at DESC, row_id DESC
+                 LIMIT 1"
+            ),
+            &[&key.session_id.0, &key.module_id, &key.strategy_id],
+        )
+        .map_err(|error| {
+            postgres_error(
+                "load current PostgreSQL provider wire state for changed module or strategy",
+                error,
+            )
+        })?;
+    row.as_ref()
+        .map(row_to_provider_wire_state_record)
+        .transpose()
 }
 
 impl PostgresBackendStore {
@@ -15857,17 +15906,20 @@ mod tests {
             .unwrap();
         let changed_strategy =
             provider_wire_state_key("session-strategy", "openai-responses", "replay-v2");
+        let strategy_transition = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: changed_strategy,
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:13:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(strategy_transition.absence_reason, None);
+        let strategy_prior = strategy_transition.record.unwrap();
+        assert_eq!(strategy_prior.key.strategy_id, "replay-v1");
         assert_eq!(
-            store
-                .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
-                    key: changed_strategy,
-                    profile_fingerprint: "profile:v1".to_string(),
-                    provider_fingerprint: "provider:v1".to_string(),
-                    now: "2026-06-26T00:13:00Z".to_string(),
-                })
-                .unwrap()
-                .absence_reason,
-            Some(ProviderStateAbsenceReason::Missing)
+            strategy_prior.invalidation_reason,
+            Some(ProviderWireStateInvalidationReason::StrategyChanged)
         );
         assert!(store
             .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
@@ -15895,17 +15947,20 @@ mod tests {
             .unwrap();
         let changed_module =
             provider_wire_state_key("session-module", "anthropic-messages", "replay");
+        let module_transition = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: changed_module,
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:16:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(module_transition.absence_reason, None);
+        let module_prior = module_transition.record.unwrap();
+        assert_eq!(module_prior.key.module_id, "openai-responses");
         assert_eq!(
-            store
-                .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
-                    key: changed_module,
-                    profile_fingerprint: "profile:v1".to_string(),
-                    provider_fingerprint: "provider:v1".to_string(),
-                    now: "2026-06-26T00:16:00Z".to_string(),
-                })
-                .unwrap()
-                .absence_reason,
-            Some(ProviderStateAbsenceReason::Missing)
+            module_prior.invalidation_reason,
+            Some(ProviderWireStateInvalidationReason::ModuleChanged)
         );
         assert!(store
             .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {

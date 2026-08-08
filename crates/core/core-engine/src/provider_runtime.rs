@@ -57,6 +57,7 @@ impl CoreEngine {
                     .unwrap_or(ProviderStateAbsenceReason::Missing),
             );
         };
+        let key_changed = record.key != lookup.key;
         if let (Some(prior), Some(current)) = (
             record.compatibility_snapshot.as_ref(),
             compatibility_snapshot.as_ref(),
@@ -76,6 +77,14 @@ impl CoreEngine {
                 );
             }
         } else if record.compatibility_snapshot.is_some() {
+            return self.provider_state_unavailable_for_mode(
+                strategy.provider_state.mode.clone(),
+                ProviderStateAbsenceReason::Invalidated,
+            );
+        }
+        if key_changed {
+            // Legacy rows cannot produce a versioned plan, but must still
+            // reconstruct rather than pass state across a module/strategy key.
             return self.provider_state_unavailable_for_mode(
                 strategy.provider_state.mode.clone(),
                 ProviderStateAbsenceReason::Invalidated,

@@ -663,6 +663,7 @@ fn provider_state_compatibility_preserves_benign_session_and_profile_refreshes()
     refreshed_facts.prompt = "prompt-v2".to_string();
     refreshed_facts.skills = "skills-v2".to_string();
     refreshed_facts.tool_catalog = "tools-v2".to_string();
+    let refreshed_snapshot_facts = refreshed_facts.clone();
     refreshed
         .provider_state_scope
         .as_mut()
@@ -718,7 +719,7 @@ fn provider_state_compatibility_preserves_benign_session_and_profile_refreshes()
     let rebuilt = bridge
         .build_brain_wake_request_for_session(
             incompatible_handle,
-            session.session_id,
+            session.session_id.clone(),
             "system".to_string(),
             b"{}".to_vec(),
             "wake-3".to_string(),
@@ -741,6 +742,102 @@ fn provider_state_compatibility_preserves_benign_session_and_profile_refreshes()
         diagnostic.is_current,
         "prior provider row remains inspectable"
     );
+
+    let mut strategy_changed = provider_state_brain_registration_with_scope(
+        "compatibility-responses-v4",
+        "compatibility-profile",
+        ProviderStateMode::Optional,
+        "profile-fingerprint",
+        "provider-fingerprint",
+    );
+    strategy_changed.strategy.as_mut().unwrap().strategy_id = "replay-v2".to_string();
+    let mut strategy_facts = refreshed_snapshot_facts.clone();
+    strategy_facts.brain_strategy = "replay-v2".to_string();
+    strategy_changed
+        .provider_state_scope
+        .as_mut()
+        .unwrap()
+        .compatibility = Some(strategy_facts.clone());
+    let strategy_handle = bridge
+        .replace_brain_implementation(strategy_changed)
+        .unwrap();
+    let strategy_rebuilt = bridge
+        .build_brain_wake_request_for_session(
+            strategy_handle,
+            session.session_id.clone(),
+            "system".to_string(),
+            b"{}".to_vec(),
+            "wake-4".to_string(),
+        )
+        .unwrap();
+    assert_eq!(
+        strategy_rebuilt.request.provider_state_absence,
+        Some(ProviderStateAbsenceReason::Invalidated)
+    );
+    let diagnostic = bridge.provider_state_diagnostics(1).unwrap().remove(0);
+    let plan: ProviderStateCompatibilityPlan =
+        serde_json::from_str(diagnostic.compatibility_plan_json.as_deref().unwrap()).unwrap();
+    assert!(plan
+        .changes
+        .iter()
+        .any(|change| change.dimension == "brain_strategy"));
+
+    bridge
+        .apply_provider_state_output(
+            strategy_handle,
+            &session.session_id,
+            "wake-4-reconstructed",
+            BrainWakeProviderStateOutput::Replace {
+                state: BrainWakeProviderStateUpdate {
+                    module_id: "openai-responses".to_string(),
+                    strategy_id: "replay-v2".to_string(),
+                    profile_fingerprint: "profile-fingerprint".to_string(),
+                    provider_fingerprint: "provider-fingerprint".to_string(),
+                    payload_version: "provider-owned-v2".to_string(),
+                    payload: serde_json::json!({"response_id": "resp-strategy-v2"}),
+                    ttl_ms: Some(60_000),
+                },
+            },
+        )
+        .unwrap();
+
+    let mut module_changed = provider_state_brain_registration_with_scope(
+        "compatibility-responses-v5",
+        "compatibility-profile",
+        ProviderStateMode::Optional,
+        "profile-fingerprint",
+        "provider-fingerprint",
+    );
+    let module_strategy = module_changed.strategy.as_mut().unwrap();
+    module_strategy.module_id = "chat-completions".to_string();
+    module_strategy.strategy_id = "replay-v2".to_string();
+    strategy_facts.brain_module = "chat-completions".to_string();
+    module_changed
+        .provider_state_scope
+        .as_mut()
+        .unwrap()
+        .compatibility = Some(strategy_facts);
+    let module_handle = bridge.replace_brain_implementation(module_changed).unwrap();
+    let module_rebuilt = bridge
+        .build_brain_wake_request_for_session(
+            module_handle,
+            session.session_id,
+            "system".to_string(),
+            b"{}".to_vec(),
+            "wake-5".to_string(),
+        )
+        .unwrap();
+    assert_eq!(
+        module_rebuilt.request.provider_state_absence,
+        Some(ProviderStateAbsenceReason::Invalidated)
+    );
+    let diagnostic = bridge.provider_state_diagnostics(1).unwrap().remove(0);
+    let plan: ProviderStateCompatibilityPlan =
+        serde_json::from_str(diagnostic.compatibility_plan_json.as_deref().unwrap()).unwrap();
+    assert!(plan
+        .changes
+        .iter()
+        .any(|change| change.dimension == "brain_module"));
 }
 
 #[test]

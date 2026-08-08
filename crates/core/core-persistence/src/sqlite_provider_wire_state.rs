@@ -153,8 +153,16 @@ fn load_provider_wire_state_for_wake_in_tx(
     lookup: &ProviderWireStateWakeLookup,
 ) -> CoreResult<ProviderWireStateWakeResult> {
     validate_provider_wire_state_key(&lookup.key)?;
+    let prior_key_record =
+        load_current_provider_wire_state_for_session_except_key(tx, &lookup.key)?;
     invalidate_provider_wire_states_for_session_except_in_tx(tx, &lookup.key, &lookup.now)?;
     let Some(record) = load_current_provider_wire_state_by_key(tx, &lookup.key)? else {
+        if let Some(prior) = prior_key_record {
+            return Ok(ProviderWireStateWakeResult {
+                record: Some(load_provider_wire_state_by_row_id(tx, prior.row_id)?),
+                absence_reason: None,
+            });
+        }
         return Ok(ProviderWireStateWakeResult {
             record: None,
             absence_reason: Some(ProviderStateAbsenceReason::Missing),
@@ -202,6 +210,39 @@ fn load_provider_wire_state_for_wake_in_tx(
     Ok(ProviderWireStateWakeResult {
         record: Some(record),
         absence_reason: None,
+    })
+}
+
+fn load_current_provider_wire_state_for_session_except_key(
+    conn: &Connection,
+    key: &ProviderWireStateKey,
+) -> CoreResult<Option<ProviderWireStateRecord>> {
+    conn.query_row(
+        "SELECT
+            row_id, session_id, module_id, strategy_id,
+            profile_fingerprint, provider_fingerprint,
+            payload_version, payload_json, payload_encoding,
+            created_at, updated_at, expires_at, last_wake_id,
+            invalidated_at, invalidation_reason, compatibility_snapshot_json
+         FROM provider_wire_states
+         WHERE session_id = ?1
+           AND invalidated_at IS NULL
+           AND (module_id != ?2 OR strategy_id != ?3)
+         ORDER BY updated_at DESC, row_id DESC
+         LIMIT 1",
+        params![
+            key.session_id.0.as_str(),
+            key.module_id.as_str(),
+            key.strategy_id.as_str(),
+        ],
+        row_to_provider_wire_state_record,
+    )
+    .optional()
+    .map_err(|error| {
+        persistence_error(
+            "load current provider wire state for changed module or strategy",
+            error,
+        )
     })
 }
 

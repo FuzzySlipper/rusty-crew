@@ -4542,7 +4542,7 @@ fn provider_wire_state_withholds_expired_and_preserves_fingerprint_stale_records
 }
 
 #[test]
-fn provider_wire_state_clear_and_strategy_change_remove_current_state() {
+fn provider_wire_state_clear_and_key_changes_return_invalidated_prior_state() {
     let db_path = temp_db_path("provider-wire-clear");
     let store = CoordinationStore::open_file(&db_path).unwrap();
     let key = sample_provider_wire_state_key();
@@ -4613,10 +4613,12 @@ fn provider_wire_state_clear_and_strategy_change_remove_current_state() {
             now: "2026-06-20T00:04:00Z".to_string(),
         })
         .unwrap();
-    assert_eq!(changed.record, None);
+    let changed_record = changed.record.expect("changed strategy prior state");
+    assert_eq!(changed.absence_reason, None);
+    assert_eq!(changed_record.key.strategy_id, "replay");
     assert_eq!(
-        changed.absence_reason,
-        Some(ProviderStateAbsenceReason::Missing)
+        changed_record.invalidation_reason,
+        Some(ProviderWireStateInvalidationReason::StrategyChanged)
     );
     let old_key_after_strategy_change = store
         .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
@@ -4627,6 +4629,44 @@ fn provider_wire_state_clear_and_strategy_change_remove_current_state() {
         })
         .unwrap();
     assert_eq!(old_key_after_strategy_change.record, None);
+
+    let module_key = ProviderWireStateKey {
+        session_id: SessionId("provider-module-session".to_string()),
+        ..sample_provider_wire_state_key()
+    };
+    store
+        .save_provider_wire_state(&sample_provider_wire_state_write(
+            ProviderWireStateWriteFixture {
+                key: module_key.clone(),
+                profile_fingerprint: "profile-fp",
+                provider_fingerprint: "provider-fp",
+                payload_version: "provider-owned-v3",
+                payload_json: serde_json::json!({"response_id": "old-module"}),
+                now: "2026-06-20T00:06:00Z",
+                expires_at: Some("2026-06-20T06:00:00Z"),
+                last_wake_id: Some("wake-old-module"),
+            },
+        ))
+        .unwrap();
+    let changed_module_key = ProviderWireStateKey {
+        module_id: "chat-completions".to_string(),
+        ..module_key
+    };
+    let changed_module = store
+        .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+            key: changed_module_key,
+            profile_fingerprint: "profile-fp".to_string(),
+            provider_fingerprint: "provider-fp".to_string(),
+            now: "2026-06-20T00:07:00Z".to_string(),
+        })
+        .unwrap();
+    let changed_module_record = changed_module.record.expect("changed module prior state");
+    assert_eq!(changed_module.absence_reason, None);
+    assert_eq!(changed_module_record.key.module_id, "openai-responses");
+    assert_eq!(
+        changed_module_record.invalidation_reason,
+        Some(ProviderWireStateInvalidationReason::ModuleChanged)
+    );
 
     remove_temp_db(&db_path);
 }
