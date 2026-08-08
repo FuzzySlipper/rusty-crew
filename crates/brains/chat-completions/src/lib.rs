@@ -10,7 +10,8 @@ use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
     compaction_strategy_artifact_metadata, decide_context_compaction_for_projection,
-    execute_compaction_strategy, is_context_limit_provider_error, validate_compaction_artifacts,
+    execute_compaction_strategy, is_context_limit_provider_error,
+    latest_usable_compaction_artifact, validate_compaction_artifacts,
     BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionItem,
     BrainContextCompactionPolicy, BrainContextCompactionSnapshot, BrainContextCompactionStrategy,
     BrainContextCompactionStrategyInput, BrainContextSafeCompactionBoundary,
@@ -1477,6 +1478,9 @@ where
                 &mut sink,
             );
             let mut compacted_messages = messages.clone();
+            let parent_artifact_id =
+                latest_usable_compaction_artifact(&context_compaction.artifacts)
+                    .map(|artifact| artifact.artifact_id.clone());
             match compact_chat_messages(
                 &mut compacted_messages,
                 policy,
@@ -1484,6 +1488,7 @@ where
                 sequence,
                 Arc::clone(&self.compaction_strategy),
                 compaction_domain_context.clone(),
+                parent_artifact_id,
             )
             .and_then(|artifact| {
                 let compacted_request = self.request_builder.build_for_session_with_images(
@@ -1672,6 +1677,9 @@ where
                     );
                     let sequence = context_compaction.artifacts.len() as u64 + 1;
                     let mut compacted_messages = messages.clone();
+                    let parent_artifact_id =
+                        latest_usable_compaction_artifact(&context_compaction.artifacts)
+                            .map(|artifact| artifact.artifact_id.clone());
                     match compact_chat_messages(
                         &mut compacted_messages,
                         self.config
@@ -1682,6 +1690,7 @@ where
                         sequence,
                         Arc::clone(&self.compaction_strategy),
                         compaction_domain_context.clone(),
+                        parent_artifact_id,
                     )
                     .and_then(|artifact| {
                         let compacted_request = self.request_builder.build_for_session_with_images(
@@ -1969,6 +1978,9 @@ where
                                     == Some(input.context.wake_id.as_str())
                         })
                         .count();
+                    let parent_artifact_id =
+                        latest_usable_compaction_artifact(&context_compaction.artifacts)
+                            .map(|artifact| artifact.artifact_id.clone());
                     let recovery = if !automatic_recovery_enabled {
                         Err("automatic provider context-limit compaction is disabled by the selected policy".to_string())
                     } else if prior_provider_limit_recoveries >= 2 {
@@ -1981,6 +1993,7 @@ where
                             sequence,
                             Arc::clone(&self.compaction_strategy),
                             compaction_domain_context.clone(),
+                            parent_artifact_id,
                         )
                         .and_then(|artifact| {
                             let compacted_request =
@@ -3259,6 +3272,7 @@ fn compact_chat_messages(
     sequence: u64,
     strategy: Arc<dyn BrainContextCompactionStrategy>,
     domain_context: Option<Value>,
+    parent_artifact_id: Option<String>,
 ) -> Result<BrainContextCompactionArtifact, String> {
     let protected_end = messages
         .iter()
@@ -3338,7 +3352,7 @@ fn compact_chat_messages(
             active_tool_exchange_id: None,
         },
         domain_context,
-        parent_artifact_id: None,
+        parent_artifact_id,
     };
     let decision = execute_compaction_strategy(strategy, strategy_input, Duration::from_secs(2))
         .map_err(|failure| format!("{}: {}", failure.reason_code, failure.summary))?;
@@ -9974,6 +9988,7 @@ mod tests {
             1,
             Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
             None,
+            None,
         );
         assert!(
             result.is_err(),
@@ -10019,6 +10034,7 @@ mod tests {
             1,
             Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
             None,
+            None,
         );
         assert!(
             ok.is_ok(),
@@ -10029,6 +10045,41 @@ mod tests {
         assert_eq!(
             artifact.terminal_status,
             Some(rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed)
+        );
+        let first_artifact_id = artifact.artifact_id.clone();
+        let failed_after_restart = BrainContextCompactionArtifact {
+            artifact_id: "failed-after-restart".to_string(),
+            sequence: 2,
+            terminal_status: Some(
+                rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Failed,
+            ),
+            ..artifact.clone()
+        };
+        let hydrated_artifacts = vec![artifact.clone(), failed_after_restart];
+        let hydrated_parent = latest_usable_compaction_artifact(&hydrated_artifacts)
+            .map(|candidate| candidate.artifact_id.clone());
+        for turn in 12..24 {
+            compacted.push(ChatCompletionMessage::user(format!("user {turn}")));
+            compacted.push(ChatCompletionMessage::assistant(format!(
+                "assistant {turn}"
+            )));
+        }
+        let second = compact_chat_messages(
+            &mut compacted,
+            &policy,
+            rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(950, 1000),
+            3,
+            Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+            None,
+            hydrated_parent,
+        )
+        .expect("successive compaction after hydration");
+        assert_eq!(
+            second
+                .strategy_payload_metadata
+                .as_ref()
+                .expect("strategy metadata")["payload_lineage"]["parentArtifactId"],
+            first_artifact_id
         );
         // Now force a failure: tiny history where no reduction is possible
         let mut unsafe_messages = vec![
@@ -10042,6 +10093,7 @@ mod tests {
             usage,
             2,
             Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+            None,
             None,
         );
         assert!(

@@ -2,10 +2,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::sync::{mpsc, Arc};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 const CONSERVATIVE_SERIALIZED_BYTES_PER_TOKEN: u64 = 3;
+const COMPACTION_STRATEGY_WORKER_COUNT: usize = 4;
+const COMPACTION_STRATEGY_QUEUE_CAPACITY: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -333,6 +336,86 @@ pub trait BrainContextCompactionStrategy: Send + Sync + 'static {
     ) -> Result<BrainContextCompactionPreservationDecision, String>;
 }
 
+type CompactionStrategyResult = Result<BrainContextCompactionPreservationDecision, String>;
+
+struct CompactionStrategyJob {
+    strategy: Arc<dyn BrainContextCompactionStrategy>,
+    input: BrainContextCompactionStrategyInput,
+    result: mpsc::SyncSender<CompactionStrategyResult>,
+}
+
+/// Fixed-capacity execution boundary for strategy adapters.
+///
+/// Rust cannot forcibly stop a non-cooperative in-process strategy. Keeping a
+/// fixed worker set and bounded queue ensures repeated timeouts cannot create
+/// an unbounded number of OS threads or queued invocations. A wedged adapter
+/// eventually receives a typed capacity failure while other Crew state stays
+/// untouched.
+struct CompactionStrategyExecutor {
+    jobs: mpsc::SyncSender<CompactionStrategyJob>,
+    _workers: Vec<std::thread::JoinHandle<()>>,
+}
+
+enum CompactionStrategySubmitError {
+    CapacityExhausted,
+    Unavailable,
+}
+
+impl CompactionStrategyExecutor {
+    fn new(worker_count: usize, queue_capacity: usize) -> Self {
+        assert!(worker_count > 0, "compaction executor needs a worker");
+        let (jobs, receiver) = mpsc::sync_channel::<CompactionStrategyJob>(queue_capacity);
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut workers = Vec::with_capacity(worker_count);
+        for index in 0..worker_count {
+            let receiver = Arc::clone(&receiver);
+            workers.push(
+                std::thread::Builder::new()
+                    .name(format!("crew-compaction-strategy-{index}"))
+                    .spawn(move || loop {
+                        let job = {
+                            let Ok(receiver) = receiver.lock() else {
+                                return;
+                            };
+                            receiver.recv()
+                        };
+                        let Ok(job) = job else {
+                            return;
+                        };
+                        let result =
+                            catch_unwind(AssertUnwindSafe(|| job.strategy.preserve(job.input)))
+                                .unwrap_or_else(
+                                    |_| Err("compaction strategy panicked".to_string()),
+                                );
+                        let _ = job.result.send(result);
+                    })
+                    .expect("spawn bounded compaction strategy worker"),
+            );
+        }
+        Self {
+            jobs,
+            _workers: workers,
+        }
+    }
+
+    fn submit(&self, job: CompactionStrategyJob) -> Result<(), CompactionStrategySubmitError> {
+        self.jobs.try_send(job).map_err(|error| match error {
+            mpsc::TrySendError::Full(_) => CompactionStrategySubmitError::CapacityExhausted,
+            mpsc::TrySendError::Disconnected(_) => CompactionStrategySubmitError::Unavailable,
+        })
+    }
+}
+
+fn compaction_strategy_executor() -> &'static CompactionStrategyExecutor {
+    static EXECUTOR: OnceLock<CompactionStrategyExecutor> = OnceLock::new();
+    EXECUTOR.get_or_init(|| {
+        CompactionStrategyExecutor::new(
+            COMPACTION_STRATEGY_WORKER_COUNT,
+            COMPACTION_STRATEGY_QUEUE_CAPACITY,
+        )
+    })
+}
+
 pub fn validate_compaction_strategy_input(
     input: &BrainContextCompactionStrategyInput,
 ) -> Result<(), String> {
@@ -441,6 +524,20 @@ pub fn execute_compaction_strategy(
     input: BrainContextCompactionStrategyInput,
     timeout: Duration,
 ) -> Result<BrainContextCompactionPreservationDecision, BrainContextCompactionStrategyFailure> {
+    execute_compaction_strategy_with_executor(
+        compaction_strategy_executor(),
+        strategy,
+        input,
+        timeout,
+    )
+}
+
+fn execute_compaction_strategy_with_executor(
+    executor: &CompactionStrategyExecutor,
+    strategy: Arc<dyn BrainContextCompactionStrategy>,
+    input: BrainContextCompactionStrategyInput,
+    timeout: Duration,
+) -> Result<BrainContextCompactionPreservationDecision, BrainContextCompactionStrategyFailure> {
     validate_compaction_strategy_input(&input).map_err(|error| {
         BrainContextCompactionStrategyFailure::new(
             BrainContextCompactionStrategyFailureKind::InvalidInput,
@@ -460,10 +557,30 @@ pub fn execute_compaction_strategy(
     let validation_input = input.clone();
     let validation_strategy = Arc::clone(&strategy);
     let (send, receive) = mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let result = strategy.preserve(input);
-        let _ = send.send(result);
-    });
+    executor
+        .submit(CompactionStrategyJob {
+            strategy,
+            input,
+            result: send,
+        })
+        .map_err(|error| match error {
+            CompactionStrategySubmitError::CapacityExhausted => {
+                BrainContextCompactionStrategyFailure::new(
+                    BrainContextCompactionStrategyFailureKind::StrategyFailed,
+                    "compaction_strategy_capacity_exhausted",
+                    "compaction strategy execution capacity is occupied by prior invocations",
+                    true,
+                )
+            }
+            CompactionStrategySubmitError::Unavailable => {
+                BrainContextCompactionStrategyFailure::new(
+                    BrainContextCompactionStrategyFailureKind::StrategyFailed,
+                    "compaction_strategy_executor_unavailable",
+                    "compaction strategy executor is unavailable",
+                    true,
+                )
+            }
+        })?;
     let decision = receive.recv_timeout(timeout).map_err(|error| match error {
         mpsc::RecvTimeoutError::Timeout => BrainContextCompactionStrategyFailure::new(
             BrainContextCompactionStrategyFailureKind::TimedOut,
@@ -690,6 +807,7 @@ pub fn latest_usable_compaction_artifact(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Condvar;
     use std::time::Duration;
 
     fn policy() -> BrainContextCompactionPolicy {
@@ -883,6 +1001,82 @@ mod tests {
             BrainContextCompactionStrategyFailureKind::TimedOut
         );
         assert_eq!(input, before);
+    }
+
+    #[derive(Debug)]
+    struct BlockingStrategy {
+        release: Arc<(Mutex<bool>, Condvar)>,
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    impl BrainContextCompactionStrategy for BlockingStrategy {
+        fn strategy_id(&self) -> &str {
+            "rolling_summary_compaction"
+        }
+
+        fn strategy_revision(&self) -> &str {
+            "blocking-v1"
+        }
+
+        fn preserve(
+            &self,
+            input: BrainContextCompactionStrategyInput,
+        ) -> Result<BrainContextCompactionPreservationDecision, String> {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            let (released, wake) = &*self.release;
+            let mut released = released.lock().expect("release gate");
+            while !*released {
+                released = wake.wait(released).expect("release wait");
+            }
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            let mut decision = FixedDownstreamStrategy.preserve(input)?;
+            decision.strategy_revision = self.strategy_revision().into();
+            Ok(decision)
+        }
+    }
+
+    #[test]
+    fn repeated_non_cooperative_timeouts_keep_worker_concurrency_bounded() {
+        let executor = CompactionStrategyExecutor::new(2, 2);
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let strategy: Arc<dyn BrainContextCompactionStrategy> = Arc::new(BlockingStrategy {
+            release: Arc::clone(&release),
+            active: Arc::clone(&active),
+            max_active: Arc::clone(&max_active),
+        });
+
+        for _ in 0..12 {
+            let failure = execute_compaction_strategy_with_executor(
+                &executor,
+                Arc::clone(&strategy),
+                strategy_input(),
+                Duration::from_millis(2),
+            )
+            .expect_err("blocked or capacity-saturated strategy must fail safely");
+            assert!(matches!(
+                failure.reason_code.as_str(),
+                "compaction_strategy_timed_out" | "compaction_strategy_capacity_exhausted"
+            ));
+        }
+        assert!(
+            max_active.load(Ordering::SeqCst) <= 2,
+            "fixed executor must not grow worker concurrency across retries"
+        );
+
+        let (released, wake) = &*release;
+        *released.lock().expect("release gate") = true;
+        wake.notify_all();
+        for _ in 0..100 {
+            if active.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
     #[derive(Debug)]

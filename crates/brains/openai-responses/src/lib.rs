@@ -16,7 +16,8 @@ pub use openai_oauth::{
 use reqwest::{Client as AsyncHttpClient, Response as AsyncHttpResponse};
 use rusty_crew_brain_runtime::{
     compaction_strategy_artifact_metadata, decide_context_compaction_for_projection,
-    execute_compaction_strategy, is_context_limit_provider_error, validate_compaction_artifacts,
+    execute_compaction_strategy, is_context_limit_provider_error,
+    latest_usable_compaction_artifact, validate_compaction_artifacts,
     BrainContextCompactionArtifact, BrainContextCompactionDecision, BrainContextCompactionItem,
     BrainContextCompactionPolicy, BrainContextCompactionSnapshot, BrainContextCompactionStrategy,
     BrainContextCompactionStrategyInput, BrainContextSafeCompactionBoundary,
@@ -3421,6 +3422,10 @@ where
                 ResponsesCompactionExtension {
                     strategy: Arc::clone(&self.compaction_strategy),
                     domain_context: compaction_domain_context.clone(),
+                    parent_artifact_id: latest_usable_compaction_artifact(
+                        &output_continuation.context_compaction.artifacts,
+                    )
+                    .map(|artifact| artifact.artifact_id.clone()),
                 },
             )
             .and_then(|(artifact, guidance)| {
@@ -3619,6 +3624,10 @@ where
                             ResponsesCompactionExtension {
                                 strategy: Arc::clone(&self.compaction_strategy),
                                 domain_context: compaction_domain_context.clone(),
+                                parent_artifact_id: latest_usable_compaction_artifact(
+                                    &output_continuation.context_compaction.artifacts,
+                                )
+                                .map(|artifact| artifact.artifact_id.clone()),
                             },
                         )
                         .and_then(|(artifact, guidance)| {
@@ -3797,6 +3806,10 @@ where
                         ResponsesCompactionExtension {
                             strategy: Arc::clone(&self.compaction_strategy),
                             domain_context: compaction_domain_context.clone(),
+                            parent_artifact_id: latest_usable_compaction_artifact(
+                                &output_continuation.context_compaction.artifacts,
+                            )
+                            .map(|artifact| artifact.artifact_id.clone()),
                         },
                     )
                     .and_then(|(artifact, guidance)| {
@@ -4853,6 +4866,7 @@ fn responses_context_compaction_attention(summary: String) -> BrainWakeAttention
 struct ResponsesCompactionExtension {
     strategy: Arc<dyn BrainContextCompactionStrategy>,
     domain_context: Option<Value>,
+    parent_artifact_id: Option<String>,
 }
 
 fn compact_responses_items(
@@ -4866,6 +4880,7 @@ fn compact_responses_items(
     let ResponsesCompactionExtension {
         strategy,
         domain_context,
+        parent_artifact_id,
     } = extension;
     let mut recent_start = items.len().saturating_sub(4);
     while recent_start > 0
@@ -4963,7 +4978,7 @@ fn compact_responses_items(
                 (None, Some(guidance)) => Some(json!({"priorGuidance": guidance})),
                 (None, None) => None,
             },
-            parent_artifact_id: None,
+            parent_artifact_id,
         },
         Duration::from_secs(2),
     )
@@ -9134,6 +9149,7 @@ mod tests {
             ResponsesCompactionExtension {
                 strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
                 domain_context: None,
+                parent_artifact_id: None,
             },
         );
         assert!(
@@ -9188,6 +9204,7 @@ mod tests {
             ResponsesCompactionExtension {
                 strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
                 domain_context: None,
+                parent_artifact_id: None,
             },
         );
         assert!(
@@ -9199,6 +9216,46 @@ mod tests {
         assert_eq!(
             artifact.terminal_status,
             Some(rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Completed)
+        );
+        let first_artifact_id = artifact.artifact_id.clone();
+        let failed_after_restart = BrainContextCompactionArtifact {
+            artifact_id: "responses-failed-after-restart".to_string(),
+            sequence: 2,
+            terminal_status: Some(
+                rusty_crew_brain_runtime::BrainContextCompactionTerminalStatus::Failed,
+            ),
+            ..artifact.clone()
+        };
+        let hydrated_artifacts = vec![artifact.clone(), failed_after_restart];
+        let hydrated_parent = latest_usable_compaction_artifact(&hydrated_artifacts)
+            .map(|candidate| candidate.artifact_id.clone());
+        for turn in 12..24 {
+            compacted.push(ResponsesInputItem::UserMessage {
+                content: format!("user {turn}"),
+            });
+            compacted.push(ResponsesInputItem::AssistantMessage {
+                content: format!("assistant {turn}"),
+            });
+        }
+        let (second, _) = compact_responses_items(
+            &mut compacted,
+            &policy,
+            rusty_crew_brain_runtime::BrainContextUsageSnapshot::from_provider(950, 1000),
+            3,
+            None,
+            ResponsesCompactionExtension {
+                strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
+                domain_context: None,
+                parent_artifact_id: hydrated_parent,
+            },
+        )
+        .expect("successive Responses compaction after hydration");
+        assert_eq!(
+            second
+                .strategy_payload_metadata
+                .as_ref()
+                .expect("strategy metadata")["payload_lineage"]["parentArtifactId"],
+            first_artifact_id
         );
         // Now force failure with tiny history
         let mut unsafe_items = vec![ResponsesInputItem::UserMessage {
@@ -9214,6 +9271,7 @@ mod tests {
             ResponsesCompactionExtension {
                 strategy: Arc::new(rusty_crew_brain_runtime::RollingSummaryCompactionStrategy),
                 domain_context: None,
+                parent_artifact_id: None,
             },
         );
         assert!(
