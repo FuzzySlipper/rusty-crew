@@ -1940,19 +1940,23 @@ where
                     .filter(|_| is_context_limit_provider_error(&error.to_string()))
                 {
                     let usage = chat_request_projection_usage(&request, Some(policy));
-                    push_stream_item(
-                        &mut stream,
-                        context_compaction_status(
-                            &input.context,
-                            "context_compaction_started",
-                            BrainProviderStatusLevel::Info,
-                            "Provider context-limit recovery started from the rejected exact request projection.",
-                            &usage,
-                            None,
-                            None,
-                        ),
-                        &mut sink,
-                    );
+                    let automatic_recovery_enabled =
+                        policy.enabled && policy.auto_compaction_enabled;
+                    if automatic_recovery_enabled {
+                        push_stream_item(
+                            &mut stream,
+                            context_compaction_status(
+                                &input.context,
+                                "context_compaction_started",
+                                BrainProviderStatusLevel::Info,
+                                "Provider context-limit recovery started from the rejected exact request projection.",
+                                &usage,
+                                None,
+                                None,
+                            ),
+                            &mut sink,
+                        );
+                    }
                     let sequence = context_compaction.artifacts.len() as u64 + 1;
                     let mut compacted_messages = messages.clone();
                     let prior_provider_limit_recoveries = context_compaction
@@ -1965,7 +1969,9 @@ where
                                     == Some(input.context.wake_id.as_str())
                         })
                         .count();
-                    let recovery = if prior_provider_limit_recoveries >= 2 {
+                    let recovery = if !automatic_recovery_enabled {
+                        Err("automatic provider context-limit compaction is disabled by the selected policy".to_string())
+                    } else if prior_provider_limit_recoveries >= 2 {
                         Err("provider context-limit recovery reached the bounded two-compaction limit for this logical turn".to_string())
                     } else {
                         compact_chat_messages(
@@ -9075,6 +9081,69 @@ mod tests {
         assert!(events(&second.stream).contains(&BrainEvent::TextDelta {
             text: "continued after provider-limit compaction".to_string(),
         }));
+    }
+
+    #[test]
+    fn provider_context_rejection_respects_disabled_auto_compaction() {
+        let mut brain = loop_with(
+            vec![Err(ChatCompletionsStreamError::ProviderError(
+                "maximum context length exceeded".to_string(),
+            ))],
+            Vec::new(),
+        )
+        .with_loop_config(ChatCompletionsBrainLoopConfig {
+            context_compaction: Some(BrainContextCompactionPolicy {
+                enabled: true,
+                auto_compaction_enabled: false,
+                strategy_id: "rolling_summary_compaction".to_string(),
+                context_window_tokens: 1_000_000,
+                compact_at_percent: 100,
+                target_percent_after_compaction: 55,
+            }),
+            ..ChatCompletionsBrainLoopConfig::default()
+        });
+        let messages = (0..30)
+            .map(|index| {
+                if index % 2 == 0 {
+                    ChatCompletionMessage::user(format!("historical user fact {index}"))
+                } else {
+                    ChatCompletionMessage::assistant(format!("historical assistant answer {index}"))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let output = brain.wake(ChatCompletionsBrainLoopInput {
+            context: context(),
+            messages,
+            input_images: Vec::new(),
+            provider_state: None,
+            continuation_state: None,
+            final_message_fallback: None,
+            compaction_intent: None,
+        });
+
+        assert!(!output.yielded);
+        assert_eq!(
+            output
+                .attention
+                .as_ref()
+                .map(|value| value.reason_code.as_str()),
+            Some("chat_completions_provider_context_limit_attention")
+        );
+        let checkpoint = chat_completions_continuation_state(
+            output
+                .continuation_state
+                .as_ref()
+                .expect("disabled recovery preserves a retry checkpoint"),
+        )
+        .expect("valid disabled recovery checkpoint");
+        assert!(checkpoint.context_compaction.artifacts.is_empty());
+        assert!(!output.stream.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ProviderStatus { metadata_json: Some(metadata), .. }
+                    if metadata.contains("context_compaction_started"))
+        )));
     }
 
     #[test]

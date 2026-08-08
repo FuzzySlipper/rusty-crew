@@ -3572,19 +3572,23 @@ where
                             last_usage.as_ref(),
                             provider_state.as_ref(),
                         );
-                        push_stream_item(
-                            &mut items,
-                            responses_context_compaction_event(
-                                &request,
-                                "context_compaction_started",
-                                BrainProviderStatusLevel::Info,
-                                "Provider context-limit recovery started from the rejected exact Responses request projection.",
-                                &usage,
-                                None,
-                                None,
-                            ),
-                            &mut sink,
-                    );
+                        let automatic_recovery_enabled =
+                            policy.enabled && policy.auto_compaction_enabled;
+                        if automatic_recovery_enabled {
+                            push_stream_item(
+                                &mut items,
+                                responses_context_compaction_event(
+                                    &request,
+                                    "context_compaction_started",
+                                    BrainProviderStatusLevel::Info,
+                                    "Provider context-limit recovery started from the rejected exact Responses request projection.",
+                                    &usage,
+                                    None,
+                                    None,
+                                ),
+                                &mut sink,
+                            );
+                        }
                     let sequence =
                         output_continuation.context_compaction.artifacts.len() as u64 + 1;
                     let mut compacted_base_history = base_history.clone();
@@ -3600,7 +3604,9 @@ where
                                     == Some(request.wake_id.as_str())
                         })
                         .count();
-                    let recovery = if prior_provider_limit_recoveries >= 2 {
+                    let recovery = if !automatic_recovery_enabled {
+                        Err("automatic provider context-limit compaction is disabled by the selected policy".to_string())
+                    } else if prior_provider_limit_recoveries >= 2 {
                         Err("provider context-limit recovery reached the bounded two-compaction limit for this logical turn".to_string())
                     } else {
                         compact_responses_projection(
@@ -8492,6 +8498,73 @@ mod tests {
             BrainWakeStreamItem::Event { event }
                 if matches!(&event.event, BrainEvent::TextDelta { text }
                     if text == "continued after provider-limit compaction")
+        )));
+    }
+
+    #[test]
+    fn provider_context_rejection_respects_disabled_auto_compaction() {
+        let mut config = ResponsesBrainConfig::replay("gpt-5");
+        config.context_compaction = Some(BrainContextCompactionPolicy {
+            enabled: true,
+            auto_compaction_enabled: false,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            context_window_tokens: 1_000_000,
+            compact_at_percent: 100,
+            target_percent_after_compaction: 55,
+        });
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Err(ResponsesStreamError::Transport(
+                "context_length_exceeded".to_string(),
+            ))]),
+            MapToolExecutor::default(),
+            config,
+        );
+        let history = ResponsesReplayProjection {
+            input_items: (0..10)
+                .map(|index| {
+                    if index % 2 == 0 {
+                        ResponsesInputItem::UserMessage {
+                            content: format!("historical user fact {index}"),
+                        }
+                    } else {
+                        ResponsesInputItem::AssistantMessage {
+                            content: format!("historical assistant answer {index}"),
+                        }
+                    }
+                })
+                .collect(),
+            replay_hints: Vec::new(),
+        };
+
+        let result = brain
+            .wake_with_history(wake_request(None, None), history)
+            .expect("disabled automatic recovery remains a recoverable wake");
+        let items = result.stream.drain_until_closed().unwrap();
+        assert!(!result.yielded);
+        assert_eq!(
+            result
+                .attention
+                .as_ref()
+                .map(|value| value.reason_code.as_str()),
+            Some("responses_context_compaction_attention")
+        );
+        let checkpoint = responses_continuation_state(
+            result
+                .continuation_state
+                .as_ref()
+                .expect("disabled recovery preserves a retry checkpoint"),
+        )
+        .expect("valid disabled recovery checkpoint");
+        assert!(checkpoint
+            .output_continuation
+            .context_compaction
+            .artifacts
+            .is_empty());
+        assert!(!items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event }
+                if matches!(&event.event, BrainEvent::ProviderStatus { metadata_json: Some(metadata), .. }
+                    if metadata.contains("context_compaction_started"))
         )));
     }
 
