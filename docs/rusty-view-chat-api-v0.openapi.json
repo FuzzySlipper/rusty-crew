@@ -1564,6 +1564,65 @@
         },
         "additionalProperties": false
       },
+      "ManualContextCompactionRequest": {
+        "type": "object",
+        "properties": {
+          "intent_key": { "type": ["string", "null"] },
+          "strategy_id": { "type": ["string", "null"] },
+          "strategy_revision": { "type": ["string", "null"] },
+          "source_projection_fingerprint": { "type": ["string", "null"] },
+          "expect_revision": {
+            "type": ["integer", "null"],
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ManualContextCompactionArtifact": {
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "session_id",
+          "strategy_id",
+          "terminal_status",
+          "created_at"
+        ],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "strategy_id": { "type": "string" },
+          "terminal_status": { "type": "string" },
+          "created_at": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ManualContextCompactionResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "session_id",
+          "artifact",
+          "terminal_status",
+          "idempotent",
+          "revision"
+        ],
+        "properties": {
+          "ok": { "const": true },
+          "session_id": { "type": "string" },
+          "artifact": {
+            "$ref": "#/components/schemas/ManualContextCompactionArtifact"
+          },
+          "terminal_status": { "type": "string" },
+          "idempotent": { "type": "boolean" },
+          "revision": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "MemorySurfaceOwner": {
         "type": "string",
         "enum": ["crew", "den", "filesystem"]
