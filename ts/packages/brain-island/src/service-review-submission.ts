@@ -772,7 +772,6 @@ async function resumeRoutedReview(
         context,
         binding,
         Number(record.taskId),
-        String(record.projectId),
       );
       const alreadyFinalized = exactHeadFinalizedRound(
         rounds,
@@ -881,7 +880,6 @@ function parseFinalizationReceipt(
   taskStatus: string;
   materialDigest?: string;
 } {
-  assertDenProjectScope(payload, String(record.projectId), "finalize_review");
   const response = allObjects(payload).find(
     (value) =>
       numericValue(value, ["id", "finalization_id"]) !== undefined &&
@@ -1121,7 +1119,6 @@ async function advanceDenHandoff(
         context,
         binding,
         Number(record.taskId),
-        String(record.projectId),
       );
       const alreadyFinalized = exactHeadFinalizedRound(
         rounds,
@@ -1179,11 +1176,6 @@ async function advanceDenHandoff(
         : { session_key: record.submitterSessionId }),
       agent_profile: binding.auditIdentity,
     });
-    assertDenProjectScope(
-      gate,
-      String(record.projectId),
-      "watch_github_checks",
-    );
     const gateId = requiredNumericId(gate, ["gate_id", "gateId", "id"]);
     record = await context.bridge.transitionReviewSubmission({
       submissionId: record.submissionId,
@@ -1477,12 +1469,10 @@ async function reviewRounds(
   context: ServiceReviewSubmissionContext,
   binding: ReviewDenAuthority,
   taskId: number,
-  projectId: string,
 ): Promise<Record<string, unknown>[]> {
   const payload = await denCall(context, binding, "list_review_rounds", {
     task_id: taskId,
   });
-  assertDenProjectScope(payload, projectId, "list_review_rounds");
   return allObjects(payload);
 }
 
@@ -1493,27 +1483,6 @@ function reviewRequestNotes(record: ReviewSubmissionRecord): string {
     "",
     record.reviewSummaryMd,
   ].join("\n");
-}
-
-function assertDenProjectScope(
-  payload: unknown,
-  projectId: string,
-  operation: string,
-): void {
-  const explicitProjects = allObjects(payload).flatMap((value) => {
-    const candidate = value.project_id ?? value.projectId;
-    return typeof candidate === "string" && candidate.trim() !== ""
-      ? [candidate.trim()]
-      : [];
-  });
-  const mismatch = explicitProjects.find(
-    (candidate) => candidate !== projectId,
-  );
-  if (mismatch === undefined) return;
-  throw new ReviewSubmissionAdapterError(
-    "review_project_scope_mismatch",
-    `${operation} returned project ${mismatch}, expected ${projectId}.`,
-  );
 }
 
 function priorReviewedHead(

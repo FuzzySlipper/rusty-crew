@@ -429,8 +429,8 @@ test("a durable result survives authority loss after dispatch and reconciles aft
   assert.equal(durable.reviewVerdict, "looks_good");
 });
 
-test("reconciliation does not reuse an older verdict past a newer pending same-head round", async () => {
-  const pending = scopedSubmissionRecord("rusty-crew", {
+test("cross-project reconciliation ignores Den wrapper project metadata and keeps task identity authoritative", async () => {
+  const pending = scopedSubmissionRecord("rusty-view", {
     type: "external_cli",
     clientId: "test",
     idempotencyKey: "test-newer-round",
@@ -499,6 +499,14 @@ test("reconciliation does not reuse an older verdict past a newer pending same-h
   });
 
   assert.deepEqual(denCalls, ["list_review_rounds", "watch_github_checks"]);
+  assert.equal(
+    transitions.some(
+      (request) =>
+        (request.transition as Record<string, unknown>).type ===
+        "adapter_failed",
+    ),
+    false,
+  );
   assert.equal(
     (transitions[0]?.transition as Record<string, unknown>)?.type,
     "den_handoff_recorded",
