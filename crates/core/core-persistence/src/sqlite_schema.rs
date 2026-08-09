@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 67;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 70;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -353,6 +353,21 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 67,
         description: "add first-class session workspace state",
         apply: repos::sessions::migrate_v67_add_session_workspace,
+    },
+    SchemaMigration {
+        version: 68,
+        description: "migrate legacy delegated workspace constraints",
+        apply: repos::sessions::migrate_v68_add_delegated_workspace_constraints,
+    },
+    SchemaMigration {
+        version: 69,
+        description: "migrate legacy session workspace event payloads",
+        apply: repos::sessions::migrate_v69_session_workspace_events,
+    },
+    SchemaMigration {
+        version: 70,
+        description: "remove null-valued legacy session workdir keys",
+        apply: repos::sessions::migrate_v70_remove_legacy_workdir_keys,
     },
 ];
 
@@ -2930,6 +2945,273 @@ mod tests {
             "idx_roleplay_lore_recall_traces_session",
         ] {
             assert!(index_exists(&db_path, index), "missing index {index}");
+        }
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn version_67_database_migrates_legacy_session_workspace_payloads() {
+        let db_path = temp_db_path("session-workspace-compatibility");
+        let delegated_lineage = |constraint: Option<&str>| {
+            let mut lineage = serde_json::json!({
+                "parent_session_id": "parent-session",
+                "parent_agent_id": "parent-agent",
+                "source_wake_id": "wake-1",
+                "source_action_index": 0,
+                "requested_task_id": null,
+                "correlation_id": "delegation:migration"
+            });
+            if let Some(cwd) = constraint {
+                lineage["workspace_constraint"] = serde_json::json!({ "cwd": cwd });
+            }
+            lineage
+        };
+        let legacy_state =
+            |session_id: &str, kind: &str, delegation: serde_json::Value, workdir: &str| {
+                serde_json::json!({
+                    "handle": 1,
+                    "session_id": session_id,
+                    "agent_id": "migration-agent",
+                    "profile_id": "migration-profile",
+                    "kind": kind,
+                    "delegation": delegation,
+                    "workspace": {
+                        "cwd": workdir,
+                        "revision": 1,
+                        "updated_at": "2026-08-08T00:01:00Z"
+                    },
+                    "resource_limits": {
+                        "workdir": workdir,
+                        "max_duration_ms": null,
+                        "max_delegation_depth": null
+                    },
+                    "tool_profile": { "tools": [] },
+                    "history_window": null,
+                    "inference_overrides": {},
+                    "status": "idle",
+                    "brain_turn_count": 0,
+                    "created_at": "2026-08-08T00:00:00Z",
+                    "last_active_at": "2026-08-08T00:01:00Z"
+                })
+            };
+
+        {
+            let mut conn = Connection::open(&db_path).unwrap();
+            prepare_migration_metadata(&conn).unwrap();
+            apply_schema_migrations(&mut conn, &SCHEMA_MIGRATIONS[..67]).unwrap();
+
+            for (handle, session_id, constraint) in [
+                (1_i64, "legacy-delegated", None),
+                (2_i64, "typed-delegated", Some("/typed")),
+            ] {
+                let state = legacy_state(
+                    session_id,
+                    "delegated",
+                    delegated_lineage(constraint),
+                    "/legacy",
+                );
+                let config = serde_json::json!({
+                    "session_id": session_id,
+                    "agent_id": "migration-agent",
+                    "profile_id": "migration-profile",
+                    "kind": "delegated",
+                    "delegation": state["delegation"],
+                    "workspace": state["workspace"],
+                    "resource_limits": state["resource_limits"],
+                    "tool_profile": { "tools": [] },
+                    "history_window": null
+                });
+                conn.execute(
+                    "INSERT INTO sessions(
+                        session_id, handle, agent_id, profile_id, kind_json,
+                        delegation_json, resource_limits_json, tool_profile_json,
+                        status_json, brain_turn_count, created_at, last_active_at,
+                        history_window_json, inference_overrides_json, workspace_json
+                     ) VALUES (?1, ?2, 'migration-agent', 'migration-profile', '\"delegated\"',
+                         ?3, ?4, '{\"tools\":[]}', '\"idle\"', 0,
+                         '2026-08-08T00:00:00Z', '2026-08-08T00:01:00Z',
+                         NULL, '{}', ?5)",
+                    params![
+                        session_id,
+                        handle,
+                        state["delegation"].to_string(),
+                        state["resource_limits"].to_string(),
+                        state["workspace"].to_string()
+                    ],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO session_configs(
+                        session_id, profile_id, kind, resource_limits_json,
+                        tool_profile_json, config_json, created_at
+                     ) VALUES (?1, 'migration-profile', 'delegated', ?2,
+                         '{\"tools\":[]}', ?3, '2026-08-08T00:00:00Z')",
+                    params![
+                        session_id,
+                        state["resource_limits"].to_string(),
+                        config.to_string()
+                    ],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "INSERT INTO sessions(
+                    session_id, handle, agent_id, profile_id, kind_json,
+                    delegation_json, resource_limits_json, tool_profile_json,
+                    status_json, brain_turn_count, created_at, last_active_at,
+                    history_window_json, inference_overrides_json, workspace_json
+                 ) VALUES ('null-worker', 3, 'migration-agent', 'migration-profile',
+                     '\"worker\"', NULL,
+                     '{\"workdir\":null,\"max_duration_ms\":null,\"max_delegation_depth\":null}',
+                     '{\"tools\":[]}', '\"idle\"', 0,
+                     '2026-08-08T00:00:00Z', '2026-08-08T00:01:00Z',
+                     NULL, '{}', NULL)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO session_configs(
+                    session_id, profile_id, kind, resource_limits_json,
+                    tool_profile_json, config_json, created_at
+                 ) VALUES ('null-worker', 'migration-profile', 'worker',
+                     '{\"workdir\":null,\"max_duration_ms\":null,\"max_delegation_depth\":null}',
+                     '{\"tools\":[]}',
+                     '{\"session_id\":\"null-worker\",\"agent_id\":\"migration-agent\",\"profile_id\":\"migration-profile\",\"kind\":\"worker\",\"delegation\":null,\"workspace\":null,\"resource_limits\":{\"workdir\":null,\"max_duration_ms\":null,\"max_delegation_depth\":null},\"tool_profile\":{\"tools\":[]},\"history_window\":null}',
+                     '2026-08-08T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+            let mut legacy_full_event =
+                legacy_state("legacy-full", "full", serde_json::Value::Null, "/full");
+            legacy_full_event["workspace"] = serde_json::Value::Null;
+            let event_rows = [
+                (1_i64, legacy_full_event),
+                (
+                    2_i64,
+                    legacy_state(
+                        "legacy-delegated-event",
+                        "delegated",
+                        delegated_lineage(None),
+                        "/delegated",
+                    ),
+                ),
+                (
+                    3_i64,
+                    legacy_state(
+                        "typed-delegated-event",
+                        "delegated",
+                        delegated_lineage(Some("/typed")),
+                        "/legacy",
+                    ),
+                ),
+                (
+                    4_i64,
+                    serde_json::json!({
+                        "handle": 4,
+                        "session_id": "null-worker-event",
+                        "agent_id": "migration-agent",
+                        "profile_id": "migration-profile",
+                        "kind": "worker",
+                        "delegation": null,
+                        "workspace": null,
+                        "resource_limits": {
+                            "workdir": null,
+                            "max_duration_ms": null,
+                            "max_delegation_depth": null
+                        },
+                        "tool_profile": { "tools": [] },
+                        "history_window": null,
+                        "inference_overrides": {},
+                        "status": "idle",
+                        "brain_turn_count": 0,
+                        "created_at": "2026-08-08T00:00:00Z",
+                        "last_active_at": "2026-08-08T00:01:00Z"
+                    }),
+                ),
+            ];
+            for (sequence, state) in event_rows {
+                conn.execute(
+                    "INSERT INTO event_history(sequence, event_kind, event_json)
+                     VALUES (?1, 'SessionCreated', ?2)",
+                    params![
+                        sequence,
+                        serde_json::json!({ "type": "session_created", "state": state })
+                            .to_string()
+                    ],
+                )
+                .unwrap();
+            }
+
+            apply_schema_migrations(&mut conn, SCHEMA_MIGRATIONS).unwrap();
+            apply_schema_migrations(&mut conn, SCHEMA_MIGRATIONS).unwrap();
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        let sessions = store.load_sessions().unwrap();
+        let configs = store.load_session_configs().unwrap();
+        assert!(sessions
+            .iter()
+            .any(|state| state.session_id.0 == "null-worker"));
+        assert!(configs
+            .iter()
+            .any(|record| record.config.session_id.0 == "null-worker"));
+        for (session_id, expected_constraint) in [
+            ("legacy-delegated", "/legacy"),
+            ("typed-delegated", "/typed"),
+        ] {
+            let state = sessions
+                .iter()
+                .find(|state| state.session_id.0 == session_id)
+                .unwrap();
+            let config = configs
+                .iter()
+                .find(|record| record.config.session_id.0 == session_id)
+                .unwrap();
+            assert_eq!(
+                state
+                    .delegation
+                    .as_ref()
+                    .and_then(|lineage| lineage.workspace_constraint.as_ref())
+                    .map(|constraint| constraint.cwd.as_str()),
+                Some(expected_constraint)
+            );
+            assert_eq!(
+                config
+                    .config
+                    .delegation
+                    .as_ref()
+                    .and_then(|lineage| lineage.workspace_constraint.as_ref())
+                    .map(|constraint| constraint.cwd.as_str()),
+                Some(expected_constraint)
+            );
+        }
+
+        let events = store.load_event_history().unwrap();
+        for (sequence, expected_cwd) in [(1_u64, "/full"), (2, "/delegated"), (3, "/typed")] {
+            let event = &events
+                .iter()
+                .find(|persisted| persisted.sequence == sequence)
+                .unwrap()
+                .event;
+            let CoreEvent::SessionCreated { state } = event else {
+                panic!("expected migrated session-created event");
+            };
+            let migrated_cwd = match state.kind {
+                SessionKind::Full => state
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.cwd.as_str()),
+                SessionKind::Delegated => state
+                    .delegation
+                    .as_ref()
+                    .and_then(|lineage| lineage.workspace_constraint.as_ref())
+                    .map(|constraint| constraint.cwd.as_str()),
+                SessionKind::Worker => None,
+            };
+            assert_eq!(migrated_cwd, Some(expected_cwd));
         }
 
         remove_temp_db(&db_path);

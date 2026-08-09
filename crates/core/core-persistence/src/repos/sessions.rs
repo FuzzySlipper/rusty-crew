@@ -435,6 +435,115 @@ pub(crate) fn migrate_v67_add_session_workspace(tx: &rusqlite::Transaction<'_>) 
     Ok(())
 }
 
+pub(crate) fn migrate_v68_add_delegated_workspace_constraints(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE sessions
+            SET delegation_json = CASE
+                    WHEN json_extract(delegation_json, '$.workspace_constraint') IS NULL
+                    THEN json_set(
+                        delegation_json,
+                        '$.workspace_constraint',
+                        json_object(
+                            'cwd', json_extract(resource_limits_json, '$.workdir')
+                        )
+                    )
+                    ELSE delegation_json
+                END,
+                resource_limits_json = json_remove(resource_limits_json, '$.workdir')
+          WHERE json_extract(kind_json, '$') = 'delegated'
+            AND json_extract(resource_limits_json, '$.workdir') IS NOT NULL;
+
+         UPDATE session_configs
+            SET config_json = json_remove(
+                    CASE
+                        WHEN json_extract(config_json, '$.delegation.workspace_constraint') IS NULL
+                        THEN json_set(
+                            config_json,
+                            '$.delegation.workspace_constraint',
+                            json_object(
+                                'cwd', json_extract(config_json, '$.resource_limits.workdir')
+                            )
+                        )
+                        ELSE config_json
+                    END,
+                    '$.resource_limits.workdir'
+                ),
+                resource_limits_json = json_remove(resource_limits_json, '$.workdir')
+          WHERE kind = 'delegated'
+            AND json_extract(config_json, '$.resource_limits.workdir') IS NOT NULL;",
+    )
+    .map_err(|error| persistence_error("migrate delegated workspace constraints", error))
+}
+
+pub(crate) fn migrate_v69_session_workspace_events(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE event_history
+            SET event_json = json_remove(
+                CASE
+                    WHEN json_extract(event_json, '$.state.kind') = 'full'
+                         AND json_extract(event_json, '$.state.workspace') IS NULL
+                    THEN json_set(
+                        event_json,
+                        '$.state.workspace',
+                        json_object(
+                            'cwd', json_extract(event_json, '$.state.resource_limits.workdir'),
+                            'revision', 1,
+                            'updated_at', COALESCE(
+                                json_extract(event_json, '$.state.last_active_at'),
+                                json_extract(event_json, '$.state.created_at')
+                            )
+                        )
+                    )
+                    WHEN json_extract(event_json, '$.state.kind') = 'delegated'
+                         AND json_extract(
+                             event_json,
+                             '$.state.delegation.workspace_constraint'
+                         ) IS NULL
+                    THEN json_set(
+                        event_json,
+                        '$.state.delegation.workspace_constraint',
+                        json_object(
+                            'cwd', json_extract(event_json, '$.state.resource_limits.workdir')
+                        )
+                    )
+                    ELSE event_json
+                END,
+                '$.state.resource_limits.workdir'
+            )
+          WHERE event_kind = 'SessionCreated'
+            AND json_extract(event_json, '$.state.resource_limits.workdir') IS NOT NULL",
+        [],
+    )
+    .map_err(|error| persistence_error("migrate session workspace event payloads", error))?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v70_remove_legacy_workdir_keys(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "UPDATE sessions
+            SET resource_limits_json = json_remove(resource_limits_json, '$.workdir')
+          WHERE json_type(resource_limits_json, '$.workdir') IS NOT NULL;
+
+         UPDATE session_configs
+            SET resource_limits_json = json_remove(resource_limits_json, '$.workdir'),
+                config_json = json_remove(config_json, '$.resource_limits.workdir')
+          WHERE json_type(resource_limits_json, '$.workdir') IS NOT NULL
+             OR json_type(config_json, '$.resource_limits.workdir') IS NOT NULL;
+
+         UPDATE event_history
+            SET event_json = json_remove(event_json, '$.state.resource_limits.workdir')
+          WHERE event_kind = 'SessionCreated'
+            AND json_type(event_json, '$.state.resource_limits.workdir') IS NOT NULL;",
+    )
+    .map_err(|error| persistence_error("remove legacy session workdir keys", error))
+}
+
 fn save_session_config_in_tx(
     tx: &rusqlite::Transaction<'_>,
     config: &SessionConfig,
