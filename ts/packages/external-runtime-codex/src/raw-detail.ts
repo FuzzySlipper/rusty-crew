@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BoundedRawDetail } from "./types.js";
+import { replaceAgentMessageFileLinks } from "./agent-message-file-links.js";
 
 const secretKey =
   /^(authorization|proxy-authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|password|secret|cookie|set-cookie)$/i;
@@ -39,9 +40,8 @@ export function captureBoundedRawDetail(
         this !== null &&
         (this as Record<string, unknown>).type === "agentMessage"
       ) {
-        const redacted = child.replace(
-          /(?<!!)\[([^\]]+)\]\((?:<)?(\/[^)\n>]+?)(?::\d+)?(?:>)?\)/g,
-          "$1",
+        const redacted = replaceAgentMessageFileLinks(child, ({ label }) =>
+          label.trim(),
         );
         if (redacted !== child) redactedKeys.add("agentMessage.fileLink");
         return redacted;

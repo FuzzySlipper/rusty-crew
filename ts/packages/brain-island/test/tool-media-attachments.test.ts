@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -639,6 +640,39 @@ test("external document capture bounds reads from zero-sized virtual files", asy
 
   assert.equal(capture?.captureState, "oversized");
   assert.equal(capture?.byteSize, 1025);
+  assert.equal(testHarness.attachments.size, 0);
+});
+
+test("external document capture rejects a linked FIFO without blocking open", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-external-document-fifo-"));
+  const fifoPath = join(root, "source-fifo");
+  const linkedPath = join(root, "source.txt");
+  execFileSync("mkfifo", [fifoPath]);
+  await symlink(fifoPath, linkedPath);
+  const testHarness = harness(root);
+  const store = new ToolMediaAttachmentStore({
+    artifactDir: root,
+    bridge: testHarness.bridge as never,
+    now: () => "2026-07-25T12:00:00.000Z",
+    maxDocumentBytes: 1024,
+    appendChatEvent: testHarness.appendChatEvent,
+  });
+
+  const [capture] = await store.captureExternalRuntimeDocuments({
+    runtimeId: "runtime-1",
+    sessionId: "session-1",
+    externalEventId: "event-fifo",
+    candidates: [
+      {
+        source: "agent_message_file_link",
+        documentIndex: 0,
+        path: linkedPath,
+        displayName: "fifo",
+      },
+    ],
+  });
+
+  assert.equal(capture?.captureState, "unsupported");
   assert.equal(testHarness.attachments.size, 0);
 });
 

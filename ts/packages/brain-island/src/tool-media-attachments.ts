@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import {
   mkdir,
   open,
@@ -1538,7 +1539,10 @@ async function readExternalDocumentBounded(
   | { state: "oversized"; byteSize: number }
   | { state: "unsupported" }
 > {
-  const handle = await open(path, "r").catch((error) => {
+  const handle = await open(
+    path,
+    fsConstants.O_RDONLY | fsConstants.O_NONBLOCK,
+  ).catch((error) => {
     throw documentReadError(error);
   });
   try {

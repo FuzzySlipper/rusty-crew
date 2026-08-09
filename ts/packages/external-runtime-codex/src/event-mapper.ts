@@ -1,5 +1,6 @@
 import type { ServerNotification } from "../protocol/0.144.1/ts/ServerNotification.js";
 import { captureBoundedRawDetail } from "./raw-detail.js";
+import { replaceAgentMessageFileLinks } from "./agent-message-file-links.js";
 import type {
   JsonRpcId,
   NeutralExternalEventKind,
@@ -65,15 +66,9 @@ function projectDocumentCandidates(
   const text = stringValue(item.text);
   if (text === undefined) return { candidates: [], sanitizedItem: item };
   const candidates: ExternalRuntimeDocumentCaptureCandidate[] = [];
-  const sanitized = text.replace(
-    /(?<!!)\[([^\]\n]+)\]\((?:<(\/[^>\n]+)>|(\/[^)\n]+))\)/g,
-    (
-      _match,
-      label: string,
-      anglePath: string | undefined,
-      barePath: string | undefined,
-    ) => {
-      const pathWithLine = (anglePath ?? barePath ?? "").trim();
+  const sanitized = replaceAgentMessageFileLinks(
+    text,
+    ({ label, pathWithLine }) => {
       const path = pathWithLine.replace(/:\d+$/, "");
       const decodedPath = decodeURIComponentSafe(path);
       const displayName = label.trim() || basenameFromPath(decodedPath);
