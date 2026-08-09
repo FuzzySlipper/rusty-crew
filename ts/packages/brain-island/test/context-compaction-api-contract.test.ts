@@ -338,15 +338,13 @@ test("GET context: an existing registry record with cleared prompts does not cou
         }),
         { session: sessionState(), requestId: "cleared-prompt" },
       );
+      const systemTokens = result.context.system_tokens ?? 0;
 
       assert.ok(
-        result.context.system_tokens < 200,
+        systemTokens < 200,
         "only the built-in role scaffold may remain after registry prompt clearing",
       );
-      assert.equal(
-        result.context.estimated_prompt_tokens,
-        result.context.system_tokens,
-      );
+      assert.equal(result.context.estimated_prompt_tokens, systemTokens);
     },
   );
 });
@@ -365,16 +363,14 @@ test("GET context: registry prompt wins when it differs from stale filesystem pr
         }),
         { session: sessionState(), requestId: "database-prompt" },
       );
+      const systemTokens = result.context.system_tokens ?? 0;
 
-      assert.ok(result.context.system_tokens > 0);
+      assert.ok(systemTokens > 0);
       assert.ok(
-        result.context.system_tokens < 250,
+        systemTokens < 250,
         "the large stale filesystem prompt must not contribute tokens",
       );
-      assert.equal(
-        result.context.estimated_prompt_tokens,
-        result.context.system_tokens,
-      );
+      assert.equal(result.context.estimated_prompt_tokens, systemTokens);
     },
   );
 });
