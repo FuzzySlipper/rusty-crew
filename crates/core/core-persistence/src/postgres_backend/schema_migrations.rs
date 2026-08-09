@@ -291,6 +291,24 @@ fn apply_postgres_external_runtime_thread_cursor(
     tx: &mut Transaction<'_>,
     schema: &str,
 ) -> CoreResult<()> {
+    let external_runtime_events_exists = tx
+        .query_opt(
+            "SELECT 1
+               FROM information_schema.tables
+              WHERE table_schema::text = $1
+                AND table_name = 'external_runtime_events'",
+            &[&schema],
+        )
+        .map_err(|error| {
+            postgres_error(
+                "inspect PostgreSQL external runtime events table",
+                error,
+            )
+        })?
+        .is_some();
+    if !external_runtime_events_exists {
+        return Ok(());
+    }
     tx.batch_execute(&format!(
         "CREATE INDEX IF NOT EXISTS external_runtime_events_thread_cursor_idx
             ON {schema}.external_runtime_events(runtime_id, native_thread_id, sequence_id)
