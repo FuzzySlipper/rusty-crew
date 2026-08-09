@@ -14,8 +14,8 @@ import {
   estimateTextFragmentsTokens,
   textFragmentsFromPayload,
 } from "./context-estimate.js";
-import { loadProfileContext } from "./profile-loading.js";
 import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
+import { loadServiceProfileContext } from "./service-profile-context.js";
 import { defaultProfileBrainForModelProvider } from "./service-profile-admin-mutations.js";
 import { resolveReasoningEffort } from "./reasoning-effort-policy.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
@@ -561,7 +561,8 @@ export async function rustyViewSessionContextUsage(
   const segmentNotes: NonNullable<
     SessionContextUsageResult["context"]["token_segments"]
   >["notes"] = [];
-  const profileContext = await loadProfileContext({
+  const profileContext = await loadServiceProfileContext({
+    bridge: context.bridge,
     profilesDir: context.runtimeConfig.profilesDir,
     skillsDir: context.runtimeConfig.skillsDir,
     profileId: input.session.profileId,

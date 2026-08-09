@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { CoreEvent, SessionState } from "@rusty-crew/contracts";
@@ -135,6 +138,8 @@ interface FakeOpsOptions {
   artifacts?: Array<Record<string, unknown>>;
   registrySettings?: Record<string, unknown>;
   provider?: Record<string, unknown>;
+  registryRecord?: Record<string, unknown>;
+  profilesDir?: string;
 }
 
 function makeOpsContext(options: FakeOpsOptions = {}) {
@@ -142,13 +147,14 @@ function makeOpsContext(options: FakeOpsOptions = {}) {
     bridge: {
       getProfileRegistryRecord: async () => ({
         activeRuntimeSettingsJson: options.registrySettings ?? {},
+        ...options.registryRecord,
       }),
       getModelProvider: async () => options.provider ?? {},
       listContextCompactionArtifacts: async () => options.artifacts ?? [],
     },
     runtimeConfig: {
       mcpBindings: [],
-      profilesDir: "/tmp/rusty-crew-test-profiles",
+      profilesDir: options.profilesDir ?? "/tmp/rusty-crew-test-profiles",
       skillsDir: "/tmp/rusty-crew-test-skills",
     },
     listChatEventsAfterCursor: async () => (options.chatEvents ?? []) as never,
@@ -156,6 +162,27 @@ function makeOpsContext(options: FakeOpsOptions = {}) {
     roleplayRouteContext: () => ({}),
   } as unknown as RustyViewChatOperationsContext;
   return ops;
+}
+
+async function withFilesystemProfile(
+  prompt: Record<string, unknown>,
+  run: (profilesDir: string) => Promise<void>,
+): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), "rusty-crew-context-profile-"));
+  const profilesDir = join(root, "profiles");
+  try {
+    await mkdir(profilesDir, { recursive: true });
+    await writeFile(
+      join(profilesDir, "profile-1.json"),
+      JSON.stringify({
+        modelConfig: { provider: "test", modelName: "test-model" },
+        prompt,
+      }),
+    );
+    await run(profilesDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 }
 
 function makeRouteContext(
@@ -295,6 +322,61 @@ test("GET context: unavailable measurement is explicit approximate/compatibility
     "legacy fields must be explicitly marked approximate until the Rust snapshot exists",
   );
   assert.equal(data.degraded, true);
+});
+
+test("GET context: an existing registry record with cleared prompts does not count stale filesystem soul", async () => {
+  await withFilesystemProfile(
+    { soulMarkdown: "stale filesystem soul ".repeat(200) },
+    async (profilesDir) => {
+      const result = await rustyViewSessionContextUsage(
+        makeOpsContext({
+          profilesDir,
+          registryRecord: {
+            promptSoulMarkdown: undefined,
+            promptMemoryMarkdown: undefined,
+          },
+        }),
+        { session: sessionState(), requestId: "cleared-prompt" },
+      );
+
+      assert.ok(
+        result.context.system_tokens < 200,
+        "only the built-in role scaffold may remain after registry prompt clearing",
+      );
+      assert.equal(
+        result.context.estimated_prompt_tokens,
+        result.context.system_tokens,
+      );
+    },
+  );
+});
+
+test("GET context: registry prompt wins when it differs from stale filesystem prompt", async () => {
+  await withFilesystemProfile(
+    { soulMarkdown: "stale filesystem soul ".repeat(200) },
+    async (profilesDir) => {
+      const result = await rustyViewSessionContextUsage(
+        makeOpsContext({
+          profilesDir,
+          registryRecord: {
+            promptSoulMarkdown: "authoritative database soul",
+            promptMemoryMarkdown: undefined,
+          },
+        }),
+        { session: sessionState(), requestId: "database-prompt" },
+      );
+
+      assert.ok(result.context.system_tokens > 0);
+      assert.ok(
+        result.context.system_tokens < 250,
+        "the large stale filesystem prompt must not contribute tokens",
+      );
+      assert.equal(
+        result.context.estimated_prompt_tokens,
+        result.context.system_tokens,
+      );
+    },
+  );
 });
 
 test("GET context: disabled policy is reflected and the session is not created/archived/rebuild implicitly", async () => {
