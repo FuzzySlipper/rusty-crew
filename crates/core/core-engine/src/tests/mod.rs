@@ -43,6 +43,7 @@ mod memory_spaces;
 mod review_submission;
 use chat_support::*;
 use delegation_support::*;
+mod agent_directory;
 mod agent_routes;
 mod body;
 mod bootstrap_sessions;
