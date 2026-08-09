@@ -564,6 +564,12 @@
         "idempotencyKey": {
           "type": "string"
         },
+        "imageAttachmentIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "inputKind": {
           "$ref": "#/$defs/AgentMessageInputKind"
         },
@@ -720,6 +726,12 @@
         },
         "idempotencyKey": {
           "type": "string"
+        },
+        "imageAttachmentIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "inputKind": {
           "$ref": "#/$defs/AgentMessageInputKind"

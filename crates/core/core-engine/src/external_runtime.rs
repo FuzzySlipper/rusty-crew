@@ -1337,7 +1337,7 @@ impl CoreEngine {
                 .store
                 .update_agent_message_delivery(&reconciled, delivery.revision)?;
             self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
-                receipt: saved.clone(),
+                receipt: Box::new(saved.clone()),
             })?;
             report
                 .reconciled_delivery_ids

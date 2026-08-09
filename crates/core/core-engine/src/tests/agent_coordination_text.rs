@@ -76,6 +76,7 @@ fn request(
         reply_to_message_id: None,
         input_kind,
         body: "inspect this".into(),
+        image_attachment_ids: Vec::new(),
         collaboration_mode: None,
         correlation_id: Some("correlation-1".into()),
         require_wake: true,

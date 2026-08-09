@@ -516,6 +516,7 @@ impl CoreEngine {
             reply_to_message_id,
             input_kind: command.input_kind,
             body: command.body.clone(),
+            image_attachment_ids: command.image_attachment_ids.clone(),
             collaboration_mode: command.collaboration_mode,
             correlation_id: command.correlation_id.clone(),
             require_wake: command.require_wake,
@@ -641,6 +642,39 @@ impl CoreEngine {
                 Some("external_collaboration_mode_turn_already_active".into()),
             );
         }
+        if !command.require_wake && !pending.request.image_attachment_ids.is_empty() {
+            return self.finish_agent_message_delivery(
+                pending,
+                AgentMessageDeliveryStatus::Rejected,
+                None,
+                None,
+                None,
+                Some("external_message_images_require_wake".into()),
+            );
+        }
+        let validated_image_inputs = match self
+            .external_image_inputs(&session.session_id, &pending.request.image_attachment_ids)
+        {
+            Ok(images) => images,
+            Err(error)
+                if matches!(
+                    error.kind,
+                    CoreErrorKind::InvalidInput
+                        | CoreErrorKind::NotFound
+                        | CoreErrorKind::ActionRejected
+                ) =>
+            {
+                return self.finish_agent_message_delivery(
+                    pending,
+                    AgentMessageDeliveryStatus::Rejected,
+                    None,
+                    None,
+                    None,
+                    Some(error.message),
+                )
+            }
+            Err(error) => return Err(error),
+        };
 
         let event = CoreEvent::AgentMessageRouted {
             message: message.clone(),
@@ -665,13 +699,15 @@ impl CoreEngine {
                 TurnInputProvenanceKind::RoutedAgentMessage
             }
         };
+        let mut activation_input = vec![ExternalTurnInputPart::Text {
+            text: model_body.clone(),
+        }];
+        activation_input.extend(validated_image_inputs);
         let activation_request = AgentActivationRequest {
             agent_id: recipient_agent_id,
             request_id: ExternalTurnRequestId::new(format!("agent-message:{}", command.message_id)),
             idempotency_key: format!("agent-message-turn:{}", command.message_id),
-            input: vec![ExternalTurnInputPart::Text {
-                text: model_body.clone(),
-            }],
+            input: activation_input,
             collaboration_mode: command.collaboration_mode,
             provenance: TurnInputProvenance {
                 kind: provenance_kind,
@@ -797,6 +833,7 @@ impl CoreEngine {
                 message_id: command.message_id,
                 to_address: command.to_address,
                 body: command.body,
+                image_attachment_ids: Vec::new(),
                 input_kind: AgentMessageInputKind::RoutedAgentMessage,
                 collaboration_mode: None,
                 correlation_id: Some(command.correlation_id),
@@ -1082,6 +1119,7 @@ impl CoreEngine {
                 message_id: command.message_id,
                 to_address: original.request.from_agent_id.0,
                 body: command.body,
+                image_attachment_ids: Vec::new(),
                 input_kind: AgentMessageInputKind::RoutedAgentMessage,
                 collaboration_mode: None,
                 correlation_id: original
@@ -1152,7 +1190,7 @@ impl CoreEngine {
             .store
             .update_agent_message_delivery(&next, expected_revision)?;
         self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
-            receipt: saved.clone(),
+            receipt: Box::new(saved.clone()),
         })?;
         if saved.status == AgentMessageDeliveryStatus::Accepted {
             if let Some(replied_to) = saved.request.reply_to_message_id.as_deref() {
@@ -1340,7 +1378,7 @@ impl CoreEngine {
             .store
             .update_agent_message_delivery(&pending, expected_revision)?;
         self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
-            receipt: receipt.clone(),
+            receipt: Box::new(receipt.clone()),
         })?;
         Ok(receipt)
     }
@@ -1358,7 +1396,7 @@ impl CoreEngine {
             .store
             .update_agent_message_delivery(&pending, expected_revision)?;
         self.bus.publish(CoreEvent::AgentMessageDeliveryObserved {
-            receipt: receipt.clone(),
+            receipt: Box::new(receipt.clone()),
         })?;
         Ok(receipt)
     }

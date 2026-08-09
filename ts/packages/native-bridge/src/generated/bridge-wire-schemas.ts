@@ -3419,6 +3419,12 @@ export const bridgeWireSchemaArtifact = {
                   "idempotencyKey": {
                     "type": "string"
                   },
+                  "imageAttachmentIds": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
                   "inputKind": {
                     "enum": [
                       "operator",
@@ -3783,6 +3789,12 @@ export const bridgeWireSchemaArtifact = {
                   },
                   "idempotencyKey": {
                     "type": "string"
+                  },
+                  "imageAttachmentIds": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
                   },
                   "inputKind": {
                     "enum": [
@@ -4177,6 +4189,12 @@ export const bridgeWireSchemaArtifact = {
                   },
                   "idempotencyKey": {
                     "type": "string"
+                  },
+                  "imageAttachmentIds": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
                   },
                   "inputKind": {
                     "enum": [
@@ -7603,6 +7621,12 @@ export const bridgeWireSchemaArtifact = {
             },
             "idempotencyKey": {
               "type": "string"
+            },
+            "imageAttachmentIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "inputKind": {
               "enum": [
@@ -20415,6 +20439,12 @@ export const bridgeWireSchemaArtifact = {
             "idempotencyKey": {
               "type": "string"
             },
+            "imageAttachmentIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "inputKind": {
               "enum": [
                 "operator",
@@ -20770,6 +20800,12 @@ export const bridgeWireSchemaArtifact = {
                 },
                 "idempotencyKey": {
                   "type": "string"
+                },
+                "imageAttachmentIds": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 },
                 "inputKind": {
                   "enum": [

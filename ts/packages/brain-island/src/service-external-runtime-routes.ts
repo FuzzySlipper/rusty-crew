@@ -540,6 +540,11 @@ export async function handleExternalRuntimeRequest(
       optionalString(body.idempotencyKey) ?? `operator-message:${deliveryId}`;
     const messageId = optionalString(body.messageId) ?? `message:${deliveryId}`;
     const messageBody = requiredString(body.body);
+    const imageAttachmentIds = optionalBoundedStringArray(
+      body.attachmentIds,
+      4,
+      "attachmentIds",
+    );
     if (isRecognizedExternalRuntimeCommandInput(messageBody)) {
       return failure(409, requestId, {
         code: "failed_precondition",
@@ -557,6 +562,10 @@ export async function handleExternalRuntimeRequest(
       existing.request.messageId === messageId &&
       existing.request.toAgentId === binding.agentId &&
       existing.request.body === messageBody &&
+      arraysEqual(
+        existing.request.imageAttachmentIds ?? [],
+        imageAttachmentIds,
+      ) &&
       existing.request.collaborationMode === collaborationMode
     ) {
       return successRoute(requestId, existing);
@@ -574,6 +583,7 @@ export async function handleExternalRuntimeRequest(
       toAddress: binding.agentId,
       inputKind: "operator",
       body: messageBody,
+      ...(imageAttachmentIds.length === 0 ? {} : { imageAttachmentIds }),
       ...(collaborationMode === undefined ? {} : { collaborationMode }),
       ...(optionalString(body.correlationId) === undefined
         ? {}
@@ -860,6 +870,32 @@ function optionalCollaborationMode(
   if (value === undefined || value === null) return undefined;
   if (value === "plan") return value;
   throw new Error("collaborationMode must be plan when provided");
+}
+
+function optionalBoundedStringArray(
+  value: unknown,
+  maxItems: number,
+  field: string,
+): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > maxItems) {
+    throw new Error(`${field} must be an array with at most ${maxItems} items`);
+  }
+  const values = value.map((item) => requiredString(item));
+  if (new Set(values).size !== values.length) {
+    throw new Error(`${field} must not contain duplicates`);
+  }
+  return values;
+}
+
+function arraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function externalRuntimeStream(

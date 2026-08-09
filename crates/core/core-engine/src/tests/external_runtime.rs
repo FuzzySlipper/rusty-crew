@@ -519,7 +519,6 @@ fn external_thread_commands_are_validated_and_replay_by_semantic_idempotency() {
         .unwrap();
     engine.register_external_runtime(&runtime(), None).unwrap();
     engine.bind_external_agent(&binding(), None).unwrap();
-
     let request = ExternalControlRequest {
         control_id: ExternalControlId::new("command-status-a"),
         idempotency_key: "command-status-key".into(),
@@ -805,6 +804,7 @@ fn durable_agent_round_resolves_reply_without_second_wake() {
             to_address: sender.agent_id.0,
             input_kind: AgentMessageInputKind::RoutedAgentMessage,
             body: "inspection complete".into(),
+            image_attachment_ids: Vec::new(),
             collaboration_mode: None,
             correlation_id: Some("round-correlation-1".into()),
             require_wake: true,
@@ -880,6 +880,7 @@ fn system_operator_round_resolves_without_fake_sender_session() {
             to_address: "rusty-crew-debug-operator".to_string(),
             input_kind: AgentMessageInputKind::RoutedAgentMessage,
             body: "report complete".into(),
+            image_attachment_ids: Vec::new(),
             collaboration_mode: None,
             correlation_id: Some("operator-correlation-1".into()),
             require_wake: true,
@@ -926,6 +927,14 @@ fn active_external_recipient_queues_without_brain_wake() {
         .unwrap();
     engine.register_external_runtime(&runtime(), None).unwrap();
     engine.bind_external_agent(&binding(), None).unwrap();
+    let mut image = test_attachment_write("codex-session", "operator-image", None);
+    image.filename = "operator-image.png".into();
+    image.mime_type = "image/png".into();
+    image.byte_size = 128;
+    image.storage_url = Some("artifact://tool-media/codex-session/operator-image.png".into());
+    engine
+        .create_chat_attachment(&CreateChatAttachmentRequest { attachment: image })
+        .unwrap();
     engine
         .activate_agent_execution(activation("codex-agent", "already-active"))
         .unwrap();
@@ -950,6 +959,7 @@ fn active_external_recipient_queues_without_brain_wake() {
         to_address: codex.agent_id.0.clone(),
         input_kind: AgentMessageInputKind::RoutedAgentMessage,
         body: "queue for later".into(),
+        image_attachment_ids: vec!["operator-image".into()],
         collaboration_mode: None,
         correlation_id: None,
         require_wake: true,
@@ -988,6 +998,18 @@ fn active_external_recipient_queues_without_brain_wake() {
         })
         .unwrap();
     assert_eq!(queued_after_replay.len(), 1);
+
+    let mut invalid_image_command = command.clone();
+    invalid_image_command.delivery_id = AgentMessageDeliveryId::new("delivery-invalid-image");
+    invalid_image_command.idempotency_key = "delivery-invalid-image-key".into();
+    invalid_image_command.message_id = "message-invalid-image".into();
+    invalid_image_command.image_attachment_ids = vec!["wrong-session-image".into()];
+    let invalid_image = engine.deliver_agent_message(invalid_image_command).unwrap();
+    assert_eq!(invalid_image.status, AgentMessageDeliveryStatus::Rejected);
+    assert_eq!(
+        invalid_image.reason_code.as_deref(),
+        Some("external_message_image_not_found")
+    );
 
     let mut plan_command = command.clone();
     plan_command.delivery_id = AgentMessageDeliveryId::new("delivery-busy-plan");
@@ -1040,9 +1062,14 @@ fn active_external_recipient_queues_without_brain_wake() {
     assert_eq!(promoted.phase, ExternalTurnPhase::Accepted);
     assert_eq!(
         promoted.request.input,
-        vec![ExternalTurnInputPart::Text {
-            text: queued[0].message.body.clone()
-        }]
+        vec![
+            ExternalTurnInputPart::Text {
+                text: queued[0].message.body.clone()
+            },
+            ExternalTurnInputPart::Image {
+                url: "artifact://tool-media/codex-session/operator-image.png".into()
+            }
+        ]
     );
     let delivered = CoordinationStore::open(engine.config.engine_data_dir.clone())
         .unwrap()
@@ -1094,6 +1121,7 @@ fn external_collaboration_mode_is_persisted_on_the_requested_turn() {
             to_address: "codex-agent".to_string(),
             input_kind: AgentMessageInputKind::RoutedAgentMessage,
             body: "ask an operator question".into(),
+            image_attachment_ids: Vec::new(),
             collaboration_mode: Some(ExternalCollaborationMode::Plan),
             correlation_id: None,
             require_wake: true,
@@ -1211,6 +1239,7 @@ fn expired_external_follow_up_is_not_promoted_after_terminal_turn() {
             to_address: codex.agent_id.0.clone(),
             input_kind: AgentMessageInputKind::RoutedAgentMessage,
             body: "do not resurrect".into(),
+            image_attachment_ids: Vec::new(),
             collaboration_mode: None,
             correlation_id: None,
             require_wake: true,
@@ -1347,6 +1376,7 @@ fn codex_caller_requires_current_controller_and_active_native_turn() {
         to_address: direct.agent_id.0,
         input_kind: AgentMessageInputKind::RoutedAgentMessage,
         body: "message from Codex".into(),
+        image_attachment_ids: Vec::new(),
         collaboration_mode: None,
         correlation_id: None,
         require_wake: true,

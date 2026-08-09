@@ -285,14 +285,26 @@ impl CoreEngine {
             .as_ref()
             .and_then(|delivery| delivery.request.routing.as_deref())
             .map(|routing| &routing.resolved_target);
+        let mut follow_up_input = vec![ExternalTurnInputPart::Text {
+            text: queued.message.body.clone(),
+        }];
+        if let Some(delivery) = source_delivery.as_ref() {
+            follow_up_input.extend(self.external_image_inputs(
+                &queued.owner_session_id.clone().ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        "queued external image message has no owner session",
+                    )
+                })?,
+                &delivery.request.image_attachment_ids,
+            )?);
+        }
         let activation = self.activate_agent_execution_inner(
             AgentActivationRequest {
                 agent_id: queued.message.to.clone(),
                 request_id: request_id.clone(),
                 idempotency_key: format!("external-follow-up:{}", queued.message_id),
-                input: vec![ExternalTurnInputPart::Text {
-                    text: queued.message.body.clone(),
-                }],
+                input: follow_up_input,
                 collaboration_mode: None,
                 provenance: TurnInputProvenance {
                     kind: provenance_kind,

@@ -102,6 +102,16 @@ export interface ExternalThreadItemProjection {
   readonly text?: string;
   readonly summary?: readonly string[];
   readonly messagePhase?: ExternalAgentMessagePhase;
+  readonly inputImages?: readonly ExternalInputImageReference[];
+}
+
+export interface ExternalInputImageReference {
+  readonly attachmentId: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly byteSize: number;
+  readonly sha256: string | null;
+  readonly contentUrl: string;
 }
 
 export type ExternalAgentMessagePhase =
@@ -1540,6 +1550,12 @@ function routeSchemas(): Record<string, JsonSchema> {
         collaborationMode: {
           $ref: "#/components/schemas/ExternalCollaborationMode",
         },
+        attachmentIds: {
+          type: "array",
+          maxItems: 4,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1 },
+        },
         ttlMs: { type: "integer", minimum: 1, maximum: 60000, default: 5000 },
       },
       additionalProperties: false,
@@ -1810,6 +1826,30 @@ function routeSchemas(): Record<string, JsonSchema> {
           type: "string",
           enum: ["commentary", "final_answer", "unknown"],
         },
+        inputImages: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalInputImageReference" },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalInputImageReference: {
+      type: "object",
+      required: [
+        "attachmentId",
+        "filename",
+        "mimeType",
+        "byteSize",
+        "sha256",
+        "contentUrl",
+      ],
+      properties: {
+        attachmentId: { type: "string" },
+        filename: { type: "string" },
+        mimeType: { type: "string" },
+        byteSize: { type: "integer", minimum: 1 },
+        sha256: { type: ["string", "null"] },
+        contentUrl: { type: "string" },
       },
       additionalProperties: false,
     },

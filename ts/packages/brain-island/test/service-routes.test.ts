@@ -1031,7 +1031,10 @@ test("external command routes are typed and recognized commands cannot leak to m
   );
   assert.equal(delivered, false);
 
-  body = { body: "plain operator prompt" };
+  body = {
+    body: "plain operator prompt",
+    attachmentIds: ["attachment:operator-image"],
+  };
   const submitted = await handleExternalRuntimeRequest(
     { method: "POST" } as IncomingMessage,
     new URL("http://local/v1/external-bindings/binding-1/messages"),
@@ -1040,6 +1043,9 @@ test("external command routes are typed and recognized commands cannot leak to m
   assert.equal((submitted as AdminRouteResult).status, 200);
   assert.equal(deliveredCommand?.inputKind, "operator");
   assert.equal(deliveredCommand?.body, "plain operator prompt");
+  assert.deepEqual(deliveredCommand?.imageAttachmentIds, [
+    "attachment:operator-image",
+  ]);
 });
 
 test("external control routes preserve Rust-owned precondition reason codes", async () => {

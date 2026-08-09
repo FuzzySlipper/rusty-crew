@@ -1943,6 +1943,10 @@
           "deliveryId": { "type": "string" },
           "expiresAt": { "type": "string" },
           "idempotencyKey": { "type": "string" },
+          "imageAttachmentIds": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
           "inputKind": { "$ref": "#/components/schemas/AgentMessageInputKind" },
           "messageId": { "type": "string" },
           "requireWake": { "type": "boolean" },
@@ -2022,6 +2026,10 @@
           "fromAgentId": { "type": "string" },
           "fromSessionId": { "type": ["string", "null"] },
           "idempotencyKey": { "type": "string" },
+          "imageAttachmentIds": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
           "inputKind": { "$ref": "#/components/schemas/AgentMessageInputKind" },
           "messageId": { "type": "string" },
           "replyToMessageId": { "type": ["string", "null"] },
@@ -7695,6 +7703,12 @@
           "collaborationMode": {
             "$ref": "#/components/schemas/ExternalCollaborationMode"
           },
+          "attachmentIds": {
+            "type": "array",
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
           "ttlMs": {
             "type": "integer",
             "minimum": 1,
@@ -7947,7 +7961,33 @@
           "messagePhase": {
             "type": "string",
             "enum": ["commentary", "final_answer", "unknown"]
+          },
+          "inputImages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalInputImageReference"
+            }
           }
+        },
+        "additionalProperties": false
+      },
+      "ExternalInputImageReference": {
+        "type": "object",
+        "required": [
+          "attachmentId",
+          "filename",
+          "mimeType",
+          "byteSize",
+          "sha256",
+          "contentUrl"
+        ],
+        "properties": {
+          "attachmentId": { "type": "string" },
+          "filename": { "type": "string" },
+          "mimeType": { "type": "string" },
+          "byteSize": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": ["string", "null"] },
+          "contentUrl": { "type": "string" }
         },
         "additionalProperties": false
       },

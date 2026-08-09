@@ -3526,6 +3526,14 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
   const controller = new ServiceExternalRuntimeController({
     bridge,
     instanceId: "interaction-test-controller",
+    resolveInputImage: async (sessionId, storageUrl) => {
+      assert.equal(sessionId, "interaction-session");
+      assert.equal(
+        storageUrl,
+        "artifact://tool-media/interaction/operator-image.png",
+      );
+      return "/tmp/operator-image.png";
+    },
     driverFactory: (_registration, authority) =>
       new CodexAppServerDriver(transport, authority),
   });
@@ -3593,6 +3601,29 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
         updatedAt: now(),
       },
     });
+    await bridge.createChatAttachment({
+      attachment: {
+        attachment_id: "interaction-image",
+        session_id: "interaction-session",
+        status: "active",
+        filename: "operator-image.png",
+        mime_type: "image/png",
+        byte_size: 128,
+        storage_url: "artifact://tool-media/interaction/operator-image.png",
+        download_url: null,
+        thumbnail_url: null,
+        extracted_text: null,
+        extracted_text_truncated: false,
+        metadata_json: {
+          content_sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+        created_at: now(),
+        updated_at: now(),
+        expires_at: null,
+        link: null,
+      },
+    });
     await controller.connect("interaction-runtime");
     const connectedRuntime = await bridge.getExternalRuntime(
       "interaction-runtime",
@@ -3617,6 +3648,7 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
       toAddress: "interaction-agent",
       inputKind: "operator",
       body: "request approval",
+      imageAttachmentIds: ["interaction-image"],
       collaborationMode: "plan",
       requireWake: true,
       createdAt: now(),
@@ -3667,8 +3699,11 @@ test("controller resolves typed interactions and resets one-shot Plan mode", asy
         text: "request approval",
         text_elements: [],
       },
+      {
+        type: "localImage",
+        path: "/tmp/operator-image.png",
+      },
     ]);
-
     transport.emit({
       id: "input-1",
       method: "item/tool/requestUserInput",

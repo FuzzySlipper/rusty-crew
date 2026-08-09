@@ -2,6 +2,7 @@
 
 mod agent_coordination;
 mod agent_message_format;
+mod agent_message_images;
 mod agent_message_traffic;
 mod agent_route_activation;
 mod body;
@@ -96,11 +97,11 @@ use rusty_crew_core_bus::CoreBus;
 use rusty_crew_core_config::{validate_engine_config, ClockConfig, EngineConfig};
 use rusty_crew_core_persistence::{
     roleplay_lore_memory_space_descriptor, ApplyRoleplayAlternativeRequest,
-    ApplyRoleplayAlternativeResult, AttachmentQuery, AttachmentRecord, AttachmentWrite,
-    BranchAwareSessionMemoryQuery, BranchHeadExpectation, ChatEventLogAppend, ChatEventLogEvent,
-    ChatEventLogPage, ChatEventLogQuery, ChatReadModelEvent, ChatReadModelEventKind,
-    ChatReadModelPage, ChatReadModelQuery, ChatReadModelSource, ChatSessionReadFacts,
-    ChatSessionReadQuery, ChatSessionReadResult, ChatSessionSummaryPage,
+    ApplyRoleplayAlternativeResult, AttachmentQuery, AttachmentRecord, AttachmentStatus,
+    AttachmentWrite, BranchAwareSessionMemoryQuery, BranchHeadExpectation, ChatEventLogAppend,
+    ChatEventLogEvent, ChatEventLogPage, ChatEventLogQuery, ChatReadModelEvent,
+    ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery, ChatReadModelSource,
+    ChatSessionReadFacts, ChatSessionReadQuery, ChatSessionReadResult, ChatSessionSummaryPage,
     ChatSessionSummaryPageQuery, ChatTranscriptSearchPage, ChatTranscriptSearchQuery,
     ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
     ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,

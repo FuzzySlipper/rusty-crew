@@ -57,6 +57,7 @@ impl CoreEngine {
             to_address: message.to.0,
             input_kind: rusty_crew_core_protocol::AgentMessageInputKind::RoutedAgentMessage,
             body: message.body,
+            image_attachment_ids: Vec::new(),
             collaboration_mode: None,
             correlation_id: message.correlation_id,
             require_wake: true,

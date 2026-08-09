@@ -1033,6 +1033,8 @@ export async function createRustyCrewServiceApp(
       bridge,
       mediaCaptureSink: toolMediaAttachments,
       documentCaptureSink: toolMediaAttachments,
+      resolveInputImage: (sessionId, storageUrl) =>
+        toolMediaAttachments.resolveExternalInputImage(sessionId, storageUrl),
       now: () => new Date((options.now ?? (() => new Date().toISOString()))()),
       onCoordinationDelivery: async (receipt) => {
         const state = liveState;

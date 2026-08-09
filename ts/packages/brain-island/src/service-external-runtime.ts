@@ -47,6 +47,7 @@ import {
 import type {
   ExternalAgentSessionCreateResult,
   ExternalAgentMessagePhase,
+  ExternalInputImageReference,
   ExternalThreadDeleteReceipt,
   ExternalRuntimeCommandCatalog,
   ExternalRuntimeCommandExecutionResult,
@@ -337,6 +338,10 @@ export class ServiceExternalRuntimeController {
   >[0]["onReviewCompletion"];
   readonly #mediaCaptureSink?: ExternalRuntimeMediaCaptureSink;
   readonly #documentCaptureSink?: ExternalRuntimeDocumentCaptureSink;
+  readonly #resolveInputImage?: (
+    sessionId: string,
+    storageUrl: string,
+  ) => Promise<string>;
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -374,6 +379,10 @@ export class ServiceExternalRuntimeController {
     >[0]["onReviewCompletion"];
     mediaCaptureSink?: ExternalRuntimeMediaCaptureSink;
     documentCaptureSink?: ExternalRuntimeDocumentCaptureSink;
+    resolveInputImage?: (
+      sessionId: string,
+      storageUrl: string,
+    ) => Promise<string>;
     recoveryBaseDelayMs?: number;
     recoveryMaxDelayMs?: number;
   }) {
@@ -385,6 +394,7 @@ export class ServiceExternalRuntimeController {
     this.#onReviewCompletion = input.onReviewCompletion;
     this.#mediaCaptureSink = input.mediaCaptureSink;
     this.#documentCaptureSink = input.documentCaptureSink;
+    this.#resolveInputImage = input.resolveInputImage;
     this.#recoveryBaseDelayMs =
       input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
     this.#recoveryMaxDelayMs =
@@ -1591,6 +1601,7 @@ export class ServiceExternalRuntimeController {
     }
     const controlled = await this.#requireControlled(binding.runtimeId);
     try {
+      const imageInput = await this.#resolveDeliveryInputImages(receipt);
       await controlled.driver.turnSteer({
         threadId: activation.nativeThreadId,
         expectedTurnId: activation.nativeTurnId,
@@ -1601,6 +1612,7 @@ export class ServiceExternalRuntimeController {
             text: activation.messageText,
             text_elements: [],
           },
+          ...imageInput,
         ],
       });
       return this.#bridge.completeAgentMessageDelivery({
@@ -1622,6 +1634,39 @@ export class ServiceExternalRuntimeController {
         completedAt: this.#now().toISOString(),
       });
     }
+  }
+
+  async #resolveDeliveryInputImages(
+    receipt: AgentMessageDeliveryReceipt,
+  ): Promise<Array<{ type: "localImage"; path: string }>> {
+    const attachmentIds = receipt.request.imageAttachmentIds ?? [];
+    if (attachmentIds.length === 0) return [];
+    const sessionId = receipt.request.toSessionId;
+    if (sessionId == null || this.#resolveInputImage === undefined) {
+      throw new Error("external delivery image resolver is unavailable");
+    }
+    const resolveInputImage = this.#resolveInputImage;
+    const attachments = await this.#querySessionAttachments(sessionId);
+    const byId = new Map(
+      attachments.flatMap((attachment) => {
+        const id = nativeString(attachment.attachment_id);
+        return id === undefined ? [] : [[id, attachment] as const];
+      }),
+    );
+    return Promise.all(
+      attachmentIds.map(async (attachmentId) => {
+        const storageUrl = nativeString(byId.get(attachmentId)?.storage_url);
+        if (storageUrl === undefined) {
+          throw new Error(
+            `external delivery image ${attachmentId} is unavailable`,
+          );
+        }
+        return {
+          type: "localImage" as const,
+          path: await resolveInputImage(sessionId, storageUrl),
+        };
+      }),
+    );
   }
 
   async executeControl(
@@ -2421,17 +2466,37 @@ export class ServiceExternalRuntimeController {
     });
     try {
       const cwd = await this.#sessionWorkspaceCwd(currentBinding);
+      const nativeInput = await Promise.all(
+        turn.request.input.map(async (part) => {
+          if (part.type === "text") {
+            return {
+              type: "text" as const,
+              text: part.text,
+              text_elements: [],
+            };
+          }
+          if (part.type === "image") {
+            if (this.#resolveInputImage === undefined) {
+              throw new Error("external input image resolver is unavailable");
+            }
+            return {
+              type: "localImage" as const,
+              path: await this.#resolveInputImage(
+                turn.request.sessionId,
+                part.url,
+              ),
+            };
+          }
+          return {
+            type: "text" as const,
+            text: `[${part.type}] ${JSON.stringify(part)}`,
+            text_elements: [],
+          };
+        }),
+      );
       const started = await controlled.driver.turnStart({
         threadId: turn.nativeThreadId,
-        input: turn.request.input.map((part) =>
-          part.type === "text"
-            ? { type: "text" as const, text: part.text, text_elements: [] }
-            : {
-                type: "text" as const,
-                text: `[${part.type}] ${JSON.stringify(part)}`,
-                text_elements: [],
-              },
-        ),
+        input: nativeInput,
         cwd,
         environments: [{ environmentId: "local", cwd }],
         approvalPolicy: "never",
@@ -2598,13 +2663,114 @@ export class ServiceExternalRuntimeController {
     );
     const identified = projectBindingIdentity(projected, binding, true);
     if (identified.turns.length === 0) return identified;
-    return reconcileExternalThreadProjection(
-      identified,
-      await this.#bridge.listExternalTurnsForNativeThread(
-        controlled.registration.runtimeId,
-        threadId,
-      ),
+    const correlations = await this.#bridge.listExternalTurnsForNativeThread(
+      controlled.registration.runtimeId,
+      threadId,
     );
+    const reconciled = reconcileExternalThreadProjection(
+      identified,
+      correlations,
+    );
+    return binding?.sessionId == null
+      ? reconciled
+      : await this.#attachExternalInputImages(
+          reconciled,
+          correlations,
+          binding.sessionId,
+        );
+  }
+
+  async #attachExternalInputImages(
+    thread: ExternalThreadProjection,
+    correlations: readonly ExternalTurnCorrelation[],
+    sessionId: string,
+  ): Promise<ExternalThreadProjection> {
+    const imageUrlsByTurn = new Map(
+      correlations.flatMap((correlation) => {
+        const urls = correlation.request.input.flatMap((part) =>
+          part.type === "image" ? [part.url] : [],
+        );
+        return correlation.nativeTurnId == null || urls.length === 0
+          ? []
+          : [[correlation.nativeTurnId, urls] as const];
+      }),
+    );
+    if (imageUrlsByTurn.size === 0) return thread;
+    const attachments = await this.#querySessionAttachments(sessionId);
+    const referencesByUrl = new Map<string, ExternalInputImageReference>();
+    for (const attachment of attachments) {
+      const storageUrl = nativeString(attachment.storage_url);
+      const attachmentId = nativeString(attachment.attachment_id);
+      const filename = nativeString(attachment.filename);
+      const mimeType = nativeString(attachment.mime_type);
+      const byteSize = nativeNumber(attachment.byte_size);
+      if (
+        storageUrl === undefined ||
+        attachmentId === undefined ||
+        filename === undefined ||
+        mimeType === undefined ||
+        byteSize === undefined
+      ) {
+        continue;
+      }
+      const metadata = isRecord(attachment.metadata_json)
+        ? attachment.metadata_json
+        : {};
+      referencesByUrl.set(storageUrl, {
+        attachmentId,
+        filename,
+        mimeType,
+        byteSize,
+        sha256: nativeString(metadata.content_sha256) ?? null,
+        contentUrl: `/v1/chat/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+      });
+    }
+    return {
+      ...thread,
+      turns: thread.turns.map((turn) => {
+        const inputImages = (imageUrlsByTurn.get(turn.turnId) ?? []).flatMap(
+          (url) => {
+            const reference = referencesByUrl.get(url);
+            return reference === undefined ? [] : [reference];
+          },
+        );
+        if (inputImages.length === 0) return turn;
+        const userIndex = turn.items.findIndex(
+          (item) => item.kind === "userMessage",
+        );
+        if (userIndex < 0) return turn;
+        return {
+          ...turn,
+          items: turn.items.map((item, index) =>
+            index === userIndex ? { ...item, inputImages } : item,
+          ),
+        };
+      }),
+    };
+  }
+
+  async #querySessionAttachments(
+    sessionId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const attachments: Array<Record<string, unknown>> = [];
+    let offset = 0;
+    for (;;) {
+      const page = (await this.#bridge.queryAttachmentsPage({
+        session_id: sessionId,
+        include_removed: true,
+        include_expired: true,
+        expired_only: false,
+        now: this.#now().toISOString(),
+        page: { limit: 1_000, offset },
+      })) as {
+        items: Array<Record<string, unknown>>;
+        next_offset?: number | null;
+      };
+      attachments.push(...page.items);
+      if (page.next_offset == null) break;
+      offset = page.next_offset;
+    }
+    return attachments;
   }
 
   #projectUnmaterializedBindingThread(

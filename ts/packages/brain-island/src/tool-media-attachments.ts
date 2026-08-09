@@ -410,6 +410,37 @@ export class ToolMediaAttachmentStore
     return attachments;
   }
 
+  async resolveExternalInputImage(
+    sessionId: string,
+    storageUrl: string,
+  ): Promise<string> {
+    const attachments = await this.queryAllAttachments({
+      session_id: sessionId,
+      include_removed: true,
+      include_expired: true,
+      expired_only: false,
+      now: this.options.now(),
+    });
+    const attachment = attachments.find(
+      (candidate) => candidate.storage_url === storageUrl,
+    );
+    if (attachment === undefined) {
+      throw new ToolMediaAttachmentError(
+        "external_message_image_not_found",
+        "external input image no longer matches the bound session",
+      );
+    }
+    if (attachment.status !== "active") {
+      throw new ToolMediaAttachmentError(
+        "external_message_image_inactive",
+        `attachment ${attachment.attachment_id} is removed`,
+      );
+    }
+    const path = this.pathFromAttachment(attachment);
+    await readFile(path);
+    return path;
+  }
+
   async resolveNarratorImageContext(input: {
     sessionId: SessionId;
     capability: NarratorImageInputCapability;

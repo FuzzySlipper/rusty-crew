@@ -1014,7 +1014,7 @@ pub enum CoreEvent {
         message: AgentMessage,
     },
     AgentMessageDeliveryObserved {
-        receipt: AgentMessageDeliveryReceipt,
+        receipt: Box<AgentMessageDeliveryReceipt>,
     },
     AgentRoundObserved {
         round: AgentCorrelatedRound,

@@ -1183,6 +1183,8 @@ pub struct AgentMessageDeliveryRequest {
     pub reply_to_message_id: Option<String>,
     pub input_kind: AgentMessageInputKind,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_attachment_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<ExternalCollaborationMode>,
     pub correlation_id: Option<String>,
@@ -1303,6 +1305,8 @@ pub struct AgentMessageCommand {
     pub to_address: String,
     pub input_kind: AgentMessageInputKind,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_attachment_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<ExternalCollaborationMode>,
     pub correlation_id: Option<String>,

@@ -186,6 +186,7 @@ export type AgentMessageCommand = {
   deliveryId: string;
   expiresAt: string;
   idempotencyKey: string;
+  imageAttachmentIds?: Array<string>;
   inputKind: AgentMessageInputKind;
   messageId: string;
   requireWake: boolean;
@@ -221,6 +222,7 @@ export type AgentMessageDeliveryRequest = {
   fromAgentId: string;
   fromSessionId?: string | null;
   idempotencyKey: string;
+  imageAttachmentIds?: Array<string>;
   inputKind: AgentMessageInputKind;
   messageId: string;
   replyToMessageId?: string | null;
