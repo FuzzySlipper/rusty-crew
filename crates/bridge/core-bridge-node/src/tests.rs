@@ -1767,6 +1767,47 @@ fn binding_runtime_census_tracks_native_wake_provider_and_tool_topology() {
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
+#[test]
+fn binding_thread_event_replay_rejects_blank_native_thread_ids() {
+    let binding = NativeBridgeBinding::new();
+    let data_dir = std::env::temp_dir().join(format!(
+        "rusty-crew-native-thread-replay-{}-{}",
+        std::process::id(),
+        time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+    ));
+    binding
+        .initialize_engine(JsEngineConfig {
+            engine_data_dir: data_dir.to_string_lossy().into_owned(),
+            fixed_clock: None,
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1_000,
+            storage_backend: None,
+            postgres_database_url: None,
+            postgres_schema: None,
+            postgres_max_connections: None,
+            postgres_statement_timeout_ms: None,
+            backing_filesystem_path: None,
+            filesystem_warning_free_percent: None,
+        })
+        .unwrap();
+
+    for native_thread_id in ["", " \t\n"] {
+        let error = binding
+            .query_external_runtime_events_json(
+                serde_json::json!({
+                    "runtimeId": "runtime-a",
+                    "nativeThreadId": native_thread_id,
+                    "afterSequence": 0,
+                    "limit": 100,
+                    "tail": false
+                })
+                .to_string(),
+            )
+            .unwrap_err();
+        assert!(error.reason.contains("native thread id must not be empty"));
+    }
+}
+
 fn brain_registration(
     implementation_id: &str,
     profile_id: &str,

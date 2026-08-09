@@ -1,10 +1,27 @@
 use super::*;
 use rusty_crew_core_protocol::{
-    RuntimeActivityBegin, RuntimeActivityCensusQuery, RuntimeActivityFindingCode,
-    RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind, RuntimeActivityLiveEvidence,
-    RuntimeActivityOwner, RuntimeActivityProgress, RuntimeActivityStatus,
-    RuntimeActivityWakeSettlement,
+    ExternalRuntimeId, RuntimeActivityBegin, RuntimeActivityCensusQuery,
+    RuntimeActivityFindingCode, RuntimeActivityFinish, RuntimeActivityId, RuntimeActivityKind,
+    RuntimeActivityLiveEvidence, RuntimeActivityOwner, RuntimeActivityProgress,
+    RuntimeActivityStatus, RuntimeActivityWakeSettlement,
 };
+
+#[test]
+fn thread_scoped_external_event_replay_rejects_blank_thread_ids() {
+    let engine = test_engine();
+    for native_thread_id in ["", " \t\n"] {
+        let error = engine
+            .query_external_runtime_thread_events(
+                &ExternalRuntimeId::new("runtime-a"),
+                native_thread_id,
+                0,
+                100,
+            )
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+        assert!(error.message.contains("native thread id must not be empty"));
+    }
+}
 
 #[test]
 fn wake_settlement_terminalizes_rust_owned_activity_tree_idempotently() {

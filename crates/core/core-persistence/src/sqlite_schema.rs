@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 70;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 71;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -368,6 +368,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 70,
         description: "remove null-valued legacy session workdir keys",
         apply: repos::sessions::migrate_v70_remove_legacy_workdir_keys,
+    },
+    SchemaMigration {
+        version: 71,
+        description: "index external runtime events by native thread cursor",
+        apply: repos::external_runtime::migrate_v71_add_external_runtime_thread_cursor,
     },
 ];
 

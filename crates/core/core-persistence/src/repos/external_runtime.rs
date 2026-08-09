@@ -233,6 +233,17 @@ pub(crate) fn migrate_v58_add_external_runtime_event_retention(
     .map_err(|error| persistence_error("apply schema migration 58", error))
 }
 
+pub(crate) fn migrate_v71_add_external_runtime_thread_cursor(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS external_runtime_events_thread_cursor_idx
+            ON external_runtime_events(runtime_id, native_thread_id, sequence_id)
+            WHERE native_thread_id IS NOT NULL;",
+    )
+    .map_err(|error| persistence_error("apply schema migration 71", error))
+}
+
 pub(crate) fn compact_terminal_external_runtime_events_in_tx(
     tx: &rusqlite::Transaction<'_>,
     cutoff: &IsoTimestamp,
@@ -2908,6 +2919,31 @@ mod tests {
             )
             .unwrap()
             .is_empty());
+        let plan = {
+            let conn = store.conn().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "EXPLAIN QUERY PLAN
+                     SELECT record_json FROM external_runtime_events
+                     WHERE runtime_id = ?1
+                       AND native_thread_id = ?2
+                       AND sequence_id > ?3
+                     ORDER BY sequence_id LIMIT ?4",
+                )
+                .unwrap();
+            stmt.query_map(
+                params!["codex-local", "native-thread-a", 0_i64, 100_i64],
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .join(" | ")
+        };
+        assert!(
+            plan.contains("external_runtime_events_thread_cursor_idx"),
+            "thread replay must use its composite cursor index: {plan}"
+        );
         remove_temp_db(&path);
     }
 

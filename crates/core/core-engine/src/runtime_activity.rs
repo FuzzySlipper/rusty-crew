@@ -15,6 +15,12 @@ impl CoreEngine {
         after_sequence: u64,
         limit: u32,
     ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        if native_thread_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "native thread id must not be empty",
+            ));
+        }
         self.store.query_external_runtime_thread_events(
             runtime_id,
             native_thread_id,

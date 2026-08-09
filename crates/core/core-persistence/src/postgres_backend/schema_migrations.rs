@@ -7,7 +7,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 52;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 53;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -280,7 +280,24 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "migrate legacy session workspace event payloads",
         apply: Some(apply_postgres_session_workspace_events),
     },
+    PostgresSchemaMigration {
+        version: 53,
+        description: "index external runtime events by native thread cursor",
+        apply: Some(apply_postgres_external_runtime_thread_cursor),
+    },
 ];
+
+fn apply_postgres_external_runtime_thread_cursor(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE INDEX IF NOT EXISTS external_runtime_events_thread_cursor_idx
+            ON {schema}.external_runtime_events(runtime_id, native_thread_id, sequence_id)
+            WHERE native_thread_id IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL external runtime thread cursor index", error))
+}
 
 fn apply_postgres_session_workspace_events(
     tx: &mut Transaction<'_>,
@@ -2346,6 +2363,45 @@ mod tests {
         let error = validate_postgres_migration_catalog(&migrations).unwrap_err();
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
         assert!(error.message.contains("expected version 2"));
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_fresh_schema_has_external_runtime_thread_cursor_index() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_thread_cursor_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut client = postgres::Client::connect(&database_url, NoTls).unwrap();
+        prepare_postgres_migration_metadata(&mut client, &schema).unwrap();
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+
+        let row = client
+            .query_one(
+                "SELECT indexdef FROM pg_indexes
+                  WHERE schemaname = $1
+                    AND indexname = 'external_runtime_events_thread_cursor_idx'",
+                &[&schema],
+            )
+            .unwrap();
+        let indexdef = row.get::<_, String>(0);
+        assert!(indexdef.contains("runtime_id, native_thread_id, sequence_id"));
+        assert!(indexdef.contains("native_thread_id IS NOT NULL"));
+        assert_eq!(
+            current_postgres_schema_version(&mut client, &schema).unwrap(),
+            POSTGRES_SCHEMA_VERSION
+        );
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
     }
 
     #[test]
