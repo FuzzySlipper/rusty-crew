@@ -489,18 +489,25 @@ async function completeReview(
     };
   }
   if (eligible.phase === "reply_terminal") {
+    const receipt = completedReceipt(eligible);
     return {
+      ...receipt,
       ok: false,
-      submissionId: eligible.submissionId,
-      taskId: Number(eligible.taskId),
-      commitSha: eligible.commitSha,
       reasonCode: eligible.replyReasonCode ?? "review_reply_terminal",
       summary:
         "Den finalization is durable, but this routed requester has a terminal reply outcome; no replacement requester was selected.",
     };
   }
-  if (eligible.phase === "replied") {
+  if (eligible.phase === "replied" || eligible.phase === "review_terminal") {
     if (eligible.reviewResultDigest === result.digest) {
+      return completedReceipt(eligible);
+    }
+    if (
+      eligible.phase === "review_terminal" &&
+      eligible.reviewResultDigest == null &&
+      (eligible.reviewVerdict === "looks_good" ||
+        eligible.reviewVerdict === "changes_requested")
+    ) {
       return completedReceipt(eligible);
     }
     return {
@@ -543,6 +550,7 @@ const ROUTED_REVIEW_PHASES = new Set<ReviewSubmissionRecord["phase"]>([
 const TERMINAL_ROUTED_REVIEW_PHASES = new Set<ReviewSubmissionRecord["phase"]>([
   "replied",
   "reply_terminal",
+  "review_terminal",
 ]);
 
 export function selectRoutedReviewRecord(
@@ -557,9 +565,7 @@ export function selectRoutedReviewRecord(
   readonly ambiguous: boolean;
   readonly notFound?: boolean;
 } {
-  const eligible = records.filter((record) =>
-    ROUTED_REVIEW_PHASES.has(record.phase),
-  );
+  const eligible = records.filter(isRoutedReviewRecord);
   if (explicitTarget !== undefined) {
     const candidates = eligible.filter(
       (record) =>
@@ -567,11 +573,7 @@ export function selectRoutedReviewRecord(
         record.commitSha.toLowerCase() ===
           explicitTarget.commitSha.toLowerCase(),
     );
-    return {
-      ...(candidates.length === 1 ? { record: candidates[0] } : {}),
-      ambiguous: candidates.length > 1,
-      ...(candidates.length === 0 ? { notFound: true } : {}),
-    };
+    return routedReviewSelection(candidates, candidates.length === 0);
   }
   const correlated =
     correlationId === undefined
@@ -585,10 +587,88 @@ export function selectRoutedReviewRecord(
   );
   const candidates =
     correlationId === undefined && active.length > 0 ? active : correlated;
+  return routedReviewSelection(candidates);
+}
+
+function isRoutedReviewRecord(record: ReviewSubmissionRecord): boolean {
+  return (
+    ROUTED_REVIEW_PHASES.has(record.phase) ||
+    (record.phase === "review_terminal" &&
+      (record.reviewVerdict === "looks_good" ||
+        record.reviewVerdict === "changes_requested"))
+  );
+}
+
+function routedReviewSelection(
+  candidates: readonly ReviewSubmissionRecord[],
+  notFound = false,
+): {
+  readonly record?: ReviewSubmissionRecord;
+  readonly ambiguous: boolean;
+  readonly notFound?: boolean;
+} {
+  const unique = [
+    ...new Map(
+      candidates.map((record) => [record.submissionId, record] as const),
+    ).values(),
+  ];
+  if (unique.length === 0) {
+    return { ambiguous: false, ...(notFound ? { notFound: true } : {}) };
+  }
+  if (unique.length === 1) {
+    return { record: unique[0], ambiguous: false };
+  }
+  const first = unique[0] as ReviewSubmissionRecord;
+  const duplicateRound =
+    first.reviewRoundId != null &&
+    unique.every(
+      (record) =>
+        record.taskId === first.taskId &&
+        record.commitSha.toLowerCase() === first.commitSha.toLowerCase() &&
+        record.reviewRoundId === first.reviewRoundId,
+    );
+  if (!duplicateRound) return { ambiguous: true };
   return {
-    ...(candidates.length === 1 ? { record: candidates[0] } : {}),
-    ambiguous: candidates.length > 1,
+    record: [...unique].sort(compareRoutedReviewProgress)[0],
+    ambiguous: false,
   };
+}
+
+function compareRoutedReviewProgress(
+  left: ReviewSubmissionRecord,
+  right: ReviewSubmissionRecord,
+): number {
+  const phaseDifference =
+    routedReviewPhaseRank(right.phase) - routedReviewPhaseRank(left.phase);
+  if (phaseDifference !== 0) return phaseDifference;
+  const receiptDifference =
+    Number(right.reviewFinalizationId != null) -
+    Number(left.reviewFinalizationId != null);
+  if (receiptDifference !== 0) return receiptDifference;
+  const updatedDifference = right.updatedAt.localeCompare(left.updatedAt);
+  if (updatedDifference !== 0) return updatedDifference;
+  return left.submissionId.localeCompare(right.submissionId);
+}
+
+function routedReviewPhaseRank(phase: ReviewSubmissionRecord["phase"]): number {
+  switch (phase) {
+    case "review_terminal":
+      return 7;
+    case "replied":
+      return 6;
+    case "reply_terminal":
+      return 5;
+    case "reply_pending":
+      return 4;
+    case "den_finalized":
+      return 3;
+    case "den_finalization_pending":
+      return 2;
+    case "reviewer_dispatched":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 interface CanonicalReviewResult {

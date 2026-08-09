@@ -855,6 +855,68 @@ test("explicit task and SHA select a queued review over stale wake correlation",
   assert.equal(selected.record?.submissionId, "review-second");
 });
 
+test("duplicate submissions for one Den round select one deterministic workflow", () => {
+  const sha = "a".repeat(40);
+  const first = {
+    ...record("review-first", "6655", sha, "reviewer_dispatched"),
+    reviewRoundId: 4279,
+    updatedAt: "2026-08-09T17:05:57.988Z",
+  } as ReviewSubmissionRecord;
+  const duplicate = {
+    ...record("review-duplicate", "6655", sha, "reviewer_dispatched"),
+    reviewRoundId: 4279,
+    updatedAt: "2026-08-09T17:05:58.060Z",
+  } as ReviewSubmissionRecord;
+
+  const selected = selectRoutedReviewRecord(
+    [first, duplicate],
+    `review:6655:${sha}`,
+    { taskId: 6655, commitSha: sha },
+  );
+  assert.equal(selected.ambiguous, false);
+  assert.equal(selected.record?.submissionId, "review-duplicate");
+});
+
+test("persisted duplicate review progress wins over a queued duplicate", () => {
+  const sha = "b".repeat(40);
+  const queued = {
+    ...record("review-queued", "6656", sha, "reviewer_dispatched"),
+    reviewRoundId: 4278,
+    updatedAt: "2026-08-09T17:06:00.000Z",
+  } as ReviewSubmissionRecord;
+  const persisted = {
+    ...record("review-persisted", "6656", sha, "den_finalization_pending"),
+    reviewRoundId: 4278,
+    updatedAt: "2026-08-09T17:05:00.000Z",
+  } as ReviewSubmissionRecord;
+
+  const selected = selectRoutedReviewRecord([queued, persisted], undefined, {
+    taskId: 6656,
+    commitSha: sha,
+  });
+  assert.equal(selected.ambiguous, false);
+  assert.equal(selected.record?.submissionId, "review-persisted");
+});
+
+test("same task and SHA remain ambiguous when Den round identity differs", () => {
+  const sha = "c".repeat(40);
+  const first = {
+    ...record("review-first", "6657", sha, "reviewer_dispatched"),
+    reviewRoundId: 4275,
+  } as ReviewSubmissionRecord;
+  const second = {
+    ...record("review-second", "6657", sha, "reviewer_dispatched"),
+    reviewRoundId: 4280,
+  } as ReviewSubmissionRecord;
+
+  const selected = selectRoutedReviewRecord([first, second], undefined, {
+    taskId: 6657,
+    commitSha: sha,
+  });
+  assert.equal(selected.record, undefined);
+  assert.equal(selected.ambiguous, true);
+});
+
 test("explicit review target cannot cross-select a different task or SHA", () => {
   const sha = "a".repeat(40);
   const review = record("review-one", "6600", sha, "reviewer_dispatched");
@@ -902,6 +964,135 @@ test("managed closeout uses the explicit target within a reused reviewer session
   assert.equal(result.taskId, 6601);
   assert.equal(result.commitSha, secondSha);
   assert.equal(result.reasonCode, "review_reply_terminal");
+});
+
+test("completed duplicate review replays the durable Den receipt", async () => {
+  const sha = "d".repeat(40);
+  const queued = {
+    ...record("review-queued", "6658", sha, "reviewer_dispatched"),
+    reviewRoundId: 4274,
+    updatedAt: "2026-08-09T17:06:00.000Z",
+  } as ReviewSubmissionRecord;
+  const completed = {
+    ...record("review-completed", "6658", sha, "review_terminal"),
+    reviewRoundId: 4274,
+    reviewFinalizationId: 910,
+    reviewPacketId: 911,
+    reviewPacketMessageId: 912,
+    reviewExactHeadCommit: sha,
+    reviewVerdict: "looks_good",
+    reviewTaskStatus: "done",
+    updatedAt: "2026-08-09T17:05:00.000Z",
+  } as ReviewSubmissionRecord;
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [queued, completed],
+    } as never,
+    runtimeConfig: { sessions: [] } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-09T17:07:00.000Z",
+    applyCoordinationDelivery: async (receipt) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "looks_good",
+    taskId: 6658,
+    commitSha: sha,
+    caller: { type: "review_submission", submissionId: "context-resolved" },
+    reviewerSessionId: "reviewer-session",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.submissionId, "review-completed");
+  assert.equal(result.reviewRoundId, 4274);
+  assert.equal(result.finalizationId, 910);
+  assert.equal(result.packetId, 911);
+  assert.equal(result.packetMessageId, 912);
+  assert.equal(result.verdict, "looks_good");
+  assert.equal(result.taskStatus, "done");
+});
+
+test("persisted duplicate result reconciles a finalized Den round without finalizing twice", async () => {
+  const sha = "e".repeat(40);
+  const persisted = {
+    ...scopedSubmissionRecord("rusty-view", {
+      type: "external_cli",
+      clientId: "external-review",
+      idempotencyKey: "first",
+    }),
+    submissionId: "review-persisted",
+    taskId: "6656",
+    commitSha: sha,
+    phase: "den_finalization_pending",
+    reviewRoundId: 4278,
+    reviewerSessionId: "reviewer-session",
+    reviewResultJson: JSON.stringify({ verdict: "looks_good" }),
+    updatedAt: "2026-08-09T17:05:00.000Z",
+  } as ReviewSubmissionRecord;
+  const duplicate = {
+    ...persisted,
+    submissionId: "review-queued-duplicate",
+    caller: {
+      type: "external_cli",
+      clientId: "external-review",
+      idempotencyKey: "second",
+    },
+    phase: "reviewer_dispatched",
+    reviewResultJson: undefined,
+    updatedAt: "2026-08-09T17:06:00.000Z",
+  } as ReviewSubmissionRecord;
+  const denCalls: string[] = [];
+  const transitions: string[] = [];
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [duplicate, persisted],
+      transitionReviewSubmission: async (request: {
+        submissionId: string;
+        transition: { type: string };
+      }) => {
+        assert.equal(request.submissionId, persisted.submissionId);
+        transitions.push(request.transition.type);
+        assert.equal(request.transition.type, "den_already_finalized");
+        return {
+          ...persisted,
+          phase: "review_terminal",
+          reviewExactHeadCommit: sha,
+          reviewVerdict: "looks_good",
+          revision: persisted.revision + 1,
+        } as ReviewSubmissionRecord;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-09T17:07:00.000Z",
+    callDenTool: async (_binding: unknown, toolName: string) => {
+      denCalls.push(toolName);
+      assert.equal(toolName, "list_review_rounds");
+      return {
+        items: [
+          {
+            id: 4278,
+            head_commit: sha,
+            verdict: "looks_good",
+          },
+        ],
+      };
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "looks_good",
+    taskId: 6656,
+    commitSha: sha,
+    caller: { type: "review_submission", submissionId: "context-resolved" },
+    reviewerSessionId: "reviewer-session",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.submissionId, persisted.submissionId);
+  assert.equal(result.reviewRoundId, 4278);
+  assert.equal(result.verdict, "looks_good");
+  assert.deepEqual(denCalls, ["list_review_rounds"]);
+  assert.deepEqual(transitions, ["den_already_finalized"]);
 });
 
 test("managed closeout explains when a direct Den review has no Crew attachment", async () => {
