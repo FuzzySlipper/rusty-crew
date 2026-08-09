@@ -1600,9 +1600,44 @@ export class ServiceExternalRuntimeController {
       });
     }
     const controlled = await this.#requireControlled(binding.runtimeId);
+    const clientUserMessageId = `rusty-crew:${receipt.request.messageId}`;
+    const intentEventId = `${receipt.request.deliveryId}:external-turn-steer-intent`;
+    const associationEventId = `${receipt.request.deliveryId}:external-turn-steer-input`;
+    let events: NormalizedExternalRuntimeEvent[];
+    try {
+      events = await this.#queryThreadEvents(
+        controlled.registration.runtimeId,
+        activation.nativeThreadId,
+      );
+    } catch {
+      return receipt;
+    }
+    if (events.some((event) => event.eventId === associationEventId)) {
+      return this.#completeAcceptedSteerDelivery(receipt);
+    }
+    if (events.some((event) => event.eventId === intentEventId)) {
+      return this.#reconcileSteerIntent(
+        controlled,
+        receipt,
+        clientUserMessageId,
+      );
+    }
+    try {
+      await this.#bridge.recordExternalRuntimeEvent({
+        controller: this.#controllerContext(controlled),
+        event: this.#steerAssociationEvent(
+          controlled,
+          receipt,
+          clientUserMessageId,
+          "external_turn_steer_intent",
+        ),
+      });
+    } catch {
+      return receipt;
+    }
+    let nativeAccepted = false;
     try {
       const imageInput = await this.#resolveDeliveryInputImages(receipt);
-      const clientUserMessageId = `rusty-crew:${receipt.request.messageId}`;
       await controlled.driver.turnSteer({
         threadId: activation.nativeThreadId,
         expectedTurnId: activation.nativeTurnId,
@@ -1616,47 +1651,109 @@ export class ServiceExternalRuntimeController {
           ...imageInput,
         ],
       });
+      nativeAccepted = true;
       await this.#bridge.recordExternalRuntimeEvent({
         controller: this.#controllerContext(controlled),
-        event: {
-          eventId: `${receipt.request.deliveryId}:external-turn-steer-input`,
-          ...(receipt.request.toSessionId == null
-            ? {}
-            : { sessionId: receipt.request.toSessionId }),
-          createdAt: this.#now().toISOString(),
-          kind: "external_turn_steer_input",
-          runtimeId: controlled.registration.runtimeId,
-          nativeThreadId: activation.nativeThreadId,
-          nativeTurnId: activation.nativeTurnId,
-          itemId: clientUserMessageId,
-          requestId: activation.requestId,
-          payload: {
-            source: "agent_message_delivery",
-            messageId: receipt.request.messageId,
-            imageAttachmentIds: receipt.request.imageAttachmentIds ?? [],
-          },
-          rawDetailRef: null,
-        },
+        event: this.#steerAssociationEvent(
+          controlled,
+          receipt,
+          clientUserMessageId,
+          "external_turn_steer_input",
+        ),
       });
-      return this.#bridge.completeAgentMessageDelivery({
-        deliveryId: receipt.request.deliveryId,
-        expectedRevision: receipt.revision,
-        status: "accepted",
-        reasonCode: "external_turn_steer_accepted",
-        completedAt: this.#now().toISOString(),
-      });
+      return this.#completeAcceptedSteerDelivery(receipt);
     } catch (error) {
-      return this.#bridge.completeAgentMessageDelivery({
-        deliveryId: receipt.request.deliveryId,
-        expectedRevision: receipt.revision,
-        status: "rejected",
-        reasonCode:
-          error instanceof CodexRpcError
-            ? "external_turn_steer_rejected"
-            : "external_turn_steer_outcome_unknown",
-        completedAt: this.#now().toISOString(),
-      });
+      const latest = await this.#bridge
+        .getAgentMessageDelivery(receipt.request.deliveryId)
+        .catch(() => undefined);
+      if (latest !== undefined && latest.status !== "pending") return latest;
+      if (!nativeAccepted && error instanceof CodexRpcError) {
+        return this.#bridge.completeAgentMessageDelivery({
+          deliveryId: receipt.request.deliveryId,
+          expectedRevision: (latest ?? receipt).revision,
+          status: "rejected",
+          reasonCode: "external_turn_steer_rejected",
+          completedAt: this.#now().toISOString(),
+        });
+      }
+      return latest ?? receipt;
     }
+  }
+
+  #steerAssociationEvent(
+    controlled: ControlledRuntime,
+    receipt: AgentMessageDeliveryReceipt,
+    clientUserMessageId: string,
+    kind: "external_turn_steer_intent" | "external_turn_steer_input",
+  ) {
+    const activation = receipt.activation;
+    if (activation?.type !== "external_turn_steer_requested") {
+      throw new Error("external steer association requires steer activation");
+    }
+    return {
+      eventId: `${receipt.request.deliveryId}:${kind.replaceAll("_", "-")}`,
+      ...(receipt.request.toSessionId == null
+        ? {}
+        : { sessionId: receipt.request.toSessionId }),
+      createdAt: receipt.request.createdAt,
+      kind,
+      runtimeId: controlled.registration.runtimeId,
+      nativeThreadId: activation.nativeThreadId,
+      nativeTurnId: activation.nativeTurnId,
+      itemId: clientUserMessageId,
+      requestId: activation.requestId,
+      payload: {
+        source: "agent_message_delivery",
+        deliveryId: receipt.request.deliveryId,
+        messageId: receipt.request.messageId,
+        imageAttachmentIds: receipt.request.imageAttachmentIds ?? [],
+      },
+      rawDetailRef: null,
+    };
+  }
+
+  async #completeAcceptedSteerDelivery(
+    receipt: AgentMessageDeliveryReceipt,
+  ): Promise<AgentMessageDeliveryReceipt> {
+    const latest =
+      (await this.#bridge.getAgentMessageDelivery(
+        receipt.request.deliveryId,
+      )) ?? receipt;
+    if (latest.status !== "pending") return latest;
+    return this.#bridge.completeAgentMessageDelivery({
+      deliveryId: latest.request.deliveryId,
+      expectedRevision: latest.revision,
+      status: "accepted",
+      reasonCode: "external_turn_steer_accepted",
+      completedAt: this.#now().toISOString(),
+    });
+  }
+
+  async #reconcileSteerIntent(
+    controlled: ControlledRuntime,
+    receipt: AgentMessageDeliveryReceipt,
+    clientUserMessageId: string,
+  ): Promise<AgentMessageDeliveryReceipt> {
+    const activation = receipt.activation;
+    if (activation?.type !== "external_turn_steer_requested") return receipt;
+    const native = await controlled.driver.threadRead({
+      threadId: activation.nativeThreadId,
+      includeTurns: true,
+    });
+    const itemExists = projectExternalThread(native.thread, null).turns.some(
+      (turn) => turn.items.some((item) => item.itemId === clientUserMessageId),
+    );
+    if (!itemExists) return receipt;
+    await this.#bridge.recordExternalRuntimeEvent({
+      controller: this.#controllerContext(controlled),
+      event: this.#steerAssociationEvent(
+        controlled,
+        receipt,
+        clientUserMessageId,
+        "external_turn_steer_input",
+      ),
+    });
+    return this.#completeAcceptedSteerDelivery(receipt);
   }
 
   async #resolveDeliveryInputImages(
@@ -1961,6 +2058,10 @@ export class ServiceExternalRuntimeController {
             false,
           );
         }
+        const currentBindingWithThread =
+          currentBinding as ExternalAgentBinding & {
+            nativeThreadId: string;
+          };
         const resumed = await controlled.driver.threadResume({
           threadId: nativeThreadId,
           ...(typeof currentBinding.cwd === "string"
@@ -1990,11 +2091,13 @@ export class ServiceExternalRuntimeController {
             turn.runtimeId === controlled.registration.runtimeId &&
             turn.request.bindingId === currentBinding.bindingId,
         );
+        let nativeThread: unknown;
         if (bindingTurns.length > 0) {
           const native = await controlled.driver.threadRead({
             threadId: nativeThreadId,
             includeTurns: true,
           });
+          nativeThread = native.thread;
           await this.#reconcileBindingExternalTurns(
             controlled,
             currentBinding,
@@ -2002,6 +2105,11 @@ export class ServiceExternalRuntimeController {
             bindingTurns,
           );
         }
+        await this.#reconcileBindingSteerIntents(
+          controlled,
+          currentBindingWithThread,
+          nativeThread,
+        );
       } catch (error) {
         controlled.bindingResumeFailures.push({
           bindingId: binding.bindingId,
@@ -2077,6 +2185,86 @@ export class ServiceExternalRuntimeController {
           : { terminalError: nativeTurn.error }),
         now: this.#now().toISOString(),
       });
+      reconciled += 1;
+    }
+    return reconciled;
+  }
+
+  async #reconcileBindingSteerIntents(
+    controlled: ControlledRuntime,
+    binding: ExternalAgentBinding & { nativeThreadId: string },
+    nativeThread?: unknown,
+  ): Promise<number> {
+    const events = await this.#queryThreadEvents(
+      controlled.registration.runtimeId,
+      binding.nativeThreadId,
+    );
+    const acceptedDeliveryIds = new Set(
+      events.flatMap((event) => {
+        if (
+          event.kind !== "external_turn_steer_input" ||
+          !isRecord(event.payload)
+        ) {
+          return [];
+        }
+        const deliveryId = nativeString(event.payload.deliveryId);
+        return deliveryId === undefined ? [] : [deliveryId];
+      }),
+    );
+    const intents = events.filter(
+      (event) =>
+        event.kind === "external_turn_steer_intent" &&
+        isRecord(event.payload) &&
+        !acceptedDeliveryIds.has(nativeString(event.payload.deliveryId) ?? ""),
+    );
+    if (intents.length === 0) return 0;
+    const native =
+      nativeThread ??
+      (
+        await controlled.driver.threadRead({
+          threadId: binding.nativeThreadId,
+          includeTurns: true,
+        })
+      ).thread;
+    const itemIds = new Set(
+      projectExternalThread(native, null).turns.flatMap((turn) =>
+        turn.items.map((item) => item.itemId),
+      ),
+    );
+    let reconciled = 0;
+    for (const intent of intents) {
+      const payload = isRecord(intent.payload) ? intent.payload : {};
+      const deliveryId = nativeString(payload.deliveryId);
+      if (deliveryId === undefined) continue;
+      const receipt = await this.#bridge.getAgentMessageDelivery(deliveryId);
+      if (
+        receipt === undefined ||
+        receipt.status !== "pending" ||
+        receipt.activation?.type !== "external_turn_steer_requested"
+      ) {
+        continue;
+      }
+      const clientUserMessageId = `rusty-crew:${receipt.request.messageId}`;
+      if (itemIds.has(clientUserMessageId)) {
+        await this.#bridge.recordExternalRuntimeEvent({
+          controller: this.#controllerContext(controlled),
+          event: this.#steerAssociationEvent(
+            controlled,
+            receipt,
+            clientUserMessageId,
+            "external_turn_steer_input",
+          ),
+        });
+        await this.#completeAcceptedSteerDelivery(receipt);
+      } else {
+        await this.#bridge.completeAgentMessageDelivery({
+          deliveryId,
+          expectedRevision: receipt.revision,
+          status: "rejected",
+          reasonCode: "external_turn_steer_outcome_unknown_after_restart",
+          completedAt: this.#now().toISOString(),
+        });
+      }
       reconciled += 1;
     }
     return reconciled;

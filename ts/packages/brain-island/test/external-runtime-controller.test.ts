@@ -1283,7 +1283,11 @@ test("immediate-steer images retain ordered durable readback after controller re
       content: [{ type: "text", text: "initial message" }],
     });
 
-    const steer = async (suffix: string, imageAttachmentIds: string[]) => {
+    const steer = async (
+      suffix: string,
+      imageAttachmentIds: string[],
+      expectedStatus: "accepted" | "pending" = "accepted",
+    ) => {
       const receipt = await fixture.bridge.deliverAgentMessage({
         caller: { type: "system", senderAgentId: "operator" },
         deliveryId: `steer-${suffix}-delivery`,
@@ -1300,10 +1304,25 @@ test("immediate-steer images retain ordered durable readback after controller re
       assert.equal(receipt.activation?.type, "external_turn_steer_requested");
       const completed =
         await fixture.controller.applyCoordinationDelivery(receipt);
-      assert.equal(completed.status, "accepted");
+      assert.equal(completed.status, expectedStatus);
     };
     await steer("text", []);
-    await steer("images", ["steer-image-a", "steer-image-b"]);
+    const recordExternalRuntimeEvent =
+      fixture.bridge.recordExternalRuntimeEvent.bind(fixture.bridge);
+    let failAcceptedAssociation = true;
+    fixture.bridge.recordExternalRuntimeEvent = async (input) => {
+      if (
+        failAcceptedAssociation &&
+        input.event.kind === "external_turn_steer_input" &&
+        (input.event.payload as Record<string, unknown>).messageId ===
+          "steer-images-message"
+      ) {
+        failAcceptedAssociation = false;
+        throw new Error("injected post-steer association persistence failure");
+      }
+      return recordExternalRuntimeEvent(input);
+    };
+    await steer("images", ["steer-image-a", "steer-image-b"], "pending");
 
     const beforeRestart = await fixture.controller.readThread(
       fixture.runtimeId,
@@ -1313,11 +1332,15 @@ test("immediate-steer images retain ordered durable readback after controller re
       beforeRestart.thread.turns[0]?.items[1]?.inputImages,
       undefined,
     );
-    assert.deepEqual(
-      beforeRestart.thread.turns[0]?.items[2]?.inputImages?.map(
-        (image) => image.attachmentId,
-      ),
-      ["steer-image-a", "steer-image-b"],
+    assert.equal(
+      beforeRestart.thread.turns[0]?.items[2]?.inputImages,
+      undefined,
+    );
+    assert.equal(
+      beforeRestart.thread.turns[0]?.items.filter(
+        (item) => item.itemId === "rusty-crew:steer-images-message",
+      ).length,
+      1,
     );
 
     await fixture.controller.stop();
@@ -1340,6 +1363,25 @@ test("immediate-steer images retain ordered durable readback after controller re
         (image) => image.attachmentId,
       ),
       ["steer-image-a", "steer-image-b"],
+    );
+    const reconciledDelivery = await fixture.bridge.getAgentMessageDelivery(
+      "steer-images-delivery",
+    );
+    assert.equal(reconciledDelivery?.status, "accepted");
+    const durableEvents = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      nativeThreadId: created.thread.threadId,
+      afterSequence: 0,
+      limit: 1_000,
+    });
+    assert.equal(
+      durableEvents.filter(
+        (event) =>
+          event.kind === "external_turn_steer_input" &&
+          (event.payload as Record<string, unknown>).messageId ===
+            "steer-images-message",
+      ).length,
+      1,
     );
     assert.equal(
       JSON.stringify(afterRestart).includes("artifact://tool-media"),

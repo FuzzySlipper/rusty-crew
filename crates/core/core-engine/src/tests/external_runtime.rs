@@ -1568,6 +1568,82 @@ fn restart_reconciliation_terminalizes_archived_session_without_replay() {
     assert!(turn.capacity_lease_id.is_none());
 }
 
+#[test]
+fn restart_hydration_preserves_pending_immediate_steer_for_native_reconciliation() {
+    let data_dir = unique_data_dir("external-steer-delivery-reconcile");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let codex = engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    engine.bind_external_agent(&binding(), None).unwrap();
+    let active_request = ExternalTurnRequestId::new("steer-active-turn");
+    engine
+        .activate_agent_execution(activation("codex-agent", &active_request.0))
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Starting,
+            None,
+            None,
+            "2026-06-19T00:00:01Z".into(),
+        )
+        .unwrap();
+    engine
+        .transition_external_turn(
+            &active_request,
+            ExternalTurnPhase::Active,
+            Some("native-turn-steer".into()),
+            None,
+            "2026-06-19T00:00:02Z".into(),
+        )
+        .unwrap();
+    let delivery_id = AgentMessageDeliveryId::new("restart-steer-delivery");
+    let pending = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::System {
+                sender_agent_id: AgentId::new("operator"),
+            },
+            delivery_id: delivery_id.clone(),
+            idempotency_key: "restart-steer-delivery".into(),
+            message_id: "restart-steer-message".into(),
+            to_address: codex.agent_id.0,
+            input_kind: AgentMessageInputKind::Operator,
+            body: "recover this native steer".into(),
+            image_attachment_ids: Vec::new(),
+            collaboration_mode: None,
+            correlation_id: None,
+            require_wake: true,
+            created_at: "2026-06-19T00:00:03Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert_eq!(pending.status, AgentMessageDeliveryStatus::Pending);
+    assert!(matches!(
+        pending.activation,
+        Some(AgentActivation::ExternalTurnSteerRequested { .. })
+    ));
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    restarted
+        .hydrate_external_runtime_lifecycle(&"2026-06-19T00:01:00Z".into())
+        .unwrap();
+    let hydrated = restarted
+        .get_agent_message_delivery(&delivery_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(hydrated.status, AgentMessageDeliveryStatus::Pending);
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
 pub(super) fn runtime() -> ExternalRuntimeRegistration {
     ExternalRuntimeRegistration {
         runtime_id: ExternalRuntimeId::new("codex-local"),

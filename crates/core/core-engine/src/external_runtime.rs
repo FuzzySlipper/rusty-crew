@@ -1324,6 +1324,16 @@ impl CoreEngine {
             }
         }
         for delivery in self.store.list_pending_agent_message_deliveries()? {
+            if matches!(
+                delivery.activation.as_ref(),
+                Some(AgentActivation::ExternalTurnSteerRequested { .. })
+            ) {
+                // A durable steer intent is reconciled against the native
+                // thread by the TypeScript runtime controller. Rejecting it
+                // here would discard the only mutable receipt before that
+                // authoritative native read can recover an accepted steer.
+                continue;
+            }
             let mut reconciled = delivery.clone();
             if delivery.request.expires_at <= *now {
                 reconciled.status = AgentMessageDeliveryStatus::Expired;
