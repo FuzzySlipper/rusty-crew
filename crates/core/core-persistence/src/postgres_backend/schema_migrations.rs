@@ -299,12 +299,7 @@ fn apply_postgres_external_runtime_thread_cursor(
                 AND table_name = 'external_runtime_events'",
             &[&schema],
         )
-        .map_err(|error| {
-            postgres_error(
-                "inspect PostgreSQL external runtime events table",
-                error,
-            )
-        })?
+        .map_err(|error| postgres_error("inspect PostgreSQL external runtime events table", error))?
         .is_some();
     if !external_runtime_events_exists {
         return Ok(());
