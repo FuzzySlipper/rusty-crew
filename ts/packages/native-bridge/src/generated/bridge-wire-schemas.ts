@@ -3193,6 +3193,31 @@ export const bridgeWireSchemaArtifact = {
               "string",
               "null"
             ]
+          },
+          "workspace": {
+            "description": "The canonical execution context for one logical session.\n\nThis is deliberately not a filesystem permission boundary. Ordinary full\nagents may still address absolute paths outside `cwd`; optional delegated\nconfinement is represented separately on explicit delegation lineage.",
+            "properties": {
+              "cwd": {
+                "type": "string"
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "cwd",
+              "revision",
+              "updated_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
         "required": [
