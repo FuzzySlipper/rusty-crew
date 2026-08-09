@@ -1625,10 +1625,19 @@
       },
       "CreateCrewChatSessionRequest": {
         "type": "object",
-        "required": ["profile_id", "expected_profile_revision"],
+        "required": [
+          "profile_id",
+          "expected_profile_revision",
+          "workspace_cwd"
+        ],
         "properties": {
           "profile_id": { "type": "string", "minLength": 1 },
-          "expected_profile_revision": { "type": "integer", "minimum": 1 }
+          "expected_profile_revision": { "type": "integer", "minimum": 1 },
+          "workspace_cwd": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          }
         },
         "additionalProperties": false
       },
