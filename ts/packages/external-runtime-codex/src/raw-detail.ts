@@ -18,7 +18,12 @@ export function captureBoundedRawDetail(
       }
       if (
         typeof child === "string" &&
-        ((key === "imageUrl" && child.startsWith("data:image/")) ||
+        ((key === "imageUrl" &&
+          typeof this === "object" &&
+          this !== null &&
+          ["inputImage", "input_image"].includes(
+            String((this as Record<string, unknown>).type),
+          )) ||
           (key === "data" &&
             typeof this === "object" &&
             this !== null &&

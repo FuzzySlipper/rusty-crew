@@ -162,6 +162,43 @@ test("failed dynamic tool completion preserves a bounded readable result", () =>
   assert.ok(event.rawDetail.redactedKeys.includes("imageUrl"));
 });
 
+test("input-image raw detail redacts unsupported URLs by semantic item type", () => {
+  for (const [index, imageUrl] of [
+    "data:IMAGE/PNG;base64,TOPSECRET",
+    "file:///home/dev/private/proof.png",
+  ].entries()) {
+    const event = mapNotification(
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: `dynamic-${index}`,
+            type: "dynamicToolCall",
+            contentItems: [{ type: "inputImage", imageUrl }],
+          },
+        },
+      },
+      12 + index,
+      16_384,
+      true,
+    );
+
+    const candidate = event.mediaCandidates?.[0];
+    assert.equal(candidate?.source, "dynamic_tool_input_image");
+    assert.equal(
+      candidate?.source === "dynamic_tool_input_image"
+        ? candidate.imageUrl
+        : undefined,
+      imageUrl,
+    );
+    assert.ok(event.rawDetail.redactedKeys.includes("imageUrl"));
+    assert.equal(event.rawDetail.json.includes(imageUrl), false);
+    assert.equal(JSON.stringify(event.payload).includes(imageUrl), false);
+  }
+});
+
 test("MCP image content and image-view paths become transient capture candidates", () => {
   const mcp = mapNotification(
     {
