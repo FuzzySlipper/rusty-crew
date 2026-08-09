@@ -1564,6 +1564,42 @@ function routeSchemas(): Record<string, JsonSchema> {
       },
       additionalProperties: false,
     },
+    ExternalRuntimeMediaReference: {
+      type: "object",
+      required: ["mediaIndex", "captureSource", "captureState"],
+      properties: {
+        mediaIndex: { type: "integer", minimum: 0 },
+        captureSource: {
+          type: "string",
+          enum: [
+            "dynamic_tool_input_image",
+            "mcp_image_content",
+            "image_view_path",
+          ],
+        },
+        captureState: {
+          type: "string",
+          enum: [
+            "available",
+            "unavailable",
+            "unsupported",
+            "empty",
+            "oversized",
+            "failed",
+          ],
+        },
+        reasonCode: { type: "string" },
+        attachmentId: { type: "string" },
+        filename: { type: "string" },
+        mimeType: { type: "string" },
+        byteSize: { type: "integer", minimum: 0 },
+        sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        width: { type: "integer", minimum: 1 },
+        height: { type: "integer", minimum: 1 },
+        contentUrl: { type: "string" },
+      },
+      additionalProperties: false,
+    },
     ExternalRuntimeEventPayload: {
       type: "object",
       required: ["nativeMethod"],
@@ -1597,6 +1633,10 @@ function routeSchemas(): Record<string, JsonSchema> {
         server: { type: "string" },
         tool: { type: "string" },
         success: { type: "boolean" },
+        media: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ExternalRuntimeMediaReference" },
+        },
         summary: { type: "array", items: { type: "string" } },
         messagePhase: {
           type: "string",

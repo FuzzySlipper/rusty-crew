@@ -151,6 +151,67 @@ test("failed dynamic tool completion preserves a bounded readable result", () =>
   assert.equal(event.payload.text?.includes("\u0000"), false);
   assert.match(event.payload.text ?? "", /^No managed review submission /);
   assert.match(event.payload.text ?? "", /\.\.\.\[truncated\]$/);
+  assert.deepEqual(event.mediaCandidates, [
+    {
+      source: "dynamic_tool_input_image",
+      mediaIndex: 1,
+      imageUrl: "data:image/png;base64,ignored",
+    },
+  ]);
+  assert.doesNotMatch(event.rawDetail.json, /base64,ignored/);
+  assert.ok(event.rawDetail.redactedKeys.includes("imageUrl"));
+});
+
+test("MCP image content and image-view paths become transient capture candidates", () => {
+  const mcp = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "mcp-1",
+          type: "mcpToolCall",
+          result: {
+            content: [
+              { type: "text", text: "proof" },
+              { type: "image", data: "cG5n", mimeType: "image/png" },
+            ],
+          },
+        },
+      },
+    },
+    12,
+    16_384,
+    true,
+  );
+  assert.deepEqual(mcp.mediaCandidates, [
+    {
+      source: "mcp_image_content",
+      mediaIndex: 1,
+      data: "cG5n",
+      mimeType: "image/png",
+    },
+  ]);
+  assert.doesNotMatch(mcp.rawDetail.json, /cG5n/);
+
+  const viewed = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { id: "view-1", type: "imageView", path: "/tmp/proof.png" },
+      },
+    },
+    13,
+    16_384,
+    true,
+  );
+  assert.deepEqual(viewed.mediaCandidates, [
+    { source: "image_view_path", mediaIndex: 0, path: "/tmp/proof.png" },
+  ]);
+  assert.doesNotMatch(viewed.rawDetail.json, /\/tmp\/proof\.png/);
 });
 
 test("error diagnostics bound and sanitize every browser-facing string", () => {

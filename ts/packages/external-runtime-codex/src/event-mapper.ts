@@ -3,6 +3,7 @@ import { captureBoundedRawDetail } from "./raw-detail.js";
 import type {
   JsonRpcId,
   NeutralExternalEventKind,
+  ExternalRuntimeMediaCaptureCandidate,
   NeutralExternalRuntimeEvent,
   NeutralExternalRuntimeEventPayload,
 } from "./types.js";
@@ -32,8 +33,63 @@ export function mapNotification(
     ...(turnId === undefined ? {} : { turnId }),
     ...(itemId === undefined ? {} : { itemId }),
     payload: projectPayload(notification.method, kind, params, item, turn),
+    ...projectMediaCandidates(item),
     rawDetail: captureBoundedRawDetail(notification, maxRawDetailBytes),
   };
+}
+
+function projectMediaCandidates(item: Record<string, unknown>): {
+  mediaCandidates?: readonly ExternalRuntimeMediaCaptureCandidate[];
+} {
+  const itemType = stringValue(item.type);
+  if (itemType === "dynamicToolCall" || itemType === "dynamic_tool_call") {
+    const candidates = arrayValue(item.contentItems).flatMap((entry, index) => {
+      const content = asRecord(entry);
+      const imageUrl = stringValue(content.imageUrl);
+      return stringValue(content.type) === "inputImage" &&
+        imageUrl !== undefined
+        ? [
+            {
+              source: "dynamic_tool_input_image" as const,
+              mediaIndex: index,
+              imageUrl,
+            },
+          ]
+        : [];
+    });
+    return candidates.length === 0 ? {} : { mediaCandidates: candidates };
+  }
+  if (itemType === "mcpToolCall" || itemType === "mcp_tool_call") {
+    const result = asRecord(item.result);
+    const candidates = arrayValue(result.content).flatMap((entry, index) => {
+      const content = asRecord(entry);
+      const data = stringValue(content.data);
+      const mimeType =
+        stringValue(content.mimeType) ?? stringValue(content.mime_type);
+      return stringValue(content.type) === "image" &&
+        data !== undefined &&
+        mimeType !== undefined
+        ? [
+            {
+              source: "mcp_image_content" as const,
+              mediaIndex: index,
+              data,
+              mimeType,
+            },
+          ]
+        : [];
+    });
+    return candidates.length === 0 ? {} : { mediaCandidates: candidates };
+  }
+  if (itemType === "imageView" || itemType === "image_view") {
+    const path = stringValue(item.path);
+    return path === undefined
+      ? {}
+      : {
+          mediaCandidates: [{ source: "image_view_path", mediaIndex: 0, path }],
+        };
+  }
+  return {};
 }
 
 export function mapUnsupportedServerRequest(
@@ -333,6 +389,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : { value };
+}
+
+function arrayValue(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function stringValue(value: unknown): string | undefined {

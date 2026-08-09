@@ -1791,7 +1791,11 @@ test("Rusty View chat stream route validates, replays once, and cleans subscribe
         mime_type: "image/png",
         byte_size: 3,
         extracted_text_truncated: false,
-        metadata_json: {},
+        metadata_json: {
+          content_sha256: "a".repeat(64),
+          width: 2,
+          height: 3,
+        },
         created_at: "2026-07-05T00:00:00.000Z",
         updated_at: "2026-07-05T00:00:00.000Z",
         links: [],
@@ -1813,11 +1817,31 @@ test("Rusty View chat stream route validates, replays once, and cleans subscribe
   }
   assert.equal(attachmentResponse.statusCode, 200);
   assert.equal(attachmentResponse.headers["content-type"], "image/png");
+  assert.equal(attachmentResponse.headers.etag, `"sha256:${"a".repeat(64)}"`);
+  assert.equal(attachmentResponse.headers["x-content-sha256"], "a".repeat(64));
+  assert.equal(attachmentResponse.headers["x-image-width"], "2");
+  assert.equal(attachmentResponse.headers["x-image-height"], "3");
   assert.equal(
     attachmentResponse.headers["access-control-allow-origin"],
     "http://view.test",
   );
   assert.equal(attachmentResponse.body, "png");
+
+  const cachedAttachment = await handleRustyViewChatStreamRequest(
+    requestLike("GET", {
+      "if-none-match": `"sha256:${"a".repeat(64)}"`,
+    }),
+    new URL(
+      "http://local/v1/chat/sessions/field-session/attachments/attachment-1/content",
+    ),
+    context,
+  );
+  const cachedResponse = fakeResponse();
+  if (cachedAttachment && "kind" in cachedAttachment) {
+    cachedAttachment.write(cachedResponse);
+  }
+  assert.equal(cachedResponse.statusCode, 304);
+  assert.equal(cachedResponse.body, "");
 
   const methodFailure = await handleRustyViewChatStreamRequest(
     requestLike("POST", { "x-request-id": "req-chat-stream" }),

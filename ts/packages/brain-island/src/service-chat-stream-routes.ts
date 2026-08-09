@@ -162,14 +162,32 @@ async function handleAttachmentContentRequest(
       attachmentId,
     );
     const filename = content.attachment.filename.replace(/[\r\n"\\]/g, "_");
+    const metadata = recordValue(content.attachment.metadata_json);
+    const sha256 = stringValue(metadata.content_sha256);
+    const width = positiveInteger(metadata.width);
+    const height = positiveInteger(metadata.height);
+    const etag = sha256 === undefined ? undefined : `"sha256:${sha256}"`;
     return {
       kind: "raw",
       write(response) {
+        if (etag !== undefined && request.headers["if-none-match"] === etag) {
+          response.writeHead(304, {
+            etag,
+            "cache-control": "private, max-age=60",
+            ...context.corsHeaders(request),
+          });
+          response.end();
+          return;
+        }
         response.writeHead(200, {
           "content-type": content.attachment.mime_type,
           "content-length": String(content.bytes.length),
           "content-disposition": `inline; filename="${filename}"`,
           "cache-control": "private, max-age=60",
+          ...(etag === undefined ? {} : { etag }),
+          ...(sha256 === undefined ? {} : { "x-content-sha256": sha256 }),
+          ...(width === undefined ? {} : { "x-image-width": String(width) }),
+          ...(height === undefined ? {} : { "x-image-height": String(height) }),
           "x-content-type-options": "nosniff",
           ...context.corsHeaders(request),
         });
@@ -195,6 +213,22 @@ async function handleAttachmentContentRequest(
       },
     );
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
 }
 
 export function writeRustyViewChatSseStream(input: {

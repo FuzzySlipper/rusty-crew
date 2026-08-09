@@ -11,10 +11,33 @@ export function captureBoundedRawDetail(
   const original = JSON.stringify(value) ?? "null";
   const redactedKeys = new Set<string>();
   const sanitized =
-    JSON.stringify(value, (key, child) => {
+    JSON.stringify(value, function (key, child) {
       if (key !== "" && secretKey.test(key)) {
         redactedKeys.add(key);
         return "[REDACTED]";
+      }
+      if (
+        typeof child === "string" &&
+        ((key === "imageUrl" && child.startsWith("data:image/")) ||
+          (key === "data" &&
+            typeof this === "object" &&
+            this !== null &&
+            (this as Record<string, unknown>).type === "image"))
+      ) {
+        redactedKeys.add(key);
+        return `[MEDIA_BYTES_REDACTED sha256=${createHash("sha256").update(child).digest("hex")}]`;
+      }
+      if (
+        key === "path" &&
+        typeof child === "string" &&
+        typeof this === "object" &&
+        this !== null &&
+        ["imageView", "image_view"].includes(
+          String((this as Record<string, unknown>).type),
+        )
+      ) {
+        redactedKeys.add(key);
+        return "[HOST_MEDIA_PATH_REDACTED]";
       }
       return child;
     }) ?? "null";

@@ -62,6 +62,7 @@ import type {
   ExternalThreadReadResult,
   ExternalThreadTurnProjection,
 } from "./external-runtime-api-contract.js";
+import type { ExternalRuntimeMediaCaptureSink } from "./external-runtime-media.js";
 
 const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
@@ -333,6 +334,7 @@ export class ServiceExternalRuntimeController {
   readonly #onReviewCompletion?: Parameters<
     typeof resolveCodexCoordinationToolCall
   >[0]["onReviewCompletion"];
+  readonly #mediaCaptureSink?: ExternalRuntimeMediaCaptureSink;
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -368,6 +370,7 @@ export class ServiceExternalRuntimeController {
     onReviewCompletion?: Parameters<
       typeof resolveCodexCoordinationToolCall
     >[0]["onReviewCompletion"];
+    mediaCaptureSink?: ExternalRuntimeMediaCaptureSink;
     recoveryBaseDelayMs?: number;
     recoveryMaxDelayMs?: number;
   }) {
@@ -377,6 +380,7 @@ export class ServiceExternalRuntimeController {
     this.#onCoordinationDelivery = input.onCoordinationDelivery;
     this.#onReviewSubmission = input.onReviewSubmission;
     this.#onReviewCompletion = input.onReviewCompletion;
+    this.#mediaCaptureSink = input.mediaCaptureSink;
     this.#recoveryBaseDelayMs =
       input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
     this.#recoveryMaxDelayMs =
@@ -3427,6 +3431,15 @@ export class ServiceExternalRuntimeController {
         candidate.runtimeId === controlled.registration.runtimeId &&
         candidate.nativeThreadId === event.threadId,
     );
+    const media =
+      event.mediaCandidates === undefined || event.mediaCandidates.length === 0
+        ? undefined
+        : await this.#captureEventMedia({
+            controlled,
+            event,
+            detailId,
+            binding,
+          });
     const saved = await this.#bridge.recordExternalRuntimeEvent({
       controller: this.#controllerContext(controlled),
       event: {
@@ -3445,11 +3458,54 @@ export class ServiceExternalRuntimeController {
         ...(event.nativeRequestId === undefined
           ? {}
           : { requestId: String(event.nativeRequestId) }),
-        payload: browserSafePayload(event),
+        payload: {
+          ...browserSafePayload(event),
+          ...(media === undefined ? {} : { media }),
+        },
         rawDetailRef: detailId,
       },
     });
     await this.#applyTerminalEvent(controlled, saved);
+  }
+
+  async #captureEventMedia(input: {
+    controlled: ControlledRuntime;
+    event: NeutralExternalRuntimeEvent;
+    detailId: string;
+    binding: ExternalAgentBinding | undefined;
+  }) {
+    const candidates = input.event.mediaCandidates ?? [];
+    if (this.#mediaCaptureSink === undefined) {
+      return candidates.map((candidate) => ({
+        mediaIndex: candidate.mediaIndex,
+        captureSource: candidate.source,
+        captureState: "failed" as const,
+        reasonCode: "external_media_capture_unconfigured",
+      }));
+    }
+    return this.#mediaCaptureSink.captureExternalRuntimeMedia({
+      runtimeId: input.controlled.registration.runtimeId,
+      ...(input.binding?.sessionId == null
+        ? {}
+        : { sessionId: input.binding.sessionId }),
+      ...(input.binding === undefined
+        ? {}
+        : { bindingId: input.binding.bindingId }),
+      ...(input.event.threadId === undefined
+        ? {}
+        : { nativeThreadId: input.event.threadId }),
+      ...(input.event.turnId === undefined
+        ? {}
+        : { nativeTurnId: input.event.turnId }),
+      ...(input.event.itemId === undefined
+        ? {}
+        : { itemId: input.event.itemId }),
+      externalEventId: input.detailId,
+      ...(input.event.payload.tool === undefined
+        ? {}
+        : { toolName: input.event.payload.tool }),
+      candidates,
+    });
   }
 
   async #recordCommandEvent(

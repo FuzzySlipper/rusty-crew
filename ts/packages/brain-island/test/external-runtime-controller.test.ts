@@ -28,6 +28,10 @@ import {
   ExternalThreadLifecycleError,
   ServiceExternalRuntimeController,
 } from "../src/service-external-runtime.js";
+import type {
+  ExternalRuntimeMediaCaptureInput,
+  ExternalRuntimeMediaCaptureSink,
+} from "../src/external-runtime-media.js";
 
 function isCompatibilityProbeThreadId(threadId: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -957,6 +961,117 @@ test("controller atomically creates and idempotently reuses an external agent se
       }),
       /external_agent_creation_idempotency_conflict/,
     );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller captures transient native media before persisting an opaque ordered event reference", async () => {
+  const captures: ExternalRuntimeMediaCaptureInput[] = [];
+  const mediaCaptureSink: ExternalRuntimeMediaCaptureSink = {
+    async captureExternalRuntimeMedia(input) {
+      captures.push(input);
+      return [
+        {
+          mediaIndex: 0,
+          captureSource: "dynamic_tool_input_image",
+          captureState: "available",
+          attachmentId: "attachment:proof",
+          filename: "proof.png",
+          mimeType: "image/png",
+          byteSize: 24,
+          sha256: "a".repeat(64),
+          width: 2,
+          height: 3,
+          contentUrl:
+            "/v1/chat/sessions/creation-profile-session/attachments/attachment%3Aproof/content",
+        },
+      ];
+    },
+  };
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "creation-profile",
+    mediaCaptureSink,
+  );
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "browser-create-media",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    fixture.transport.emit({
+      method: "item/completed",
+      params: {
+        threadId: created.thread.threadId,
+        turnId: "native-turn-media",
+        completedAtMs: Date.now(),
+        item: {
+          id: "native-item-media",
+          type: "dynamicToolCall",
+          namespace: null,
+          tool: "view_image",
+          arguments: {},
+          status: "completed",
+          success: true,
+          contentItems: [
+            {
+              type: "inputImage",
+              imageUrl: "data:image/png;base64,cHJvb2Y=",
+            },
+          ],
+          durationMs: 10,
+        },
+      },
+    });
+    await waitUntil(
+      async () => captures.length === 1,
+      "external media capture",
+    );
+    assert.equal(captures[0]?.sessionId, created.creation.session.sessionId);
+    assert.equal(captures[0]?.bindingId, created.creation.binding.bindingId);
+    assert.equal(captures[0]?.nativeTurnId, "native-turn-media");
+    assert.equal(captures[0]?.itemId, "native-item-media");
+    assert.equal(captures[0]?.toolName, "view_image");
+
+    const events = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    });
+    const mediaEvent = events.find(
+      (event) => event.itemId === "native-item-media",
+    );
+    assert.ok(mediaEvent);
+    const payload = mediaEvent.payload as Record<string, unknown>;
+    assert.deepEqual(payload.media, [
+      {
+        mediaIndex: 0,
+        captureSource: "dynamic_tool_input_image",
+        captureState: "available",
+        attachmentId: "attachment:proof",
+        filename: "proof.png",
+        mimeType: "image/png",
+        byteSize: 24,
+        sha256: "a".repeat(64),
+        width: 2,
+        height: 3,
+        contentUrl:
+          "/v1/chat/sessions/creation-profile-session/attachments/attachment%3Aproof/content",
+      },
+    ]);
+    assert.equal(JSON.stringify(payload).includes("base64"), false);
+    const raw = fixture.controller.rawDetail(
+      fixture.runtimeId,
+      mediaEvent.rawDetailRef!,
+    );
+    assert.ok(raw);
+    assert.doesNotMatch(raw.json, /cHJvb2Y=/);
   } finally {
     await fixture.cleanup();
   }
@@ -3813,6 +3928,7 @@ async function externalCreationFixture(
   },
   profilelessBindingReads = false,
   profileIdOverride = "creation-profile",
+  mediaCaptureSink?: ExternalRuntimeMediaCaptureSink,
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
@@ -3861,6 +3977,7 @@ async function externalCreationFixture(
   );
   const controller = new ServiceExternalRuntimeController({
     bridge: controllerBridge,
+    mediaCaptureSink,
     instanceId: "creation-test-controller",
     driverFactory: (_registration, authority) =>
       new CodexAppServerDriver(transport, authority, {

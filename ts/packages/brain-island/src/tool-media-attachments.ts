@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import type { SessionId } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type { BrainToolResult } from "./brain-tool.js";
@@ -13,6 +13,11 @@ import type {
   NarratorImageContextResolution,
   NarratorImageInputCapability,
 } from "./narrator-image-context.js";
+import type {
+  ExternalRuntimeMediaCaptureInput,
+  ExternalRuntimeMediaCaptureSink,
+  ExternalRuntimeMediaReference,
+} from "./external-runtime-media.js";
 
 const MAX_TOOL_IMAGE_BYTES = 20 * 1024 * 1024;
 const MIME_EXTENSIONS = new Map([
@@ -41,7 +46,9 @@ export interface ToolMediaAttachmentContent {
   bytes: Buffer;
 }
 
-export class ToolMediaAttachmentStore implements BrainToolMediaSink {
+export class ToolMediaAttachmentStore
+  implements BrainToolMediaSink, ExternalRuntimeMediaCaptureSink
+{
   private readonly rootDir: string;
   private readonly maxImageBytes: number;
 
@@ -74,6 +81,103 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
           imageIndex: index,
         }),
       );
+    }
+    return references;
+  }
+
+  async captureExternalRuntimeMedia(
+    input: ExternalRuntimeMediaCaptureInput,
+  ): Promise<readonly ExternalRuntimeMediaReference[]> {
+    if (input.sessionId === undefined) {
+      return input.candidates.map((candidate) => ({
+        mediaIndex: candidate.mediaIndex,
+        captureSource: candidate.source,
+        captureState: "unavailable",
+        reasonCode: "external_media_session_unbound",
+      }));
+    }
+
+    const references: ExternalRuntimeMediaReference[] = [];
+    const capturedSourceByHash = new Map<
+      string,
+      ExternalRuntimeMediaCaptureInput["candidates"][number]["source"]
+    >();
+    for (const candidate of input.candidates) {
+      try {
+        const materialized = await materializeExternalMedia(candidate);
+        if (materialized.bytes.length === 0) {
+          references.push({
+            mediaIndex: candidate.mediaIndex,
+            captureSource: candidate.source,
+            captureState: "empty",
+            reasonCode: "external_media_empty",
+          });
+          continue;
+        }
+        if (materialized.bytes.length > this.maxImageBytes) {
+          references.push({
+            mediaIndex: candidate.mediaIndex,
+            captureSource: candidate.source,
+            captureState: "oversized",
+            reasonCode: "external_media_oversized",
+            mimeType: materialized.mimeType,
+            byteSize: materialized.bytes.length,
+          });
+          continue;
+        }
+        const sha256 = createHash("sha256")
+          .update(materialized.bytes)
+          .digest("hex");
+        const capturedSource = capturedSourceByHash.get(sha256);
+        if (
+          capturedSource !== undefined &&
+          capturedSource !== candidate.source
+        ) {
+          continue;
+        }
+        capturedSourceByHash.set(sha256, candidate.source);
+        const stored = await this.persistStoredImage({
+          sessionId: input.sessionId,
+          identity: [
+            input.runtimeId,
+            input.bindingId ?? input.sessionId,
+            input.nativeThreadId ?? "thread-unknown",
+            input.nativeTurnId ?? "turn-unknown",
+            input.itemId ?? input.externalEventId,
+            String(candidate.mediaIndex),
+          ].join(":"),
+          filename: materialized.filename,
+          mimeType: materialized.mimeType,
+          bytes: materialized.bytes,
+          metadata: {
+            source: "external_runtime_media",
+            runtime_id: input.runtimeId,
+            binding_id: input.bindingId ?? null,
+            native_thread_id: input.nativeThreadId ?? null,
+            native_turn_id: input.nativeTurnId ?? null,
+            item_id: input.itemId ?? null,
+            external_event_id: input.externalEventId,
+            media_index: candidate.mediaIndex,
+            capture_source: candidate.source,
+            tool_name: input.toolName ?? null,
+          },
+        });
+        references.push({
+          mediaIndex: candidate.mediaIndex,
+          captureSource: candidate.source,
+          captureState: "available",
+          attachmentId: stored.attachmentId,
+          filename: stored.filename,
+          mimeType: stored.mimeType,
+          byteSize: stored.byteSize,
+          sha256,
+          width: stored.width,
+          height: stored.height,
+          contentUrl: stored.downloadUrl,
+        });
+      } catch (error) {
+        references.push(externalCaptureFailure(candidate, error));
+      }
     }
     return references;
   }
@@ -312,7 +416,7 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
   }
 
   async removeContent(attachment: AttachmentRecord): Promise<void> {
-    if (recordValue(attachment.metadata_json).source !== "brain_tool_media") {
+    if (!isToolMediaSource(recordValue(attachment.metadata_json).source)) {
       return;
     }
     await this.removeStoredBytes(attachment);
@@ -327,32 +431,56 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
     image: { type: "image"; data: string; mimeType: string };
     imageIndex: number;
   }): Promise<BrainToolMediaReference> {
-    const extension = MIME_EXTENSIONS.get(input.image.mimeType);
+    const bytes = decodeBase64(input.image.data);
+    return this.persistStoredImage({
+      sessionId: input.sessionId,
+      identity: `${input.sessionId}:${input.wakeId}:${input.callId}:${input.imageIndex}`,
+      filename: `${safeStem(input.toolName)}-${input.imageIndex + 1}.${MIME_EXTENSIONS.get(input.image.mimeType) ?? "image"}`,
+      mimeType: input.image.mimeType,
+      bytes,
+      metadata: {
+        source: "brain_tool_media",
+        wake_id: input.wakeId,
+        tool_call_id: input.callId,
+        tool_name: input.toolName,
+        image_index: input.imageIndex,
+        provenance: safeProvenance(input.result.details),
+      },
+    });
+  }
+
+  private async persistStoredImage(input: {
+    sessionId: string;
+    identity: string;
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+    metadata: Record<string, unknown>;
+  }): Promise<BrainToolMediaReference> {
+    const extension = MIME_EXTENSIONS.get(input.mimeType);
     if (!extension) {
       throw new ToolMediaAttachmentError(
         "unsupported_image_mime_type",
-        `unsupported tool image MIME type ${input.image.mimeType}`,
+        `unsupported tool image MIME type ${input.mimeType}`,
       );
     }
-    const bytes = decodeBase64(input.image.data);
-    if (bytes.length === 0 || bytes.length > this.maxImageBytes) {
+    if (input.bytes.length === 0 || input.bytes.length > this.maxImageBytes) {
       throw new ToolMediaAttachmentError(
         "invalid_image_byte_size",
-        `tool image byte size ${bytes.length} is outside 1..${this.maxImageBytes}`,
+        `tool image byte size ${input.bytes.length} is outside 1..${this.maxImageBytes}`,
       );
     }
-    const dimensions = imageDimensions(bytes, input.image.mimeType);
-    const attachmentId = stableId(
-      "attachment",
-      `${input.sessionId}:${input.wakeId}:${input.callId}:${input.imageIndex}`,
-    );
-    const filename = `${safeStem(input.toolName)}-${input.imageIndex + 1}.${extension}`;
+    const dimensions = imageDimensions(input.bytes, input.mimeType);
+    const attachmentId = stableId("attachment", input.identity);
+    const filename = safeDisplayFilename(input.filename, extension);
     const sessionDir = join(this.rootDir, digest(input.sessionId));
     const finalPath = join(sessionDir, `${digest(attachmentId)}.${extension}`);
     const temporaryPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
     const now = this.options.now();
     const downloadUrl = toolMediaDownloadUrl(input.sessionId, attachmentId);
-    const contentSha256 = createHash("sha256").update(bytes).digest("hex");
+    const contentSha256 = createHash("sha256")
+      .update(input.bytes)
+      .digest("hex");
     const existing = await this.findAttachmentOptional(
       input.sessionId,
       attachmentId,
@@ -361,8 +489,8 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
       const metadata = recordValue(existing.metadata_json);
       if (
         existing.status !== "active" ||
-        existing.mime_type !== input.image.mimeType ||
-        existing.byte_size !== bytes.length ||
+        existing.mime_type !== input.mimeType ||
+        existing.byte_size !== input.bytes.length ||
         metadata.content_sha256 !== contentSha256
       ) {
         throw new ToolMediaAttachmentError(
@@ -374,7 +502,7 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
       return mediaReference(existing);
     }
     await mkdir(sessionDir, { recursive: true });
-    await writeFile(temporaryPath, bytes, { flag: "wx", mode: 0o600 });
+    await writeFile(temporaryPath, input.bytes, { flag: "wx", mode: 0o600 });
     await rename(temporaryPath, finalPath).catch(async (error) => {
       await rm(temporaryPath, { force: true }).catch(() => undefined);
       throw error;
@@ -386,23 +514,18 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
           session_id: input.sessionId,
           status: "active",
           filename,
-          mime_type: input.image.mimeType,
-          byte_size: bytes.length,
+          mime_type: input.mimeType,
+          byte_size: input.bytes.length,
           storage_url: `artifact://tool-media/${digest(input.sessionId)}/${basename(finalPath)}`,
           download_url: downloadUrl,
           thumbnail_url: null,
           extracted_text: null,
           extracted_text_truncated: false,
           metadata_json: {
-            source: "brain_tool_media",
-            wake_id: input.wakeId,
-            tool_call_id: input.callId,
-            tool_name: input.toolName,
-            image_index: input.imageIndex,
+            ...input.metadata,
             width: dimensions.width,
             height: dimensions.height,
             content_sha256: contentSha256,
-            provenance: safeProvenance(input.result.details),
           },
           created_at: now,
           updated_at: now,
@@ -417,8 +540,8 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
       return {
         attachmentId,
         filename,
-        mimeType: input.image.mimeType,
-        byteSize: bytes.length,
+        mimeType: input.mimeType,
+        byteSize: input.bytes.length,
         width: dimensions.width,
         height: dimensions.height,
         downloadUrl,
@@ -469,7 +592,7 @@ export class ToolMediaAttachmentStore implements BrainToolMediaSink {
     );
     if (!attachment) return undefined;
     const metadata = recordValue(attachment.metadata_json);
-    if (metadata.source !== "brain_tool_media") {
+    if (!isToolMediaSource(metadata.source)) {
       throw new ToolMediaAttachmentError(
         "attachment_content_unavailable",
         "attachment does not use Crew-owned tool media storage",
@@ -670,6 +793,121 @@ function safeStem(value: string): string {
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return (stem || "tool-image").slice(0, 80);
+}
+
+function safeDisplayFilename(value: string, extension: string): string {
+  const base = basename(value)
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[^A-Za-z0-9._ -]+/g, "-")
+    .replace(/^\.+/, "")
+    .trim()
+    .slice(0, 120);
+  if (!base) return `external-media.${extension}`;
+  return extname(base) ? base : `${base}.${extension}`;
+}
+
+async function materializeExternalMedia(
+  candidate: ExternalRuntimeMediaCaptureInput["candidates"][number],
+): Promise<{ bytes: Buffer; mimeType: string; filename: string }> {
+  if (candidate.source === "dynamic_tool_input_image") {
+    const match = /^data:(image\/[A-Za-z0-9.+-]+);base64,([\s\S]*)$/.exec(
+      candidate.imageUrl,
+    );
+    if (!match) {
+      throw new ToolMediaAttachmentError(
+        "external_media_data_url_unsupported",
+        "dynamic tool image must use a base64 image data URL",
+      );
+    }
+    const mimeType = match[1] ?? "";
+    const extension = MIME_EXTENSIONS.get(mimeType) ?? "image";
+    return {
+      bytes: decodeExternalBase64(match[2] ?? ""),
+      mimeType,
+      filename: `dynamic-tool-image-${candidate.mediaIndex + 1}.${extension}`,
+    };
+  }
+  if (candidate.source === "mcp_image_content") {
+    const extension = MIME_EXTENSIONS.get(candidate.mimeType) ?? "image";
+    return {
+      bytes: decodeExternalBase64(candidate.data),
+      mimeType: candidate.mimeType,
+      filename: `mcp-image-${candidate.mediaIndex + 1}.${extension}`,
+    };
+  }
+  const mimeType = mimeTypeFromPath(candidate.path);
+  const before = await stat(candidate.path);
+  const bytes = await readFile(candidate.path);
+  const after = await stat(candidate.path);
+  if (
+    before.dev !== after.dev ||
+    before.ino !== after.ino ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs
+  ) {
+    throw new ToolMediaAttachmentError(
+      "external_media_changed_before_capture",
+      "image-view source changed while Crew was capturing it",
+    );
+  }
+  return {
+    bytes,
+    mimeType,
+    filename: basename(candidate.path),
+  };
+}
+
+function decodeExternalBase64(value: string): Buffer {
+  return value.trim().length === 0 ? Buffer.alloc(0) : decodeBase64(value);
+}
+
+function mimeTypeFromPath(path: string): string {
+  const extension = extname(path).toLowerCase();
+  for (const [mimeType, candidateExtension] of MIME_EXTENSIONS) {
+    if (
+      extension === `.${candidateExtension}` ||
+      (mimeType === "image/jpeg" && extension === ".jpeg")
+    ) {
+      return mimeType;
+    }
+  }
+  throw new ToolMediaAttachmentError(
+    "unsupported_image_mime_type",
+    "image-view path does not use a supported image extension",
+  );
+}
+
+function externalCaptureFailure(
+  candidate: ExternalRuntimeMediaCaptureInput["candidates"][number],
+  error: unknown,
+): ExternalRuntimeMediaReference {
+  const reasonCode =
+    error instanceof ToolMediaAttachmentError
+      ? error.reasonCode
+      : isNodeError(error) && error.code === "ENOENT"
+        ? "external_media_source_unavailable"
+        : "external_media_capture_failed";
+  return {
+    mediaIndex: candidate.mediaIndex,
+    captureSource: candidate.source,
+    captureState:
+      reasonCode === "unsupported_image_mime_type" ||
+      reasonCode === "external_media_data_url_unsupported"
+        ? "unsupported"
+        : reasonCode === "external_media_source_unavailable" ||
+            reasonCode === "external_media_changed_before_capture"
+          ? "unavailable"
+          : "failed",
+    reasonCode,
+  };
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+function isToolMediaSource(value: unknown): boolean {
+  return value === "brain_tool_media" || value === "external_runtime_media";
 }
 
 function mediaReference(attachment: AttachmentRecord): BrainToolMediaReference {

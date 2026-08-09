@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -186,6 +186,140 @@ test("typed tool images persist, replay after restart, link, and remove without 
     restarted.readContent("session-1", reference.attachmentId),
     /ENOENT/,
   );
+});
+
+test("external runtime media is ordered, idempotent, durable, and deduplicated within one item", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-external-media-"));
+  const imagePath = join(root, "proof.png");
+  const firstBytes = png(7, 9);
+  await writeFile(imagePath, firstBytes);
+  const testHarness = harness(root);
+  const input = {
+    runtimeId: "runtime-1",
+    sessionId: "session-1",
+    bindingId: "binding-1",
+    nativeThreadId: "thread-1",
+    nativeTurnId: "turn-1",
+    itemId: "item-1",
+    externalEventId: "event-1",
+    toolName: "view_image",
+    candidates: [
+      {
+        source: "dynamic_tool_input_image" as const,
+        mediaIndex: 0,
+        imageUrl: `data:image/png;base64,${firstBytes.toString("base64")}`,
+      },
+      {
+        source: "image_view_path" as const,
+        mediaIndex: 1,
+        path: imagePath,
+      },
+    ],
+  };
+  const [reference] = await testHarness
+    .createStore()
+    .captureExternalRuntimeMedia(input);
+  assert.ok(reference);
+  assert.equal(reference.captureState, "available");
+  assert.equal(reference.captureSource, "dynamic_tool_input_image");
+  assert.equal(reference.width, 7);
+  assert.equal(reference.height, 9);
+  assert.equal(reference.byteSize, firstBytes.length);
+  assert.equal(testHarness.attachments.size, 1);
+  assert.equal(
+    JSON.stringify([...testHarness.attachments.values()]).includes(imagePath),
+    false,
+  );
+
+  const replay = await testHarness
+    .createStore()
+    .captureExternalRuntimeMedia(input);
+  assert.deepEqual(replay, [reference]);
+  assert.equal(testHarness.attachments.size, 1);
+  assert.deepEqual(
+    (
+      await testHarness
+        .createStore()
+        .readContent("session-1", reference.attachmentId!)
+    ).bytes,
+    firstBytes,
+  );
+
+  const secondBytes = png(11, 13);
+  await writeFile(imagePath, secondBytes);
+  const [later] = await testHarness.createStore().captureExternalRuntimeMedia({
+    ...input,
+    nativeTurnId: "turn-2",
+    itemId: "item-2",
+    externalEventId: "event-2",
+    candidates: [{ source: "image_view_path", mediaIndex: 0, path: imagePath }],
+  });
+  assert.ok(later);
+  assert.equal(later.captureState, "available");
+  assert.notEqual(later.attachmentId, reference.attachmentId);
+  assert.notEqual(later.sha256, reference.sha256);
+  assert.equal(testHarness.attachments.size, 2);
+});
+
+test("external runtime media exposes typed non-available capture states", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-external-media-state-"));
+  const testHarness = harness(root);
+  const unbound = await testHarness.createStore().captureExternalRuntimeMedia({
+    runtimeId: "runtime-1",
+    externalEventId: "event-unbound",
+    candidates: [
+      {
+        source: "image_view_path",
+        mediaIndex: 0,
+        path: "/missing/proof.png",
+      },
+    ],
+  });
+  assert.equal(unbound[0]?.captureState, "unavailable");
+  assert.equal(unbound[0]?.reasonCode, "external_media_session_unbound");
+
+  const states = await new ToolMediaAttachmentStore({
+    artifactDir: root,
+    bridge: testHarness.bridge as never,
+    now: () => "2026-07-25T12:00:00.000Z",
+    maxImageBytes: 16,
+    appendChatEvent: async () => {
+      throw new Error("must not append unavailable media");
+    },
+  }).captureExternalRuntimeMedia({
+    runtimeId: "runtime-1",
+    sessionId: "session-1",
+    externalEventId: "event-states",
+    candidates: [
+      {
+        source: "image_view_path",
+        mediaIndex: 0,
+        path: join(root, "missing.png"),
+      },
+      {
+        source: "dynamic_tool_input_image",
+        mediaIndex: 1,
+        imageUrl: "https://example.invalid/proof.png",
+      },
+      {
+        source: "mcp_image_content",
+        mediaIndex: 2,
+        mimeType: "image/png",
+        data: Buffer.alloc(20).toString("base64"),
+      },
+      {
+        source: "mcp_image_content",
+        mediaIndex: 3,
+        mimeType: "image/png",
+        data: "",
+      },
+    ],
+  });
+  assert.deepEqual(
+    states.map((state) => state.captureState),
+    ["unavailable", "unsupported", "oversized", "empty"],
+  );
+  assert.equal(testHarness.attachments.size, 0);
 });
 
 test("tool image validation rejects malformed, oversized, and unsupported media", async () => {

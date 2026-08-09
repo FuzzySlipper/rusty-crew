@@ -55,6 +55,50 @@ export interface BoundedRawDetail {
   readonly redactedKeys: readonly string[];
 }
 
+/**
+ * Transient media input captured from a native Codex notification. These
+ * values are consumed by the Crew service before the normalized event is
+ * persisted and must never be exposed through the public event DTO.
+ */
+export type ExternalRuntimeMediaCaptureCandidate =
+  | {
+      readonly source: "dynamic_tool_input_image";
+      readonly mediaIndex: number;
+      readonly imageUrl: string;
+    }
+  | {
+      readonly source: "mcp_image_content";
+      readonly mediaIndex: number;
+      readonly data: string;
+      readonly mimeType: string;
+    }
+  | {
+      readonly source: "image_view_path";
+      readonly mediaIndex: number;
+      readonly path: string;
+    };
+
+export interface ExternalRuntimeMediaProjection {
+  readonly mediaIndex: number;
+  readonly captureSource: ExternalRuntimeMediaCaptureCandidate["source"];
+  readonly captureState:
+    | "available"
+    | "unavailable"
+    | "unsupported"
+    | "empty"
+    | "oversized"
+    | "failed";
+  readonly reasonCode?: string;
+  readonly attachmentId?: string;
+  readonly filename?: string;
+  readonly mimeType?: string;
+  readonly byteSize?: number;
+  readonly sha256?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly contentUrl?: string;
+}
+
 export type NeutralExternalEventKind =
   | "thread_lifecycle"
   | "turn_lifecycle"
@@ -93,6 +137,7 @@ export interface NeutralExternalRuntimeEventPayload {
   readonly server?: string;
   readonly tool?: string;
   readonly success?: boolean;
+  readonly media?: readonly ExternalRuntimeMediaProjection[];
   readonly summary?: readonly string[];
   readonly fileChanges?: readonly {
     readonly path?: string;
@@ -120,6 +165,7 @@ export interface NeutralExternalRuntimeEvent {
   readonly itemId?: string;
   readonly nativeRequestId?: JsonRpcId;
   readonly payload: NeutralExternalRuntimeEventPayload;
+  readonly mediaCandidates?: readonly ExternalRuntimeMediaCaptureCandidate[];
   readonly rawDetail: BoundedRawDetail;
 }
 
