@@ -79,6 +79,15 @@ export interface ProfileRegistryRuntimeConfigPlan {
   };
 }
 
+export interface EditableProfileMcpBinding {
+  serverId: string;
+  bindingId?: string;
+  adapterId?: string;
+  serverNames?: string[];
+  transport?: string;
+  toolProfileKey?: string;
+}
+
 interface EditableProfileRuntimeConfig {
   providerAlias: string;
   externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
@@ -91,14 +100,39 @@ interface EditableProfileRuntimeConfig {
     includeDeprecated?: boolean;
   };
   contextPolicy: ContextStrategyPolicy;
-  mcpBindings: Array<{
-    serverId: string;
-    bindingId?: string;
-    adapterId?: string;
-    serverNames?: string[];
-    transport?: string;
-    toolProfileKey?: string;
-  }>;
+  mcpBindings: EditableProfileMcpBinding[];
+}
+
+export function profileMcpBindingsFromRegistryRecord(
+  record: NativeProfileRegistryRecord,
+): EditableProfileMcpBinding[] {
+  const settings = optionalRecord(record.activeRuntimeSettingsJson) ?? {};
+  const value = settings.mcpBindings ?? settings.mcp_bindings;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): EditableProfileMcpBinding[] => {
+    if (!isRecord(item)) return [];
+    const serverNames = optionalStringArray(
+      item.serverNames ?? item.server_names,
+    );
+    const endpointRef = optionalString(item.endpointRef ?? item.endpoint_ref);
+    const serverId =
+      optionalString(item.serverId ?? item.server_id) ??
+      serverIdFromEndpointRef(endpointRef) ??
+      serverNames?.[0];
+    if (serverId === undefined) return [];
+    return [
+      {
+        serverId,
+        bindingId: optionalString(item.bindingId ?? item.binding_id),
+        adapterId: optionalString(item.adapterId ?? item.adapter_id),
+        serverNames,
+        transport: optionalString(item.transport),
+        toolProfileKey: optionalString(
+          item.toolProfileKey ?? item.tool_profile_key,
+        ),
+      },
+    ];
+  });
 }
 
 export async function planProfileRegistryWrite(
@@ -346,9 +380,13 @@ async function editableRuntimeConfigForProfile(
     settings.externalMessageDeliveryPolicy ??
       profile?.externalMessageDeliveryPolicy,
   );
-  const mcpBindings = context.runtimeConfig.mcpBindings
+  const activeMcpBindings = context.runtimeConfig.mcpBindings
     .filter((binding) => String(binding.profileId) === record.profileId)
     .map(editableMcpBindingFromRuntime);
+  const mcpBindings =
+    activeMcpBindings.length > 0
+      ? activeMcpBindings
+      : profileMcpBindingsFromRegistryRecord(record);
   const runtimeConfig: EditableProfileRuntimeConfig = {
     providerAlias,
     externalMessageDeliveryPolicy,
@@ -919,6 +957,15 @@ function optionalRecord(value: unknown): Record<string, unknown> | undefined {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.flatMap((item) => {
+    const string = optionalString(item);
+    return string === undefined ? [] : [string];
+  });
+  return parsed.length > 0 ? parsed : undefined;
 }
 
 function requiredString(value: unknown, fieldName: string): string {

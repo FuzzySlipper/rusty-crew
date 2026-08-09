@@ -11,6 +11,7 @@ import type {
 } from "@rusty-crew/native-bridge";
 import type { ChatEvent } from "./rusty-view-chat-api.js";
 import type { RuntimeConfigFileForMutation } from "./service-profile-admin-mutations.js";
+import { profileMcpBindingsFromRegistryRecord } from "./service-profile-runtime-mutations.js";
 import type {
   RustyCrewRuntimeConfig,
   RustyCrewRuntimeConfigApplyResult,
@@ -257,6 +258,11 @@ export async function createFreshCrewSession(
     );
   }
   try {
+    await restoreProfileMcpBindingsForSession(
+      context,
+      runtimeConfigFile.array("mcpBindings"),
+      creation.session,
+    );
     await assertValidRuntimeConfig(context, runtimeConfigFile.value);
     await context.writeRuntimeConfigFile(runtimeConfigFile.value);
     const applyResult = await context.applyRuntimeConfigFromDisk({
@@ -290,6 +296,44 @@ export async function createFreshCrewSession(
       true,
     );
   }
+}
+
+async function restoreProfileMcpBindingsForSession(
+  context: CrewSessionLifecycleContext,
+  runtimeBindings: unknown[],
+  session: SessionState,
+): Promise<void> {
+  const profile = await context.bridge.getProfileRegistryRecord(
+    session.profileId,
+  );
+  if (profile === undefined) return;
+  const configured = profileMcpBindingsFromRegistryRecord(profile);
+  const existingIds = new Set(
+    runtimeBindings.flatMap((entry) => {
+      if (!isRecord(entry)) return [];
+      const bindingId = entry.bindingId ?? entry.binding_id;
+      return typeof bindingId === "string" ? [bindingId] : [];
+    }),
+  );
+  configured.forEach((binding, index) => {
+    const bindingId =
+      binding.bindingId ?? `${session.agentId}-mcp-${index + 1}`;
+    if (existingIds.has(bindingId)) return;
+    runtimeBindings.push({
+      bindingId,
+      adapterId: binding.adapterId ?? "mcp-ts-main",
+      agentId: session.agentId,
+      sessionId: session.sessionId,
+      profileId: session.profileId,
+      serverNames: binding.serverNames ?? [binding.serverId],
+      endpointRef: `config://mcp/${binding.serverId}`,
+      transport: binding.transport ?? "streamable_http",
+      toolProfileKey: binding.toolProfileKey ?? session.profileId,
+      status: "active",
+      diagnostics: {},
+    });
+    existingIds.add(bindingId);
+  });
 }
 
 function runtimeSessionEntry(session: SessionState): Record<string, unknown> {

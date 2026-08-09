@@ -6,6 +6,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   loadNativeBridge,
+  type NativeProfileRegistryRecord,
   type NativeRuntimeConfigDraft,
 } from "@rusty-crew/native-bridge";
 import {
@@ -28,12 +29,14 @@ let runtimeValue: Record<string, unknown> = {
       agentId: session.agentId,
       profileId: session.profileId,
       kind: "full",
+      workspaceCwd: "/home",
     },
     {
       sessionId: "other-session",
       agentId: "other-agent",
       profileId: "other-profile",
       kind: "full",
+      workspaceCwd: "/home",
     },
   ],
   channelBindings: [
@@ -164,7 +167,10 @@ runtimeValue = {
   scheduledJobs: [],
 };
 const creation = creationRecord();
-const created = await createFreshCrewSession(lifecycleContext(), {
+const creationContext = lifecycleContext();
+creationContext.bridge.getProfileRegistryRecord = async () =>
+  profileRecordWithMcpBindings();
+const created = await createFreshCrewSession(creationContext, {
   idempotencyKey: "create-key",
   profileId: "prime" as never,
   expectedProfileRevision: 4,
@@ -172,6 +178,21 @@ const created = await createFreshCrewSession(lifecycleContext(), {
 });
 assert.equal(created.creation.session.sessionId, creation.session.sessionId);
 assert.equal((runtimeValue.sessions as unknown[]).length, 1);
+assert.deepEqual(runtimeValue.mcpBindings, [
+  {
+    bindingId: "prime-mcp-den",
+    adapterId: "mcp-ts-main",
+    agentId: "prime",
+    sessionId: "crew-session-created",
+    profileId: "prime",
+    serverNames: ["den"],
+    endpointRef: "config://mcp/den",
+    transport: "streamable_http",
+    toolProfileKey: "prime",
+    status: "active",
+    diagnostics: {},
+  },
+]);
 
 const api = await handleRustyViewChatRequest(
   {
@@ -298,6 +319,7 @@ function runtimeConfigWithSession(): Record<string, unknown> {
         agentId: session.agentId,
         profileId: session.profileId,
         kind: "full",
+        workspaceCwd: "/home",
       },
     ],
     channelBindings: [],
@@ -343,5 +365,33 @@ function creationRecord(): CrewAgentSessionCreationRecord {
     templateSessionId: null,
     outcome: "created",
     session: sessionState("crew-session-created", "active"),
+  };
+}
+
+function profileRecordWithMcpBindings(): NativeProfileRegistryRecord {
+  return {
+    profileId: "prime",
+    lifecycleStatus: "active",
+    displayName: "Prime",
+    defaultSessionKind: "full",
+    agentId: "prime",
+    activeRuntimeSettingsJson: {
+      mcp_bindings: [
+        {
+          server_id: "den",
+          binding_id: "prime-mcp-den",
+          adapter_id: "mcp-ts-main",
+          server_names: ["den"],
+          transport: "streamable_http",
+          tool_profile_key: "prime",
+        },
+      ],
+    },
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [],
+    importExport: { metadataJson: {} },
+    revision: 4,
+    createdAt: "2026-07-28T00:00:00Z",
+    updatedAt: "2026-07-28T00:00:00Z",
   };
 }
