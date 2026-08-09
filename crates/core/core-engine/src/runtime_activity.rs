@@ -1,5 +1,7 @@
 use super::*;
-use rusty_crew_core_protocol::RuntimeActivityLiveEvidence;
+use rusty_crew_core_protocol::{
+    ExternalRuntimeId, NormalizedExternalRuntimeEvent, RuntimeActivityLiveEvidence,
+};
 
 const MAX_ACTIVITY_TEXT_BYTES: usize = 512;
 const MAX_ACTIVITY_PHASE_BYTES: usize = 128;

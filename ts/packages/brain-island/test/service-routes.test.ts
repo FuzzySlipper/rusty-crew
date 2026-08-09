@@ -934,7 +934,7 @@ test("external runtime event list rejects an empty native thread filter", async 
     context,
   );
 
-  assert.equal(result.status, 400);
+  assert.equal((result as AdminRouteResult).status, 400);
   assert.equal(queried, false);
 });
 
