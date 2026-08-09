@@ -1226,6 +1226,17 @@
         "public": true
       },
       {
+        "id": "chat.sessions.attachments.upload",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments/upload",
+        "description": "Upload Crew-owned raw image bytes for a chat attachment.",
+        "auth": "chat",
+        "mutation": "write",
+        "stability": "stable",
+        "tags": ["chat", "session", "attachment"],
+        "public": true
+      },
+      {
         "id": "chat.sessions.attachments.remove",
         "method": "DELETE",
         "path_template": "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
@@ -3445,6 +3456,13 @@
         "capability_id": "chat.sessions.attachments.create",
         "method": "POST",
         "path_template": "/v1/chat/sessions/{session_id}/attachments",
+        "route_id": "chat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "chat.sessions.attachments.upload",
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/{session_id}/attachments/upload",
         "route_id": "chat",
         "auth_phase": "after_auth"
       },

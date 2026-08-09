@@ -188,6 +188,61 @@ test("typed tool images persist, replay after restart, link, and remove without 
   );
 });
 
+test("raw chat image uploads are durable, idempotent, and linkable to user messages", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-chat-upload-"));
+  const testHarness = harness(root);
+  const store = testHarness.createStore();
+  const image = png(5, 7);
+  const first = await store.persistUploadedImage({
+    sessionId: "session-1",
+    idempotencyKey: "clipboard-1",
+    filename: "clipboard image.png",
+    mimeType: "image/png",
+    bytes: image,
+  });
+  const duplicate = await testHarness.createStore().persistUploadedImage({
+    sessionId: "session-1",
+    idempotencyKey: "clipboard-1",
+    filename: "clipboard image.png",
+    mimeType: "image/png",
+    bytes: image,
+  });
+  assert.equal(
+    duplicate.attachment.attachment_id,
+    first.attachment.attachment_id,
+  );
+  assert.deepEqual(duplicate.bytes, image);
+  const attachmentMetadata = first.attachment.metadata_json as Record<
+    string,
+    unknown
+  >;
+  assert.equal(attachmentMetadata["source"], "chat_upload");
+  assert.equal(attachmentMetadata["width"], 5);
+  assert.equal(attachmentMetadata["height"], 7);
+  assert.equal(
+    testHarness.events.filter((event) => event.kind === "attachment_uploaded")
+      .length,
+    1,
+  );
+
+  const [linked] = await store.linkUploadedAttachmentsToMessage({
+    sessionId: "session-1",
+    attachmentIds: [first.attachment.attachment_id],
+    messageId: "user-message-1",
+    blockIdsByAttachmentId: new Map([
+      [first.attachment.attachment_id, "attachment-block-1"],
+    ]),
+  });
+  assert.equal(linked?.attachment_id, first.attachment.attachment_id);
+  const persisted = testHarness.attachments.get(first.attachment.attachment_id);
+  assert.equal(persisted?.links[0]?.message_id, "user-message-1");
+  assert.equal(persisted?.links[0]?.block_id, "attachment-block-1");
+  const linkMetadata = persisted?.links[0]?.metadata_json as
+    | Record<string, unknown>
+    | undefined;
+  assert.equal(linkMetadata?.["source"], "chat_upload");
+});
+
 test("external runtime media is ordered, idempotent, durable, and deduplicated within one item", async () => {
   const root = await mkdtemp(join(tmpdir(), "rusty-external-media-"));
   const imagePath = join(root, "proof.png");

@@ -1378,6 +1378,17 @@ export const API_CAPABILITIES = [
     public: true,
   },
   {
+    id: "chat.sessions.attachments.upload",
+    method: "POST",
+    path_template: RUSTY_VIEW_CHAT_PATHS.attachmentUpload,
+    description: "Upload Crew-owned raw image bytes for a chat attachment.",
+    auth: "chat",
+    mutation: "write",
+    stability: "stable",
+    tags: ["chat", "session", "attachment"],
+    public: true,
+  },
+  {
     id: "chat.sessions.attachments.remove",
     method: "DELETE",
     path_template: RUSTY_VIEW_CHAT_PATHS.attachment,

@@ -3490,6 +3490,32 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/chat/sessions/{session_id}/attachments/upload": {
+      "post": {
+        "operationId": "chatSessionsAttachmentsUpload",
+        "summary": "Upload Crew-owned raw image bytes for a chat attachment.",
+        "tags": ["chat", "session", "attachment"],
+        "security": [{ "ChatBearer": [] }],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "chat.sessions.attachments.upload",
+        "x-rusty-crew-auth": "chat",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/chat/sessions/{session_id}/branches": {
       "post": {
         "operationId": "chatSessionsBranchesUpsert",
@@ -5767,7 +5793,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 232,
+    "capability_count": 233,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

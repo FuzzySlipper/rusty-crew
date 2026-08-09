@@ -167,6 +167,92 @@ try {
   );
   assert.equal(typeof sent.body.data.wake_id, "string");
 
+  const clipboardImage = png(3, 4);
+  const uploadedImage = await upload(
+    "/v1/chat/sessions/chat-session/attachments/upload?filename=clipboard.png",
+    token,
+    clipboardImage,
+    "image/png",
+    "clipboard-upload-1",
+  );
+  assert.equal(uploadedImage.status, 201, JSON.stringify(uploadedImage.body));
+  const uploadedAttachmentId = uploadedImage.body.data.attachment.attachment_id;
+  assert.equal(uploadedImage.body.data.attachment.filename, "clipboard.png");
+  assert.equal(
+    uploadedImage.body.data.attachment.byte_size,
+    clipboardImage.length,
+  );
+  assert.equal(uploadedImage.body.data.attachment.metadata_json.width, 3);
+  assert.equal(uploadedImage.body.data.attachment.metadata_json.height, 4);
+  const unsupportedUpload = await upload(
+    "/v1/chat/sessions/chat-session/attachments/upload?filename=clipboard.svg",
+    token,
+    Buffer.from("<svg/>", "utf8"),
+    "image/svg+xml",
+    "clipboard-upload-unsupported",
+  );
+  assert.equal(unsupportedUpload.status, 400);
+  assert.equal(
+    unsupportedUpload.body.error.reason_code,
+    "unsupported_image_mime_type",
+  );
+  const emptyUpload = await upload(
+    "/v1/chat/sessions/chat-session/attachments/upload?filename=empty.png",
+    token,
+    Buffer.alloc(0),
+    "image/png",
+    "clipboard-upload-empty",
+  );
+  assert.equal(emptyUpload.status, 400);
+  assert.equal(emptyUpload.body.error.reason_code, "attachment_upload_empty");
+  const uploadedContent = await getBytes(
+    `/v1/chat/sessions/chat-session/attachments/${encodeURIComponent(uploadedAttachmentId)}/content`,
+    token,
+  );
+  assert.equal(uploadedContent.status, 200);
+  assert.deepEqual(uploadedContent.body, clipboardImage);
+
+  const sentWithAttachment = await post(
+    "/v1/chat/sessions/chat-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "please inspect the pasted image",
+      attachment_ids: [uploadedAttachmentId],
+      client_message_id: "client-message-with-attachment",
+    },
+    { "Idempotency-Key": "chat-send-with-attachment" },
+  );
+  assert.equal(
+    sentWithAttachment.status,
+    202,
+    JSON.stringify(sentWithAttachment.body),
+  );
+  const linkedUpload = await get(
+    "/v1/chat/sessions/chat-session/attachments?message_id=client-message-with-attachment",
+    token,
+  );
+  assert.equal(linkedUpload.status, 200);
+  assert.equal(
+    linkedUpload.body.data.items[0]?.attachment_id,
+    uploadedAttachmentId,
+  );
+  const afterUploadOpen = await get("/v1/chat/sessions/chat-session", token);
+  const uploadedMessage = afterUploadOpen.body.data.message_slots
+    .map(
+      (slot: { primary: { message: { message_id: string } } }) =>
+        slot.primary.message,
+    )
+    .find(
+      (message: { message_id: string }) =>
+        message.message_id === "client-message-with-attachment",
+    );
+  assert.equal(uploadedMessage.blocks[1]?.kind, "attachment");
+  assert.equal(
+    uploadedMessage.blocks[1]?.content_json.attachment_id,
+    uploadedAttachmentId,
+  );
+
   const initialTree = await get("/v1/chat/sessions/chat-session/tree", token);
   assert.equal(initialTree.status, 200);
   const defaultBranch = initialTree.body.data.branches.find(
@@ -175,7 +261,7 @@ try {
   assert.ok(defaultBranch, "chat send should create a default branch");
   assert.equal(
     defaultBranch.head_message_id,
-    `assistant-message:${sent.body.data.wake_id}`,
+    `assistant-message:${sentWithAttachment.body.data.wake_id}`,
   );
   assert.equal(
     initialTree.body.data.branch_state.active_branch_id,
@@ -1320,6 +1406,49 @@ async function post(
   };
 }
 
+async function upload(
+  path: string,
+  bearer: string,
+  body: Buffer,
+  mimeType: string,
+  idempotencyKey: string,
+) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      "content-type": mimeType,
+      "idempotency-key": idempotencyKey,
+    },
+    body,
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: (await response.json()) as any,
+  };
+}
+
+async function getBytes(path: string, bearer: string) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers: { authorization: `Bearer ${bearer}` },
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: Buffer.from(await response.arrayBuffer()),
+  };
+}
+
+function png(width: number, height: number): Buffer {
+  const bytes = Buffer.alloc(24);
+  bytes.write("\x89PNG\r\n\x1a\n", 0, "binary");
+  bytes.write("IHDR", 12, "ascii");
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes;
+}
+
 async function del(path: string, bearer: string | undefined) {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: "DELETE",
@@ -1717,24 +1846,28 @@ function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
             agentId: "chat-agent",
             profileId: "chat-profile",
             kind: "full",
+            workspaceCwd: dataRoot,
           },
           {
             sessionId: "mcp-session",
             agentId: "mcp-agent",
             profileId: "chat-profile",
             kind: "full",
+            workspaceCwd: dataRoot,
           },
           {
             sessionId: "chat-fail-session",
             agentId: "chat-fail-agent",
             profileId: "chat-profile",
             kind: "full",
+            workspaceCwd: dataRoot,
           },
           {
             sessionId: "chat-retention-session",
             agentId: "chat-retention-agent",
             profileId: "chat-profile",
             kind: "full",
+            workspaceCwd: dataRoot,
           },
         ],
         mcpBindings: [

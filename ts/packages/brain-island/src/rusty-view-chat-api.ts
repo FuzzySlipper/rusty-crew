@@ -321,6 +321,7 @@ export interface CreateCrewChatSessionInput {
 export interface SendChatMessageRequest {
   actor: ChatActor;
   body: string;
+  attachment_ids?: string[];
   client_message_id?: string;
   reason?: string;
 }
@@ -329,6 +330,7 @@ export interface ChatSendMessageInput {
   session: SessionState;
   actor: ChatActor;
   body: string;
+  attachmentIds: string[];
   clientMessageId?: string;
   idempotencyKey: string;
   reason?: string;
@@ -1844,6 +1846,7 @@ async function handleSendMessage(
     session: session.session,
     actor: parsed.value.actor,
     body: parsed.value.body.trim(),
+    attachmentIds: parsed.value.attachment_ids ?? [],
     clientMessageId: parsed.value.client_message_id,
     idempotencyKey,
     reason: parsed.value.reason,
@@ -2728,12 +2731,33 @@ function parseSendMessageRequest(
       message: "chat actor requires id and kind",
     };
   }
-  const body = stringValue(record.body);
-  if (body === undefined || body.trim() === "") {
+  const body = typeof record.body === "string" ? record.body : undefined;
+  const attachmentIds = Array.isArray(record.attachment_ids)
+    ? record.attachment_ids
+    : [];
+  if (
+    attachmentIds.some(
+      (attachmentId) =>
+        typeof attachmentId !== "string" || attachmentId.trim() === "",
+    )
+  ) {
+    return {
+      ok: false,
+      reasonCode: "invalid_chat_attachment_ids",
+      message: "chat attachment_ids must contain non-empty strings",
+    };
+  }
+  const uniqueAttachmentIds = [
+    ...new Set(attachmentIds.map((attachmentId) => attachmentId.trim())),
+  ];
+  if (
+    body === undefined ||
+    (body.trim() === "" && uniqueAttachmentIds.length === 0)
+  ) {
     return {
       ok: false,
       reasonCode: "empty_chat_message",
-      message: "chat message body is empty",
+      message: "chat message body and attachments are empty",
     };
   }
   return {
@@ -2745,6 +2769,7 @@ function parseSendMessageRequest(
         display_name: stringValue(actorRecord.display_name),
       },
       body,
+      attachment_ids: uniqueAttachmentIds,
       client_message_id: stringValue(record.client_message_id),
       reason: stringValue(record.reason),
     },

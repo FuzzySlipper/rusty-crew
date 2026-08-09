@@ -1903,6 +1903,85 @@ test("Rusty View chat stream route validates, replays once, and cleans subscribe
   assert.equal(cachedResponse.statusCode, 304);
   assert.equal(cachedResponse.body, "");
 
+  let uploaded:
+    | {
+        sessionId: string;
+        idempotencyKey: string;
+        filename: string;
+        mimeType: string;
+        bytes: Buffer;
+      }
+    | undefined;
+  context.uploadAttachmentContent = async (input) => {
+    uploaded = input;
+    return {
+      attachment: {
+        attachment_id: "attachment-uploaded",
+        session_id: input.sessionId,
+        status: "active",
+        filename: input.filename,
+        mime_type: input.mimeType,
+        byte_size: input.bytes.length,
+        extracted_text_truncated: false,
+        metadata_json: { source: "chat_upload" },
+        created_at: "2026-07-05T00:00:00.000Z",
+        updated_at: "2026-07-05T00:00:00.000Z",
+        links: [],
+      },
+      bytes: input.bytes,
+    };
+  };
+  const uploadResult = await handleRustyViewChatStreamRequest(
+    requestWithBody("POST", Buffer.from("png"), {
+      "content-type": "image/png",
+      "idempotency-key": "clipboard-1",
+      "x-request-id": "req-upload",
+    }),
+    new URL(
+      "http://local/v1/chat/sessions/field-session/attachments/upload?filename=clipboard.png",
+    ),
+    context,
+  );
+  if (uploadResult === undefined || "kind" in uploadResult) {
+    assert.fail("attachment upload should return a JSON envelope");
+  }
+  if (typeof uploadResult.body === "string") {
+    assert.fail("attachment upload should not return a string route response");
+  }
+  assert.equal(uploadResult.status, 201);
+  assert.deepEqual(uploaded, {
+    sessionId: "field-session",
+    idempotencyKey: "clipboard-1",
+    filename: "clipboard.png",
+    mimeType: "image/png",
+    bytes: Buffer.from("png"),
+  });
+  assert.equal(
+    okData<{ attachment: { attachment_id: string } }>(
+      uploadResult as AdminRouteResult,
+    ).attachment.attachment_id,
+    "attachment-uploaded",
+  );
+
+  const emptyUpload = await handleRustyViewChatStreamRequest(
+    requestWithBody("POST", Buffer.alloc(0), {
+      "content-type": "image/png",
+      "x-request-id": "req-empty-upload",
+    }),
+    new URL(
+      "http://local/v1/chat/sessions/field-session/attachments/upload?filename=empty.png",
+    ),
+    context,
+  );
+  if (emptyUpload === undefined || "kind" in emptyUpload) {
+    assert.fail("empty attachment upload should return a JSON error");
+  }
+  assert.equal(emptyUpload.status, 400);
+  assert.equal(
+    errorReason(emptyUpload as AdminRouteResult),
+    "attachment_upload_empty",
+  );
+
   const methodFailure = await handleRustyViewChatStreamRequest(
     requestLike("POST", { "x-request-id": "req-chat-stream" }),
     new URL("http://local/v1/chat/sessions/field-session/stream"),
@@ -2322,6 +2401,11 @@ function chatStreamContext() {
         "attachment content is not configured in this route fixture",
       );
     },
+    async uploadAttachmentContent() {
+      throw new Error(
+        "attachment upload is not configured in this route fixture",
+      );
+    },
   };
   return context;
 }
@@ -2363,6 +2447,20 @@ function requestLike(
   headers: Record<string, string> = {},
 ): IncomingMessage {
   return { method, headers } as IncomingMessage;
+}
+
+function requestWithBody(
+  method: string,
+  body: Buffer,
+  headers: Record<string, string> = {},
+): IncomingMessage {
+  return {
+    method,
+    headers,
+    async *[Symbol.asyncIterator]() {
+      if (body.length > 0) yield body;
+    },
+  } as unknown as IncomingMessage;
 }
 
 function fakeResponse(): ServerResponse & {

@@ -1202,6 +1202,56 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/attachments/upload": {
+      "post": {
+        "operationId": "uploadAttachmentContent",
+        "summary": "Upload Crew-owned raw image bytes",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/png": { "schema": { "type": "string", "format": "binary" } },
+            "image/jpeg": { "schema": { "type": "string", "format": "binary" } },
+            "image/webp": { "schema": { "type": "string", "format": "binary" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Image bytes persisted and attachment created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AttachmentUploadResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/attachments/{attachment_id}": {
       "delete": {
         "operationId": "removeAttachment",
@@ -2511,7 +2561,12 @@
         "required": ["actor", "body"],
         "properties": {
           "actor": { "$ref": "#/components/schemas/ChatActor" },
-          "body": { "type": "string", "minLength": 1, "maxLength": 20000 },
+          "body": { "type": "string", "maxLength": 20000 },
+          "attachment_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
           "client_message_id": { "type": "string", "maxLength": 200 },
           "reason": { "type": "string", "maxLength": 500 }
         },
@@ -2744,6 +2799,15 @@
           },
           "attachment": { "$ref": "#/components/schemas/AttachmentRecord" },
           "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentUploadResult": {
+        "type": "object",
+        "required": ["status", "attachment"],
+        "properties": {
+          "status": { "type": "string", "enum": ["created"] },
+          "attachment": { "$ref": "#/components/schemas/AttachmentRecord" }
         },
         "additionalProperties": false
       },

@@ -19,7 +19,7 @@ import type {
   ExternalRuntimeMediaReference,
 } from "./external-runtime-media.js";
 
-const MAX_TOOL_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
 const MIME_EXTENSIONS = new Map([
   ["image/png", "png"],
   ["image/jpeg", "jpg"],
@@ -54,7 +54,7 @@ export class ToolMediaAttachmentStore
 
   constructor(private readonly options: ToolMediaAttachmentStoreOptions) {
     this.rootDir = join(options.artifactDir, "tool-media");
-    this.maxImageBytes = options.maxImageBytes ?? MAX_TOOL_IMAGE_BYTES;
+    this.maxImageBytes = options.maxImageBytes ?? MAX_CHAT_IMAGE_BYTES;
   }
 
   async persistImages(input: {
@@ -202,6 +202,45 @@ export class ToolMediaAttachmentStore
     });
   }
 
+  async persistUploadedImage(input: {
+    sessionId: string;
+    idempotencyKey: string;
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+  }): Promise<ToolMediaAttachmentContent> {
+    const stored = await this.persistStoredImage({
+      sessionId: input.sessionId,
+      identity: `${input.sessionId}:chat-upload:${input.idempotencyKey}`,
+      filename: input.filename,
+      mimeType: input.mimeType,
+      bytes: input.bytes,
+      metadata: {
+        source: "chat_upload",
+        idempotency_key: input.idempotencyKey,
+      },
+    });
+    return this.readContent(input.sessionId, stored.attachmentId);
+  }
+
+  async uploadedAttachments(
+    sessionId: string,
+    attachmentIds: readonly string[],
+  ): Promise<AttachmentRecord[]> {
+    const attachments: AttachmentRecord[] = [];
+    for (const attachmentId of attachmentIds) {
+      const attachment = await this.findAttachment(sessionId, attachmentId);
+      if (attachment.status !== "active") {
+        throw new ToolMediaAttachmentError(
+          "attachment_removed",
+          `attachment ${attachmentId} is removed`,
+        );
+      }
+      attachments.push(attachment);
+    }
+    return attachments;
+  }
+
   async resolveNarratorImageContext(input: {
     sessionId: SessionId;
     capability: NarratorImageInputCapability;
@@ -347,7 +386,46 @@ export class ToolMediaAttachmentStore
       input.sessionId,
       input.wakeId,
     );
-    for (const attachment of attachments) {
+    await this.linkAttachmentRecordsToMessage({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      attachments,
+      blockIdsByAttachmentId: input.blockIdsByAttachmentId,
+      metadata: {
+        source: "brain_tool_media",
+        wake_id: input.wakeId,
+      },
+    });
+  }
+
+  async linkUploadedAttachmentsToMessage(input: {
+    sessionId: string;
+    attachmentIds: readonly string[];
+    messageId: string;
+    blockIdsByAttachmentId: ReadonlyMap<string, string>;
+  }): Promise<AttachmentRecord[]> {
+    const attachments = await this.uploadedAttachments(
+      input.sessionId,
+      input.attachmentIds,
+    );
+    await this.linkAttachmentRecordsToMessage({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      attachments,
+      blockIdsByAttachmentId: input.blockIdsByAttachmentId,
+      metadata: { source: "chat_upload" },
+    });
+    return attachments;
+  }
+
+  private async linkAttachmentRecordsToMessage(input: {
+    sessionId: string;
+    messageId: string;
+    attachments: readonly AttachmentRecord[];
+    blockIdsByAttachmentId: ReadonlyMap<string, string>;
+    metadata: Record<string, unknown>;
+  }): Promise<void> {
+    for (const attachment of input.attachments) {
       const blockId = input.blockIdsByAttachmentId.get(
         attachment.attachment_id,
       );
@@ -363,10 +441,7 @@ export class ToolMediaAttachmentStore
         message_id: input.messageId,
         block_id: blockId,
         scope_id: null,
-        metadata_json: {
-          source: "brain_tool_media",
-          wake_id: input.wakeId,
-        },
+        metadata_json: input.metadata,
         created_at: now,
       };
       const result = (await this.options.bridge.createChatAttachment({
@@ -907,7 +982,11 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function isToolMediaSource(value: unknown): boolean {
-  return value === "brain_tool_media" || value === "external_runtime_media";
+  return (
+    value === "brain_tool_media" ||
+    value === "external_runtime_media" ||
+    value === "chat_upload"
+  );
 }
 
 function mediaReference(attachment: AttachmentRecord): BrainToolMediaReference {

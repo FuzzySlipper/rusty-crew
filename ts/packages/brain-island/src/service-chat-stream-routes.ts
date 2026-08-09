@@ -6,9 +6,16 @@ import {
   type RustyViewChatContext,
 } from "./rusty-view-chat-api.js";
 import type { ServiceRouteResult } from "./service-route-results.js";
-import { failure, isRawServiceRouteResult } from "./service-route-results.js";
+import {
+  failure,
+  isRawServiceRouteResult,
+  successRoute,
+} from "./service-route-results.js";
 import type { ToolMediaAttachmentContent } from "./tool-media-attachments.js";
-import { ToolMediaAttachmentError } from "./tool-media-attachments.js";
+import {
+  MAX_CHAT_IMAGE_BYTES,
+  ToolMediaAttachmentError,
+} from "./tool-media-attachments.js";
 
 export interface ChatStreamSubscriber {
   write(event: ChatEvent): void;
@@ -29,6 +36,13 @@ export interface RustyViewChatStreamRouteContext {
     sessionId: string,
     attachmentId: string,
   ): Promise<ToolMediaAttachmentContent>;
+  uploadAttachmentContent(input: {
+    sessionId: string;
+    idempotencyKey: string;
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+  }): Promise<ToolMediaAttachmentContent>;
 }
 
 export interface RustyViewChatRouteContext {
@@ -75,6 +89,16 @@ export async function handleRustyViewChatStreamRequest(
   context: RustyViewChatStreamRouteContext,
 ): Promise<ServiceRouteResult | undefined> {
   const parts = url.pathname.split("/").filter(Boolean);
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "attachments" &&
+    parts[5] === "upload"
+  ) {
+    return handleAttachmentUploadRequest(request, url, context, parts);
+  }
   if (
     parts.length === 7 &&
     parts[0] === "v1" &&
@@ -138,6 +162,118 @@ export async function handleRustyViewChatStreamRequest(
       });
     },
   };
+}
+
+async function handleAttachmentUploadRequest(
+  request: IncomingMessage,
+  url: URL,
+  context: RustyViewChatStreamRouteContext,
+  parts: string[],
+): Promise<ServiceRouteResult> {
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "POST") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "attachment_upload_requires_post",
+      message: "attachment upload routes only support POST",
+      retryable: false,
+    });
+  }
+  const sessionId = decodeURIComponent(parts[3] ?? "");
+  const session = (await context.listSessions()).find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  if (!session) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "chat_session_not_found",
+      message: `chat session ${sessionId} was not found`,
+      retryable: false,
+    });
+  }
+  if (session.status === "archived") {
+    return failure(412, requestIdValue, {
+      code: "failed_precondition",
+      reason_code: "chat_session_archived",
+      message: `chat session ${sessionId} is archived`,
+      retryable: false,
+    });
+  }
+  const filename = stringParam(url, "filename");
+  if (filename === undefined) {
+    return failure(400, requestIdValue, {
+      code: "invalid_input",
+      reason_code: "attachment_filename_required",
+      message: "attachment upload requires a filename query parameter",
+      retryable: false,
+    });
+  }
+  const mimeType = (stringHeader(request, "content-type") ?? "")
+    .split(";", 1)[0]!
+    .trim()
+    .toLowerCase();
+  const idempotencyKey =
+    stringHeader(request, "idempotency-key") ?? requestIdValue;
+  try {
+    const bytes = await readBoundedAttachmentBody(request);
+    const content = await context.uploadAttachmentContent({
+      sessionId,
+      idempotencyKey,
+      filename,
+      mimeType,
+      bytes,
+    });
+    return {
+      ...successRoute(requestIdValue, {
+        status: "created",
+        attachment: content.attachment,
+      }),
+      status: 201,
+    };
+  } catch (error) {
+    const reasonCode =
+      error instanceof ToolMediaAttachmentError
+        ? error.reasonCode
+        : "attachment_upload_failed";
+    const invalid = [
+      "attachment_upload_empty",
+      "attachment_upload_oversized",
+      "unsupported_image_mime_type",
+      "invalid_image_byte_size",
+      "invalid_image_dimensions",
+    ].includes(reasonCode);
+    return failure(invalid ? 400 : 500, requestIdValue, {
+      code: invalid ? "invalid_input" : "internal_error",
+      reason_code: reasonCode,
+      message: error instanceof Error ? error.message : String(error),
+      retryable: false,
+    });
+  }
+}
+
+async function readBoundedAttachmentBody(
+  request: IncomingMessage,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let byteSize = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteSize += bytes.length;
+    if (byteSize > MAX_CHAT_IMAGE_BYTES) {
+      throw new ToolMediaAttachmentError(
+        "attachment_upload_oversized",
+        `attachment upload exceeds ${MAX_CHAT_IMAGE_BYTES} bytes`,
+      );
+    }
+    chunks.push(bytes);
+  }
+  if (byteSize === 0) {
+    throw new ToolMediaAttachmentError(
+      "attachment_upload_empty",
+      "attachment upload body is empty",
+    );
+  }
+  return Buffer.concat(chunks, byteSize);
 }
 
 async function handleAttachmentContentRequest(

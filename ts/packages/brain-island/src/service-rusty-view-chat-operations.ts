@@ -158,6 +158,25 @@ export async function submitRustyViewChatMessage(
       ? {}
       : { speaker_identity: speakerIdentity }),
   };
+  const attachments = await context.toolMediaAttachments.uploadedAttachments(
+    input.session.sessionId,
+    input.attachmentIds,
+  );
+  const attachmentBlocks: MessageBlockDraft[] = attachments.map(
+    (attachment) => ({
+      block_id: attachmentBlockId(messageId, attachment.attachment_id),
+      kind: "attachment",
+      content_json: {
+        attachment_id: attachment.attachment_id,
+        filename: attachment.filename,
+        mime_type: attachment.mime_type,
+        byte_size: attachment.byte_size,
+        download_url: attachment.download_url,
+      },
+      render_policy_json: { display: "inline_media" },
+      metadata_json: { source: "chat_upload" },
+    }),
+  );
   const durable = (await context.bridge.createChatMessageSlot({
     slot: {
       slot_id: slotId,
@@ -179,6 +198,12 @@ export async function submitRustyViewChatMessage(
       body: input.body,
       branchId: fallbackBranchId,
       metadataJson: messageMetadata,
+      blocks: [
+        ...(input.body.length > 0
+          ? [{ kind: "text", content_json: { text: input.body } }]
+          : []),
+        ...attachmentBlocks,
+      ],
       now,
     }),
     branch_id: fallbackBranchId,
@@ -208,6 +233,12 @@ export async function submitRustyViewChatMessage(
   const branch = durable.branch;
   const persistedMessage = durable.slot.primary.message;
   if (durable.duplicate) {
+    await linkUploadedMessageAttachments(
+      context,
+      input.session.sessionId,
+      messageId,
+      input.attachmentIds,
+    );
     const latest = await context.listChatEventsAfterCursor(
       input.session,
       undefined,
@@ -241,12 +272,24 @@ export async function submitRustyViewChatMessage(
         : { speaker_identity: speakerIdentity }),
       correlation_id: correlationId,
       reason: input.reason,
+      attachments,
     },
   });
+  await linkUploadedMessageAttachments(
+    context,
+    input.session.sessionId,
+    messageId,
+    input.attachmentIds,
+  );
   const wakeReport = await context.submitServiceTurn({
     sessionId: input.session.sessionId,
     from: input.actor.id,
-    body: input.body,
+    body:
+      input.body.length > 0
+        ? input.body
+        : `[Attached image${attachments.length === 1 ? "" : "s"}: ${attachments
+            .map((attachment) => attachment.filename)
+            .join(", ")}]`,
     correlationId,
     source: "chat",
   });
@@ -274,6 +317,26 @@ export async function submitRustyViewChatMessage(
     reason_code: wakeReport.reasonCode,
   };
   return result;
+}
+
+async function linkUploadedMessageAttachments(
+  context: RustyViewChatOperationsContext,
+  sessionId: string,
+  messageId: string,
+  attachmentIds: readonly string[],
+): Promise<void> {
+  if (attachmentIds.length === 0) return;
+  await context.toolMediaAttachments.linkUploadedAttachmentsToMessage({
+    sessionId,
+    attachmentIds,
+    messageId,
+    blockIdsByAttachmentId: new Map(
+      attachmentIds.map((attachmentId) => [
+        attachmentId,
+        attachmentBlockId(messageId, attachmentId),
+      ]),
+    ),
+  });
 }
 
 async function persistCompletedAssistantTurn(

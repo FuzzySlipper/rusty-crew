@@ -1581,6 +1581,8 @@ async function handleHttpRequest(
         corsHeaders: (corsRequest) => chatCorsHeaders(corsRequest),
         readAttachmentContent: (sessionId, attachmentId) =>
           state.toolMediaAttachments.readContent(sessionId, attachmentId),
+        uploadAttachmentContent: (input) =>
+          state.toolMediaAttachments.persistUploadedImage(input),
       },
       chat: {
         listSessions: () => listProjectedServiceSessions(state),

@@ -36,6 +36,7 @@ export const RUSTY_VIEW_CHAT_PATHS = {
   branchHead: "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
   snapshots: "/v1/chat/sessions/{session_id}/snapshots",
   attachments: "/v1/chat/sessions/{session_id}/attachments",
+  attachmentUpload: "/v1/chat/sessions/{session_id}/attachments/upload",
   attachment: "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
   attachmentContent:
     "/v1/chat/sessions/{session_id}/attachments/{attachment_id}/content",
