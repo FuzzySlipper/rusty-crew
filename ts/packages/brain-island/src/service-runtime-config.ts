@@ -93,6 +93,7 @@ import {
   type ProfileConfig,
   type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
+import { loadServiceProfileContext } from "./service-profile-context.js";
 import {
   contextStrategyPolicyFromUnknown,
   type ContextStrategyPolicy,
@@ -862,12 +863,13 @@ export async function applyRustyCrewRuntimeConfig(input: {
   });
   const profileContexts = new Map<
     ProfileId,
-    Awaited<ReturnType<typeof loadProfileContext>>
+    Awaited<ReturnType<typeof loadServiceProfileContext>>
   >();
   const loadProfile = async (profileId: ProfileId) => {
     const existing = profileContexts.get(profileId);
     if (existing !== undefined) return existing;
-    const profile = await loadProfileContext({
+    const profile = await loadServiceProfileContext({
+      bridge: input.bridge,
       profilesDir: runtimeConfig.profilesDir,
       skillsDir: runtimeConfig.skillsDir,
       profileId,
@@ -1162,7 +1164,8 @@ export async function rebuildConfiguredBrainRuntime(input: {
     discoveryClientFactory: input.mcpToolDiscoveryClientFactory,
     surfaceDiagnostics: input.mcpSurfaceDiagnostics,
   });
-  const profile = await loadProfileContext({
+  const profile = await loadServiceProfileContext({
+    bridge: input.bridge,
     profilesDir: runtimeConfig.profilesDir,
     skillsDir: runtimeConfig.skillsDir,
     profileId: input.profileId,

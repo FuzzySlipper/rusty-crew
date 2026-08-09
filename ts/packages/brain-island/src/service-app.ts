@@ -209,6 +209,7 @@ import {
   type ProfileConfig,
   type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
+import { loadServiceProfileContext } from "./service-profile-context.js";
 import {
   buildProfileRoleAssembly,
   renderSessionMemoryContext,
@@ -3761,7 +3762,8 @@ async function buildDirectDebugContext(
     await Promise.all(
       debugSessions.map(async (session) => {
         try {
-          const profileContext = await loadProfileContext({
+          const profileContext = await loadServiceProfileContext({
+            bridge: state.bridge,
             profilesDir: state.runtimeConfig.profilesDir,
             skillsDir: state.runtimeConfig.skillsDir,
             profileId: session.profileId,
@@ -6150,7 +6152,8 @@ function backgroundReviewContext(
     },
     diagnostics: () => buildDiagnosticsContext(state),
     loadProfileContext: (profileId) =>
-      loadProfileContext({
+      loadServiceProfileContext({
+        bridge: state.bridge,
         profilesDir: state.runtimeConfig.profilesDir,
         skillsDir: state.runtimeConfig.skillsDir,
         profileId,
@@ -6279,7 +6282,8 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
     configuredSessionForRuntimeSession: (session) =>
       configuredSessionForRuntimeSession(state.runtimeConfig, session),
     loadProfileContext: (profileId) =>
-      loadProfileContext({
+      loadServiceProfileContext({
+        bridge: state.bridge,
         profilesDir: state.runtimeConfig.profilesDir,
         skillsDir: state.runtimeConfig.skillsDir,
         profileId,

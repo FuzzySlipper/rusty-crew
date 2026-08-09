@@ -18,6 +18,8 @@ import {
   createServiceProfile,
   type ServiceProfileAdminMutationContext,
 } from "../src/service-profile-admin-mutations.js";
+import { buildProfileRoleAssembly } from "../src/profile-role-assembly.js";
+import { loadServiceProfileContext } from "../src/service-profile-context.js";
 import type {
   RustyCrewRuntimeConfig,
   RustyCrewRuntimeConfigApplyResult,
@@ -28,7 +30,7 @@ test("profile create persists exact prompts through the public service mutation"
   const profilesDir = join(dataDir, "profiles");
   const serviceConfigFile = join(dataDir, "service.json");
   const bridge = await loadNativeBridge();
-  const engine = await bridge.initializeEngine({
+  let engine = await bridge.initializeEngine({
     engineDataDir: dataDir,
     clock: "system",
     defaultTurnBudget: 16,
@@ -87,6 +89,49 @@ test("profile create persists exact prompts through the public service mutation"
     assert.ok(persisted);
     assert.equal(persisted.promptSoulMarkdown, soulMarkdown);
     assert.equal(persisted.promptMemoryMarkdown, memoryMarkdown);
+    const profileFile = JSON.parse(
+      await readFile(join(profilesDir, "prompt-round-trip.json"), "utf8"),
+    ) as Record<string, unknown>;
+    assert.equal(profileFile.prompt, undefined);
+
+    const loaded = await loadServiceProfileContext({
+      bridge,
+      profilesDir,
+      profileId: "prompt-round-trip" as ProfileId,
+      modelProviderResolver: async () => ({
+        provider: "openai_compatible",
+        modelName: "profile-create-regression",
+      }),
+    });
+    const initialRole = buildProfileRoleAssembly(loaded);
+    const initialInstructions = initialRole.roleAssembly.instructions;
+    assert.ok(initialInstructions);
+    assert.match(initialInstructions, /# Profile Soul/);
+    assert.match(initialInstructions, /# Exact soul/);
+    assert.match(initialInstructions, /# Profile Memory/);
+
+    await bridge.shutdownEngine({ engine, drainTimeoutMs: 5_000 });
+    engine = await bridge.initializeEngine({
+      engineDataDir: dataDir,
+      clock: "system",
+      defaultTurnBudget: 16,
+      defaultIdleTimeoutMs: 30_000,
+      storage: { backend: "sqlite" },
+    });
+    const hydrated = await loadServiceProfileContext({
+      bridge,
+      profilesDir,
+      profileId: "prompt-round-trip" as ProfileId,
+      modelProviderResolver: async () => ({
+        provider: "openai_compatible",
+        modelName: "profile-create-regression",
+      }),
+    });
+    const hydratedRole = buildProfileRoleAssembly(hydrated);
+    const hydratedInstructions = hydratedRole.roleAssembly.instructions;
+    assert.ok(hydratedInstructions);
+    assert.match(hydratedInstructions, /# Profile Soul/);
+    assert.match(hydratedInstructions, /# Exact soul/);
 
     await createServiceProfile(
       context,

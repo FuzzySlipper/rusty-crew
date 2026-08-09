@@ -313,6 +313,10 @@ export interface LoadProfileContextInput {
   modelProviderResolver?: (alias: string) => Promise<BrainModelConfig>;
   toolAvailabilityPlanner?: ToolAvailabilityPlanner;
   externalMemoryAvailability?: ExternalMemoryToolAvailability;
+  profilePromptAssets?: {
+    soulMarkdown?: string;
+    memoryMarkdown?: string;
+  };
 }
 
 export interface LoadedProfileCuratorDiscoveryContext {
@@ -326,6 +330,16 @@ export async function loadProfileContext(
 ): Promise<LoadedProfileContext> {
   const registry = input.registry ?? defaultToolRegistry;
   let profile = await loadProfileConfig(input.profilesDir, input.profileId);
+  if (input.profilePromptAssets !== undefined) {
+    profile = {
+      ...profile,
+      prompt: {
+        ...(profile.prompt ?? {}),
+        soulMarkdown: input.profilePromptAssets.soulMarkdown,
+        memoryMarkdown: input.profilePromptAssets.memoryMarkdown,
+      },
+    };
+  }
   if (profile.providerAlias !== undefined) {
     if (input.modelProviderResolver === undefined) {
       throw invalidProfile(
